@@ -1,0 +1,159 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "opensearch-single-kernel-library"
+dynamic = ["version"]
+description = "Shared and reusable code for OpenSearch charms"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+]
+classifiers = [
+ "Development Status :: 3 - Alpha",
+ "Intended Audience :: Developers",
+ "Intended Audience :: System Administrators",
+ "Operating System :: POSIX :: Linux",
+]
+requires-python = ">=3.10,<4.0"
+
+
+[project.urls]
+homepage = "https://github.com/canonical/opensearch-single-kernel-library"
+repository = "https://github.com/canonical/opensearch-single-kernel-library"
+"Bug Tracker" = "https://github.com/canonical/opensearch-single-kernel-library/issues"
+"Matrix" = "https://matrix.to/#/#charmhub-data-platform:ubuntu.com"
+"Contribute" = "https://github.com/canonical/mongo-single-kernel-library/blob/main/CONTRIBUTING.md"
+
+[tool.poetry]
+requires-poetry = ">=2.0.0"
+package-mode = true
+packages = [
+    {include = "opensearch_single_kernel"},
+]
+include = ["opensearch_single_kernel/templates/"]
+exclude = ["opensearch_single_kernel/charmcraft.yaml"]
+version = "0.0.0"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+ops = "^2.22.0"
+tenacity = "^9.1.2"
+boto3 = "^1.38.36"
+overrides = "^7.7.0"
+requests = "2.32.4"
+# Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashs
+ruamel-yaml = "0.18.14"
+shortuuid = "1.0.13"
+jproperties = "2.1.2"
+pydantic = "^1.10.17, <2"
+cryptography = "^45.0.4"
+jsonschema = "^4.24.0"
+data-platform-helpers = "^0.1.4"
+poetry-core = "<2.0.0"
+
+
+[tool.poetry.group.charm-libs.dependencies]
+# data_platform_libs/v0/data_interfaces.py
+ops = "^2.22.0"
+# data_platform_libs/v0/upgrade.py
+# grafana_agent/v0/cos_agent.py requires pydantic <2
+pydantic = "^1.10.17, <2"
+# tls_certificates_interface/v3/tls_certificates.py
+cryptography = "^45.0.4"
+jsonschema = "^4.24.0"
+# grafana_agent/v0/cos_agent.py
+cosl = "^1.0.0"
+bcrypt = "^4.3.0"
+
+
+[tool.poetry.group.format]
+optional = true
+
+[tool.poetry.group.format.dependencies]
+black = "^25.1.0"
+isort = "^6.0.1"
+
+[tool.poetry.group.lint]
+optional = true
+
+[tool.poetry.group.lint.dependencies]
+black = "^25.1.0"
+isort = "^6.0.1"
+flake8 = "^7.0.0"
+flake8-docstrings = "^1.7.0"
+flake8-copyright = "^0.2.4"
+flake8-builtins = "^2.5.0"
+pyproject-flake8 = "^7.0.0"
+pep8-naming = "^0.15.1"
+codespell = "^2.4.1"
+shellcheck-py = "^0.10.0.1"
+
+[tool.poetry.group.unit.dependencies]
+ops = { version = "^2.22.0", extras = ["testing"] }
+ops-scenario = "^7.22.0"
+pytest = "^8.4.0"
+pytest-asyncio = "^0.21.2"
+coverage = { extras = ["toml"], version = "^7.9.1" }
+parameterized = "^0.9.0"
+responses = "^0.25.7"
+
+[tool.poetry.group.integration.dependencies]
+boto3 = "^1.38.36"
+pytest = "^8.4.0"
+pytest-asyncio = "^0.21.2"
+pytest-operator = "^0.42.0"
+pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
+juju = "^3.6.1.2"
+ops = "^2.22.0"
+tenacity = "^9.1.2"
+pyyaml = "^6.0.2"
+pyjwt = "^2.10.1"
+urllib3 = "^2.4.0"
+protobuf = "^6.31.1"
+opensearch-py = "^2.8.0"
+allure-pytest = "^2.14.3"
+allure-pytest-default-results = "^0.1.3"
+# Azure integration tests
+azure-identity = "^1.23.0"
+azure-storage-blob = "^12.25.1"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+log_cli_level = "INFO"
+markers = ["unstable"]
+asyncio_mode = "auto"
+
+# Formatting tools configuration
+[tool.black]
+line-length = 99
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+
+# Linting tools configuration
+[tool.flake8]
+max-line-length = 99
+max-doc-length = 99
+max-complexity = 10
+exclude = [".git", "__pycache__", ".tox", "build", "dist", "*.egg_info", "venv"]
+select = ["E", "W", "F", "C", "N", "R", "D", "H"]
+# Ignore W503, E501 because using black creates errors with this
+# Ignore D107 Missing docstring in __init__
+# Ignore D415 Docstring first line punctuation (doesn't make sense for properties)
+# Ignore N818 Exceptions end with "Error" (not all exceptions are errors)
+ignore = ["W503", "E501", "D107", "D415", "N818"]
+# D100, D101, D102, D103: Ignore missing docstrings in tests
+per-file-ignores = ["tests/*:D100,D101,D102,D103,D104"]
+docstring-convention = "google"
+# Check for properly formatted copyright header in each file
+copyright-check = "True"
+copyright-author = "Canonical Ltd."
+copyright-regexp = "Copyright\\s\\d{4}([-,]\\d{4})*\\s+%(author)s"

@@ -1,0 +1,71 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+  - pre-push
+  - post-checkout
+  - post-merge
+
+default_stages:
+  - pre-commit
+
+repos:
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+
+  - repo: https://github.com/python-poetry/poetry
+    rev: 2.1.1
+    hooks:
+      - id: poetry-check
+        args: [--no-cache]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: debug-statements
+      - id: check-toml
+      - id: detect-private-key
+        exclude: |
+          (?x)^(
+           )$
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+        exclude_types:
+          - svg
+      - id: mixed-line-ending
+
+  - repo: https://github.com/psf/black
+    rev: v25.1.0
+    hooks:
+    - id: black
+
+  - repo: https://github.com/pycqa/isort
+    rev: v6.0.1
+    hooks:
+    - id: isort
+
+  - repo: https://github.com/pycqa/flake8
+    rev: v7.0.0
+    hooks:
+    - id: flake8
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.6
+    hooks:
+    - id: codespell
+      additional_dependencies: [tomli]
+      args: ["--write-changes"]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+    - id: actionlint
+
+exclude: |
+  (?x)(
+    ^docs/.*
+  )
