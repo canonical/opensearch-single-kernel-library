@@ -119,6 +119,20 @@ allure-pytest-default-results = "^0.1.3"
 azure-identity = "^1.23.0"
 azure-storage-blob = "^12.25.1"
 
+
+[tool.poetry-dynamic-versioning]
+enable = true
+vcs = "git"
+dirty = true
+strict = true
+fix-shallow-repository = true
+
+
+
+[build-system]
+requires = ["poetry-core>=2.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
+
 [tool.coverage.run]
 branch = true
 
