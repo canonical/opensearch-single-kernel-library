@@ -1,4 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""OpenSearch Managers."""
+
+def test_basic():
+    assert 1 == 1
