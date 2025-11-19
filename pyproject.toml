@@ -42,7 +42,7 @@ tenacity = "^9.1.2"
 boto3 = "^1.38.36"
 overrides = "^7.7.0"
 requests = "2.32.4"
-# Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashs
+# Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
 jproperties = "2.1.2"
@@ -51,6 +51,7 @@ cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.4"
 poetry-core = "<2.0.0"
+pre-commit = "^4.4.0"
 
 
 [tool.poetry.group.charm-libs.dependencies]

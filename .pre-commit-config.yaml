@@ -39,17 +39,17 @@ repos:
       - id: mixed-line-ending
 
   - repo: https://github.com/psf/black
-    rev: v25.1.0
+    rev: 25.1.0
     hooks:
     - id: black
 
   - repo: https://github.com/pycqa/isort
-    rev: v6.0.1
+    rev: 6.0.1
     hooks:
     - id: isort
 
   - repo: https://github.com/pycqa/flake8
-    rev: v7.0.0
+    rev: 7.0.0
     hooks:
     - id: flake8
 
