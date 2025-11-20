@@ -17,23 +17,31 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from charms.opensearch.v0.constants_charm import OPENSEARCH_SNAP_REVISION
-from charms.opensearch.v0.helper_charm import run_cmd
-from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution, Paths
-from charms.opensearch.v0.opensearch_exceptions import (
+from overrides import override
+from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    OPENSEARCH_SNAP_REVISION,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import run_cmd
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+    OpenSearchDistribution,
+    Paths,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
     OpenSearchMissingError,
     OpenSearchStartError,
     OpenSearchStopError,
 )
-from charms.operator_libs_linux.v1.systemd import service_failed, service_running
-from charms.operator_libs_linux.v2 import snap
-from charms.operator_libs_linux.v2.snap import SnapError
-from overrides import override
-from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
-
-from utils import extract_tarball
+from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
+    service_failed,
+    service_running,
+)
+from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
+from opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap import SnapError
+from opensearch_single_kernel.utils import extract_tarball
 
 logger = logging.getLogger(__name__)
 

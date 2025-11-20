@@ -1,4 +1,4 @@
-# Copyright 2024 Canonical Ltd.
+# opensearch_single_kernel.lib. Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Class for Managing simple or large deployments and configuration related changes."""
@@ -7,7 +7,10 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Literal, Optional
 
-from charms.opensearch.v0.constants_charm import (
+from ops import BlockedStatus
+from shortuuid import ShortUUID
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     AdminUser,
     CMRoleRemovalForbidden,
     CmVoRolesProvidedInvalid,
@@ -20,13 +23,15 @@ from charms.opensearch.v0.constants_charm import (
     PeerClusterOrchestratorRelationName,
     PeerClusterRelationName,
 )
-from charms.opensearch.v0.helper_charm import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
     all_units,
     format_unit_name,
     trigger_peer_rel_changed,
 )
-from charms.opensearch.v0.helper_cluster import ClusterTopology
-from charms.opensearch.v0.models import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
     App,
     DeploymentDescription,
     DeploymentState,
@@ -40,10 +45,12 @@ from charms.opensearch.v0.models import (
     StartMode,
     State,
 )
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchError
-from charms.opensearch.v0.opensearch_internal_data import Scope
-from ops import BlockedStatus
-from shortuuid import ShortUUID
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "35ccf1a7eac946ec8f962c21401598d6"
@@ -59,7 +66,9 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 
 class OpenSearchProvidedRolesException(OpenSearchError):

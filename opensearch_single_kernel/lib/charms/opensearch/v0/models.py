@@ -10,10 +10,14 @@ from datetime import datetime
 from hashlib import md5
 from typing import Any, Dict, List, Literal, Optional
 
-from charms.opensearch.v0.constants_secrets import AZURE_CREDENTIALS, S3_CREDENTIALS
-from charms.opensearch.v0.helper_enums import BaseStrEnum
 from pydantic import BaseModel, Field, root_validator, validator
 from pydantic.utils import ROOT_KEY
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_secrets import (
+    AZURE_CREDENTIALS,
+    S3_CREDENTIALS,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
 
 # The unique Charmhub library identifier, never change it
 LIBID = "6007e8030e4542e6b189e2873c8fbfef"

@@ -14,9 +14,12 @@ from os.path import exists
 from typing import Optional, Tuple
 
 import bcrypt
-from charms.opensearch.v0.helper_charm import run_cmd
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchCmdError
 from cryptography import x509
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import run_cmd
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchCmdError,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "224ce9884b0d47b997357fec522f11c7"

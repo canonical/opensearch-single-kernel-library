@@ -7,10 +7,17 @@ import logging
 from collections import namedtuple
 from typing import Any, Dict, List, Optional
 
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.helper_security import normalized_tls_subject
-from charms.opensearch.v0.models import App, JWTAuthConfiguration
-from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_security import (
+    normalized_tls_subject,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
+    App,
+    JWTAuthConfiguration,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+    OpenSearchDistribution,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "b02ab02d4fd644fdabe02c61e509093f"

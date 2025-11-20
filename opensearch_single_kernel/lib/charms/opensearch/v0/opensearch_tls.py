@@ -24,15 +24,23 @@ from os.path import exists
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from charms.opensearch.v0.constants_charm import (
+from ops.charm import ActionEvent, RelationBrokenEvent, RelationCreatedEvent
+from ops.framework import Object
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     PeerClusterOrchestratorRelationName,
     PeerClusterRelationName,
     PeerRelationName,
 )
-from charms.opensearch.v0.constants_tls import TLS_RELATION, CertType
-from charms.opensearch.v0.helper_charm import all_units
-from charms.opensearch.v0.helper_networking import get_host_public_ip
-from charms.opensearch.v0.helper_security import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import (
+    TLS_RELATION,
+    CertType,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import all_units
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_networking import (
+    get_host_public_ip,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_security import (
     generate_password,
     get_cert_issuer,
     get_cert_issuer_from_path,
@@ -41,13 +49,15 @@ from charms.opensearch.v0.helper_security import (
     store_ca,
     store_key_pair,
 )
-from charms.opensearch.v0.models import DeploymentType
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import DeploymentType
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
 )
-from charms.opensearch.v0.opensearch_internal_data import Scope
-from charms.tls_certificates_interface.v3.tls_certificates import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
+from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
     CertificateExpiringEvent,
     CertificateInvalidatedEvent,
@@ -55,11 +65,11 @@ from charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
     generate_private_key,
 )
-from ops.charm import ActionEvent, RelationBrokenEvent, RelationCreatedEvent
-from ops.framework import Object
 
 if typing.TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 # The unique Charmhub library identifier, never change it
 LIBID = "8bcf275287ad486db5f25a1dbb26f920"

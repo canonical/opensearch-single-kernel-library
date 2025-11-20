@@ -8,19 +8,28 @@ import logging
 from functools import cached_property
 from typing import TYPE_CHECKING, Dict, Optional
 
-from charms.opensearch.v0.constants_charm import PERFORMANCE_PROFILE, PeerRelationName
-from charms.opensearch.v0.models import (
+from ops import Object
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    PERFORMANCE_PROFILE,
+    PeerRelationName,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
     DeploymentDescription,
     PeerClusterApp,
     PerformanceType,
 )
-from ops import Object
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
-from charms.opensearch.v0.opensearch_internal_data import RelationDataStore, Scope
-from charms.opensearch.v0.opensearch_profile import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    RelationDataStore,
+    Scope,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_profile import (
     OpenSearchProfile,
     ProductionProfile,
     TestingProfile,

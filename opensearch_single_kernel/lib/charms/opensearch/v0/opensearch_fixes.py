@@ -2,7 +2,9 @@
 # See LICENSE file for licensing details.
 
 """Base class for the OpenSearch Fixes of bugs introduced by upstream."""
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchHttpError
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchHttpError,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "3bdf0a053a53493abefe8265dac85419"

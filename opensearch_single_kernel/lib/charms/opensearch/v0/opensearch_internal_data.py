@@ -9,10 +9,11 @@ from abc import ABC, abstractmethod
 from ast import literal_eval
 from typing import Any, Dict, Optional, Union
 
-from charms.opensearch.v0.helper_enums import BaseStrEnum
-from charms.opensearch.v0.models import Model
 from ops import Secret
 from overrides import override
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import Model
 
 # The unique Charmhub library identifier, never change it
 LIBID = "e28df77e11504aef9a537b351fd4cf37"

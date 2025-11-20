@@ -80,10 +80,27 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set
 
 import pydantic
-from charms.data_platform_libs.v0.azure_storage import AzureStorageRequires
-from charms.data_platform_libs.v0.data_interfaces import RequirerData
-from charms.data_platform_libs.v0.s3 import S3Requirer
-from charms.opensearch.v0.constants_charm import (
+from ops import (
+    ActionEvent,
+    BlockedStatus,
+    MaintenanceStatus,
+    Object,
+    RelationEvent,
+    SecretEvent,
+    SecretNotFoundError,
+    WaitingStatus,
+)
+from ops.framework import EventBase, EventSource, Handle
+from overrides import override
+
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
+    AzureStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    RequirerData,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     AZURE_RELATION,
     OPENSEARCH_BACKUP_ID_FORMAT,
     S3_RELATION,
@@ -98,42 +115,40 @@ from charms.opensearch.v0.constants_charm import (
     PluginConfigError,
     RestoreInProgress,
 )
-from charms.opensearch.v0.constants_secrets import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_secrets import (
     AZURE_PEER_SECRET_KEYS,
     S3_PEER_SECRET_KEYS,
 )
-from charms.opensearch.v0.helper_cluster import ClusterState, IndexStateEnum
-from charms.opensearch.v0.helper_enums import BaseStrEnum
-from charms.opensearch.v0.models import AzureRelData, DeploymentType, Model, S3RelData
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterState,
+    IndexStateEnum,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
+    AzureRelData,
+    DeploymentType,
+    Model,
+    S3RelData,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
 )
-from charms.opensearch.v0.opensearch_keystore import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_keystore import (
     OpenSearchKeystoreError,
     OpenSearchKeystoreNotReadyError,
 )
-from charms.opensearch.v0.opensearch_locking import OpenSearchNodeLock
-from charms.opensearch.v0.opensearch_plugins import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_locking import (
+    OpenSearchNodeLock,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_plugins import (
     OpenSearchAzurePlugin,
     OpenSearchPluginMissingConfigError,
     OpenSearchPluginMissingDepsError,
     OpenSearchS3Plugin,
     PluginState,
 )
-from ops import (
-    ActionEvent,
-    BlockedStatus,
-    MaintenanceStatus,
-    Object,
-    RelationEvent,
-    SecretEvent,
-    SecretNotFoundError,
-    WaitingStatus,
-)
-from ops.framework import EventBase, EventSource, Handle
-from overrides import override
 
 # The unique Charmhub library identifier, never change it
 LIBID = "d301deee4d2c4c1b8e30cd3df8034be2"

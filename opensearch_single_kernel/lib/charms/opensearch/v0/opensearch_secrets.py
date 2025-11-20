@@ -14,27 +14,30 @@ information for the Opensearch charm.
 import logging
 from typing import TYPE_CHECKING, Dict, Optional, Union
 
-from charms.opensearch.v0.constants_charm import (
+from ops import JujuVersion, Relation, Secret, SecretNotFoundError
+from ops.charm import SecretChangedEvent
+from ops.framework import Object
+from overrides import override
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     KibanaserverUser,
     OpenSearchSystemUsers,
 )
-from charms.opensearch.v0.constants_secrets import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_secrets import (
     AZURE_CREDENTIALS,
     HASH_POSTFIX,
     PW_POSTFIX,
     S3_CREDENTIALS,
 )
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchSecretInsertionError
-from charms.opensearch.v0.opensearch_internal_data import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchSecretInsertionError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
     RelationDataStore,
     Scope,
     SecretCache,
 )
-from ops import JujuVersion, Relation, Secret, SecretNotFoundError
-from ops.charm import SecretChangedEvent
-from ops.framework import Object
-from overrides import override
 
 # The unique Charmhub library identifier, never change it
 LIBID = "d2bcf5b34e064adf9e27d8fbff36bc55"

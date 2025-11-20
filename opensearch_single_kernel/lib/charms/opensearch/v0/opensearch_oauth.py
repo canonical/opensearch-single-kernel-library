@@ -6,12 +6,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-from charms.hydra.v0.oauth import ClientConfig, OAuthRequirer
-from charms.opensearch.v0.constants_charm import OAUTH_RELATION, OAuthRelationInvalid
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.models import DeploymentType
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchCmdError
-from charms.opensearch.v0.opensearch_internal_data import Scope
 from ops import (
     BlockedStatus,
     EventBase,
@@ -19,6 +13,23 @@ from ops import (
     RelationBrokenEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
+)
+
+from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
+    ClientConfig,
+    OAuthRequirer,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    OAUTH_RELATION,
+    OAuthRelationInvalid,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import DeploymentType
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchCmdError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
 )
 
 if TYPE_CHECKING:

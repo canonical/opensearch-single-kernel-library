@@ -23,15 +23,30 @@ import os
 from typing import TYPE_CHECKING, List, Optional
 
 import ops
-from charms.opensearch.v0.constants_charm import NodeLockRelationName
-from charms.opensearch.v0.helper_charm import all_units, format_unit_name
-from charms.opensearch.v0.helper_cluster import ClusterState, ClusterTopology
-from charms.opensearch.v0.models import PeerClusterApp
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchHttpError
-from charms.opensearch.v0.opensearch_internal_data import Scope
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    NodeLockRelationName,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    all_units,
+    format_unit_name,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterState,
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import PeerClusterApp
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchHttpError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 # The unique Charmhub library identifier, never change it
 LIBID = "0924c6d81c604a15873ad43498cd6895"

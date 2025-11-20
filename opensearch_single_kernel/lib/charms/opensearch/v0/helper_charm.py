@@ -10,13 +10,20 @@ from time import time_ns
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, List, Union
 
-from charms.opensearch.v0.constants_charm import PeerRelationName
-from charms.opensearch.v0.helper_enums import BaseStrEnum
-from charms.opensearch.v0.models import App, PeerClusterApp
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchCmdError
-from charms.opensearch.v0.opensearch_internal_data import Scope
 from ops import CharmBase
 from ops.model import ActiveStatus, StatusBase, Unit
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    PeerRelationName,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import App, PeerClusterApp
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchCmdError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
 
 if TYPE_CHECKING:
     from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm

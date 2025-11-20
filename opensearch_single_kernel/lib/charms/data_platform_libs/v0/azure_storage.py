@@ -3,15 +3,8 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections import namedtuple
 from typing import Dict, List, Optional
 
-from charms.data_platform_libs.v0.data_interfaces import (
-    EventHandlers,
-    ProviderData,
-    RequirerData,
-    RequirerEventHandlers,
-)
 from ops import Model
 from ops.charm import (
     CharmBase,
@@ -22,8 +15,15 @@ from ops.charm import (
     RelationJoinedEvent,
     SecretChangedEvent,
 )
-from ops.framework import EventSource, ObjectEvents
+from ops.framework import EventSource
 from ops.model import Relation
+
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    EventHandlers,
+    ProviderData,
+    RequirerData,
+    RequirerEventHandlers,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "fca396f6254246c9bfa5650000000000"

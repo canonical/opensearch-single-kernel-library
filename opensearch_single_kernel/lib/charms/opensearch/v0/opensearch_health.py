@@ -6,22 +6,29 @@ import logging
 import time
 from typing import Dict, Optional
 
-from charms.opensearch.v0.constants_charm import (
+from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
+from tenacity import retry, stop_after_attempt, wait_fixed
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     ClusterHealthRed,
     ClusterHealthRedUpgrade,
     ClusterHealthYellow,
     WaitingForBusyShards,
     WaitingForSpecificBusyShards,
 )
-from charms.opensearch.v0.helper_charm import Status, trigger_peer_rel_changed
-from charms.opensearch.v0.helper_cluster import ClusterState, ClusterTopology
-from charms.opensearch.v0.models import StartMode
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    Status,
+    trigger_peer_rel_changed,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterState,
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import StartMode
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
 )
-from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 # The unique Charmhub library identifier, never change it
 LIBID = "93d2c27f38974a59b3bbe39fb27ac98d"

@@ -9,14 +9,14 @@ These functions wrap around some API calls used for user management.
 import logging
 from typing import Dict, List, Optional
 
-from charms.opensearch.v0.constants_charm import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     AdminUser,
     COSRole,
     COSUser,
     KibanaserverUser,
     OpenSearchUsers,
 )
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
 )

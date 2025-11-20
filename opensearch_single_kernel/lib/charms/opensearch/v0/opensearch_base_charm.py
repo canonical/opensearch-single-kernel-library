@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 """Base class for the OpenSearch Operators."""
+
 import abc
 import logging
 import random
@@ -10,8 +11,30 @@ import typing
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type
 
-from charms.grafana_agent.v0.cos_agent import COSAgentProvider
-from charms.opensearch.v0.constants_charm import (
+from ops.charm import (
+    ActionEvent,
+    CharmBase,
+    ConfigChangedEvent,
+    LeaderElectedEvent,
+    RelationBrokenEvent,
+    RelationChangedEvent,
+    RelationCreatedEvent,
+    RelationDepartedEvent,
+    RelationJoinedEvent,
+    StartEvent,
+    StorageDetachingEvent,
+    UpdateStatusEvent,
+)
+from ops.framework import EventBase, EventSource
+from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
+from tenacity import Retrying, stop_after_attempt, wait_exponential
+
+import opensearch_single_kernel.lifecycle as lifecycle
+import opensearch_single_kernel.upgrade as upgrade
+from opensearch_single_kernel.lib.charms.grafana_agent.v0.cos_agent import (
+    COSAgentProvider,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     PERFORMANCE_PROFILE,
     AdminUser,
     AdminUserInitProgress,
@@ -44,23 +67,37 @@ from charms.opensearch.v0.constants_charm import (
     TLSRelationMissing,
     WaitingToStart,
 )
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.helper_charm import Status, all_units, format_unit_name
-from charms.opensearch.v0.helper_cluster import ClusterTopology, Node
-from charms.opensearch.v0.helper_networking import get_host_ip, units_ips
-from charms.opensearch.v0.helper_security import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    Status,
+    all_units,
+    format_unit_name,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+    Node,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_networking import (
+    get_host_ip,
+    units_ips,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_security import (
     cert_expiration_remaining_hours,
     generate_hashed_password,
     generate_password,
 )
-from charms.opensearch.v0.models import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
     DeploymentDescription,
     DeploymentType,
 )
-from charms.opensearch.v0.opensearch_backups import backup
-from charms.opensearch.v0.opensearch_config import OpenSearchConfig
-from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_backups import backup
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_config import (
+    OpenSearchConfig,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+    OpenSearchDistribution,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchCmdError,
     OpenSearchError,
     OpenSearchHAError,
@@ -71,58 +108,67 @@ from charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchStartTimeoutError,
     OpenSearchStopError,
 )
-from charms.opensearch.v0.opensearch_fixes import OpenSearchFixes
-from charms.opensearch.v0.opensearch_health import HealthColors, OpenSearchHealth
-from charms.opensearch.v0.opensearch_internal_data import RelationDataStore, Scope
-from charms.opensearch.v0.opensearch_jwt import JwtHandler
-from charms.opensearch.v0.opensearch_keystore import OpenSearchKeystoreNotReadyError
-from charms.opensearch.v0.opensearch_locking import OpenSearchNodeLock
-from charms.opensearch.v0.opensearch_nodes_exclusions import OpenSearchExclusions
-from charms.opensearch.v0.opensearch_oauth import OAuthHandler
-from charms.opensearch.v0.opensearch_peer_clusters import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_fixes import (
+    OpenSearchFixes,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_health import (
+    HealthColors,
+    OpenSearchHealth,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    RelationDataStore,
+    Scope,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_jwt import JwtHandler
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_keystore import (
+    OpenSearchKeystoreNotReadyError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_locking import (
+    OpenSearchNodeLock,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_nodes_exclusions import (
+    OpenSearchExclusions,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_oauth import (
+    OAuthHandler,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_peer_clusters import (
     OpenSearchPeerClustersManager,
     StartMode,
 )
-from charms.opensearch.v0.opensearch_plugin_manager import OpenSearchPluginManager
-from charms.opensearch.v0.opensearch_plugins import OpenSearchPluginError
-from charms.opensearch.v0.opensearch_profile import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_plugin_manager import (
+    OpenSearchPluginManager,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_plugins import (
+    OpenSearchPluginError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_profile import (
     ProfilesManager,
 )
-from charms.opensearch.v0.opensearch_relation_peer_cluster import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_relation_peer_cluster import (
     OpenSearchPeerClusterProvider,
     OpenSearchPeerClusterRequirer,
 )
-from charms.opensearch.v0.opensearch_relation_provider import OpenSearchProvider
-from charms.opensearch.v0.opensearch_secrets import OpenSearchSecrets
-from charms.opensearch.v0.opensearch_tls import OLD_CA_ALIAS, OpenSearchTLS
-from charms.opensearch.v0.opensearch_users import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_relation_provider import (
+    OpenSearchProvider,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_secrets import (
+    OpenSearchSecrets,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_tls import (
+    OLD_CA_ALIAS,
+    OpenSearchTLS,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_users import (
     OpenSearchUserManager,
     OpenSearchUserMgmtError,
 )
-from charms.opensearch.v0.state import OpenSearchClusterState
-from charms.tls_certificates_interface.v3.tls_certificates import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.state import (
+    OpenSearchClusterState,
+)
+from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
 )
-from ops.charm import (
-    ActionEvent,
-    CharmBase,
-    ConfigChangedEvent,
-    LeaderElectedEvent,
-    RelationBrokenEvent,
-    RelationChangedEvent,
-    RelationCreatedEvent,
-    RelationDepartedEvent,
-    RelationJoinedEvent,
-    StartEvent,
-    StorageDetachingEvent,
-    UpdateStatusEvent,
-)
-from ops.framework import EventBase, EventSource
-from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
-from tenacity import Retrying, stop_after_attempt, wait_exponential
-
-import lifecycle
-import upgrade
 
 # The unique Charmhub library identifier, never change it
 LIBID = "cba015bae34642baa1b6bb27bb35a2f7"
@@ -149,7 +195,12 @@ class _StartOpenSearch(EventBase):
     """
 
     def __init__(
-        self, handle, *, ignore_lock=False, after_upgrade=False, is_first_data_node=False
+        self,
+        handle,
+        *,
+        ignore_lock=False,
+        after_upgrade=False,
+        is_first_data_node=False,
     ):
         super().__init__(handle)
         self.ignore_lock = ignore_lock
@@ -212,7 +263,10 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         self.peers_data = RelationDataStore(self, PeerRelationName)
         self.secrets = OpenSearchSecrets(self, PeerRelationName)
         self.tls = OpenSearchTLS(
-            self, PeerRelationName, self.opensearch.paths.jdk, self.opensearch.paths.certs
+            self,
+            PeerRelationName,
+            self.opensearch.paths.jdk,
+            self.opensearch.paths.certs,
         )
         self.oauth = OAuthHandler(self)
         self.jwt = JwtHandler(self)
@@ -254,7 +308,8 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
             self.on[PeerRelationName].relation_departed, self._on_peer_relation_departed
         )
         self.framework.observe(
-            self.on[STORAGE_NAME].storage_detaching, self._on_opensearch_data_storage_detaching
+            self.on[STORAGE_NAME].storage_detaching,
+            self._on_opensearch_data_storage_detaching,
         )
 
         self.framework.observe(self.on.set_password_action, self._on_set_password_action)
@@ -830,7 +885,8 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
             self.status.clear(InvalidProfileConfigOption)
         except ValueError:
             logger.error(
-                "Invalid profile configuration. Value: %s", self.state.config.get("profile")
+                "Invalid profile configuration. Value: %s",
+                self.state.config.get("profile"),
             )
             self.status.set(BlockedStatus(InvalidProfileConfigOption))
             return
@@ -981,7 +1037,11 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         self._restart_opensearch_event.emit()
 
     def on_tls_conf_set(
-        self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
+        self,
+        event: CertificateAvailableEvent,
+        scope: Scope,
+        cert_type: CertType,
+        renewal: bool,
     ):
         """Called after certificate ready and stored on the corresponding scope databag.
 
@@ -1086,7 +1146,9 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         return self.peers_data.get(Scope.APP, "admin_user_initialized", False)
 
     def _handle_change_to_main_orchestrator_if_needed(
-        self, event: ConfigChangedEvent, previous_deployment_desc: Optional[DeploymentDescription]
+        self,
+        event: ConfigChangedEvent,
+        previous_deployment_desc: Optional[DeploymentDescription],
     ) -> None:
         """Handle when the user changes the roles or init_hold config from True to False."""
         # if the current cluster wasn't already a "main-Orchestrator" and we're now updating
@@ -1744,7 +1806,9 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
 
                     if self.unit.is_leader():
                         self.peers_data.put(
-                            Scope.APP, "bootstrap_contributors_count", cms_in_bootstrap + 1
+                            Scope.APP,
+                            "bootstrap_contributors_count",
+                            cms_in_bootstrap + 1,
                         )
 
                     # indicates that this unit is part of the "initial cm nodes"
@@ -1774,7 +1838,9 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         try:
             # fetch nodes
             nodes = ClusterTopology.nodes(
-                self.opensearch, use_localhost=self.opensearch.is_node_up(), hosts=self.alt_hosts
+                self.opensearch,
+                use_localhost=self.opensearch.is_node_up(),
+                hosts=self.alt_hosts,
             )
             # update (append) CM IPs
             self.opensearch_config.add_seed_hosts(

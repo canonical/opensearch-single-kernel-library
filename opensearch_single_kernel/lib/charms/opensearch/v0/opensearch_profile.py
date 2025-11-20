@@ -17,16 +17,27 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Optional
 
-from charms.opensearch.v0.constants_charm import InvalidProfileConfigOption
-from charms.opensearch.v0.helper_cluster import ClusterTopology
 from ops import BlockedStatus
 
-if TYPE_CHECKING:
-    from charms.opensearch.v0.state import OpenSearchClusterState
-    from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    InvalidProfileConfigOption,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+)
 
-from charms.opensearch.v0.helper_charm import Status, all_units, format_unit_name
-from charms.opensearch.v0.models import (
+if TYPE_CHECKING:
+    from opensearch_single_kernel.lib.charms.opensearch.v0.state import OpenSearchClusterState
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+        OpenSearchDistribution,
+    )
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    Status,
+    all_units,
+    format_unit_name,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
     Model,
     PeerClusterApp,
     PerformanceType,

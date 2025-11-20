@@ -291,11 +291,17 @@ import logging
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
-from charms.opensearch.v0.helper_enums import BaseStrEnum
-from charms.opensearch.v0.models import AzureRelDataCredentials, S3RelDataCredentials
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchError
 from jproperties import Properties
 from pydantic import BaseModel, validator
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
+    AzureRelDataCredentials,
+    S3RelDataCredentials,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchError,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "3b05456c6e304680b4af8e20dae246a2"

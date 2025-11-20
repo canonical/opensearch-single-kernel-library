@@ -18,27 +18,6 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import requests
 import urllib3.exceptions
-from charms.opensearch.v0.constants_charm import GeneratedRoles
-from charms.opensearch.v0.helper_charm import (
-    format_unit_name,
-    mask_sensitive_information,
-)
-from charms.opensearch.v0.helper_cluster import Node
-from charms.opensearch.v0.helper_conf_setter import YamlConfigSetter
-from charms.opensearch.v0.helper_http import error_http_retry_log
-from charms.opensearch.v0.helper_networking import (
-    get_host_ip,
-    get_host_public_ip,
-    is_reachable,
-)
-from charms.opensearch.v0.models import App, StartMode
-from charms.opensearch.v0.opensearch_exceptions import (
-    OpenSearchCmdError,
-    OpenSearchError,
-    OpenSearchHttpError,
-    OpenSearchStartTimeoutError,
-)
-from charms.opensearch.v0.opensearch_internal_data import Scope
 from pydantic.error_wrappers import ValidationError
 from tenacity import (
     Retrying,
@@ -46,6 +25,36 @@ from tenacity import (
     retry_if_exception_type,
     stop_after_attempt,
     wait_fixed,
+)
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    GeneratedRoles,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    format_unit_name,
+    mask_sensitive_information,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import Node
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_conf_setter import (
+    YamlConfigSetter,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_http import (
+    error_http_retry_log,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_networking import (
+    get_host_ip,
+    get_host_public_ip,
+    is_reachable,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import App, StartMode
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchCmdError,
+    OpenSearchError,
+    OpenSearchHttpError,
+    OpenSearchStartTimeoutError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
 )
 
 # The unique Charmhub library identifier, never change it

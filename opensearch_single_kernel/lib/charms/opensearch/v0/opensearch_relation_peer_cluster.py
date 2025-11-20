@@ -8,38 +8,6 @@ import logging
 from hashlib import sha1
 from typing import TYPE_CHECKING, Any, Dict, List, MutableMapping, Optional
 
-from charms.opensearch.v0.constants_charm import (
-    AZURE_RELATION,
-    S3_RELATION,
-    AdminUser,
-    COSUser,
-    KibanaserverUser,
-    PClusterMainIsRequirer,
-    PClusterOrchestratorsRemoved,
-    PClusterWaitingForFailoverPromotion,
-    PeerClusterOrchestratorRelationName,
-    PeerClusterRelationName,
-)
-from charms.opensearch.v0.constants_secrets import AZURE_CREDENTIALS, S3_CREDENTIALS
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.helper_charm import all_units, format_unit_name
-from charms.opensearch.v0.helper_cluster import ClusterTopology
-from charms.opensearch.v0.models import (
-    AzureRelDataCredentials,
-    DeploymentDescription,
-    DeploymentType,
-    Directive,
-    Node,
-    PeerClusterApp,
-    PeerClusterOrchestrators,
-    PeerClusterRelData,
-    PeerClusterRelDataCredentials,
-    PeerClusterRelErrorData,
-    S3RelDataCredentials,
-    StartMode,
-)
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchHttpError
-from charms.opensearch.v0.opensearch_internal_data import Scope
 from ops import (
     BlockedStatus,
     EventBase,
@@ -53,8 +21,55 @@ from ops import (
 )
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    AZURE_RELATION,
+    S3_RELATION,
+    AdminUser,
+    COSUser,
+    KibanaserverUser,
+    PClusterMainIsRequirer,
+    PClusterOrchestratorsRemoved,
+    PClusterWaitingForFailoverPromotion,
+    PeerClusterOrchestratorRelationName,
+    PeerClusterRelationName,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_secrets import (
+    AZURE_CREDENTIALS,
+    S3_CREDENTIALS,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_charm import (
+    all_units,
+    format_unit_name,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
+    AzureRelDataCredentials,
+    DeploymentDescription,
+    DeploymentType,
+    Directive,
+    Node,
+    PeerClusterApp,
+    PeerClusterOrchestrators,
+    PeerClusterRelData,
+    PeerClusterRelDataCredentials,
+    PeerClusterRelErrorData,
+    S3RelDataCredentials,
+    StartMode,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchHttpError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
+
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 
 logger = logging.getLogger(__name__)

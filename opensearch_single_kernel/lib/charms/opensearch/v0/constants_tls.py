@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 """In this file we declare the constants and enums used by TLS related components."""
-from charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
 
 # The unique Charmhub library identifier, never change it
 LIBID = "2f539a53ab0a4916957beaf1d6b27124"

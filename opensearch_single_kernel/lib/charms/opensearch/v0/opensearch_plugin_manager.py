@@ -15,17 +15,21 @@ import functools
 import logging
 from typing import Dict, List, Tuple, Type
 
-from charms.opensearch.v0.helper_cluster import ClusterTopology
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchCmdError,
     OpenSearchHttpError,
 )
-from charms.opensearch.v0.opensearch_health import HealthColors
-from charms.opensearch.v0.opensearch_keystore import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_health import (
+    HealthColors,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_keystore import (
     OpenSearchKeystore,
     OpenSearchKeystoreNotReadyError,
 )
-from charms.opensearch.v0.opensearch_plugins import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_plugins import (
     OpenSearchKnn,
     OpenSearchPlugin,
     OpenSearchPluginConfig,

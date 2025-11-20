@@ -7,21 +7,33 @@ import logging
 from typing import TYPE_CHECKING
 
 import ops
-from charms.data_platform_libs.v0.data_interfaces import RequirerData
-from charms.opensearch.v0.constants_charm import (
+from pydantic.error_wrappers import ValidationError
+
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    RequirerData,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     JWT_CONFIG_RELATION,
     JWTAuthConfigInvalid,
     JWTRelationInvalid,
     SecurityIndexUpdateError,
 )
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.models import DeploymentType, JWTAuthConfiguration
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchCmdError
-from charms.opensearch.v0.opensearch_internal_data import Scope
-from pydantic.error_wrappers import ValidationError
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import (
+    DeploymentType,
+    JWTAuthConfiguration,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchCmdError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 # The unique Charmhub library identifier, never change it
 LIBID = "c6eab0abbd8b426fa99421c9460e2bc9"

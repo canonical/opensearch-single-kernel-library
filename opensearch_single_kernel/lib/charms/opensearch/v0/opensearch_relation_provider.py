@@ -24,11 +24,15 @@ from enum import Enum
 from json import JSONDecodeError
 from typing import Dict, Optional, Set
 
-from charms.data_platform_libs.v0.data_interfaces import (
+from ops.charm import RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
+from ops.framework import Object
+from ops.model import BlockedStatus, MaintenanceStatus, Relation
+
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     IndexRequestedEvent,
     OpenSearchProvides,
 )
-from charms.opensearch.v0.constants_charm import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
     ClientRelationName,
     ClientUsersDict,
     IndexCreationFailed,
@@ -38,21 +42,26 @@ from charms.opensearch.v0.constants_charm import (
     PeerRelationName,
     UserCreationFailed,
 )
-from charms.opensearch.v0.constants_tls import CertType
-from charms.opensearch.v0.helper_networking import unit_ip
-from charms.opensearch.v0.helper_security import generate_hashed_password
-from charms.opensearch.v0.opensearch_exceptions import (
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_tls import CertType
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_networking import unit_ip
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_security import (
+    generate_hashed_password,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
     OpenSearchHttpError,
     OpenSearchIndexError,
 )
-from charms.opensearch.v0.opensearch_internal_data import Scope
-from charms.opensearch.v0.opensearch_users import OpenSearchUserMgmtError
-from ops.charm import RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
-from ops.framework import Object
-from ops.model import BlockedStatus, MaintenanceStatus, Relation
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data import (
+    Scope,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_users import (
+    OpenSearchUserMgmtError,
+)
 
 if typing.TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 # The unique Charmhub library identifier, never change it
 LIBID = "c0f1d8f94bdd41a781fe2871e1922480"

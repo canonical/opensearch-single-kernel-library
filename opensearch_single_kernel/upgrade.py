@@ -17,17 +17,27 @@ import typing
 
 import ops
 import poetry.core.constraints.version as poetry_version
-from charms.opensearch.v0.helper_cluster import ClusterTopology
-from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution
-from charms.opensearch.v0.opensearch_exceptions import OpenSearchHttpError
-from charms.opensearch.v0.opensearch_health import HealthColors
 
-import status_exception
+import opensearch_single_kernel.status_exception as status_exception
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_cluster import (
+    ClusterTopology,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+    OpenSearchDistribution,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions import (
+    OpenSearchHttpError,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_health import (
+    HealthColors,
+)
 
 logger = logging.getLogger(__name__)
 
 if typing.TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 
 PEER_RELATION_ENDPOINT_NAME = "upgrade-version-a"

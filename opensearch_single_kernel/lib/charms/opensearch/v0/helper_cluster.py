@@ -5,11 +5,16 @@
 import logging
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from charms.opensearch.v0.constants_charm import GeneratedRoles
-from charms.opensearch.v0.helper_enums import BaseStrEnum
-from charms.opensearch.v0.models import App, Node
-from charms.opensearch.v0.opensearch_distro import OpenSearchDistribution
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from opensearch_single_kernel.lib.charms.opensearch.v0.constants_charm import (
+    GeneratedRoles,
+)
+from opensearch_single_kernel.lib.charms.opensearch.v0.helper_enums import BaseStrEnum
+from opensearch_single_kernel.lib.charms.opensearch.v0.models import App, Node
+from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_distro import (
+    OpenSearchDistribution,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "80c3b9eff6df437bb4175b1666b73f91"
@@ -26,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 
 class IndexStateEnum(BaseStrEnum):
