@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections import namedtuple
 from typing import Dict, List, Optional
 
 from ops import Model
@@ -15,7 +16,7 @@ from ops.charm import (
     RelationJoinedEvent,
     SecretChangedEvent,
 )
-from ops.framework import EventSource
+from ops.framework import EventSource, ObjectEvents
 from ops.model import Relation
 
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (

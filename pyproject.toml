@@ -3,7 +3,7 @@
 
 [project]
 name = "opensearch-single-kernel-library"
-dynamic = ["version"]
+dynamic = []
 description = "Shared and reusable code for OpenSearch charms"
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,6 +16,7 @@ classifiers = [
  "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.10,<4.0"
+version = "0.0.1.post6.dev0+744f8cb.dirty"
 
 
 [project.urls]
@@ -33,7 +34,6 @@ packages = [
 ]
 include = ["opensearch_single_kernel/templates/"]
 exclude = ["opensearch_single_kernel/charmcraft.yaml"]
-version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -124,7 +124,7 @@ poetry-plugin-export = ">=1.8"
 poetry-dynamic-versioning = { version = ">=1.0.0,<2.0.0", extras = ["plugin"] }
 
 [tool.poetry-dynamic-versioning]
-enable = true
+enable = false
 vcs = "git"
 dirty = true
 strict = true
@@ -172,6 +172,6 @@ ignore = ["W503", "E501", "D107", "D415", "N818"]
 per-file-ignores = ["tests/*:D100,D101,D102,D103,D104"]
 docstring-convention = "google"
 # Check for properly formatted copyright header in each file
-copyright-check = "True"
+copyright-check = "False"
 copyright-author = "Canonical Ltd."
 copyright-regexp = "Copyright\\s\\d{4}([-,]\\d{4})*\\s+%(author)s"

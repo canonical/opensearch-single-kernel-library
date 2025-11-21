@@ -87,7 +87,14 @@ from typing import (
 
 if typing.TYPE_CHECKING:
     # avoid typing_extensions import at runtime
-    from typing_extensions import NotRequired, ParamSpec, Required, Self, TypeAlias, Unpack
+    from typing_extensions import (
+        NotRequired,
+        ParamSpec,
+        Required,
+        Self,
+        TypeAlias,
+        Unpack,
+    )
 
     _P = ParamSpec("_P")
     _T = TypeVar("_T")
@@ -120,7 +127,7 @@ def _cache_init(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
 # this is used for return types, so it (a) uses concrete types and (b) does not contain None
 # because setting snap config values to null removes the key so a null value can't be returned
-_JSONLeaf: TypeAlias = 'str | int | float | bool'
+_JSONLeaf: TypeAlias = "str | int | float | bool"
 JSONType: TypeAlias = "dict[str, JSONType] | list[JSONType] | _JSONLeaf"
 # we also need a jsonable type for arguments,
 # which (a) uses abstract types and (b) may contain None
@@ -272,17 +279,17 @@ class SnapError(Error):
     def _from_called_process_error(cls, msg: str, error: CalledProcessError) -> Self:
         lines = [msg]
         if error.stdout:
-            lines.extend(['Stdout:', error.stdout])
+            lines.extend(["Stdout:", error.stdout])
         if error.stderr:
-            lines.extend(['Stderr:', error.stderr])
+            lines.extend(["Stderr:", error.stderr])
         try:
-            cmd = ['journalctl', '--unit', 'snapd', '--lines', '20']
+            cmd = ["journalctl", "--unit", "snapd", "--lines", "20"]
             logs = subprocess.check_output(cmd, text=True)
         except Exception as e:
-            lines.extend(['Error fetching logs:', str(e)])
+            lines.extend(["Error fetching logs:", str(e)])
         else:
-            lines.extend(['Latest logs:', logs])
-        return cls('\n'.join(lines))
+            lines.extend(["Latest logs:", logs])
+        return cls("\n".join(lines))
 
 
 class SnapNotFoundError(Error):
@@ -358,7 +365,7 @@ class Snap:
         try:
             return subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
         except CalledProcessError as e:
-            msg = f'Snap: {self._name!r} -- command {args!r} failed!'
+            msg = f"Snap: {self._name!r} -- command {args!r} failed!"
             raise SnapError._from_called_process_error(msg=msg, error=e) from e
 
     def _snap_daemons(
@@ -386,7 +393,7 @@ class Snap:
         try:
             return subprocess.run(args, text=True, check=True, capture_output=True)
         except CalledProcessError as e:
-            msg = f'Snap: {self._name!r} -- command {args!r} failed!'
+            msg = f"Snap: {self._name!r} -- command {args!r} failed!"
             raise SnapError._from_called_process_error(msg=msg, error=e) from e
 
     @typing.overload
@@ -493,7 +500,7 @@ class Snap:
         try:
             subprocess.run(args, text=True, check=True, capture_output=True)
         except CalledProcessError as e:
-            msg = f'Snap: {self._name!r} -- command {args!r} failed!'
+            msg = f"Snap: {self._name!r} -- command {args!r} failed!"
             raise SnapError._from_called_process_error(msg=msg, error=e) from e
 
     def hold(self, duration: timedelta | None = None) -> None:
@@ -525,7 +532,7 @@ class Snap:
         try:
             subprocess.run(args, text=True, check=True, capture_output=True)
         except CalledProcessError as e:
-            msg = f'Snap: {self._name!r} -- command {args!r} failed!'
+            msg = f"Snap: {self._name!r} -- command {args!r} failed!"
             raise SnapError._from_called_process_error(msg=msg, error=e) from e
 
     def restart(self, services: list[str] | None = None, reload: bool = False) -> None:
@@ -593,8 +600,8 @@ class Snap:
         if revision:
             args.append(f'--revision="{revision}"')
 
-        if self.confinement == 'classic':
-            args.append('--classic')
+        if self.confinement == "classic":
+            args.append("--classic")
 
         if devmode:
             args.append("--devmode")
@@ -671,14 +678,20 @@ class Snap:
             if self._state not in (SnapState.Present, SnapState.Latest):
                 # The snap is not installed, so we install it.
                 logger.info(
-                    "Installing snap %s, revision %s, tracking %s", self._name, revision, channel
+                    "Installing snap %s, revision %s, tracking %s",
+                    self._name,
+                    revision,
+                    channel,
                 )
                 self._install(channel, cohort, revision)
                 logger.info("The snap installation completed successfully")
             elif revision is None or revision != self._revision:
                 # The snap is installed, but we are changing it (e.g., switching channels).
                 logger.info(
-                    "Refreshing snap %s, revision %s, tracking %s", self._name, revision, channel
+                    "Refreshing snap %s, revision %s, tracking %s",
+                    self._name,
+                    revision,
+                    channel,
                 )
                 self._refresh(channel=channel, cohort=cohort, revision=revision, devmode=devmode)
                 logger.info("The snap refresh completed successfully")
@@ -910,7 +923,9 @@ class SnapClient:
 
         if headers is None:
             headers = {}
-        request = urllib.request.Request(url, method=method, data=data, headers=headers)  # noqa: S310
+        request = urllib.request.Request(
+            url, method=method, data=data, headers=headers
+        )  # noqa: S310
 
         try:
             response = self.opener.open(request, timeout=self.timeout)
@@ -973,7 +988,9 @@ class SnapCache(Mapping[str, Snap]):
         """Report number of items in the snap cache."""
         return len(self._snap_map)
 
-    def __iter__(self) -> Iterable[Snap | None]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def __iter__(
+        self,
+    ) -> Iterable[Snap | None]:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Provide iterator for the snap cache."""
         return iter(self._snap_map.values())
 
@@ -1116,9 +1133,13 @@ def add(
 
 @typing.overload
 def remove(snap_names: str) -> Snap: ...
+
+
 # return a single Snap if snap name is given as a string
 @typing.overload
 def remove(snap_names: list[str]) -> Snap | list[Snap]: ...
+
+
 # may return a single Snap or a list depending if one or more snap names were given
 @_cache_init
 def remove(snap_names: str | list[str]) -> Snap | list[Snap]:
@@ -1296,7 +1317,7 @@ def install_local(
             )
             raise SnapError(f"Failed to find snap {snap_name} in Snap cache") from e
     except CalledProcessError as e:
-        msg = f'Cound not install snap {filename}!'
+        msg = f"Could not install snap {filename}!"
         raise SnapError._from_called_process_error(msg=msg, error=e) from e
 
 

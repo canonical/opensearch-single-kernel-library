@@ -163,7 +163,9 @@ LIBPATCH = 1
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 
 # OpenSearch Backups

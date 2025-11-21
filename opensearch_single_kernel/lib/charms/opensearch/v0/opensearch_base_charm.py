@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 """Base class for the OpenSearch Operators."""
-
 import abc
 import logging
 import random
@@ -103,6 +102,7 @@ from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_exceptions imp
     OpenSearchHAError,
     OpenSearchHttpError,
     OpenSearchMissingError,
+    OpenSearchNoClusterManagersError,
     OpenSearchNotFullyReadyError,
     OpenSearchStartError,
     OpenSearchStartTimeoutError,
@@ -195,12 +195,7 @@ class _StartOpenSearch(EventBase):
     """
 
     def __init__(
-        self,
-        handle,
-        *,
-        ignore_lock=False,
-        after_upgrade=False,
-        is_first_data_node=False,
+        self, handle, *, ignore_lock=False, after_upgrade=False, is_first_data_node=False
     ):
         super().__init__(handle)
         self.ignore_lock = ignore_lock
@@ -263,10 +258,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         self.peers_data = RelationDataStore(self, PeerRelationName)
         self.secrets = OpenSearchSecrets(self, PeerRelationName)
         self.tls = OpenSearchTLS(
-            self,
-            PeerRelationName,
-            self.opensearch.paths.jdk,
-            self.opensearch.paths.certs,
+            self, PeerRelationName, self.opensearch.paths.jdk, self.opensearch.paths.certs
         )
         self.oauth = OAuthHandler(self)
         self.jwt = JwtHandler(self)
@@ -308,8 +300,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
             self.on[PeerRelationName].relation_departed, self._on_peer_relation_departed
         )
         self.framework.observe(
-            self.on[STORAGE_NAME].storage_detaching,
-            self._on_opensearch_data_storage_detaching,
+            self.on[STORAGE_NAME].storage_detaching, self._on_opensearch_data_storage_detaching
         )
 
         self.framework.observe(self.on.set_password_action, self._on_set_password_action)
@@ -745,6 +736,24 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
                 elif self.opensearch_peer_cm.is_consumer():
                     self.peer_cluster_requirer.refresh_requirer_relation_data()
 
+            # No cluster managers left in the cluster fleet
+            # raise so we do not lose the cluster state
+            if (
+                len(
+                    [
+                        app
+                        for app in self.opensearch_peer_cm.apps_in_fleet()
+                        if app.app.id != self.state.app.deployment_description.app.id
+                    ]
+                )
+                > 0
+                and not self.opensearch_peer_cm.is_any_cm_node_up_in_cluster()
+            ):
+                logger.error(
+                    "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
+                )
+                raise OpenSearchNoClusterManagersError()
+
         # we attempt to flush the translog to disk
         if self.opensearch.is_node_up():
             try:
@@ -885,8 +894,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
             self.status.clear(InvalidProfileConfigOption)
         except ValueError:
             logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.state.config.get("profile"),
+                "Invalid profile configuration. Value: %s", self.state.config.get("profile")
             )
             self.status.set(BlockedStatus(InvalidProfileConfigOption))
             return
@@ -1037,11 +1045,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         self._restart_opensearch_event.emit()
 
     def on_tls_conf_set(
-        self,
-        event: CertificateAvailableEvent,
-        scope: Scope,
-        cert_type: CertType,
-        renewal: bool,
+        self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
     ):
         """Called after certificate ready and stored on the corresponding scope databag.
 
@@ -1146,9 +1150,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         return self.peers_data.get(Scope.APP, "admin_user_initialized", False)
 
     def _handle_change_to_main_orchestrator_if_needed(
-        self,
-        event: ConfigChangedEvent,
-        previous_deployment_desc: Optional[DeploymentDescription],
+        self, event: ConfigChangedEvent, previous_deployment_desc: Optional[DeploymentDescription]
     ) -> None:
         """Handle when the user changes the roles or init_hold config from True to False."""
         # if the current cluster wasn't already a "main-Orchestrator" and we're now updating
@@ -1806,9 +1808,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
 
                     if self.unit.is_leader():
                         self.peers_data.put(
-                            Scope.APP,
-                            "bootstrap_contributors_count",
-                            cms_in_bootstrap + 1,
+                            Scope.APP, "bootstrap_contributors_count", cms_in_bootstrap + 1
                         )
 
                     # indicates that this unit is part of the "initial cm nodes"
@@ -1838,9 +1838,7 @@ class OpenSearchBaseCharm(CharmBase, abc.ABC):
         try:
             # fetch nodes
             nodes = ClusterTopology.nodes(
-                self.opensearch,
-                use_localhost=self.opensearch.is_node_up(),
-                hosts=self.alt_hosts,
+                self.opensearch, use_localhost=self.opensearch.is_node_up(), hosts=self.alt_hosts
             )
             # update (append) CM IPs
             self.opensearch_config.add_seed_hosts(

@@ -26,7 +26,9 @@ from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_internal_data 
 )
 
 if TYPE_CHECKING:
-    from charms.opensearch.v0.opensearch_base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.lib.charms.opensearch.v0.opensearch_base_charm import (
+        OpenSearchBaseCharm,
+    )
 
 # The unique Charmhub library identifier, never change it
 LIBID = "293db55a2d8949f8aa5906d04cd541ba"

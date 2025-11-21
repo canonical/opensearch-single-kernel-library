@@ -1,4 +1,4 @@
-# opensearch_single_kernel.lib. Copyright 2024 Canonical Ltd.
+# Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Class for Managing simple or large deployments and configuration related changes."""
@@ -777,3 +777,14 @@ class OpenSearchPeerClustersManager:
             )
 
         return PeerClusterRelData.from_dict(content)
+
+    def is_any_cm_node_up_in_cluster(self) -> bool:
+        """Check whether there is at least one cluster manager unit up in the fleet."""
+        nodes = ClusterTopology.nodes(self._charm.opensearch, True, self._charm.alt_hosts)
+        for node in nodes:
+            # ignore current unit
+            if node.ip == self._charm.opensearch.host:
+                continue
+            if node.is_cm_eligible() and self._charm.opensearch.is_node_up(node.ip):
+                return True
+        return False
