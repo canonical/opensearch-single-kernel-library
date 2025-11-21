@@ -1,9 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from pathlib import Path
-
-import pytest
 from _pytest.config.argparsing import Parser
 
 
