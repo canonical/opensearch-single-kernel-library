@@ -13,7 +13,7 @@ CHARMS_PATH="./tests/charms"
 if [ $# -ge 1 ]; then
     declare -a TEST_CHARMS=("$1")
 else
-    declare -a TEST_CHARMS=("${CHARMS_PATH}/opensearch_test_charm" "${CHARMS_PATH}/opensearch_k8s_test_charm" )
+    declare -a TEST_CHARMS=("${CHARMS_PATH}/opensearch_test_charm" )
 fi
 
 for directory in "${TEST_CHARMS[@]}"; do

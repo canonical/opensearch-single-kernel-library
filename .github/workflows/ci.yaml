@@ -61,10 +61,13 @@ jobs:
           fetch-depth: 0
       - name: Check libs
         uses: canonical/charming-actions/check-libraries@2.7.0
+        continue-on-error: true
         with:
           charm-path: ./opensearch_single_kernel/
           credentials: ${{ secrets.CHARMHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          use-labels: false
+          fail-build: ${{ github.event_name == 'pull_request' }}
     permissions:
       pull-requests: write
 

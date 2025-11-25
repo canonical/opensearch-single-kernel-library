@@ -586,7 +586,7 @@ files = [
 
 [[package]]
 name = "opensearch-single-kernel-library"
-version = "0.0.0"
+version = "0.0.1.post6.dev0+744f8cb.dirty"
 description = "Shared and reusable code for OpenSearch charms"
 optional = false
 python-versions = "^3.10"
