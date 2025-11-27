@@ -5,12 +5,13 @@
 """Handler for General OpenSearch charm events."""
 
 from typing import TYPE_CHECKING
+
 from ops import Object
 from ops.charm import ConfigChangedEvent
 from ops.model import ActiveStatus
-from opensearch_single_kernel.utils.logging import WithLogging
-from opensearch_single_kernel.core.state import GlobalState
 
+from opensearch_single_kernel.core.state import GlobalState
+from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
     from base_charm import OpenSearchBaseCharm

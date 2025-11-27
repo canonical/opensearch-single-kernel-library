@@ -4,8 +4,8 @@
 
 """Example Manager."""
 
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.core.state import GlobalState
+from opensearch_single_kernel.utils.logging import WithLogging
 
 
 class ExampleManager(WithLogging):
@@ -16,8 +16,6 @@ class ExampleManager(WithLogging):
         self.state = state
 
     def print_hello_world(self):
-        """
-        Print Hello World
-        """
+        """Print Hello World."""
         self.logger.debug("Hello World ! ")
         return "Hello World !"

@@ -7,9 +7,9 @@
 
 from typing import TYPE_CHECKING
 
+from ops import Object
 
 from opensearch_single_kernel.utils.logging import WithLogging
-from ops import Object
 
 if TYPE_CHECKING:
     from base_charm import OpenSearchBaseCharm

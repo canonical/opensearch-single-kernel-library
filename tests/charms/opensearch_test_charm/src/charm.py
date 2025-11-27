@@ -6,6 +6,7 @@
 """Charmed Machine Operator for OpenSearch."""
 
 from ops.main import main
+
 from opensearch_single_kernel.base_charm import OpenSearchBaseCharm
 
 
