@@ -9,6 +9,7 @@ on:
       - edited
     branches:
       - 2/edge
+      - feature/single-kernel
 
 jobs:
   check-pr:

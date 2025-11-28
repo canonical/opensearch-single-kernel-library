@@ -5,7 +5,8 @@ name: Release to PyPI
 on:
   push:
     branches:
-      - 6/edge
+      - 2/edge
+      - feature/single-kernel
 
 concurrency:
   # Prevent race conditions (if multiple commits have been pushed since the last release)
@@ -32,7 +33,8 @@ jobs:
       - release-part1
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: production
+    # Change environment name if we are on test feature
+    environment: ${{ github.ref_name == 'feature/single-kernel' && 'testpypi' || 'production' }}
     steps:
       - name: Download all the dists
         uses: actions/download-artifact@v4
@@ -41,6 +43,9 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Configure repository url, by default it is pypi.
+          repository_url: ${{ github.ref_name == 'feature/single-kernel' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
     permissions:
       id-token: write  # Needed for PyPI trusted publishing
 
