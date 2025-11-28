@@ -45,7 +45,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Configure repository url, by default it is pypi.
-          repository_url: ${{ github.ref_name == 'feature/single-kernel' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          repository-url: ${{ github.ref_name == 'feature/single-kernel' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
     permissions:
       id-token: write  # Needed for PyPI trusted publishing
 
