@@ -12,7 +12,7 @@ from ops import Object
 from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
-    from base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.core.base_charm import OpenSearchBaseCharm
 
 
 class GlobalState(Object, WithLogging):

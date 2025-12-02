@@ -7,15 +7,7 @@
 
 from ops.main import main
 
-from opensearch_single_kernel.base_charm import OpenSearchBaseCharm
-
-
-class OpenSearchOperatorCharm(OpenSearchBaseCharm):
-    """This class represents the machine charm for OpenSearch."""
-
-    def __init__(self, *args):
-        super().__init__(*args)
-
+from opensearch_single_kernel.vm_charm import OpenSearchVMCharm
 
 if __name__ == "__main__":
-    main(OpenSearchOperatorCharm)
+    main(OpenSearchVMCharm)

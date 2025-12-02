@@ -600,6 +600,7 @@ cryptography = "^45.0.4"
 data-platform-helpers = "^0.1.4"
 jproperties = "2.1.2"
 jsonschema = "^4.24.0"
+opentelemetry-api = "1.38.0"
 ops = "^2.22.0"
 overrides = "^7.7.0"
 poetry-core = "<2.0.0"
@@ -616,14 +617,14 @@ url = "opensearch_single_kernel"
 
 [[package]]
 name = "opentelemetry-api"
-version = "1.34.1"
+version = "1.38.0"
 description = "OpenTelemetry Python API"
 optional = false
 python-versions = ">=3.9"
 groups = ["main", "charm-libs"]
 files = [
-    {file = "opentelemetry_api-1.34.1-py3-none-any.whl", hash = "sha256:b7df4cb0830d5a6c29ad0c0691dbae874d8daefa934b8b1d642de48323d32a8c"},
-    {file = "opentelemetry_api-1.34.1.tar.gz", hash = "sha256:64f0bd06d42824843731d05beea88d4d4b6ae59f9fe347ff7dfa2cc14233bbb3"},
+    {file = "opentelemetry_api-1.38.0-py3-none-any.whl", hash = "sha256:2891b0197f47124454ab9f0cf58f3be33faca394457ac3e09daba13ff50aa582"},
+    {file = "opentelemetry_api-1.38.0.tar.gz", hash = "sha256:f4c193b5e8acb0912b06ac5b16321908dd0843d75049c091487322284a3eea12"},
 ]
 
 [package.dependencies]
