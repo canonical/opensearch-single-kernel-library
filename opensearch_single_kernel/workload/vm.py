@@ -5,16 +5,23 @@
 """OpenSearch Machine VM Workload."""
 
 from overrides import override
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
+from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION, VM_PATHS
 from opensearch_single_kernel.common.exceptions import OpenSearchInstallError
-from opensearch_single_kernel.common.literals import OPENSEARCH_SNAP_REVISION
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
-from opensearch_single_kernel.workload.base import BaseWorkload
+from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
 
 class VMWorkload(BaseWorkload):
     """OpenSearch Machine VM Workload."""
+
+    def __init__(self):
+        super().__init__()
+        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(wait=5)):
+            with attempt:
+                cache = snap.SnapCache()
+                self.opensearch_snap = cache["opensearch"]
 
     @retry(
         stop=stop_after_attempt(3),
@@ -36,3 +43,9 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
+
+    @override
+    @property
+    def paths(self):
+        """Return Workload's paths"""
+        return Paths(**VM_PATHS)

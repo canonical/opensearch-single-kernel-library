@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""OpenSearch Client."""
+import json
+import random
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import requests
+import urllib3
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+    wait_fixed,
+)
+
+from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.utils.logging import WithLogging
+from opensearch_single_kernel.workload.base import BaseWorkload
+
+
+class OpenSearchClient(WithLogging):
+    """Handle OpenSearch Interaction with Server."""
+
+    def __init__(
+        self, workload: BaseWorkload, host: str, port: int, admin_secret: Optional[str] = None
+    ):
+        """Initialise the client.
+
+        The host, port and admin_secret should be retrieved from state.
+        """
+        self.host = host
+        self.port = port
+        self.workload = workload
+        self.admin_secret = admin_secret
+
+    def node_id(self, unit_name: str) -> str:
+        """Get the OpenSearch node id corresponding to the unit."""
+        nodes = self.request("GET", "/_nodes").get("nodes")
+
+        for n_id, node in nodes.items():
+            if node["name"] == unit_name:
+                return n_id
+
+    def roles(self, unit_name: str, alt_hosts: Optional[List[str]]) -> List[str]:
+        """Get the list of the roles assigned to this node."""
+        nodes = self.request("GET", f"/_nodes/{self.node_id(unit_name)}", alt_hosts=alt_hosts)
+        return nodes["nodes"][self.node_id]["roles"]
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def indices(
+        self,
+        host: Optional[str] = None,
+        alt_hosts: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, str]]:
+        """Get all shards of all indexes in the cluster."""
+        # Get cluster state
+        cluster_state = self.request(
+            "GET", "/_cluster/state?filter_path=metadata.indices", host=host, alt_hosts=alt_hosts
+        )
+        indices_state = cluster_state["metadata"]["indices"]
+
+        # Get cluster health
+        cluster_health = self.request(
+            "GET", "/_cluster/health?level=indices", host=host, alt_hosts=alt_hosts
+        )
+        indices_health = cluster_health["indices"]
+
+        idx = {}
+        for index in indices_state.keys():
+            idx[index] = {
+                "health": indices_health[index]["status"],
+                "status": indices_state[index]["state"],
+            }
+        return idx
+
+    def get_nodes(self, host: Optional[str] = None, alt_hosts: Optional[List[str]] = None):
+        """Call the /_nodes API endpoint of opensearch"""
+        response = self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
+        return response
+
+    def is_node_up(self, host: Optional[str] = None) -> bool:
+        """Get status of node.
+
+        This assumes OpenSearch is Running. Defaults to this unit
+        """
+        host = host or self.host
+        if not self.workload.is_reachable(host, self.port):
+            return False
+
+        try:
+            resp_code = self.request(
+                "GET",
+                "/",
+                host=host,
+                check_hosts_reach=False,
+                resp_status_code=True,
+                timeout=1,
+            )
+            return resp_code < 400
+        except (OpenSearchHttpError, Exception) as e:
+            self.logger.debug(f"Error when checking if host {host} is up: {e}")
+            return False
+
+    def request(  # noqa
+        self,
+        method: str,
+        endpoint: str,
+        payload: Optional[Union[str, Dict[str, any], List[Dict[str, any]]]] = None,
+        host: Optional[str] = None,
+        alt_hosts: Optional[List[str]] = None,
+        check_hosts_reach: bool = True,
+        resp_status_code: bool = False,
+        retries: int = 0,
+        ignore_retry_on: Optional[List] = None,
+        timeout: int = 5,
+        cert_files: Optional[Tuple[str]] = None,
+    ) -> Union[Dict[str, any], List[any], int]:
+        """Make an HTTP request.
+
+        Args:
+            method: matching the known http methods.
+            endpoint: relative to the base uri.
+            payload: str, JSON obj or array body payload.
+            host: host of the node we wish to make a request on, by default current host.
+            alt_hosts: in case the default host is unreachable, fallback/alternative hosts.
+            check_hosts_reach: if true, performs a ping for each host
+            resp_status_code: whether to only return the HTTP code from the response.
+            retries: number of retries
+            ignore_retry_on: don't retry for specific error codes
+            timeout: number of seconds before a timeout happens
+            cert_files: tuple of cert and key files to use for authentication
+
+        Raises:
+            ValueError if method or endpoint are missing
+            OpenSearchHttpError if hosts are unreachable
+        """
+
+        def call(urls: List[str]) -> requests.Response:
+            """Performs an HTTP request."""
+            random.shuffle(urls)
+
+            for attempt in Retrying(
+                retry=retry_if_exception_type(requests.RequestException)
+                | retry_if_exception_type(urllib3.exceptions.HTTPError),
+                stop=stop_after_attempt(retries),
+                wait=wait_fixed(1),
+                before_sleep=self.error_http_retry_log(retries, method, urls, payload),
+                reraise=True,
+            ):
+                with attempt, requests.Session() as s:
+                    url = urls[(attempt.retry_state.attempt_number - 1) % len(urls)]
+                    if cert_files:
+                        s.cert = cert_files
+                    else:
+                        s.auth = ("admin", self.admin_secret)
+
+                    request_kwargs = {
+                        "method": method.upper(),
+                        "url": url,
+                        "verify": f"{self.workload.paths.certs}/chain.pem",
+                        "headers": {
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        },
+                        "timeout": (timeout, timeout),
+                    }
+                    if payload:
+                        request_kwargs["data"] = (
+                            json.dumps(payload) if not isinstance(payload, str) else payload
+                        )
+
+                    response = s.request(**request_kwargs)
+                    try:
+                        response.raise_for_status()
+                    except requests.RequestException as ex:
+                        if ex.response.status_code in (ignore_retry_on or []):
+                            raise OpenSearchHttpError(
+                                response_text=ex.response.text,
+                                response_code=ex.response.status_code,
+                            )
+                        raise
+
+                    return response
+
+        if None in [endpoint, method]:
+            raise ValueError("endpoint or method missing")
+
+        if endpoint.startswith("/"):
+            endpoint = endpoint[1:]
+
+        urls = []
+        for host_candidate in (host or self.host, *(alt_hosts or [])):
+            if check_hosts_reach and not self.is_node_up(host_candidate):
+                continue
+            urls.append(f"https://{host_candidate}:{self.port}/{endpoint}")
+        if not urls:
+            raise OpenSearchHttpError(
+                f"Host {host or self.host}:{self.port} and alternative_hosts: {alt_hosts or []} not reachable."
+            )
+
+        resp = None
+        try:
+            resp = call(urls)
+            if resp_status_code:
+                return resp.status_code
+
+            return resp.json()
+        except OpenSearchHttpError as e:
+            if resp_status_code:
+                return e.response_code
+            raise
+        except (requests.RequestException, urllib3.exceptions.HTTPError) as e:
+            if not isinstance(e, requests.RequestException) or e.response is None:
+                raise OpenSearchHttpError(response_text=str(e))
+
+            if resp_status_code:
+                return e.response.status_code
+
+            raise OpenSearchHttpError(
+                response_text=e.response.text, response_code=e.response.status_code
+            )
+        except requests.JSONDecodeError:
+            raise OpenSearchHttpError(response_text=resp.text)
+        except Exception as e:
+            raise OpenSearchHttpError(response_text=str(e))
+
+    def error_http_retry_log(
+        self, retry_max: int, method: str, urls: List[str], payload: Optional[Dict[str, Any]]
+    ):
+        """Return a custom log function to run before a new Tenacity retry."""
+
+        def log_error(retry_state: RetryCallState):
+            url = urls[(retry_state.attempt_number - 1) % len(urls)]
+            self.logger.debug(
+                f"Request {method} to {url} with payload: {payload} failed."
+                f"(Attempts left: {retry_max - retry_state.attempt_number})\n"
+                f"\tError: {retry_state.outcome.exception()}"
+            )
+
+        return log_error

@@ -10,3 +10,6 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 
 class K8sWorkload(BaseWorkload):
     """Kubernetes OpenSearch Workload."""
+
+    def __init__(self):
+        super().__init__()
