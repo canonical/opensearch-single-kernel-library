@@ -32,7 +32,7 @@ from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.topology import TopologyManager
+from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -288,7 +288,7 @@ class LockManager(PeerLockManager):
             self.logger.debug("[Node lock] 1+ opensearch nodes online")
             try:
                 online_nodes = len(
-                    TopologyManager.nodes(
+                    ClusterTopology.nodes(
                         self.opensearch_client, use_localhost=host is not None, hosts=alt_hosts
                     )
                 )

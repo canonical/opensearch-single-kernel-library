@@ -4,6 +4,7 @@
 
 """OpenSearch Machine VM Workload."""
 import os
+import subprocess
 from typing import Optional
 
 from overrides import override
@@ -11,6 +12,7 @@ from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait
 
 from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION, VM_PATHS
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchInstallError,
     OpenSearchMissingError,
     OpenSearchStartError,
@@ -19,6 +21,7 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
     service_failed,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
+from opensearch_single_kernel.utils.helpers import mask_sensitive_information
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
 
@@ -54,6 +57,50 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.5), reraise=True)
+    @override
+    def _run_cmd(self, command: str, args: str = None, stdin: str = None) -> str:
+        """Run command.
+
+        Arg:
+            command: can contain arguments
+            args: command line arguments
+            stdin: string input to be passed on the standard input of the subprocess
+
+        Returns the stdout
+        """
+        command_with_args = command
+        if args is not None:
+            command_with_args = f"{command} {args}"
+
+        # only log the command and no arguments to avoid logging sensitive information
+        command = mask_sensitive_information(command_with_args)
+        self.logger.debug(f"Executing command: {command}")
+
+        try:
+            output = subprocess.run(
+                command_with_args,
+                input=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                env=os.environ,
+            )
+
+            self.logger.debug(f"{command}:\n{output.stdout}")
+
+            if output.returncode != 0:
+                self.logger.debug(
+                    f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}"
+                )
+                raise OpenSearchCmdError(output.stderr)
+        except (TimeoutError, subprocess.TimeoutExpired) as e:
+            raise OpenSearchCmdError(e)
+        return output.stdout.strip()
 
     @override
     def run_script(self, script_name: str, args: str = None):

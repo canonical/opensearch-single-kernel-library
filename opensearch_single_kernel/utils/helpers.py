@@ -3,14 +3,17 @@
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
+import re
 from time import time_ns
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 from ops import Unit
 
-from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 from opensearch_single_kernel.common.constants import PEER_RELATION, Scope
 from opensearch_single_kernel.core.models import App
+
+if TYPE_CHECKING:
+    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
 def format_unit_name(unit: Union[Unit, str], app: App) -> str:
@@ -21,7 +24,7 @@ def format_unit_name(unit: Union[Unit, str], app: App) -> str:
 
 
 def trigger_peer_rel_changed(
-    charm: OpenSearchBaseCharm,
+    charm: "OpenSearchBaseCharm",
     only_by_leader: bool = False,
     on_other_units: bool = True,
     on_current_unit: bool = False,
@@ -35,3 +38,10 @@ def trigger_peer_rel_changed(
 
     if on_current_unit:
         charm.on[PEER_RELATION].relation_changed.emit(charm.model.get_relation(PEER_RELATION))
+
+
+def mask_sensitive_information(cmd: str) -> str:
+    """Replace passwords or secrets by 'xxx' and return the masked str."""
+    pattern = re.compile(r"(-tspass\s+|-kspass\s+|-storepass\s+|-new\s+|pass:)(\S+)")
+
+    return re.sub(pattern, r"\1" + "xxx", cmd)

@@ -99,6 +99,10 @@ class TlsFileExt(BaseStrEnum):
     KEYPASS = ".key-password"
 
 
+# Profiles
+_1GB_IN_KB = 1024 * 1024  # 1GB in KB
+MAX_HEAP_SIZE = 31 * _1GB_IN_KB  # 31GB in KB
+PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
 OPENSEARCH_SNAP_REVISION = 79  # Keep in sync with `workload_version` file
 
@@ -111,6 +115,7 @@ COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
+
 
 # Relations
 PEER_RELATION = "opensearch-peers"

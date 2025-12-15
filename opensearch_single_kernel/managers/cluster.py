@@ -29,7 +29,7 @@ from opensearch_single_kernel.core.models import DeploymentDescription, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.topology import TopologyManager
+from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -225,7 +225,7 @@ class ClusterManager(BaseManager):
         if self.state.application.deployment_desc.start == StartMode.WITH_PROVIDED_ROLES:
             computed_roles = self.state.application.deployment_desc.config.roles
         else:
-            computed_roles = TopologyManager.generated_roles()
+            computed_roles = ClusterTopology.generated_roles()
 
         if (
             self.state.server.is_app_leader
@@ -233,7 +233,7 @@ class ClusterManager(BaseManager):
             and not self.state.application.security_index_initialised
         ):
             return []
-        return TopologyManager.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
+        return ClusterTopology.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
 
     def clean_up_started_state(self) -> None:
         """Remove the 'started' key from the unit state."""
