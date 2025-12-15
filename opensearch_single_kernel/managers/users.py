@@ -19,8 +19,8 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
@@ -28,7 +28,7 @@ ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
 
-class UsersManager(WithLogging):
+class UsersManager(BaseManager):
     """OpenSearch Users Manager.
 
     This manager handles everything related to configuring users in OpenSearch.

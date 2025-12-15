@@ -2,13 +2,15 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Base interface for workload operations across different substrates."""
+"""Base interface for common workload operations."""
+
 import socket
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.utils.logging import WithLogging
 
 
@@ -54,6 +56,7 @@ class Paths(BaseModel):
         return f"{self.conf}/unicast_hosts.txt"
 
 
+# --- Base Workload
 class BaseWorkload(ABC, WithLogging):
     """Base interface for common workload operations."""
 
@@ -62,8 +65,8 @@ class BaseWorkload(ABC, WithLogging):
         """Install the workload."""
         pass
 
-    @abstractmethod
     @property
+    @abstractmethod
     def paths(self) -> Paths:
         """Return the Workload's paths"""
         pass
@@ -74,6 +77,11 @@ class BaseWorkload(ABC, WithLogging):
 
         Set paused=True if the process was intentionally paused.
         """
+        pass
+
+    @abstractmethod
+    def start_service_only(self):
+        """Start the actual service only (snap / pebble)."""
         pass
 
     @property
@@ -89,3 +97,66 @@ class BaseWorkload(ABC, WithLogging):
             return False
         finally:
             s.close()
+
+    @abstractmethod
+    def _run_cmd(self, command: str):
+        """Run Command in CLI"""
+        pass
+
+    @abstractmethod
+    def meminfo(self) -> dict[str, float]:
+        """Read the /proc/meminfo file and return the values.
+
+        According to the kernel source code, the values are always in kB:
+            https://github.com/torvalds/linux/blob/
+                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
+        """
+        pass
+
+    @abstractmethod
+    def is_failed(self) -> bool:
+        """Check if snap service failed."""
+        pass
+
+    @abstractmethod
+    def start_service(self):
+        """Start the opensearch service."""
+        pass
+
+    def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
+        """Apply a system requirement."""
+        try:
+            self._run_cmd(f"sysctl -w {system_requirement}={value}")
+            return int(self._run_cmd(f"sysctl -n {system_requirement}")) == value
+        except OpenSearchCmdError:
+            return False
+
+    def _get_kernel_property_value(self, prop: str) -> int:
+        """Get the value of a kernel parameter."""
+        return int(self._run_cmd(f"sysctl -n {prop}"))
+
+    def check_missing_system_requirements(self) -> List[str]:
+        """Checks the system requirements."""
+        missing_requirements = []
+
+        prop, val = "vm.max_map_count", 262144
+        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at least {val}")
+
+        prop, val = "vm.swappiness", 0
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, 0
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        prop, val = "net.ipv4.tcp_retries2", 5
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        if missing_requirements:
+            self.logger.error("Missing system requirements: %s", missing_requirements)
+        return missing_requirements

@@ -30,13 +30,13 @@ from opensearch_single_kernel.common.constants import DeploymentType, Scope, Sta
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.managers.topology import TopologyManager
+from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.logging import WithLogging
+from opensearch_single_kernel.utils.topology import TopologyManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
-class PeerLockManager(WithLogging):
+class PeerLockManager(BaseManager):
     """Fallback lock when all units of OpenSearch are offline."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
@@ -226,7 +226,7 @@ class LockManager(PeerLockManager):
     def _should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
-            self.state.unit.is_app_leader
+            self.state.server.is_app_leader
             # data unit
             and (
                 "data" in deployment_desc.config.roles
@@ -238,15 +238,16 @@ class LockManager(PeerLockManager):
                 or (
                     # in case all data-nodes are powered down after being previously started
                     # ignore the lock to get a data-node started, as it holds security index
-                    self.state.unit.started
+                    self.state.server.started
                     and not self.workload.is_service_started()
                 )
             )
-            and self.peer_cluster_requirer.get_cluster_first_data_node() is None
-            and (
-                deployment_desc.typ != DeploymentType.FAILOVER_ORCHESTRATOR
-                or self._is_failover_and_sole_data_app()
-            )
+            # TODO: Handle large deployment cases
+            # and self.peer_cluster_requirer.get_cluster_first_data_node() is None
+            # and (
+            # deployment_desc.typ != DeploymentType.FAILOVER_ORCHESTRATOR
+            # or self._is_failover_and_sole_data_app()
+            # )
         )
 
     @property

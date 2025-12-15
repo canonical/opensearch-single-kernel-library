@@ -12,7 +12,7 @@ import json
 from abc import ABC, abstractmethod
 from ast import literal_eval
 from hashlib import md5
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from ops import Secret
 from ops.model import Application, Relation, Unit
@@ -99,6 +99,173 @@ class Model(ABC, BaseModel):
         return equal
 
 
+class DataStore(ABC):
+    """Class representing a data store used in the OPs code of the charm."""
+
+    def __init__(self, charm):
+        self._charm = charm
+
+    @abstractmethod
+    def put(self, scope: Scope, key: str, value: Optional[any]) -> None:
+        """Put string into the data store."""
+        pass
+
+    @abstractmethod
+    def put_object(
+        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
+    ) -> None:
+        """Put object into the data store."""
+        pass
+
+    @abstractmethod
+    def has(self, scope: Scope, key: str):
+        """Check if the said key is contained in the store."""
+        pass
+
+    @abstractmethod
+    def get(
+        self, scope: Scope, key: str, default: Optional[Union[int, float, str, bool]] = None
+    ) -> Optional[Union[int, float, str, bool]]:
+        """Get string from the data store."""
+        pass
+
+    @abstractmethod
+    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
+        """Get dict / json object from the data store."""
+        pass
+
+    @abstractmethod
+    def delete(self, scope: Scope, key: str):
+        """Delete object from the data store."""
+        pass
+
+    @staticmethod
+    def cast(str_val: str) -> Union[bool, int, float, str]:
+        """Cast a string to the corresponding primitive type."""
+        try:
+            typed_val = literal_eval(str_val.capitalize())
+            if type(typed_val) not in {bool, int, float, str}:
+                return str_val
+
+            return typed_val
+        except (ValueError, SyntaxError):
+            return str_val
+
+    @staticmethod
+    def put_or_delete(data: Dict[str, str], key: str, value: Optional[str]):
+        """Put data into the key/val data store or delete if value is None."""
+        if value is None:
+            data.pop(key, None)
+            return
+
+        data.update({key: str(value)})
+
+
+class RelationDataStore(DataStore):
+    """Class representing a relation data store for a charm."""
+
+    def __init__(self, charm, relation_name: str):
+        super(RelationDataStore, self).__init__(charm)
+        self.relation_name = relation_name
+
+    @override
+    def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
+        """Put string into the relation data store."""
+        if scope is None:
+            raise ValueError("Scope undefined.")
+
+        data = self._get_relation_data(scope)
+        self.put_or_delete(data, key, value)
+
+    @override
+    def put_object(
+        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
+    ) -> None:
+        """Put dict / json object into relation data store."""
+        if merge:
+            stored = self.get_object(scope, key)
+
+            if stored is not None:
+                stored.update(value)
+                value = stored
+
+        sorted_value = Model.sort_payload(value)
+
+        payload_str = None
+        if value is not None:
+            payload_str = json.dumps(
+                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
+            )
+
+        self.put(scope, key, payload_str)
+
+    @override
+    def has(self, scope: Scope, key: str):
+        """Check if the said key is contained in the relation data."""
+        if scope is None:
+            raise ValueError("Scope undefined.")
+
+        return key in (self._get_relation_data(scope) or {})
+
+    @override
+    def get(
+        self,
+        scope: Scope,
+        key: str,
+        default: Optional[Union[int, float, str, bool]] = None,
+        auto_casting: bool = True,
+    ) -> Optional[Union[int, float, str, bool]]:
+        """Get string from the relation data store."""
+        if scope is None:
+            raise ValueError("Scope undefined.")
+
+        data = self._get_relation_data(scope)
+
+        value = data.get(key)
+        if value is None:
+            return default
+
+        if not auto_casting:
+            return value
+
+        return self.cast(value)
+
+    @override
+    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
+        """Get dict / json object from the relation data store."""
+        data = self.get(scope, key)
+        if data is None:
+            return None
+
+        return json.loads(data)
+
+    @override
+    def delete(self, scope: Scope, key: str):
+        """Delete object from the relation data store."""
+        self.put(scope, key, None)
+
+    def _get_relation_data(self, scope: Scope) -> Dict[str, str]:
+        """Relation data object."""
+        relation = self._charm.model.get_relation(self.relation_name)
+        if relation is None:
+            return {}
+
+        relation_scope = self._charm.app if scope == Scope.APP else self._charm.unit
+
+        return relation.data.get(relation_scope)
+
+    @staticmethod
+    def _default_encoder(o: Any) -> Any:
+        """Default encoder for json dumps."""
+        if isinstance(o, enum.Enum):
+            return o.value
+
+        if hasattr(o, "__dict__"):
+            return vars(o)
+
+        raise TypeError(f"Unserializable {o.__class__.__name__}")
+
+
 class App(Model):
     """Data class representing an application."""
 
@@ -159,6 +326,32 @@ class Node(Model):
         return False
 
 
+class PeerClusterOrchestrators(Model):
+    """Model class for the PClusters registered main/failover clusters."""
+
+    _TYPES = Literal["main", "failover"]
+
+    main_rel_id: int = -1
+    main_app: Optional[App]
+    failover_rel_id: int = -1
+    failover_app: Optional[App]
+
+    def delete(self, typ: _TYPES) -> None:
+        """Delete an orchestrator from the current pair."""
+        if typ == "main":
+            self.main_rel_id = -1
+            self.main_app = None
+        else:
+            self.failover_rel_id = -1
+            self.failover_app = None
+
+    def promote_failover(self) -> None:
+        """Delete previous main orchestrator and promote failover if any."""
+        self.main_app = self.failover_app
+        self.main_rel_id = self.failover_rel_id
+        self.delete("failover")
+
+
 class PeerClusterConfig(Model):
     """Model class for the multi-clusters related config set by the user."""
 
@@ -197,6 +390,29 @@ class PeerClusterConfig(Model):
             values["roles"] = list(set(values["roles"]))
 
         return values
+
+
+class PeerClusterApp(Model):
+    """Model class for representing an application part of a large deployment."""
+
+    app: App
+    planned_units: int
+    units: List[str]
+    roles: List[str]
+
+
+class PeerClusterFleetApps(Model):
+    """Model class for all applications in a large deployment as a dict."""
+
+    __root__: Dict[str, PeerClusterApp]
+
+    def __iter__(self):
+        """Implements the iter magic method."""
+        return iter(self.__root__)
+
+    def __getitem__(self, item):
+        """Implements the getitem magic method."""
+        return self.__root__[item]
 
 
 class DeploymentState(Model):
@@ -373,6 +589,11 @@ class OpenSearchApplication(RelationState):
         return self.relation_data.get("nodes_config", "")
 
     @property
+    def bootstrapped(self) -> bool:
+        """Return the value of 'bootstrapped' in application state"""
+        return bool(self.relation_data.get("bootstrapped", ""))
+
+    @property
     def deployment_desc(self) -> Optional[DeploymentDescription]:
         """Return the deployment description object if any."""
         current_deployment_desc = self.relation_data.get("deployment-desciption")
@@ -385,172 +606,26 @@ class OpenSearchApplication(RelationState):
 
             return DeploymentDescription.from_dict(current_deployment_desc)
 
+    @property
+    def cluster_fleet_apps(self) -> Dict[str, PeerClusterApp]:
+        """Get the cluster fleet applications."""
+        cluster_fleet_apps = self.relation_data.get("cluster_fleet_apps", "")
+        if not cluster_fleet_apps:
+            cluster_fleet_apps = {}
+        elif not json.loads(cluster_fleet_apps):
+            cluster_fleet_apps = {}
+        else:
+            cluster_fleet_apps = json.loads(cluster_fleet_apps)
+        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
-class DataStore(ABC):
-    """Class representing a data store used in the OPs code of the charm."""
-
-    def __init__(self, charm):
-        self._charm = charm
-
-    @abstractmethod
-    def put(self, scope: Scope, key: str, value: Optional[any]) -> None:
-        """Put string into the data store."""
-        pass
-
-    @abstractmethod
-    def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
-    ) -> None:
-        """Put object into the data store."""
-        pass
-
-    @abstractmethod
-    def has(self, scope: Scope, key: str):
-        """Check if the said key is contained in the store."""
-        pass
-
-    @abstractmethod
-    def get(
-        self, scope: Scope, key: str, default: Optional[Union[int, float, str, bool]] = None
-    ) -> Optional[Union[int, float, str, bool]]:
-        """Get string from the data store."""
-        pass
-
-    @abstractmethod
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
-        """Get dict / json object from the data store."""
-        pass
-
-    @abstractmethod
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the data store."""
-        pass
-
-    @staticmethod
-    def cast(str_val: str) -> Union[bool, int, float, str]:
-        """Cast a string to the corresponding primitive type."""
-        try:
-            typed_val = literal_eval(str_val.capitalize())
-            if type(typed_val) not in {bool, int, float, str}:
-                return str_val
-
-            return typed_val
-        except (ValueError, SyntaxError):
-            return str_val
-
-    @staticmethod
-    def put_or_delete(data: Dict[str, str], key: str, value: Optional[str]):
-        """Put data into the key/val data store or delete if value is None."""
-        if value is None:
-            data.pop(key, None)
-            return
-
-        data.update({key: str(value)})
-
-
-class RelationDataStore(DataStore):
-    """Class representing a relation data store for a charm."""
-
-    def __init__(self, charm, relation_name: str):
-        super(RelationDataStore, self).__init__(charm)
-        self.relation_name = relation_name
-
-    @override
-    def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
-        """Put string into the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-        self.put_or_delete(data, key, value)
-
-    @override
-    def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
-    ) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(scope, key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.put(scope, key, payload_str)
-
-    @override
-    def has(self, scope: Scope, key: str):
-        """Check if the said key is contained in the relation data."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        return key in (self._get_relation_data(scope) or {})
-
-    @override
-    def get(
-        self,
-        scope: Scope,
-        key: str,
-        default: Optional[Union[int, float, str, bool]] = None,
-        auto_casting: bool = True,
-    ) -> Optional[Union[int, float, str, bool]]:
-        """Get string from the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-
-        value = data.get(key)
-        if value is None:
-            return default
-
-        if not auto_casting:
-            return value
-
-        return self.cast(value)
-
-    @override
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
-        """Get dict / json object from the relation data store."""
-        data = self.get(scope, key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    @override
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the relation data store."""
-        self.put(scope, key, None)
-
-    def _get_relation_data(self, scope: Scope) -> Dict[str, str]:
-        """Relation data object."""
-        relation = self._charm.model.get_relation(self.relation_name)
-        if relation is None:
-            return {}
-
-        relation_scope = self._charm.app if scope == Scope.APP else self._charm.unit
-
-        return relation.data.get(relation_scope)
-
-    @staticmethod
-    def _default_encoder(o: Any) -> Any:
-        """Default encoder for json dumps."""
-        if isinstance(o, enum.Enum):
-            return o.value
-
-        if hasattr(o, "__dict__"):
-            return vars(o)
-
-        raise TypeError(f"Unserializable {o.__class__.__name__}")
+    def apps_in_fleet(self) -> List[PeerClusterApp]:
+        """Returns list of apps in cluster fleet"""
+        cluster_fleet_apps = self.relation_data.get_object(Scope.APP, "cluster_fleet_apps", "")
+        if not cluster_fleet_apps:
+            cluster_fleet_apps = {}
+        elif not json.loads(cluster_fleet_apps):
+            cluster_fleet_apps = json.loads(cluster_fleet_apps)
+        return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
 
 
 class SecretCache:

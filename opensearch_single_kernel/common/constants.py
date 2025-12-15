@@ -24,6 +24,17 @@ class Scope(BaseStrEnum):
     UNIT = "unit"
 
 
+class HealthColors:
+    """Colors the clusters or a unit may have depending on their health."""
+
+    GREEN = "green"
+    YELLOW = "yellow"
+    YELLOW_TEMP = "yellow-temp"
+    RED = "red"
+    UNKNOWN = "unknown"
+    IGNORE = "ignore"
+
+
 class Directive(BaseStrEnum):
     """Directive indicating what the pending actions for the current deployments are."""
 
@@ -97,7 +108,7 @@ OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {"monitor"}
 KIBANA_SERVER_USER = "kibanaserver"
 ADMIN_USER = "admin"
 COS_USER = "monitor"
-COR_ROLE = "readall_and_monitor"
+COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
@@ -116,13 +127,13 @@ _SNAP_COMMON = f"{_BASE_SNAP_DIR}/common"
 _SNAP = "/snap/opensearch/current"
 
 VM_PATHS = {
-    "HOME": f"{_SNAP_DATA}/usr/share/opensearch",
-    "CONF": f"{_SNAP_DATA}/etc/opensearch",
-    "DATA": f"{_SNAP_COMMON}/var/lib/opensearch",
-    "LOGS": f"{_SNAP_COMMON}/var/log/opensearch",
-    "JDK": f"{_SNAP}/usr/lib/jvm/java-21-openjdk-amd64",
-    "TMP": f"{_SNAP_COMMON}/usr/share/tmp",
-    "BIN": f"{_SNAP}/usr/share/opensearch/bin",
+    "home": f"{_SNAP_DATA}/usr/share/opensearch",
+    "conf": f"{_SNAP_DATA}/etc/opensearch",
+    "data": f"{_SNAP_COMMON}/var/lib/opensearch",
+    "logs": f"{_SNAP_COMMON}/var/log/opensearch",
+    "jdk": f"{_SNAP}/usr/lib/jvm/java-21-openjdk-amd64",
+    "tmp": f"{_SNAP_COMMON}/usr/share/tmp",
+    "bin": f"{_SNAP}/usr/share/opensearch/bin",
 }
 
 

@@ -4,8 +4,8 @@
 
 """OpenSearch Machine Charm."""
 
+from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 from opensearch_single_kernel.common.constants import Substrates
-from opensearch_single_kernel.events.base_charm import OpenSearchBaseCharm
 from opensearch_single_kernel.workload.base import BaseWorkload
 from opensearch_single_kernel.workload.vm import VMWorkload
 

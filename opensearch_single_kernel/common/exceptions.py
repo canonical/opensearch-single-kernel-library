@@ -54,6 +54,10 @@ class OpenSearchHttpError(OpenSearchError):
         super().__init__(message)
 
 
+class OpenSearchHAError(OpenSearchError):
+    """Exception thrown when the HA of the OpenSearch charm is violated."""
+
+
 class OpenSearchNotFullyReadyError(OpenSearchError):
     """Exception thrown when a node is started but not full ready to take on requests."""
 

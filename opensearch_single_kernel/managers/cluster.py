@@ -3,6 +3,8 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Cluster manager."""
+import datetime
+import time
 from typing import List, Optional
 
 from tenacity import (
@@ -11,7 +13,6 @@ from tenacity import (
     wait_exponential,
 )
 
-from opensearch_single_kernel.common.base import BaseManager
 from opensearch_single_kernel.common.constants import (
     CertType,
     Directive,
@@ -22,11 +23,13 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
+    OpenSearchStartTimeoutError,
 )
 from opensearch_single_kernel.core.models import DeploymentDescription, Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.managers.topology import TopologyManager
+from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
+from opensearch_single_kernel.utils.topology import TopologyManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -43,6 +46,33 @@ class ClusterManager(BaseManager):
         super().__init__(state, workload)
         self.name = "cluster_manager"
         self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+
+    def start(self, wait_until_http_200: bool = True):
+        """Start the opensearch service."""
+
+        def _is_connected():
+            return self.is_node_up() if wait_until_http_200 else self.is_started()
+
+        if self.is_started():
+            return
+
+        # start the opensearch service
+        self.workload.start_service()
+
+        start = datetime.now()
+        while not (connected := _is_connected()) and (datetime.now() - start).seconds < 180:
+            time.sleep(3)
+        if not connected:
+            self.logger.debug(f"waited {datetime.now() - start} opensearch did not start")
+            raise OpenSearchStartTimeoutError()
+
+    def is_started(self) -> bool:
+        """Check if OpenSearch is started."""
+        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
+        if not reachable:
+            self.logger.debug("Cannot connect to the OpenSearch server...")
+
+        return reachable
 
     def set_client_auth(self):
         """Configure TLS and basic http for clients."""
@@ -169,29 +199,6 @@ class ClusterManager(BaseManager):
                 if not self.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
-    def _apply_peer_cm_directives_and_check_if_can_start(self) -> bool:
-        """Apply the directives computed by the opensearch peer cluster manager."""
-        if not (deployment_desc := self.state.application.deployment_desc()):
-            # the deployment description hasn't finished being computed by the leader
-            return False
-
-        # check possibility to start
-        self.logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
-        if self.can_start(deployment_desc):
-            try:
-                self.get_nodes(False)
-            except OpenSearchHttpError:
-                return False
-            return True
-
-        # TODO: Need to find a solution for this
-        # if self.unit.is_leader():
-        # self.opensearch_peer_cm.apply_status_if_needed(
-        # deployment_desc, show_status_only_once=False
-        # )
-
-        return False
-
     def can_start(self, deployment_desc: Optional[DeploymentDescription] = None) -> bool:
         """Return whether the service of a node can start."""
         if not (deployment_desc := deployment_desc or self.deployment_desc()):
@@ -224,12 +231,12 @@ class ClusterManager(BaseManager):
             computed_roles = TopologyManager.generated_roles()
 
         if (
-            self.state.opensearch_unit.is_app_leader
+            self.state.server.is_app_leader
             and "data" in computed_roles
-            and not self.state.opensearch_application.security_index_initialised
+            and not self.state.application.security_index_initialised
         ):
             return []
-        return TopologyManager.nodes(self.opensearch_client, use_localhost, self.state.alt_hosts)
+        return TopologyManager.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
 
     def clean_up_started_state(self) -> None:
         """Remove the 'started' key from the unit state."""

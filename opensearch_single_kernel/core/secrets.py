@@ -25,7 +25,7 @@ from opensearch_single_kernel.core.models import RelationDataStore, Scope, Secre
 from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
-    from opensearch_single_kernel.events.base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
 class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
@@ -195,7 +195,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         if scope is None:
             raise ValueError("Scope undefined.")
 
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().has(scope, key)
 
         return bool(self._get_juju_secret(scope, key))
@@ -211,7 +211,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         """Getting a secret's value."""
         self.logger.debug(f"Getting secret {scope}:{key}")
 
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().get(scope, key, default, auto_casting)
 
         content = self._get_juju_secret_content(scope, key)

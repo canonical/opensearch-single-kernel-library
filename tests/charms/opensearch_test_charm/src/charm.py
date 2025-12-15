@@ -7,7 +7,7 @@
 
 from ops.main import main
 
-from opensearch_single_kernel.vm_charm import OpenSearchVMCharm
+from opensearch_single_kernel.charms.vm import OpenSearchVMCharm
 
 if __name__ == "__main__":
     main(OpenSearchVMCharm)

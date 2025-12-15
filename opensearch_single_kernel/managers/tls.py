@@ -5,15 +5,17 @@
 """OpenSearch TLS manager."""
 
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.logging import WithLogging
+from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.workload.base import BaseWorkload
 
 
-class TlsManager(WithLogging):
+class TlsManager(BaseManager):
     """OpenSearch TLS Manager."""
 
-    def __init__(self, state: ClusterState):
+    def __init__(self, state: ClusterState, workload: BaseWorkload):
         self.name = "tls_manager"
         self.state = state
+        self.workload = workload
 
     def is_fully_configured(self) -> bool:
         """Check if all TLS secrets and resources exist and are stored."""

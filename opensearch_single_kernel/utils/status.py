@@ -15,7 +15,7 @@ from opensearch_single_kernel.utils.enum import BaseStrEnum
 logger = logging.getLogger()
 
 if TYPE_CHECKING:
-    from opensearch_single_kernel.events.base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
 class Status:

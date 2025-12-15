@@ -6,11 +6,11 @@
 
 
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.logging import WithLogging
+from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
-class NodesExclusionsManager(WithLogging):
+class NodesExclusionsManager(BaseManager):
     """OpenSearch Nodes Exclusions Manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):

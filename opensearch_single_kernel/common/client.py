@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Client."""
+
 import json
 import random
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -52,6 +53,114 @@ class OpenSearchClient(WithLogging):
         """Get the list of the roles assigned to this node."""
         nodes = self.request("GET", f"/_nodes/{self.node_id(unit_name)}", alt_hosts=alt_hosts)
         return nodes["nodes"][self.node_id]["roles"]
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def shards(
+        self,
+        host: Optional[str] = None,
+        alt_hosts: Optional[List[str]] = None,
+        verbose: bool = False,
+    ) -> List[Dict[str, str]]:
+        """Get all shards of all indexes in the cluster."""
+        cluster_state = self.request(
+            "GET", "_cluster/state/routing_table,metadata,nodes", host=host, alt_hosts=alt_hosts
+        )
+
+        nodes = cluster_state["nodes"]
+
+        shards_info = []
+        for index_name, index_data in cluster_state["routing_table"]["indices"].items():
+            for shard_num, shard_data in index_data["shards"].items():
+                for shard in shard_data:
+                    node_data = nodes.get(shard["node"], {})
+                    node_name = node_data.get("name", None)
+                    node_ip = (
+                        node_data["transport_address"].split(":")[0]
+                        if "transport_address" in node_data
+                        else None
+                    )
+
+                    shard_info = {
+                        "index": index_name,
+                        "shard": shard_num,
+                        "prirep": shard["primary"] and "p" or "r",
+                        "state": shard["state"],
+                        "ip": node_ip,
+                        "node": node_name,
+                    }
+                    if verbose:
+                        shard_info["unassigned.reason"] = shard.get("unassigned_info", {}).get(
+                            "reason", None
+                        )
+                    shards_info.append(shard_info)
+        return shards_info
+
+    def busy_shards_by_unit(
+        self,
+        host: Optional[str] = None,
+        alt_hosts: Optional[List[str]] = None,
+    ) -> Dict[str, List[str]]:
+        """Get the busy shards of each index in the cluster."""
+        shards = self.shards(host=host, alt_hosts=alt_hosts)
+
+        busy_shards = {}
+        for shard in shards:
+            state = shard.get("state")
+            if state not in ["INITIALIZING", "RELOCATING"]:
+                continue
+
+            unit_name = shard["node"]
+            if unit_name not in busy_shards:
+                busy_shards[unit_name] = []
+
+            busy_shards[unit_name].append(shard["index"])
+
+        return busy_shards
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def allocation_explain(
+        self,
+        host: Optional[str] = None,
+        alt_hosts: Optional[List[str]] = None,
+    ) -> List[Dict[str, str]]:
+        """Get all shards of all indexes in the cluster."""
+        return self.request(
+            "GET",
+            "/_cluster/allocation/explain?include_disk_info=true&include_yes_decisions=true",
+            host=host,
+            alt_hosts=alt_hosts,
+        )
+
+    def health(
+        self, host: str, wait_for_green: bool, alt_hosts: Optional[List[str]] = None
+    ) -> Optional[Dict[str, any]]:
+        """Fetch the cluster health."""
+        endpoint = "/_cluster/health"
+
+        timeout = 5
+        if wait_for_green:
+            endpoint = f"{endpoint}?wait_for_status=green&timeout=1m"
+            timeout = 61
+
+        try:
+            return self.request(
+                "GET",
+                endpoint,
+                host=host,
+                alt_hosts=alt_hosts,
+                timeout=timeout,
+                retries=3,
+            )
+        except OpenSearchHttpError:
+            return None
 
     @retry(
         stop=stop_after_attempt(3),

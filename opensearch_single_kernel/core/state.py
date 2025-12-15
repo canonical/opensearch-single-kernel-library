@@ -5,24 +5,20 @@
 
 """Object representing the global state of OpenSearch Charm."""
 
-import random
 import socket
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List
 
 from ops import JujuVersion, Object, Relation, Unit
 
-from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     NODE_LOCK_RELATION,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
     TLS_RELATION,
-    Scope,
     Substrates,
 )
 from opensearch_single_kernel.core.models import (
-    Node,
     OpenSearchApplication,
     OpenSearchServer,
     PeerCluster,
@@ -34,10 +30,11 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
+from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
-    from opensearch_single_kernel.events.base_charm import OpenSearchBaseCharm
+    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
 class ClusterState(Object, WithLogging):
@@ -88,6 +85,7 @@ class ClusterState(Object, WithLogging):
         return PeerCluster(
             relation=self.peer_cluster_relation,
             data_interface=PeerClusterData(self.model, PEER_CLUSTER_RELATION),
+            component=self.model.app,
         )
 
     @property
@@ -98,12 +96,13 @@ class ClusterState(Object, WithLogging):
             data_interface=PeerClusterOrchestratorData(
                 self.model, PEER_CLUSTER_ORCHESTRATOR_RELATION
             ),
+            component=self.model.app,
         )
 
     # -- Core Components
 
     @property
-    def unit(self) -> OpenSearchServer:
+    def server(self) -> OpenSearchServer:
         """Get the opensearch unit state."""
         return OpenSearchServer(
             relation=self.peer_relation,
@@ -130,7 +129,7 @@ class ClusterState(Object, WithLogging):
     @property
     def host_ip(self) -> str:
         """Fetches the IP address of the current unit."""
-        address = self.charm.model.get_binding(PEER_RELATION).network.bind_address
+        address = self.model.get_binding(PEER_RELATION).network.bind_address
         return str(address)
 
     @property
@@ -146,71 +145,44 @@ class ClusterState(Object, WithLogging):
     def unit_ip(self, unit: Unit) -> str:
         """Returns the ip address of a given unit."""
         # check if host is current host
-        if unit == self.charm.unit:
+        if unit == self.model.unit:
             return self.host_ip
 
-        private_address = (
-            self.charm.model.get_relation(PEER_RELATION).data[unit].get("private-address")
-        )
+        private_address = self.peer_relation.data[unit].get("private-address")
         return str(private_address)
+
+    def get_unit(self, name: str):
+        """Get unit by name"""
+        return self.model.get_unit(name)
 
     @property
     def units_ips(self) -> Dict[str, str]:
         """Returns the mapping "unit id / ip address" of all units."""
         unit_ip_map = {}
-        if not self.charm.model.get_relation(PEER_RELATION):
+        if not self.peer_relation:
             return unit_ip_map
 
-        for unit in self.charm.model.get_relation(PEER_RELATION).units:
+        for unit in self.peer_relation.units:
             unit_id = unit.name.split("/")[1]
             unit_ip_map[unit_id] = self.unit_ip(unit)
 
         # Sometimes the above command doesn't get the current node,
         # so ensure we get this unit's ip.
-        unit_ip_map[self.charm.unit.name.split("/")[1]] = self.host_ip
+        unit_ip_map[self.model.unit.name.split("/")[1]] = self.host_ip
 
         return unit_ip_map
 
     @property
-    def alt_hosts(self) -> Optional[List[str]]:
-        """Return an alternative host (of another node)in case the current is offline."""
-        all_units_ips = self.units_ips
-        all_hosts = list(all_units_ips.values())
-
-        if nodes_conf := self.opensearch_application.nodes_config:
-            all_hosts.extend([Node.from_dict(node).ip for node in nodes_conf.values()])
-
-        # TODO: Handle Peer CM
-        # if peer_cm_rel_data := self.opensearch_peer_cm.rel_data():
-        # all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
-
-        random.shuffle(all_hosts)
-
-        if not all_hosts:
-            return None
-
-        admin_field = self.secrets.password_key("admin")
-        admin_secret = self.secrets.get(Scope.APP, admin_field)
-        opensearch_client = OpenSearchClient(
-            self.charm.workload, self.host, self.port, admin_secret
-        )
-
-        return [
-            host
-            for host in all_hosts
-            if host != self.unit_ip and opensearch_client.is_node_up(host)
-        ]
-
-    @property
     def all_units(self) -> List[Unit]:
         """Fetch the list of units for the current app."""
-        return list(self.peer_relation.units.union({self.opensearch_unit.unit}))
+        return list(self.peer_relation.units.union({self.server.unit}))
 
     @property
     def implements_secrets(self):
         """Property to cache results from a Juju call."""
         return JujuVersion.from_environ().has_secrets
 
-    def get_unit(self, name: str):
-        """Get unit by name"""
-        return self.charm.model.get_unit(name)
+    @property
+    def unit_name(self):
+        """Name of the current unit."""
+        return format_unit_name(self.unit, app=self.opensearch_peer_cm.deployment_desc().app)

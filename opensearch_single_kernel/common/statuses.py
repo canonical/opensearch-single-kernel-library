@@ -21,10 +21,27 @@ class CharmStatuses(Enum):
     TLS_RELATION_MISSING = BlockedStatus("Missing TLS relation with this cluster.")
     TLS_NOT_FULLY_CONFIGURED = MaintenanceStatus("Waiting for TLS to be fully configured...")
 
+    # Profiles
+    INVALID_PROFILE_CONFIG_OPTION = BlockedStatus(
+        "Invalid profile configuration option. Only `production` and `testing` values are allowed."
+    )
+
     # Configuration Status
     ADMIN_USER_NOT_CONFIGURED = MaintenanceStatus(
         "Waiting for the admin user to be fully configured..."
     )
+
+    # Health Status
+    CLUSTER_HEALTH_RED = BlockedStatus(
+        "1 or more 'primary' shards are not assigned, please scale your application up."
+    )
+    CLUSTER_HEALTH_UKNOWN = BlockedStatus(
+        "No unit online, cannot determine if it's safe to scale-down."
+    )
+    CLUSTER_HEALTH_YELLOW = BlockedStatus(
+        "1 or more 'replica' shards are not assigned, please scale your application up."
+    )
+    WAITING_FOR_BUSY_SHARDS = MaintenanceStatus("Some shards are still initializing / relocating.")
 
     # Lock Status
     REQUEST_LOCK_ON_START = WaitingStatus("Requesting lock on operation: start")
@@ -43,3 +60,21 @@ class CharmStatuses(Enum):
         "Cannot run cluster with current roles. Waiting for data node..."
     )
     PEER_CLUSTER_NO_RELATION = BlockedStatus("Cannot start. Waiting for peer cluster relation...")
+    PEER_CLUSTER_WRONG_RELATION = BlockedStatus(
+        "Cluster name don't match with related cluster. Remove relation."
+    )
+    PEER_CLUSTER_WRONG_ROLES_PROVIDED = BlockedStatus(
+        "Cannot start cluster with current set of roles."
+    )
+    CM_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
+        "Removal of cluster_manager role from deployment not allowed."
+    )
+    CM_VO_PROVIDED_INVALID = BlockedStatus(
+        "cluster_manager and voting_only roles cannot be both set on the same nodes."
+    )
+    DATA_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
+        "Removal of data role from current deployment not allowed - the data cannot be reallocated."
+    )
+
+
+WAITING_FOR_BUSY_SHARDS = "The shards: {} need to complete building."
