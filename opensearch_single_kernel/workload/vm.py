@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
-
+import os
 from typing import Optional
 
 from overrides import override
@@ -54,6 +54,15 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
+
+    @override
+    def run_script(self, script_name: str, args: str = None):
+        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
+        script_path = f"{self.paths.home}/{script_name}"
+        if not os.access(script_path, os.X_OK):
+            self._run_cmd(f"chmod a+x {script_path}")
+
+        self._run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @property
     @override

@@ -99,6 +99,11 @@ class BaseWorkload(ABC, WithLogging):
             s.close()
 
     @abstractmethod
+    def run_script(self, script_name: str, args: str = None):
+        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
+        pass
+
+    @abstractmethod
     def _run_cmd(self, command: str):
         """Run Command in CLI"""
         pass

@@ -133,12 +133,10 @@ class ClusterManager(BaseManager):
         return (
             self.state.opensearch_unit.is_app_leader
             and not self.state.opensearch_application.security_index_initialised
-            # TODO: Update this once we include peer CM relation
-            # and (
-            #    "data" in self.opensearch_peer_cm.deployment_desc().config.roles
-            #    or self.opensearch_peer_cm.deployment_desc().start
-            #    == StartMode.WITH_GENERATED_ROLES
-            # )
+            and (
+                "data" in self.state.application.deployment_desc.config.roles
+                or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            )
         )
 
     def initialise_security_index(self):
@@ -154,15 +152,14 @@ class ClusterManager(BaseManager):
         try:
             args = [
                 f"-cd {self.workload.paths.conf}/opensearch-security/",
-                # TODO: Consider deployment description from peer cm
-                #  f"-cn {self.opensearch_peer_cm.deployment_desc().config.cluster_name}",
-                f"-h {self.unit_ip}",
-                f"-ts {self.opensearch.paths.certs}/ca.p12",
-                f"-tspass {self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
+                f"-cn {self.state.application.deployment_desc.config.cluster_name}",
+                f"-h {self.state.unit_ip}",
+                f"-ts {self.workload.paths.certs}/ca.p12",
+                f"-tspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
                 "-tsalias ca",
                 "-tst PKCS12",
-                f"-ks {self.opensearch.paths.certs}/{CertType.APP_ADMIN}.p12",
-                f"-kspass {self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
+                f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+                f"-kspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
                 f"-ksalias {CertType.APP_ADMIN}",
                 "-kst PKCS12",
             ]
@@ -171,7 +168,7 @@ class ClusterManager(BaseManager):
             if admin_key_pwd is not None:
                 args.append(f"-keypass {admin_key_pwd}")
 
-            self.opensearch.run_script(
+            self.workload.run_script(
                 "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
             )
             self._put_security_index_initialised()

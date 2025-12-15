@@ -361,6 +361,26 @@ class OpenSearchEventsHandler(Object, WithLogging):
         # Add a timestamp to always trigger relation changed
         self.peers_data.put(Scope.UNIT, "started", time.time())
 
+        # apply cluster health
+        self.apply_health(wait_for_green_first=True, app=self.charm.state.server.is_app_leader)
+
+        if (
+            self.charm.state.server.is_app_leader
+            and self.charm.state.application.deployment_desc.typ
+            == DeploymentType.MAIN_ORCHESTRATOR
+        ):
+            pass
+            # Creating the monitoring user
+            # self.charm.users_manager.put_or_update_internal_user_leader(COSUser, update=False)
+
+        self.charm.unit.open_port("tcp", 9200)
+
+        # clear waiting to start status
+        self.status.clear(CharmStatuses.REQUEST_LOCK_ON_START.value)
+        self.status.clear(CharmStatuses.WAITING_TO_START)
+        self.status.clear(CharmStatuses.SERVICE_START_ERROR)
+        self.status.clear(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
+
     def _on_node_lock_relation_changed(self, _=None):
         """Event handler for when the node-lock relation changed"""
         self.charm.lock_manager.refresh_lock()
