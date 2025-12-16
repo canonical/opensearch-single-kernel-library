@@ -12,6 +12,7 @@ from opensearch_single_kernel.common.constants import (
     KIBANA_SERVER_USER,
     OPENSEARCH_SYSTEM_USERS,
     OPENSEARCH_USERS,
+    Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
@@ -21,6 +22,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
+from opensearch_single_kernel.utils.helpers import generate_hashed_password
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
@@ -39,6 +41,55 @@ class UsersManager(BaseManager):
         self.workload = workload
         self.state = state
         self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+
+    def put_or_update_internal_user_leader(
+        self,
+        user: str,
+        pwd: Optional[str] = None,
+        update: bool = True,
+    ) -> None:
+        """Create system user or update it with a new password."""
+        # Leader is to set new password and hash, others populate existing hash locally
+        if not self.unit.is_leader():
+            self.logger.error("Credential change can be only performed by the leader unit.")
+            return
+
+        secret = self.state.secrets.get(Scope.APP, self.state.secrets.password_key(user))
+        if secret and not update:
+            self._put_or_update_internal_user_unit(user)
+            return
+
+        hashed_pwd, pwd = generate_hashed_password(pwd)
+
+        # Updating security index
+        # We need to do this for all credential changes
+        if secret and update:
+            self.update_user_password(user, hashed_pwd)
+
+        # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
+        # we either need to initialize or update (local) credentials as well
+        if not secret or user in OPENSEARCH_SYSTEM_USERS:
+            self.put_internal_user(user, hashed_pwd)
+
+        # Secrets need to be maintained
+        # For System Users we also save the hash key
+        # so all units can fetch it for local users (internal_users.yml) updates.
+        self.state.secrets.put(Scope.APP, self.state.secrets.password_key(user), pwd)
+
+        if user in OPENSEARCH_SYSTEM_USERS:
+            self.state.secrets.put(Scope.APP, self.state.secrets.hash_key(user), hashed_pwd)
+
+        if user == ADMIN_USER:
+            self.state.application.update({"admin_user_initialized", "True"})
+
+    def _put_or_update_internal_user_unit(self, user: str) -> None:
+        """Create system user or update it with a new password."""
+        # Leader is to set new password and hash, others populate existing hash locally
+        hashed_pwd = self.state.secrets.get(Scope.APP, self.state.secrets.hash_key(user))
+
+        # System users have to be saved locally in internal_users.yml
+        if user in OPENSEARCH_SYSTEM_USERS:
+            self.put_internal_user(user, hashed_pwd)
 
     def purge_initial_users(self):
         """Removes all users from internal_users yaml config.
@@ -68,7 +119,7 @@ class UsersManager(BaseManager):
             OpenSearchUserMgmtError: If the request fails.
         """
         try:
-            return self.opensearch.request("GET", f"{ROLE_ENDPOINT}/")
+            return self.opensearch_client.request("GET", f"{ROLE_ENDPOINT}/")
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
@@ -95,7 +146,7 @@ class UsersManager(BaseManager):
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.opensearch.request(
+            resp = self.opensearch_client.request(
                 "PUT",
                 f"{ROLE_ENDPOINT}/{role_name}",
                 payload={**(permissions or {}), **(action_groups or {})},
@@ -129,7 +180,7 @@ class UsersManager(BaseManager):
             )
 
         try:
-            resp = self.opensearch.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
+            resp = self.opensearch_client.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -152,7 +203,7 @@ class UsersManager(BaseManager):
             OpenSearchUserMgmtError: If the request fails.
         """
         try:
-            return self.opensearch.request("GET", f"{USER_ENDPOINT}/")
+            return self.opensearch_client.request("GET", f"{USER_ENDPOINT}/")
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
@@ -177,7 +228,7 @@ class UsersManager(BaseManager):
             payload["opendistro_security_roles"] = roles
 
         try:
-            resp = self.opensearch.request(
+            resp = self.opensearch_client.request(
                 "PUT",
                 f"{USER_ENDPOINT}/{user_name}",
                 payload=payload,
@@ -211,7 +262,7 @@ class UsersManager(BaseManager):
             )
 
         try:
-            resp = self.opensearch.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
+            resp = self.opensearch_client.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -240,7 +291,7 @@ class UsersManager(BaseManager):
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.opensearch.request(
+            resp = self.opensearch_client.request(
                 "PATCH",
                 f"{USER_ENDPOINT}/{user_name}",
                 payload=patches,
@@ -264,7 +315,7 @@ class UsersManager(BaseManager):
             OpenSearchUserMgmtError: If the request fails.
         """
         try:
-            resp = self.opensearch.request(
+            resp = self.opensearch_client.request(
                 "PUT",
                 f"{ROLESMAPPING_ENDPOINT}/{role}",
                 payload={"users": mapped_users, "backend_roles": [role]},
@@ -293,7 +344,7 @@ class UsersManager(BaseManager):
             )
 
         try:
-            resp = self.opensearch.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
+            resp = self.opensearch_client.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 resp = {
@@ -308,7 +359,7 @@ class UsersManager(BaseManager):
 
     def update_user_password(self, username: str, hashed_pwd: str = None):
         """Change user hashed password."""
-        resp = self.opensearch.request(
+        resp = self.opensearch_client.request(
             "PATCH",
             f"/_plugins/_security/api/internalusers/{username}",
             [{"op": "replace", "path": "/hash", "value": hashed_pwd}],
@@ -326,7 +377,7 @@ class UsersManager(BaseManager):
             # updates made on the dashboard or the rest api.
             # we grant the admin user all opensearch access + security_rest_api_access
             self.logger.debug("putting admin to internal_users.yml")
-            self.opensearch.config.put(
+            self.yaml_setter.put(
                 "opensearch-security/internal_users.yml",
                 "admin",
                 {
@@ -341,7 +392,7 @@ class UsersManager(BaseManager):
                 },
             )
         elif user == KIBANA_SERVER_USER:
-            self.opensearch.config.put(
+            self.yaml_setter.put(
                 "opensearch-security/internal_users.yml",
                 f"{KIBANA_SERVER_USER}",
                 {

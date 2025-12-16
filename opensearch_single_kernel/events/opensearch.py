@@ -11,6 +11,7 @@ from ops import (
     BlockedStatus,
     EventSource,
     InstallEvent,
+    LeaderElectedEvent,
     Object,
     SecretChangedEvent,
     StartEvent,
@@ -42,7 +43,10 @@ from opensearch_single_kernel.common.statuses import (
     CharmStatuses,
 )
 from opensearch_single_kernel.core.models import DeploymentDescription
-from opensearch_single_kernel.events.custom_events import StartOpenSearch
+from opensearch_single_kernel.events.custom_events import (
+    RestartOpenSearch,
+    StartOpenSearch,
+)
 from opensearch_single_kernel.utils.helpers import trigger_peer_rel_changed
 from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.utils.status import Status
@@ -56,6 +60,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
     """Class implementing OpenSearch Charm events handling."""
 
     _start_opensearch_event = EventSource(StartOpenSearch)
+    _restart_opensearch_event = EventSource(RestartOpenSearch)
 
     def __init__(self, charm: "OpenSearchBaseCharm"):
         super().__init__(charm, key="opensearch_events")
@@ -67,6 +72,9 @@ class OpenSearchEventsHandler(Object, WithLogging):
         self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
         self.framework.observe(
             self.charm.on[NODE_LOCK_RELATION].relation_changed, self._on_node_lock_relation_changed
+        )
+        self.framework.observe(
+            self.charm.on.leader_elected,
         )
 
         # --- OpenSearch Custom events ---
@@ -81,6 +89,59 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 self.charm.status.clear(CharmStatuses.INSTALL_IN_PROGRESS.value)
             except OpenSearchInstallError:
                 self.charm.unit.status = CharmStatuses.INSTALL_ERROR.value
+
+    def _on_leader_elected(self, event: LeaderElectedEvent):  # noqa: C901
+        """Handle leader election event."""
+        # We check if the current unit is the leader, in case where the leader elected event
+        # was deferred, then juju proceeded with a new leader election, and this now deferred-event
+        # was emitted in a non-juju leader unit (previous leader)
+        if not self.charm.state.server.is_app_leader:
+            return
+
+        if self.charm.state.application.security_index_initialised:
+            # Leader election event happening after a previous leader got killed
+            if not self.charm.cluster_manager.is_node_up():
+                event.defer()
+                return
+
+            if self.apply_health(unit=False) in [
+                HealthColors.UNKNOWN,
+                HealthColors.YELLOW_TEMP,
+            ]:
+                event.defer()
+            nodes = self.charm.cluster_manager.get_nodes(True)
+            if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
+                # Nodes Config updated, we would need to reconfigure and restart
+                if self.charm.cluster_manager.reconfigure_unit():
+                    # Restart needed
+                    self.charm.status.set(CharmStatuses.WAITING_TO_START.value)
+                    self.logger.debug("Restarting opensearch due to reconfiguring node roles")
+                    self._restart_opensearch_event.emit()
+
+            return
+
+        # TODO: check if cluster can start independently
+
+        # User config is currently in a default state, which contains multiple insecure default
+        # users. Purge the user list before initialising the users the charm requires.
+        self.charm.users_manager.purge_initial_users()
+
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            event.defer()
+            return
+
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        if not self.charm.state.application.is_admin_user_configured:
+            self.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
+
+        # Restore purged system users in local `internal_users.yml`
+        # with corresponding credentials
+        for user in OPENSEARCH_SYSTEM_USERS:
+            self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
+
+        self.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
     def _on_start(self, event: StartEvent):  # noqa: C901
         """Event handler for start event."""
@@ -540,7 +601,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
     def _apply_peer_cm_directives_and_check_if_can_start(self) -> bool:
         """Apply the directives computed by the opensearch peer cluster manager."""
-        if not (deployment_desc := self.charm.state.application.deployment_desc()):
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             # the deployment description hasn't finished being computed by the leader
             return False
 
@@ -597,7 +658,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
         the unit is marked as started but service couldn't start
         """
         return (
-            self.charm.state.unit.started
+            self.charm.state.server.started
             and "cluster_manager" in self.charm.cluster_manager.roles
             and not self.charm.workload.is_service_started()
         )

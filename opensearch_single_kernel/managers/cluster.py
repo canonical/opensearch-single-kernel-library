@@ -235,6 +235,94 @@ class ClusterManager(BaseManager):
             return []
         return ClusterTopology.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
 
+    def compute_and_broadcast_updated_topology(self, current_nodes: List[Node]) -> bool:
+        """Compute cluster topology and broadcast node configs (roles for now) to change if any.
+
+        Returns whether a nodes_config object has been updated or not.
+        """
+        if not current_nodes:
+            return False
+
+        current_reported_nodes = {
+            name: Node.from_dict(node)
+            for name, node in (self.state.application.nodes_config or {}).items()
+        }
+
+        if (
+            deployment_desc := self.state.application.deployment_desc
+        ).start == StartMode.WITH_GENERATED_ROLES:
+            updated_nodes = ClusterTopology.recompute_nodes_conf(
+                logger=self.logger, app_id=deployment_desc.app.id, nodes=current_nodes
+            )
+        else:
+            updated_nodes = {}
+            for node in current_nodes:
+                roles = node.roles
+                temperature = node.temperature
+
+                # only change the roles of the nodes of the current cluster
+                if node.app.id == deployment_desc.app.id:
+                    roles = deployment_desc.config.roles
+                    temperature = deployment_desc.config.data_temperature
+
+                updated_nodes[node.name] = Node(
+                    name=node.name,
+                    roles=roles,
+                    ip=node.ip,
+                    app=node.app,
+                    unit_number=self.unit_id,
+                    temperature=temperature,
+                )
+
+        if current_reported_nodes == updated_nodes:
+            return False
+
+        self.state.application.put_object("nodes_config", updated_nodes)
+        return True
+
+    def reconfigure_unit(self) -> bool:
+        """Reconfigure unit based on the nodes_config.
+
+        Returns if a restart is needed or not.
+        """
+        if not (nodes_config := self.state.application.get_object("nodes_config")):
+            return False
+
+        nodes_config = {name: Node.from_dict(node) for name, node in nodes_config.items()}
+
+        # update (append) CM IPs
+        self.add_seed_hosts(
+            [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
+        )
+
+        if not (new_node_conf := nodes_config.get(self.state.unit_name)):
+            # the conf could not be computed / broadcast, because this node is
+            # "starting" and is not online "yet" - either barely being configured (i.e. TLS)
+            # or waiting to start.
+            return False
+
+        current_conf = self.yaml_setter.load(self.CONFIG_YML)
+        stored_roles = current_conf["node.roles"] or ["coordinating"]
+        new_conf_roles = new_node_conf.roles or ["coordinating"]
+        if (
+            sorted(stored_roles) == sorted(new_conf_roles)
+            and current_conf.get("node.attr.temp") == new_node_conf.temperature
+        ):
+            # no conf change (roles for now)
+            return False
+        return True
+
+    def add_seed_hosts(self, cm_ips: List[str]):
+        """Add CM nodes ips / host names to the seed host list of this unit."""
+        cm_ips_set = set(cm_ips)
+
+        # only update the file if there is data to update
+        # TODO: This should be handled at the workload level since on K8s it will be different
+        if cm_ips_set:
+            with open(self.workload.paths.seed_hosts, "w+") as f:
+                lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
+                f.write(f"{lines}\n")
+
     def clean_up_started_state(self) -> None:
         """Remove the 'started' key from the unit state."""
         self.state.opensearch_unit.relation_data.pop("started")

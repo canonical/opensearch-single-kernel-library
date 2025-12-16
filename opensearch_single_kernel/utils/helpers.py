@@ -4,9 +4,12 @@
 
 """A set of helpers functions."""
 import re
+import secrets
+import string
 from time import time_ns
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Union
 
+import bcrypt
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, Scope
@@ -45,3 +48,30 @@ def mask_sensitive_information(cmd: str) -> str:
     pattern = re.compile(r"(-tspass\s+|-kspass\s+|-storepass\s+|-new\s+|pass:)(\S+)")
 
     return re.sub(pattern, r"\1" + "xxx", cmd)
+
+
+def hash_string(string: str) -> str:
+    """Hashes the given string."""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(string.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+
+
+def generate_password() -> str:
+    """Generate a random password string.
+
+    Returns:
+       A random password string.
+    """
+    choices = string.ascii_letters + string.digits
+    return "".join([secrets.choice(choices) for _ in range(32)])
+
+
+def generate_hashed_password(pwd: Optional[str] = None) -> Tuple[str, str]:
+    """Generates a password and its bcrypt hash.
+
+    Returns:
+        A hash and the original password
+    """
+    pwd = pwd or generate_password()
+    return hash_string(pwd), pwd

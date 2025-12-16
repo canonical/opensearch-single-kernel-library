@@ -4,7 +4,8 @@
 
 """OpenSearch Topology Manager."""
 
-from typing import List, Optional
+from logging import Logger
+from typing import Dict, List, Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
@@ -83,3 +84,32 @@ class ClusterTopology(WithLogging):
             app for app in state.application.apps_in_fleet() if "data" in app.roles
         ]
         return data_apps_in_fleet and any(app.planned_units > 0 for app in data_apps_in_fleet)
+
+    @staticmethod
+    def recompute_nodes_conf(logger: Logger, app_id: str, nodes: List[Node]) -> Dict[str, Node]:
+        """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
+        if not nodes:
+            return {}
+        logger.debug(f"Roles before re-balancing {({node.name: node.roles for node in nodes})=}")
+        nodes_by_name = {}
+        current_cluster_nodes = []
+        for node in nodes:
+            if node.app.id == app_id:
+                current_cluster_nodes.append(node)
+            else:
+                # Leave node unchanged
+                nodes_by_name[node.name] = node
+        for node in current_cluster_nodes:
+            nodes_by_name[node.name] = Node(
+                name=node.name,
+                # we do this in order to remove any non-default role / add any missing default role
+                roles=ClusterTopology.generated_roles(),
+                ip=node.ip,
+                app=node.app,
+                unit_number=node.unit_number,
+                temperature=node.temperature,
+            )
+        logger.debug(
+            f"Roles after re-balancing {({name: node.roles for name, node in nodes_by_name.items()})=}"
+        )
+        return nodes_by_name

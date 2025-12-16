@@ -27,6 +27,7 @@ class CharmStatuses(Enum):
     )
 
     # Configuration Status
+    ADMIN_USER_INIT_IN_PROGRESS = MaintenanceStatus("Configuring admin user...")
     ADMIN_USER_NOT_CONFIGURED = MaintenanceStatus(
         "Waiting for the admin user to be fully configured..."
     )

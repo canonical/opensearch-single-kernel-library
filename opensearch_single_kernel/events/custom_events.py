@@ -37,3 +37,10 @@ class StartOpenSearch(EventBase):
         self.ignore_lock = snapshot["ignore_lock"]
         self.after_upgrade = snapshot["after_upgrade"]
         self.is_first_data_node = snapshot["is_first_data_node"]
+
+
+class RestartOpenSearch(EventBase):
+    """Attempt to acquire lock & restart OpenSearch.
+
+    This event will be deferred until OpenSearch stops. Then, `_StartOpenSearch` will be emitted.
+    """

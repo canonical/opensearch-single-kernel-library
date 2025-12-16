@@ -84,7 +84,6 @@ class BaseWorkload(ABC, WithLogging):
         """Start the actual service only (snap / pebble)."""
         pass
 
-    @property
     def is_reachable(self, host: str, port: int) -> bool:
         """Attempting a socket connection to a host/port."""
         s = socket.socket()
