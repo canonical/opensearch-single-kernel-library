@@ -25,10 +25,9 @@ from typing import List, Optional
 
 import ops
 
-from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import DeploymentType, Scope, StartMode
+from opensearch_single_kernel.common.constants import DeploymentType, StartMode
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models import DeploymentDescription
+from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -40,8 +39,7 @@ class PeerLockManager(BaseManager):
     """Fallback lock when all units of OpenSearch are offline."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        self.state = state
-        self.workload = workload
+        super().__init__(state, workload)
 
     @property
     def acquired(self) -> bool:
@@ -53,22 +51,22 @@ class PeerLockManager(BaseManager):
         if not self._relation:
             return False
 
-        self._relation.data[self.state.opensearch_unit.unit]["lock-requested"] = json.dumps(True)
+        self._relation.data[self.state.server.unit]["lock-requested"] = json.dumps(True)
 
-        if self.state.opensearch_unit.is_app_leader:
+        if self.state.server.is_app_leader:
             self.logger.debug("[Node lock] Requested peer lock as leader unit")
             # A separate relation-changed event won't get fired
-            self._on_peer_relation_changed()
+            self.refresh_lock()
 
-        if self._unit_with_lock != self.state.opensearch_unit.unit_name:
+        if self._unit_with_lock != self.state.server.unit_name:
             self.logger.debug(
                 f"[Node lock] Not acquired. Unit with peer databag lock: {self._unit_with_lock}"
             )
             return False
 
         if (
-            self.state.opensearch_unit.is_app_leader
-            and self._relation.data[self.state.opensearch_application.app][
+            self.state.server.is_app_leader
+            and self._relation.data[self.state.application.app][
                 "leader-acquired-lock-after-juju-event-id"
             ]
             == os.environ["JUJU_CONTEXT_ID"]
@@ -80,7 +78,7 @@ class PeerLockManager(BaseManager):
             # Therefore, we cannot use the lock now. We must wait until the next Juju event,
             # when `unit-with-lock` has been committed (i.e. won't be reverted), to use the
             # lock.
-            if self.state.opensearch_application.app.planned_units() <= 1:
+            if self.state.planned_units <= 1:
                 # No other unit will get peer relation changed
                 # Therefore, no other unit will be able to trigger peer relation changed on this
                 # unit. We must use the lock now and accept that `unit-with-lock` could be reverted
@@ -104,11 +102,11 @@ class PeerLockManager(BaseManager):
         if not self._relation:
             return
 
-        self._relation.data[self._charm.unit].pop("lock-requested", None)
-        if self.state.opensearch_unit.is_app_leader:
+        self._relation.data[self.state.server.unit].pop("lock-requested", None)
+        if self.state.server.is_app_leader:
             self.logger.debug("[Node lock] Released peer lock as leader unit")
             # A separate relation-changed event won't get fired
-            self._on_peer_relation_changed()
+            self.refresh_lock()
 
     def _unit_requested_lock(self, unit: ops.Unit):
         """Whether unit requested lock."""
@@ -125,14 +123,14 @@ class PeerLockManager(BaseManager):
     @property
     def _unit_with_lock(self) -> str | None:
         if self._relation:
-            return self._relation.data[self.state.opensearch_application.app].get("unit-with-lock")
+            return self._relation.data[self.state.application.app].get("unit-with-lock")
 
     @_unit_with_lock.setter
     def _unit_with_lock(self, value: str):
         assert self._relation
         assert self._unit_with_lock != value
 
-        if value == self.state.opensearch_unit.unit_name:
+        if value == self.state.server.unit_name:
             self.logger.debug("[Node lock] (leader) granted peer lock to own unit")
             # Prevent leader unit from using lock in the same Juju event that it was granted
             # If the charm code raises an uncaught exception later in the Juju event,
@@ -144,16 +142,16 @@ class PeerLockManager(BaseManager):
             # `JUJU_CONTEXT_ID` is unique for each Juju event
             # (https://matrix.to/#/!xdClnUGkurzjxqiQcN:ubuntu.com/$yEGjGlDaIPBtCi8uB3fH6ZaXUjN7GF-Y2s9YwvtPM-o?via=ubuntu.com&via=matrix.org&via=cutefunny.art)
 
-            self._relation.data[self.state.opensearch_application.app][
+            self._relation.data[self.state.application.app][
                 "leader-acquired-lock-after-juju-event-id"
             ] = os.environ["JUJU_CONTEXT_ID"]
-        self._relation.data[self.state.opensearch_application.app]["unit-with-lock"] = value
+        self._relation.data[self.state.application.app]["unit-with-lock"] = value
 
     @_unit_with_lock.deleter
     def _unit_with_lock(self):
         assert self._relation
-        self._relation.data[self.state.opensearch_application.app].pop("unit-with-lock", None)
-        self._relation.data[self.state.opensearch_application.app].pop(
+        self._relation.data[self.state.application.app].pop("unit-with-lock", None)
+        self._relation.data[self.state.application.app].pop(
             "leader-acquired-lock-after-juju-event-id", None
         )
 
@@ -167,11 +165,11 @@ class PeerLockManager(BaseManager):
         """Grant & release lock."""
         assert self._relation
 
-        if not (deployment_desc := self._charm.opensearch_peer_cm.deployment_desc()):
+        if not (deployment_desc := self.state.application.deployment_desc):
             return
 
-        if not self.state.opensearch_unit.is_app_leader():
-            if self._relation.data[self.state.opensearch_application.app].get(
+        if not self.state.server.is_app_leader():
+            if self._relation.data[self.state.application.app].get(
                 "leader-acquired-lock-after-juju-event-id"
             ):
                 # Trigger peer relation changed event on leader unit
@@ -181,7 +179,7 @@ class PeerLockManager(BaseManager):
                 # (Value should never be read)
                 # (If we set the same value that is currently in the databag, a peer relation
                 # changed event will not be triggered)
-                self._relation.data[self.state.opensearch_unit.unit]["-trigger"] = os.environ[
+                self._relation.data[self.state.server.unit]["-trigger"] = os.environ[
                     "JUJU_CONTEXT_ID"
                 ]
             return
@@ -197,7 +195,7 @@ class PeerLockManager(BaseManager):
         # During initial startup, leader unit must start first
         # Give priority to leader unit
 
-        for unit in (self.state.opensearch_unit.unit, *self._relation.units):
+        for unit in (self.state.server.unit, *self._relation.units):
             if self._unit_requested_lock(unit):
                 self._unit_with_lock = format_unit_name(unit, app=deployment_desc.app)
                 self.logger.debug(f"[Node lock] (leader) granted peer lock to {unit.name=}")
@@ -223,7 +221,7 @@ class LockManager(PeerLockManager):
         self.name = "lock_manager"
         super().__init__(state, workload)
 
-    def _should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
+    def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
             self.state.server.is_app_leader
@@ -250,13 +248,6 @@ class LockManager(PeerLockManager):
             # )
         )
 
-    @property
-    def opensearch_client(self) -> OpenSearchClient:
-        """Initialize an OpenSearch Client"""
-        admin_field = self.state.secrets.password_key("admin")
-        admin_secret = self.state.secrets.get(Scope.APP, admin_field)
-        return OpenSearchClient(self.workload, self.state.host, self.state.port, admin_secret)
-
     def _unit_with_lock(self, host: str | None) -> str | None:
         """Unit that has acquired OpenSearch lock."""
         try:
@@ -264,7 +255,7 @@ class LockManager(PeerLockManager):
                 "GET",
                 endpoint=f"/{self.OPENSEARCH_INDEX}/_source/0",
                 host=host,
-                alt_hosts=self.state.alt_hosts,
+                alt_hosts=self.alt_hosts,
                 retries=3,
                 ignore_retry_on=[404],
             )
@@ -283,7 +274,7 @@ class LockManager(PeerLockManager):
             Whether lock was acquired
         """
         host = self.state.host_ip if self.opensearch_client.is_node_up() else None
-        alt_hosts = self.state.alt_hosts
+        alt_hosts = self.alt_hosts
         if host or alt_hosts:
             self.logger.debug("[Node lock] 1+ opensearch nodes online")
             try:
@@ -326,9 +317,9 @@ class LockManager(PeerLockManager):
                         "PUT",
                         endpoint=f"/{self.OPENSEARCH_INDEX}/_create/0?refresh=true&wait_for_active_shards=all",
                         host=host,
-                        alt_hosts=self.state.alt_hosts,
+                        alt_hosts=self.alt_hosts,
                         retries=0,
-                        payload={"unit-name": self.state.opensearch_unit.unit_name},
+                        payload={"unit-name": self.state.server.unit_name},
                     )
                 except OpenSearchHttpError as e:
                     if e.response_code == 409 and "document already exists" in e.response_body.get(
@@ -366,7 +357,7 @@ class LockManager(PeerLockManager):
                             "DELETE",
                             endpoint=f"/{self.OPENSEARCH_INDEX}/_doc/0?refresh=true",
                             host=host,
-                            alt_hosts=self.state.alt_hosts,
+                            alt_hosts=self.alt_hosts,
                             retries=10,
                         )
                         self.logger.debug(
@@ -375,9 +366,9 @@ class LockManager(PeerLockManager):
                         return False
 
                     # This unit has OpenSearch lock
-                    unit = self.state.opensearch_unit.unit_name
+                    unit = self.state.server.unit_name
 
-            if unit == self.state.opensearch_unit.unit_name:
+            if unit == self.state.server.unit_name:
                 # Lock acquired
                 # Release peer databag lock, if any
                 self.logger.debug("[Node lock] Acquired via opensearch")
@@ -408,11 +399,10 @@ class LockManager(PeerLockManager):
         self.logger.debug("[Node lock] Releasing lock")
 
         # fetch current app description
-        # TODO: Add peer CM
-        current_app = self._charm.opensearch_peer_cm.deployment_desc().app
+        current_app = self.state.application.deployment_desc.app
 
         host = self.state.host_ip if self.opensearch_client.is_node_up() else None
-        alt_hosts = self.state.alt_hosts
+        alt_hosts = self.alt_hosts
         if host or alt_hosts:
             self.logger.debug("[Node lock] Checking which unit has opensearch lock")
             # Check if this unit currently has lock
@@ -424,23 +414,22 @@ class LockManager(PeerLockManager):
                 format_unit_name(unit, app=current_app) for unit in self.state.all_units
             ]
 
-            # TODO:
             # handle case of large deployments
             other_apps_units = []
-            # if all_apps := self._charm.peers_data.get_object(Scope.APP, "cluster_fleet_apps"):
-            # for app in all_apps.values():
-            # p_cluster_app = PeerClusterApp.from_dict(app)
-            # if p_cluster_app.app.id == current_app.id:
-            # continue
+            if all_apps := self.state.application.cluster_fleet_apps:
+                for app in all_apps.values():
+                    p_cluster_app = PeerClusterApp.from_dict(app)
+                    if p_cluster_app.app.id == current_app.id:
+                        continue
 
-            # units = [
-            # format_unit_name(unit, app=p_cluster_app.app)
-            # for unit in p_cluster_app.units
-            # ]
-            # other_apps_units.extend(units)
+                    units = [
+                        format_unit_name(unit, app=p_cluster_app.app)
+                        for unit in p_cluster_app.units
+                    ]
+                    other_apps_units.extend(units)
 
             if unit_with_lock and (
-                unit_with_lock == self.state.opensearch_unit.unit_name
+                unit_with_lock == self.state.server.unit_name
                 or unit_with_lock not in current_app_units + other_apps_units
             ):
                 self.logger.debug("[Node lock] Releasing opensearch lock")
@@ -467,12 +456,12 @@ class LockManager(PeerLockManager):
         # we do this, to circumvent opensearch raising a 429 error,
         # complaining about spamming the index creation endpoint
         try:
-            indices = self.opensearch_client.indices(host, alt_hosts)
+            indices = self.opensearch_client.get_indices(host, alt_hosts)
             if self.OPENSEARCH_INDEX in indices:
                 self.logger.debug(
                     f"{self.OPENSEARCH_INDEX} already created. Skipping creation attempt. List:{indices}"
                 )
-                if self.state.opensearch_application.app.planned_units() > 1:
+                if self.state.application.app.planned_units() > 1:
                     self.opensearch_client.request(
                         "GET",
                         endpoint=f"/_cluster/health/{self.OPENSEARCH_INDEX}?wait_for_status=green",

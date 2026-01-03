@@ -37,9 +37,8 @@ class UsersManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
+        super().__init__(state, workload)
         self.name = "users_manager"
-        self.workload = workload
-        self.state = state
         self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
 
     def put_or_update_internal_user_leader(
@@ -50,7 +49,7 @@ class UsersManager(BaseManager):
     ) -> None:
         """Create system user or update it with a new password."""
         # Leader is to set new password and hash, others populate existing hash locally
-        if not self.unit.is_leader():
+        if not self.state.server.is_app_leader:
             self.logger.error("Credential change can be only performed by the leader unit.")
             return
 
@@ -80,7 +79,7 @@ class UsersManager(BaseManager):
             self.state.secrets.put(Scope.APP, self.state.secrets.hash_key(user), hashed_pwd)
 
         if user == ADMIN_USER:
-            self.state.application.update({"admin_user_initialized", "True"})
+            self.state.application.update({"admin_user_initialized": "True"})
 
     def _put_or_update_internal_user_unit(self, user: str) -> None:
         """Create system user or update it with a new password."""

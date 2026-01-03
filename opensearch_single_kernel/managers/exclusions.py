@@ -14,9 +14,8 @@ class NodesExclusionsManager(BaseManager):
     """OpenSearch Nodes Exclusions Manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
+        super().__init__(state, workload)
         self.name = "exclusions_manager"
-        self.state = state
-        self.workload = workload
 
     def delete_current(
         self, voting: bool = True, allocation: bool = True, raise_error: bool = False

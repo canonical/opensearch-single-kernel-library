@@ -3,14 +3,12 @@
 # See LICENSE file for licensing details.
 
 """Base interface for common workload operations."""
-
 import socket
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from pydantic import BaseModel
 
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.utils.logging import WithLogging
 
 
@@ -80,6 +78,11 @@ class BaseWorkload(ABC, WithLogging):
         pass
 
     @abstractmethod
+    def get_host_public_ip(self) -> Optional[str]:
+        """Fetches the Public IP address of the current unit."""
+        pass
+
+    @abstractmethod
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         pass
@@ -109,12 +112,7 @@ class BaseWorkload(ABC, WithLogging):
 
     @abstractmethod
     def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values.
-
-        According to the kernel source code, the values are always in kB:
-            https://github.com/torvalds/linux/blob/
-                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
-        """
+        """Read the /proc/meminfo file and return the values."""
         pass
 
     @abstractmethod
@@ -127,17 +125,14 @@ class BaseWorkload(ABC, WithLogging):
         """Start the opensearch service."""
         pass
 
+    @abstractmethod
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement."""
-        try:
-            self._run_cmd(f"sysctl -w {system_requirement}={value}")
-            return int(self._run_cmd(f"sysctl -n {system_requirement}")) == value
-        except OpenSearchCmdError:
-            return False
+        pass
 
     def _get_kernel_property_value(self, prop: str) -> int:
         """Get the value of a kernel parameter."""
-        return int(self._run_cmd(f"sysctl -n {prop}"))
+        pass
 
     def check_missing_system_requirements(self) -> List[str]:
         """Checks the system requirements."""

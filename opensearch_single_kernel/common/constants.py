@@ -104,7 +104,7 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = 79  # Keep in sync with `workload_version` file
+OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 OPENSEARCH_SYSTEM_USERS = {"admin", "kibanaserver"}
@@ -166,3 +166,8 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+
+
+# Messages
+PEER_CLUSTER_NO_RELATION = "Cannot start. Waiting for peer cluster relation..."
+PEER_CLUSTER_WRONG_RELATION = "Cluster name don't match with related cluster. Remove relation."

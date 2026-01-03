@@ -12,6 +12,7 @@ from opensearch_single_kernel.common.constants import Substrates
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.managers.cluster import ClusterManager
+from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
 from opensearch_single_kernel.managers.health import HealthManager
 from opensearch_single_kernel.managers.lock import LockManager
@@ -43,6 +44,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC, WithLogging):
         self.lock_manager = LockManager(self.state, self.workload)
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
+        self.config_manager = ConfigManager(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)

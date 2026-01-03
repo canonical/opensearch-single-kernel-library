@@ -23,6 +23,7 @@ class HealthManager(BaseManager):
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
+        self.name = "health_manager"
 
     def get(  # noqa: C901
         self,
@@ -47,10 +48,10 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = self._charm.unit_ip if use_localhost else None
-        response = self.opensearch_client.health(host, wait_for_green_first, self.alt_hosts)
+        host = self.state.unit_ip if use_localhost else None
+        response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
-            response = self.opensearch_client.health(host, False, self.alt_hosts)
+            response = self.opensearch_client.get_health(host, False, self.alt_hosts)
 
         if not response:
             return HealthColors.UNKNOWN
@@ -58,7 +59,7 @@ class HealthManager(BaseManager):
         self.logger.info(f"Health: {response}")
         try:
             status = response["status"].lower()
-        except AttributeError as e:
+        except (AttributeError, TypeError, KeyError) as e:
             self.logger.error(e)  # means the status was reported as an int (i.e: 503)
             return HealthColors.UNKNOWN
 
@@ -69,10 +70,10 @@ class HealthManager(BaseManager):
         ):
             try:
                 self.logger.debug(
-                    f"\n\nHealth: {status} -- Shards: {self.opensearch_client.shards(host, verbose=True)}\n\n"
+                    f"\n\nHealth: {status} -- Shards: {self.opensearch_client.get_shards(host, verbose=True)}\n\n"
                 )
                 self.logger.debug(
-                    f"Allocation explanations: {self.opensearch_client.allocation_explain(host)}\n\n"
+                    f"Allocation explanations: {self.opensearch_client.get_allocation_explain(host)}\n\n"
                 )
             except OpenSearchHttpError:
                 pass

@@ -12,8 +12,13 @@ from typing import TYPE_CHECKING, Optional, Tuple, Union
 import bcrypt
 from ops import Unit
 
-from opensearch_single_kernel.common.constants import PEER_RELATION, Scope
-from opensearch_single_kernel.core.models import App
+from opensearch_single_kernel.common.constants import (
+    PEER_RELATION,
+    DeploymentType,
+    Scope,
+    StartMode,
+)
+from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -75,3 +80,22 @@ def generate_hashed_password(pwd: Optional[str] = None) -> Tuple[str, str]:
     """
     pwd = pwd or generate_password()
     return hash_string(pwd), pwd
+
+
+def deployment_type(
+    config: PeerClusterConfig,
+    start_mode: StartMode,
+    prev_deployment_type: Optional[DeploymentType] = None,
+) -> DeploymentType:
+    """Check if the current cluster is an independent cluster."""
+    has_cm_roles = (
+        start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in config.roles
+    )
+    if not has_cm_roles:
+        return DeploymentType.OTHER
+
+    return prev_deployment_type or (
+        DeploymentType.MAIN_ORCHESTRATOR
+        if not config.init_hold
+        else DeploymentType.FAILOVER_ORCHESTRATOR
+    )

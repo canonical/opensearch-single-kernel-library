@@ -43,7 +43,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     def _user_from_hash_key(self, key):
         """Which user is referred to by key?"""
         for user in OPENSEARCH_SYSTEM_USERS:
-            if key == self.charm.secrets.hash_key(user):
+            if key == self.hash_key(user):
                 return user
 
     def password_key(self, username: str) -> str:
@@ -142,7 +142,10 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
 
         # Keeping a reference of the secret's ID just for sure.
         # May come handy for internal Observer Juju relation.
-        self.charm.peers_data.put(scope, label, secret.id)
+        if scope == Scope.APP:
+            self.charm.state.application.update({label: secret.id})
+        else:
+            self.charm.state.server.update({label: secret.id})
 
         return secret
 
@@ -233,7 +236,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     @override
     def get_object(self, scope: Scope, key: str, peek: bool = False) -> Optional[Dict[str, any]]:
         """Get dict object from the relation data store."""
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().get_object(scope, key)
 
         return self._get_juju_secret_content(scope, key, peek)
@@ -242,7 +245,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
         """Adding or updating a secret's value."""
         self.logger.debug(f"Putting secret {scope}:{key}")
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().put(scope, key, value)
 
         # todo: remove when secret-changed not triggered for same content update
@@ -257,7 +260,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     ) -> None:
         """Put a dict object into relation data store."""
         self.logger.debug(f"Putting secret object {scope}:{key}")
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().put_object(scope, key, value, merge)
 
         # todo: remove when secret-changed not triggered for same content update
@@ -271,7 +274,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         """Removing a secret."""
         self.logger.debug(f"Removing secret {scope}:{key}")
 
-        if not self.implements_secrets:
+        if not self.charm.state.implements_secrets:
             return super().delete(scope, key)
 
         self._remove_juju_secret(scope, key)

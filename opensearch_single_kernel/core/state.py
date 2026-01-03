@@ -156,6 +156,11 @@ class ClusterState(Object, WithLogging):
         return self.model.get_unit(name)
 
     @property
+    def network_ingress_address(self) -> str:
+        """Get the public ip address of the unit."""
+        return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
+
+    @property
     def units_ips(self) -> Dict[str, str]:
         """Returns the mapping "unit id / ip address" of all units."""
         unit_ip_map = {}
@@ -185,4 +190,14 @@ class ClusterState(Object, WithLogging):
     @property
     def unit_name(self):
         """Name of the current unit."""
-        return format_unit_name(self.unit, app=self.opensearch_peer_cm.deployment_desc().app)
+        return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
+
+    @property
+    def app_name(self):
+        """Name of the charm application."""
+        return self.model.app.name
+
+    @property
+    def model_uuid(self):
+        """UUID of the Charm Model."""
+        return self.model.uuid

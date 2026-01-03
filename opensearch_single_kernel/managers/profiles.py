@@ -23,8 +23,8 @@ class ProfilesManager(BaseManager):
     """Manage all profile related operations"""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        self.state = state
-        self.workload = workload
+        super().__init__(state, workload)
+        self.name = "profiles_manager"
         try:
             if self.profile.type == PerformanceType.TESTING:
                 self.logger.warning(
@@ -94,10 +94,10 @@ class ProfilesManager(BaseManager):
         return [error_message]
 
     def _current_peer_cluster_app(self) -> PeerClusterApp:
-        deployment_desc = self.state.app.deployment_description
+        deployment_desc = self.state.application.deployment_desc
         return PeerClusterApp(
             app=deployment_desc.app,
-            planned_units=self.state.charm.app.planned_units(),
+            planned_units=self.state.planned_units,
             units=[format_unit_name(u, app=deployment_desc.app) for u in self.state.all_units],
             roles=(
                 deployment_desc.config.roles

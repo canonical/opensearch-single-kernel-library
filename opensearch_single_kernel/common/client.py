@@ -41,7 +41,7 @@ class OpenSearchClient(WithLogging):
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def node_id(self, unit_name: str) -> str:
+    def get_node_id(self, unit_name: str) -> str:
         """Get the OpenSearch node id corresponding to the unit."""
         nodes = self.request("GET", "/_nodes").get("nodes")
 
@@ -49,17 +49,17 @@ class OpenSearchClient(WithLogging):
             if node["name"] == unit_name:
                 return n_id
 
-    def roles(self, unit_name: str, alt_hosts: Optional[List[str]]) -> List[str]:
+    def get_roles(self, unit_name: str, alt_hosts: Optional[List[str]]) -> List[str]:
         """Get the list of the roles assigned to this node."""
-        nodes = self.request("GET", f"/_nodes/{self.node_id(unit_name)}", alt_hosts=alt_hosts)
-        return nodes["nodes"][self.node_id]["roles"]
+        nodes = self.request("GET", f"/_nodes/{self.get_node_id(unit_name)}", alt_hosts=alt_hosts)
+        return nodes["nodes"][self.get_node_id]["roles"]
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
     )
-    def shards(
+    def get_shards(
         self,
         host: Optional[str] = None,
         alt_hosts: Optional[List[str]] = None,
@@ -99,13 +99,13 @@ class OpenSearchClient(WithLogging):
                     shards_info.append(shard_info)
         return shards_info
 
-    def busy_shards_by_unit(
+    def get_busy_shards_by_unit(
         self,
         host: Optional[str] = None,
         alt_hosts: Optional[List[str]] = None,
     ) -> Dict[str, List[str]]:
         """Get the busy shards of each index in the cluster."""
-        shards = self.shards(host=host, alt_hosts=alt_hosts)
+        shards = self.get_shards(host=host, alt_hosts=alt_hosts)
 
         busy_shards = {}
         for shard in shards:
@@ -126,7 +126,7 @@ class OpenSearchClient(WithLogging):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
     )
-    def allocation_explain(
+    def get_allocation_explain(
         self,
         host: Optional[str] = None,
         alt_hosts: Optional[List[str]] = None,
@@ -139,7 +139,7 @@ class OpenSearchClient(WithLogging):
             alt_hosts=alt_hosts,
         )
 
-    def health(
+    def get_health(
         self, host: str, wait_for_green: bool, alt_hosts: Optional[List[str]] = None
     ) -> Optional[Dict[str, any]]:
         """Fetch the cluster health."""
@@ -167,7 +167,7 @@ class OpenSearchClient(WithLogging):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
     )
-    def indices(
+    def get_indices(
         self,
         host: Optional[str] = None,
         alt_hosts: Optional[List[str]] = None,
@@ -264,7 +264,7 @@ class OpenSearchClient(WithLogging):
                 | retry_if_exception_type(urllib3.exceptions.HTTPError),
                 stop=stop_after_attempt(retries),
                 wait=wait_fixed(1),
-                before_sleep=self.error_http_retry_log(retries, method, urls, payload),
+                before_sleep=self.get_log_error_http_retry(retries, method, urls, payload),
                 reraise=True,
             ):
                 with attempt, requests.Session() as s:
@@ -344,7 +344,7 @@ class OpenSearchClient(WithLogging):
         except Exception as e:
             raise OpenSearchHttpError(response_text=str(e))
 
-    def error_http_retry_log(
+    def get_log_error_http_retry(
         self, retry_max: int, method: str, urls: List[str], payload: Optional[Dict[str, Any]]
     ):
         """Return a custom log function to run before a new Tenacity retry."""

@@ -6,11 +6,11 @@
 """Collection of models defining state structure of OpenSearch charm, relations and units."""
 
 
-import datetime
 import enum
 import json
 from abc import ABC, abstractmethod
 from ast import literal_eval
+from datetime import datetime
 from hashlib import md5
 from typing import Any, Dict, List, Literal, Optional, Union
 
@@ -679,7 +679,6 @@ class OpenSearchApplication(RelationState):
         super().__init__(relation, data_interface, component)
         self.app = component
 
-    @override
     def get_object(self, key: str) -> Optional[Dict[str, any]]:
         """Get dict / json object from the relation data store."""
         data = self.relation_data.get(key)
@@ -735,15 +734,10 @@ class OpenSearchApplication(RelationState):
     @property
     def deployment_desc(self) -> Optional[DeploymentDescription]:
         """Return the deployment description object if any."""
-        current_deployment_desc = self.relation_data.get("deployment-desciption")
+        current_deployment_desc = self.get_object("deployment-description")
         if not current_deployment_desc:
             return None
-        else:
-            current_deployment_desc = json.loads(current_deployment_desc)
-            if not current_deployment_desc:
-                return None
-
-            return DeploymentDescription.from_dict(current_deployment_desc)
+        return DeploymentDescription.from_dict(current_deployment_desc)
 
     @property
     def cluster_fleet_apps(self) -> Dict[str, PeerClusterApp]:

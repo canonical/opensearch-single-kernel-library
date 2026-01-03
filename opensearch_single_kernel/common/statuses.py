@@ -31,6 +31,7 @@ class CharmStatuses(Enum):
     ADMIN_USER_NOT_CONFIGURED = MaintenanceStatus(
         "Waiting for the admin user to be fully configured..."
     )
+    MISSING_PROFILE_REQUIREMENTS = BlockedStatus("Missing profile requirements.")
 
     # Health Status
     CLUSTER_HEALTH_RED = BlockedStatus(

@@ -13,9 +13,8 @@ class TlsManager(BaseManager):
     """OpenSearch TLS Manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
+        super().__init__(state, workload)
         self.name = "tls_manager"
-        self.state = state
-        self.workload = workload
 
     def is_fully_configured(self) -> bool:
         """Check if all TLS secrets and resources exist and are stored."""

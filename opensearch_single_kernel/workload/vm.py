@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
     service_failed,
+    service_running,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
 from opensearch_single_kernel.utils.helpers import mask_sensitive_information
@@ -57,6 +58,147 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
+
+    @override
+    def run_script(self, script_name: str, args: str = None):
+        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
+        script_path = f"{self.paths.home}/{script_name}"
+        if not os.access(script_path, os.X_OK):
+            self._run_cmd(f"chmod a+x {script_path}")
+
+        self._run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+
+    @override
+    def get_host_public_ip(self) -> Optional[str]:
+        """Fetches the Public IP address of the current unit."""
+        cmd = "unit-get public-address"
+        output = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True,
+            encoding="utf-8",
+            timeout=25,
+            env=os.environ,
+        )
+        if output.returncode != 0:
+            return None
+
+        return output.stdout.strip()
+
+    @override
+    def is_service_started(self, paused: Optional[bool] = False) -> bool:
+        """Check if the snap service and JVM process are running.
+
+        Set paused=True if the process was intentionally paused.
+        """
+        if not self.opensearch_snap.present:
+            return False
+
+        if not service_running("snap.opensearch.daemon.service"):
+            return False
+
+        # Now, we must dig deeper into the actual status of systemd and the JVM process.
+        # First, we want to make sure the process is not stopped, dead or zombie.
+        try:
+            pid = self._run_cmd("lsof", args="-ti:9200").out.rstrip()
+            if not pid or not os.path.exists(f"/proc/{pid}/stat"):
+                return False
+            with open(f"/proc/{pid}/stat") as f:
+                stat = f.read()
+        except (subprocess.CalledProcessError, OpenSearchCmdError):
+            return False
+
+        # From: https://github.com/torvalds/linux/blob/ \
+        #     8d8d276ba2fb5f9ac4984f5c10ae60858090babc/fs/proc/array.c#L126-L140
+        # Possible states to consider:
+        # "R (running)",		/* 0x00 */
+        # "S (sleeping)",		/* 0x01 */
+        # "D (disk sleep)",	/* 0x02 */
+        # "T (stopped)",		/* 0x04 */
+        # "t (tracing stop)",	/* 0x08 */
+        # "X (dead)",		/* 0x10 */
+        # "Z (zombie)",		/* 0x20 */
+        # "P (parked)",		/* 0x40 */
+        # "I (idle)",		/* 0x80 */
+        # "Parked" state is ignored as it applies to threads.
+        if stat[2] == "T" and paused:
+            return True
+
+        # We do not check reachability of the service
+        # If that is needed, then use the `is_started` method.
+        return stat[2] not in ["Z", "T", "X"]
+
+    @override
+    def start_service_only(self):
+        """Start the actual service only (snap / pebble)."""
+        if not self.opensearch_snap.present:
+            raise OpenSearchMissingError()
+
+        try:
+            self.opensearch_snap.start([self.SERVICE_NAME])
+        except snap.SnapError as e:
+            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            raise OpenSearchStartError()
+
+    @override
+    def is_failed(self) -> bool:
+        """Check if snap service failed."""
+        if not self.opensearch_snap.present:
+            raise OpenSearchMissingError()
+
+        return service_failed("snap.opensearch.daemon.service")
+
+    @override
+    def start_service(self):
+        """Start the snap exposed "daemon" service."""
+        if not self.opensearch_snap.present:
+            raise OpenSearchMissingError()
+
+        if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
+            self.logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
+            return
+
+        try:
+            self.opensearch_snap.start([self.SERVICE_NAME])
+        except snap.SnapError as e:
+            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            raise OpenSearchStartError()
+
+    @override
+    def meminfo(self) -> dict[str, float]:
+        """Read the /proc/meminfo file and return the values.
+
+        According to the kernel source code, the values are always in kB:
+            https://github.com/torvalds/linux/blob/
+                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
+        """
+        with open("/proc/meminfo") as f:
+            meminfo = f.read().split("\n")
+            meminfo = [line.split() for line in meminfo if line.strip()]
+
+        return {line[0][:-1]: float(line[1]) for line in meminfo}
+
+    @property
+    @override
+    def paths(self):
+        """Return Workload's paths"""
+        return Paths(**VM_PATHS)
+
+    @override
+    def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
+        """Apply a system requirement."""
+        try:
+            self._run_cmd(f"sysctl -w {system_requirement}={value}")
+            return int(self._run_cmd(f"sysctl -n {system_requirement}")) == value
+        except OpenSearchCmdError:
+            return False
+
+    @override
+    def _get_kernel_property_value(self, prop: str) -> int:
+        """Get the value of a kernel parameter."""
+        return int(self._run_cmd(f"sysctl -n {prop}"))
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.5), reraise=True)
     @override
@@ -101,69 +243,3 @@ class VMWorkload(BaseWorkload):
         except (TimeoutError, subprocess.TimeoutExpired) as e:
             raise OpenSearchCmdError(e)
         return output.stdout.strip()
-
-    @override
-    def run_script(self, script_name: str, args: str = None):
-        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
-        script_path = f"{self.paths.home}/{script_name}"
-        if not os.access(script_path, os.X_OK):
-            self._run_cmd(f"chmod a+x {script_path}")
-
-        self._run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
-
-    @property
-    @override
-    def paths(self):
-        """Return Workload's paths"""
-        return Paths(**VM_PATHS)
-
-    @override
-    def is_service_started(self, paused: Optional[bool] = False) -> bool:
-        """Check if the snap service and JVM process are running.
-
-        Set paused=True if the process was intentionally paused.
-        """
-        return False
-
-    @override
-    def start_service_only(self):
-        """Start the actual service only (snap / pebble)."""
-        pass
-
-    @override
-    def is_failed(self) -> bool:
-        """Check if snap service failed."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
-        return service_failed("snap.opensearch.daemon.service")
-
-    @override
-    def start_service(self):
-        """Start the snap exposed "daemon" service."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
-        if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            self.logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
-            return
-
-        try:
-            self.opensearch_snap.start([self.SERVICE_NAME])
-        except snap.SnapError as e:
-            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
-            raise OpenSearchStartError()
-
-    @override
-    def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values.
-
-        According to the kernel source code, the values are always in kB:
-            https://github.com/torvalds/linux/blob/
-                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
-        """
-        with open("/proc/meminfo") as f:
-            meminfo = f.read().split("\n")
-            meminfo = [line.split() for line in meminfo if line.strip()]
-
-        return {line[0][:-1]: float(line[1]) for line in meminfo}
