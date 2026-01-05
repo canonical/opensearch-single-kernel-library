@@ -18,6 +18,7 @@ from opensearch_single_kernel.common.constants import (
     PEER_CLUSTER_NO_RELATION,
     PEER_CLUSTER_WRONG_RELATION,
     CertType,
+    DeploymentType,
     Directive,
     Scope,
     StartMode,
@@ -62,9 +63,9 @@ class ClusterManager(BaseManager):
         """Start the opensearch service."""
 
         def _is_connected():
-            return self.is_node_up() if wait_until_http_200 else self.is_started()
+            return self.is_node_up() if wait_until_http_200 else self.is_opensearch_started
 
-        if self.is_started():
+        if self.is_opensearch_started:
             return
 
         # start the opensearch service
@@ -166,24 +167,16 @@ class ClusterManager(BaseManager):
             ],
         )
 
-    def is_started(self) -> bool:
-        """Check if OpenSearch is started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
-        if not reachable:
-            self.logger.debug("Cannot connect to the OpenSearch server...")
-
-        return reachable
-
     def cleanup_bootstrap_conf(self):
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
-        if self.state.unit.is_app_leader:
+        if self.state.server.is_app_leader:
             self.state.application.update({"bootstrapped": "True"})
-        self.state.unit.relation_data.pop("bootstrap_contributor")
-        self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
+        self.state.server.update({"bootstrap_contributor": None})
 
+    @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host, self.state.port)
+        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
         if not reachable:
             self.logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -224,7 +217,7 @@ class ClusterManager(BaseManager):
             args = [
                 f"-cd {self.workload.paths.conf}/opensearch-security/",
                 f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-                f"-h {self.state.unit_ip}",
+                f"-h {self.state.host_ip}",
                 # f"-ts {self.workload.paths.certs}/ca.p12",
                 # f"-tspass {self.state.secrets.get_object(Scope.APP,
                 # CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
@@ -376,3 +369,80 @@ class ClusterManager(BaseManager):
     def is_node_up(self):
         """Check whether opensearch is up"""
         return self.opensearch_client.is_node_up()
+
+    def _is_failover_and_sole_data_app(self) -> bool:
+        """Check if the current node is a failover and the only data node in the cluster."""
+        deployment_desc = self.state.application.deployment_desc
+        cluster_fleet_apps = self.state.application.cluster_fleet_apps or {}
+        return (
+            # data node in a failover orchestrator deployment
+            deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
+            and (
+                "data" in deployment_desc.config.roles
+                or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            )
+            # No pure data nodes in the cluster
+            and not any(
+                self.state.app_name != cluster_fleet_apps[app].get("app", {}).get("name")
+                and "data" in cluster_fleet_apps[app].get("roles", [])
+                and "cluster_manager" not in cluster_fleet_apps[app].get("roles", [])
+                for app in cluster_fleet_apps
+            )
+        )
+
+    def configure_bootstrap_contributors(
+        self,
+        computed_roles: List[str],
+        cm_names: List[str],
+        cm_ips: List[str],
+    ) -> bool:
+        """Configure application state with bootstrap contributors.
+
+        This function takes the computed rolesn cluster managers names and ips,
+        it configure the application state and return whether the current unit contribute
+        to bootstrap.
+        """
+        contribute_to_bootstrap = False
+        if "cluster_manager" in computed_roles:
+            cm_names.append(self.state.unit_name)
+            cm_ips.append(self.state.host_ip)
+
+            if (
+                self.state.application.typ == DeploymentType.MAIN_ORCHESTRATOR
+                and not self.state.application.bootstrapped
+            ):
+                cms_in_bootstrap = self.state.application.bootstrap_contributors_count
+                if cms_in_bootstrap < self.state.planned_units:
+                    contribute_to_bootstrap = True
+
+                    if self.state.server.is_app_leader:
+                        self.state.application.bootstrap_contributors_count = cms_in_bootstrap + 1
+
+                    # indicates that this unit is part of the "initial cm nodes"
+                    self.state.server.bootstrap_contributor = True
+        return contribute_to_bootstrap
+
+    def computed_roles(self):
+        """Return computed_roles"""
+        if (
+            deployment_desc := self.state.application.deployment_desc
+        ).start == StartMode.WITH_PROVIDED_ROLES:
+            computed_roles = deployment_desc.config.roles
+        else:
+            computed_roles = ClusterTopology.generated_roles()
+
+        # If the failover orchestrator is the only data node in the cluster, remove the
+        # cluster-manager role from it to avoid it bootstrapping the cluster
+        # which is the responsibility of the main orchestrator
+        # who then broadcasts `security_index_initialized` to the peer clusters.
+        if (
+            self.state.server.is_app_leader
+            and self._is_failover_and_sole_data_app()
+            and not self.state.application.security_index_initialised
+        ):
+            self.state.server.cluster_manager_removed = True
+            computed_roles.remove("cluster_manager")
+
+        if computed_roles == ["coordinating"]:
+            computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list
+        return computed_roles

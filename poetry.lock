@@ -2281,6 +2281,24 @@ resolved_reference = "da511b11e2550ac49dfea0e01549fb9fa3ba48bf"
 subdirectory = "python/pytest_plugins/microceph"
 
 [[package]]
+name = "pytest-mock"
+version = "3.15.1"
+description = "Thin-wrapper around the mock package for easier use with pytest"
+optional = false
+python-versions = ">=3.9"
+groups = ["integration", "unit"]
+files = [
+    {file = "pytest_mock-3.15.1-py3-none-any.whl", hash = "sha256:0a25e2eb88fe5168d535041d09a4529a188176ae608a6d249ee65abc0949630d"},
+    {file = "pytest_mock-3.15.1.tar.gz", hash = "sha256:1849a238f6f396da19762269de72cb1814ab44416fa73a8686deac10b0d87a0f"},
+]
+
+[package.dependencies]
+pytest = ">=6.2.5"
+
+[package.extras]
+dev = ["pre-commit", "pytest-asyncio", "tox"]
+
+[[package]]
 name = "pytest-operator"
 version = "0.42.1"
 description = "Fixtures for Operators"
@@ -3141,4 +3159,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "2758f2d159e64f20087e9e332e4ce968dd6b12378c23a85846b880e56bb1a5d6"
+content-hash = "089a454a8d17a28c3819005784e14fdfdb0b463d2de9d466a74c1379ed04dfb9"

@@ -658,7 +658,22 @@ class OpenSearchServer(RelationState):
     @property
     def bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return bool(self.relation.data.get("bootstrap_contributor", ""))
+        return self.relation.data.get("bootstrap_contributor", "") == "True"
+
+    @bootstrap_contributor.setter
+    def bootstrap_contributor(self, value: bool):
+        """Set the value of 'bootstrap_contributor' in application state."""
+        self.update({"bootstrap_contributor": str(value)})
+
+    @property
+    def cluster_manager_removed(self) -> bool:
+        """Get value of 'cluster_manager_removed'"""
+        return self.relation_data.get("cluster_manager_removed", "") == "True"
+
+    @cluster_manager_removed.setter
+    def cluster_manager_removed(self, value: bool):
+        """Set value of 'cluster_manager_removed'"""
+        self.update({"cluster_manager_removed": str(value)})
 
     @property
     def started(self) -> bool:
@@ -712,14 +727,34 @@ class OpenSearchApplication(RelationState):
         return self.app.name
 
     @property
-    def is_admin_user_configured(self) -> bool:
+    def is_admin_user_initialized(self) -> bool:
         """Return the value of 'admin_user_initialized' in application state."""
         return self.relation_data.get("admin_user_initialized", "") == "True"
 
     @property
-    def security_index_initialised(self) -> str:
-        """Return the value of 'security_index_initialised' in application state"""
-        return self.relation_data.get("security_index_initialised", "")
+    def bootstrap_contributors_count(self) -> int:
+        """Get the value of 'bootstrap_contributors_count'"""
+        return int(self.relation_data.get("bootstrap_contributors_count", 0))
+
+    @bootstrap_contributors_count.setter
+    def bootstrap_contributors_count(self, value: int):
+        """Set value of bootstrap contributors count in application state."""
+        self.update({"bootstrap_contributors_count": str(value)})
+
+    @is_admin_user_initialized.setter
+    def is_admin_user_initialized(self, value: bool):
+        """Update the value of 'admin_user_initialized' in application state."""
+        self.update({"admin_user_initialized": str(value)})
+
+    @property
+    def security_index_initialised(self) -> bool:
+        """Return the value of 'security_index_initialised' in application state."""
+        return self.relation_data.get("security_index_initialised", "") == "True"
+
+    @security_index_initialised.setter
+    def security_index_initialised(self, value: bool):
+        """Update the value of 'security_index_initialised' in application state."""
+        self.update({"security_index_initialised": str(value)})
 
     @property
     def nodes_config(self) -> str:
@@ -753,7 +788,7 @@ class OpenSearchApplication(RelationState):
 
     def apps_in_fleet(self) -> List[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
-        cluster_fleet_apps = self.relation_data.get_object(Scope.APP, "cluster_fleet_apps", "")
+        cluster_fleet_apps = self.get_object("cluster_fleet_apps")
         if not cluster_fleet_apps:
             cluster_fleet_apps = {}
         elif not json.loads(cluster_fleet_apps):

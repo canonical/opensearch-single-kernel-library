@@ -39,7 +39,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
-from opensearch_single_kernel.core.models import DeploymentDescription
+from opensearch_single_kernel.core.models import DeploymentDescription, Node
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
@@ -144,7 +144,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
-        if not self.charm.state.application.is_admin_user_configured:
+        if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
         # Restore purged system users in local `internal_users.yml`
@@ -203,13 +203,13 @@ class OpenSearchEventsHandler(Object, WithLogging):
             )
 
         if (
-            not self.charm.state.application.is_admin_user_configured
+            not self.charm.state.application.is_admin_user_initialized
             or not self.charm.tls_manager.is_fully_configured()
         ):
             if not self.charm.state.tls_relation:
                 status = CharmStatuses.TLS_RELATION_MISSING
             else:
-                if not self.charm.state.application.is_admin_user_configured:
+                if not self.charm.state.application.is_admin_user_initialized:
                     status = CharmStatuses.ADMIN_USER_NOT_CONFIGURED
                 else:
                     status = CharmStatuses.TLS_NOT_FULLY_CONFIGURED
@@ -277,6 +277,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         if self.charm.unit.is_leader():
             self._start_opensearch_event.emit(ignore_lock=True, is_first_data_node=True)
+            return
         self._start_opensearch_event.emit()
 
     def _on_start_opensearch(self, event: StartOpenSearch):  # noqa: C901
@@ -306,7 +307,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 # check if cluster should have started but is blocked
                 self.logger.debug("OpenSearch already started, but post-start init failed.")
                 if (
-                    ClusterTopology.is_data_role_in_cluster_fleet_apps(self)
+                    ClusterTopology.is_data_role_in_cluster_fleet_apps(self.charm.state)
                     and self.charm.state.application.bootstrapped
                     # and self.opensearch_peer_cm.is_provider(typ="main")
                 ):
@@ -331,7 +332,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
             # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
             return
 
-        self.charm.state.unit.update({"started": None})
+        self.charm.state.server.update({"started": None})
 
         if not self.can_service_start(event.is_first_data_node):
             self.logger.info("Conditions not met to start opensearch. Will retry next event.")
@@ -359,7 +360,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
             nodes = self.charm.cluster_manager.get_nodes(False)
 
             # Set the configuration of the node
-            self.charm.config_manager.set_node_conf(nodes)
+            self._set_node_conf(nodes)
         except OpenSearchHttpError as e:
             self.logger.debug(f"error getting the nodes: {e}")
             self.charm.lock_manager.release()
@@ -432,6 +433,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         if self.charm.state.server.bootstrap_contributor:
             self.charm.cluster_manager.cleanup_bootstrap_conf()
+            self.charm.config_manager.cleanup_initial_cluster_managers()
 
         self.charm.exclusions_manager.delete_current()
 
@@ -473,7 +475,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
         if not self.charm.cluster_manager.can_start(deployment_desc):
             return False
 
-        if not self.charm.state.application.is_admin_user_configured:
+        if not self.charm.state.application.is_admin_user_initialized:
             return False
 
         # Case of the first "main" cluster to get started.
@@ -603,6 +605,30 @@ class OpenSearchEventsHandler(Object, WithLogging):
             self.charm.state.server.started
             and "cluster_manager" in self.charm.cluster_manager.roles
             and not self.charm.workload.is_service_started()
+        )
+
+    def _set_node_conf(self, nodes: List[Node]) -> None:
+        """Set the configuration of the current node / unit."""
+        computed_roles = self.charm.cluster_manager.computed_roles()
+
+        cm_names = ClusterTopology.get_cluster_managers_names(nodes)
+        cm_ips = ClusterTopology.get_cluster_managers_ips(nodes)
+        contribute_to_bootstrap = self.charm.cluster_manager.configure_bootstrap_contributors(
+            computed_roles,
+            cm_names,
+            cm_ips,
+        )
+
+        deployment_desc = self.charm.state.application.deployment_desc
+        self.charm.config_manager.set_node(
+            app=deployment_desc.app,
+            cluster_name=deployment_desc.config.cluster_name,
+            unit_name=self.charm.state.unit_name,
+            roles=computed_roles,
+            cm_names=list(set(cm_names)),
+            cm_ips=list(set(cm_ips)),
+            contribute_to_bootstrap=contribute_to_bootstrap,
+            node_temperature=deployment_desc.config.data_temperature,
         )
 
     def _on_secret_changed(self, event: SecretChangedEvent):  # noqa: C901

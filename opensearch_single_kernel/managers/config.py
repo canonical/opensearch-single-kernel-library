@@ -4,9 +4,10 @@
 
 """OpenSearch Config manager."""
 from collections import namedtuple
-from typing import List
+from typing import List, Optional
 
 from opensearch_single_kernel.core.models import (
+    App,
     Node,
 )
 from opensearch_single_kernel.core.state import ClusterState
@@ -26,6 +27,83 @@ class ConfigManager(BaseManager):
         super().__init__(state, workload)
         self.name = "config_manager"
         self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+
+    def set_node(
+        self,
+        app: App,
+        cluster_name: str,
+        unit_name: str,
+        roles: List[str],
+        cm_names: List[str],
+        cm_ips: List[str],
+        contribute_to_bootstrap: bool,
+        node_temperature: Optional[str] = None,
+    ) -> None:
+        """Set base config for each node in the cluster."""
+        self.yaml_setter.put(self.CONFIG_YML, "cluster.name", cluster_name)
+        self.yaml_setter.put(self.CONFIG_YML, "node.name", unit_name)
+        self.yaml_setter.put(
+            self.CONFIG_YML, "network.host", ["_site_"] + self.state.network_hosts
+        )
+        if self.state.host_ip:
+            self.yaml_setter.put(self.CONFIG_YML, "network.publish_host", self.state.host_ip)
+        public_address = self.workload.get_host_public_ip() or self.state.network_ingress_address
+        self.yaml_setter.put(self.CONFIG_YML, "http.publish_host", public_address)
+
+        self.yaml_setter.put(self.CONFIG_YML, "node.roles", roles, inline_array=len(roles) == 0)
+        if node_temperature:
+            self.yaml_setter.put(self.CONFIG_YML, "node.attr.temp", node_temperature)
+        else:
+            self.yaml_setter.delete(self.CONFIG_YML, "node.attr.temp")
+
+        # Set the current app full id
+        self.yaml_setter.put(self.CONFIG_YML, "node.attr.app_id", app.id)
+
+        # This allows the new CMs to be discovered automatically (hot reload of unicast_hosts.txt)
+        self.yaml_setter.put(self.CONFIG_YML, "discovery.seed_providers", "file")
+        self.add_seed_hosts(cm_ips)
+
+        if "cluster_manager" in roles and contribute_to_bootstrap:  # cluster NOT bootstrapped yet
+            self.yaml_setter.put(
+                self.CONFIG_YML, "cluster.initial_cluster_manager_nodes", cm_names
+            )
+
+        self.yaml_setter.put(self.CONFIG_YML, "path.data", self.workload.paths.data)
+        self.yaml_setter.put(self.CONFIG_YML, "path.logs", self.workload.paths.logs)
+
+        self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={self.workload.paths.logs}/")
+
+        self.yaml_setter.put(self.CONFIG_YML, "plugins.security.disabled", False)
+        self.yaml_setter.put(self.CONFIG_YML, "plugins.security.ssl.http.enabled", True)
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.ssl.transport.enforce_hostname_verification",
+            True,
+        )
+
+        # security plugin rest API access
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.restapi.roles_enabled",
+            ["all_access", "security_rest_api_access"],
+        )
+        # to use the PUT and PATCH methods of the security rest API
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.unsupported.restapi.allow_securityconfig_modification",
+            True,
+        )
+
+        # enable hot reload of TLS certs (without restarting the node)
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.ssl_cert_reload_enabled",
+            True,
+        )
+
+    def cleanup_initial_cluster_managers(self):
+        """Update the opensearch.yaml by deleting initiali_cluster_manager_nodes."""
+        self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
 
     def set_client_auth(self):
         """Configure TLS and basic http for clients."""
