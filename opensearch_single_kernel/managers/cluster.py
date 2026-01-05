@@ -345,7 +345,7 @@ class ClusterManager(BaseManager):
                     roles=roles,
                     ip=node.ip,
                     app=node.app,
-                    unit_number=self.unit_id,
+                    unit_number=self.state.server.unit_id,
                     temperature=temperature,
                 )
 

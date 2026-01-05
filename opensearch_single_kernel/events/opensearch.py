@@ -201,9 +201,6 @@ class OpenSearchEventsHandler(Object, WithLogging):
             self._apply_status_if_needed(
                 self.charm.state.application.deployment_desc, show_status_only_once=False
             )
-        self.logger.warning(
-            f"Admin user initialised ?? {self.charm.state.application.is_admin_user_initialized}"
-        )
         if (
             not self.charm.state.application.is_admin_user_initialized
             or not self.charm.tls_manager.is_fully_configured()
