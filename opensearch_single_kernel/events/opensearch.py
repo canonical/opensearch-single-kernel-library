@@ -284,7 +284,6 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
     def _on_start_opensearch(self, event: StartOpenSearch):  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
-        return
         if (
             not self.charm.state.application.deployment_desc
             and self.charm.state.planned_units == 0
