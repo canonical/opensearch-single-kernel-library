@@ -102,10 +102,17 @@ class Status:
         self.charm.status.set(WaitingStatus(message))
 
     def clear(
-        self, status: CharmStatuses, pattern: CheckPattern = CheckPattern.Equal, app: bool = False
+        self,
+        status: CharmStatuses,
+        pattern: CheckPattern = CheckPattern.Equal,
+        dynamic_message: Optional[str] = None,
+        app: bool = False,
     ):
         """Resets the unit status if it was previously blocked/maintenance with message."""
-        status_message = status.value.message
+        if dynamic_message:
+            status_message = dynamic_message
+        else:
+            status_message = status.value.message
         context = self.charm.app if app else self.charm.unit
 
         condition: bool

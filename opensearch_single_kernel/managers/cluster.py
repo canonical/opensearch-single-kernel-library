@@ -280,7 +280,7 @@ class ClusterManager(BaseManager):
 
     def can_start(self, deployment_desc: Optional[DeploymentDescription] = None) -> bool:
         """Return whether the service of a node can start."""
-        if not (deployment_desc := deployment_desc or self.deployment_desc()):
+        if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
 
         blocking_directives = [
@@ -316,6 +316,18 @@ class ClusterManager(BaseManager):
         ):
             return []
         return ClusterTopology.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
+
+    def clear_directive(self, directive: Directive):
+        """Remove directive after having applied it."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return
+
+        if directive not in deployment_desc.pending_directives:
+            return
+
+        deployment_desc.pending_directives.remove(directive)
+        self.logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
+        self.state.application.put_object("deployment-description", deployment_desc.to_dict())
 
     def compute_and_broadcast_updated_topology(self, current_nodes: List[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
@@ -408,7 +420,7 @@ class ClusterManager(BaseManager):
             cm_ips.append(self.state.host_ip)
 
             if (
-                self.state.application.typ == DeploymentType.MAIN_ORCHESTRATOR
+                self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 and not self.state.application.bootstrapped
             ):
                 cms_in_bootstrap = self.state.application.bootstrap_contributors_count

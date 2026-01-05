@@ -168,7 +168,7 @@ class PeerLockManager(BaseManager):
         if not (deployment_desc := self.state.application.deployment_desc):
             return
 
-        if not self.state.server.is_app_leader():
+        if not self.state.server.is_app_leader:
             if self._relation.data[self.state.application.app].get(
                 "leader-acquired-lock-after-juju-event-id"
             ):
@@ -248,7 +248,7 @@ class LockManager(PeerLockManager):
             # )
         )
 
-    def _unit_with_lock(self, host: str | None) -> str | None:
+    def unit_with_lock(self, host: str | None) -> str | None:
         """Unit that has acquired OpenSearch lock."""
         try:
             document_data = self.opensearch_client.request(
@@ -289,7 +289,7 @@ class LockManager(PeerLockManager):
             self.logger.debug(f"[Node lock] Opensearch {online_nodes=}")
             assert online_nodes > 0
             try:
-                unit = self._unit_with_lock(host)
+                unit = self.unit_with_lock(host)
             except OpenSearchHttpError:
                 self.logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock
@@ -409,7 +409,7 @@ class LockManager(PeerLockManager):
             # or if there is a stale lock from a unit no longer existing
             # for large deployments the MAIN/FAILOVER orchestrators should broadcast info
             # over non-online units in the relation. This info should be considered here as well.
-            unit_with_lock = self._unit_with_lock(host)
+            unit_with_lock = self.unit_with_lock(host)
             current_app_units = [
                 format_unit_name(unit, app=current_app) for unit in self.state.all_units
             ]

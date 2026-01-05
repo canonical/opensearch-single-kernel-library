@@ -201,7 +201,9 @@ class OpenSearchEventsHandler(Object, WithLogging):
             self._apply_status_if_needed(
                 self.charm.state.application.deployment_desc, show_status_only_once=False
             )
-
+        self.logger.warning(
+            f"Admin user initialised ?? {self.charm.state.application.is_admin_user_initialized}"
+        )
         if (
             not self.charm.state.application.is_admin_user_initialized
             or not self.charm.tls_manager.is_fully_configured()
@@ -282,6 +284,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
     def _on_start_opensearch(self, event: StartOpenSearch):  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
+        return
         if (
             not self.charm.state.application.deployment_desc
             and self.charm.state.planned_units == 0
@@ -437,8 +440,12 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         self.charm.exclusions_manager.delete_current()
 
+        self.charm.lock_manager.release()
+
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.update({"started": str(time.time())})
+
+        # TODO: OpenSearch fixes
 
         # apply cluster health
         self.charm.status.apply_health(wait_for_green_first=True, app=self.charm.unit.is_leader())
@@ -545,7 +552,9 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 )
             else:
                 self.charm.status.clear(
-                    status_message="Missing requirements:", pattern=Status.CheckPattern.Start
+                    CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
+                    dynamic_message="Missing requirements:",
+                    pattern=Status.CheckPattern.Start,
                 )
 
         return missing_requirements
@@ -572,7 +581,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         # remove show_status directive which is applied below
         if show_status_only_once:
-            self.clear_directive(Directive.SHOW_STATUS)
+            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         blocked_status = [
             CharmStatuses.CM_ROLE_REMOVAL_FORBIDDEN,

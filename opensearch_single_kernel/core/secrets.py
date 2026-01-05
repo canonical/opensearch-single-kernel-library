@@ -134,6 +134,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         label = self.label(scope, key)
         try:
             secret = scope_obj.add_secret(safe_value, label=label)
+            self.logger.debug(f"Secret added {secret}")
         except ValueError as e:
             self.logger.error("Secret %s:%s couldn't be added", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
