@@ -173,25 +173,6 @@ class ClusterManager(BaseManager):
             self.state.application.update({"bootstrapped": "True"})
         self.state.server.update({"bootstrap_contributor": None})
 
-    @property
-    def is_opensearch_started(self) -> bool:
-        """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
-        if not reachable:
-            self.logger.debug("Cannot connect to the OpenSearch server...")
-
-        return reachable
-
-    @property
-    def roles(self) -> List[str]:
-        """Get the list of the roles assigned to this node."""
-        try:
-            return self.opensearch_client.get_roles(
-                self.state.unit.unit_name, self.state.alt_hosts
-            )
-        except OpenSearchHttpError:
-            return self.yaml_setter.load("opensearch.yml")["node.roles"]
-
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
         return (
@@ -458,3 +439,22 @@ class ClusterManager(BaseManager):
         if computed_roles == ["coordinating"]:
             computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list
         return computed_roles
+
+    @property
+    def is_opensearch_started(self) -> bool:
+        """Returns whether OpenSearch has started."""
+        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
+        if not reachable:
+            self.logger.debug("Cannot connect to the OpenSearch server...")
+
+        return reachable
+
+    @property
+    def roles(self) -> List[str]:
+        """Get the list of the roles assigned to this node."""
+        try:
+            return self.opensearch_client.get_roles(
+                self.state.unit.unit_name, self.state.alt_hosts
+            )
+        except OpenSearchHttpError:
+            return self.yaml_setter.load("opensearch.yml")["node.roles"]

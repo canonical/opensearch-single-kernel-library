@@ -180,12 +180,6 @@ class VMWorkload(BaseWorkload):
 
         return {line[0][:-1]: float(line[1]) for line in meminfo}
 
-    @property
-    @override
-    def paths(self):
-        """Return Workload's paths"""
-        return Paths(**VM_PATHS)
-
     @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement."""
@@ -243,3 +237,9 @@ class VMWorkload(BaseWorkload):
         except (TimeoutError, subprocess.TimeoutExpired) as e:
             raise OpenSearchCmdError(e)
         return output.stdout.strip()
+
+    @property
+    @override
+    def paths(self):
+        """Return Workload's paths"""
+        return Paths(**VM_PATHS)
