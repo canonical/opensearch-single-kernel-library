@@ -4,7 +4,12 @@
 
 """OpenSearch Machine VM Workload."""
 import os
+import pathlib
 import subprocess
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from overrides import override
@@ -60,13 +65,64 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchInstallError()
 
     @override
+    def exists(self, path: str) -> bool:
+        """Return whether the path exists in filesystem."""
+        return os.path.exists(path)
+
+    @override
+    def dirname(self, path: str) -> str:
+        """Return the directory name of a give path."""
+        return os.path.dirname(path)
+
+    @override
+    def write_file(self, path: str, data: str, override: bool = True):
+        """Persists data into file. Useful for files generated on the fly, such as certs etc."""
+        pass
+        if not override and self.exists(path):
+            return
+
+        parent_dir_path = "/".join(path.split("/")[:-1])
+        if parent_dir_path:
+            pathlib.Path(parent_dir_path).mkdir(parents=True, exist_ok=True)
+
+        with open(path, mode="w") as f:
+            f.write(data)
+
+    @contextmanager
+    def tempfile(
+        self,
+        mode="w+b",
+        encoding=None,
+        dir=None,
+        delete=True,
+        *,
+        errors=None,
+        suffix=None,
+    ):
+        """Create a temporary file and return the file, clean it once context is closed."""
+        f = tempfile.NamedTemporaryFile(
+            mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
+        )
+        try:
+            yield f
+        finally:
+            if not f.closed:
+                f.close()
+
+            if delete:
+                try:
+                    os.unlink(f.name)
+                except OSError as e:
+                    raise e
+
+    @override
     def run_script(self, script_name: str, args: str = None):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):
-            self._run_cmd(f"chmod a+x {script_path}")
+            self.run_cmd(f"chmod a+x {script_path}")
 
-        self._run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @override
     def get_host_public_ip(self) -> Optional[str]:
@@ -102,7 +158,7 @@ class VMWorkload(BaseWorkload):
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
         # First, we want to make sure the process is not stopped, dead or zombie.
         try:
-            pid = self._run_cmd("lsof", args="-ti:9200").out.rstrip()
+            pid = self.run_cmd("lsof", args="-ti:9200").out.rstrip()
             if not pid or not os.path.exists(f"/proc/{pid}/stat"):
                 return False
             with open(f"/proc/{pid}/stat") as f:
@@ -151,6 +207,21 @@ class VMWorkload(BaseWorkload):
         return service_failed("snap.opensearch.daemon.service")
 
     @override
+    def read_text(self, path: Path) -> str:
+        """Open file, read it and close file."""
+        return path.read_text()
+
+    @override
+    def write_text(self, path: Path, content: str) -> str:
+        """Open file, write in it and close file."""
+        return path.write_text(content)
+
+    @override
+    def remove_file(self, file_path: str):
+        """Remove file from the filesystem."""
+        os.remove(file_path)
+
+    @override
     def start_service(self):
         """Start the snap exposed "daemon" service."""
         if not self.opensearch_snap.present:
@@ -184,25 +255,32 @@ class VMWorkload(BaseWorkload):
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement."""
         try:
-            self._run_cmd(f"sysctl -w {system_requirement}={value}")
-            return int(self._run_cmd(f"sysctl -n {system_requirement}")) == value
+            self.run_cmd(f"sysctl -w {system_requirement}={value}")
+            return int(self.run_cmd(f"sysctl -n {system_requirement}").out.rstrip()) == value
         except OpenSearchCmdError:
             return False
 
     @override
     def _get_kernel_property_value(self, prop: str) -> int:
         """Get the value of a kernel parameter."""
-        return int(self._run_cmd(f"sysctl -n {prop}"))
+        return int(self.run_cmd(f"sysctl -n {prop}").out.rstrip())
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.5), reraise=True)
     @override
-    def _run_cmd(self, command: str, args: str = None, stdin: str = None) -> str:
-        """Run command.
+    def run_cmd(
+        self,
+        command: str,
+        args: Optional[str] = None,
+        use_errors_replace: bool = False,
+        stdin: Optional[str] = None,
+    ) -> SimpleNamespace:
+        """Run command
 
         Arg:
             command: can contain arguments
             args: command line arguments
             stdin: string input to be passed on the standard input of the subprocess
+            use_errors_replace: replace errors with empty string
+
 
         Returns the stdout
         """
@@ -214,18 +292,30 @@ class VMWorkload(BaseWorkload):
         command = mask_sensitive_information(command_with_args)
         self.logger.debug(f"Executing command: {command}")
 
+        run_kwargs = dict(
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True,
+            encoding="utf-8",
+            timeout=25,
+            env=os.environ,
+        )
+
+        # OpenSSL's "pkcs12 -in" output may contain non-UTF-8 bytes in Bag Attributes
+        # (e.g., friendlyName: debian:netlock_arany_=class_gold=_fQtanúsítvány.pem). When Python
+        # decodes stdout/stderr as UTF-8, this can raise UnicodeDecodeError.
+        #
+        # We enable errors="replace" only when explicitly requested (e.g., in list_cas or
+        # certificate-issuer parsing), because those commands only need ASCII PEM blocks
+        # and not the exact attribute encoding. All other commands (keytool, chmod, x509)
+        # should fail if their output is not valid UTF-8.
+        if use_errors_replace:
+            run_kwargs["errors"] = "replace"
+        if stdin:
+            run_kwargs["input"] = stdin
         try:
-            output = subprocess.run(
-                command_with_args,
-                input=stdin,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                env=os.environ,
-            )
+            output = subprocess.run(command_with_args, **run_kwargs)
 
             self.logger.debug(f"{command}:\n{output.stdout}")
 
@@ -233,10 +323,10 @@ class VMWorkload(BaseWorkload):
                 self.logger.debug(
                     f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}"
                 )
-                raise OpenSearchCmdError(output.stderr)
-        except (TimeoutError, subprocess.TimeoutExpired) as e:
-            raise OpenSearchCmdError(e)
-        return output.stdout.strip()
+                raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
+            return SimpleNamespace(cmd=command, out=output.stdout, err=output.stderr)
+        except (TimeoutError, subprocess.TimeoutExpired):
+            raise OpenSearchCmdError(cmd=command)
 
     @property
     @override

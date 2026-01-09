@@ -5,6 +5,9 @@
 """Base interface for common workload operations."""
 import socket
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -70,6 +73,43 @@ class BaseWorkload(ABC, WithLogging):
         pass
 
     @abstractmethod
+    def read_text(self, path: Path) -> str:
+        """Open file, read it and close file."""
+        pass
+
+    @abstractmethod
+    def write_text(self, path: Path, content: str) -> str:
+        """Open file, write in it and close file."""
+        pass
+
+    @abstractmethod
+    def write_file(self, path: str, data: str, override: bool = True):
+        """Persists data into file. Useful for files generated on the fly, such as certs etc."""
+        pass
+
+    @abstractmethod
+    def dirname(self, path: str) -> str:
+        """Return the directory name of a give path."""
+        pass
+
+    @contextmanager
+    def tempfile(
+        self, mode="w+b", encoding=None, dir=None, delete=True, *, errors=None, suffix=None
+    ):
+        """Context manager for creating temporary files."""
+        pass
+
+    @abstractmethod
+    def exists(self, path: str) -> bool:
+        """Return whether the path exists in filesystem."""
+        pass
+
+    @abstractmethod
+    def remove_file(self, file_path: str):
+        """Remove file from the filesystem."""
+        pass
+
+    @abstractmethod
     def is_service_started(self, paused: Optional[bool] = False) -> bool:
         """Check if the snap service and JVM process are running.
 
@@ -106,7 +146,9 @@ class BaseWorkload(ABC, WithLogging):
         pass
 
     @abstractmethod
-    def _run_cmd(self, command: str):
+    def run_cmd(
+        self, command: str, args: str = None, use_errors_replace: bool = False, stdin: str = None
+    ) -> SimpleNamespace:
         """Run Command in CLI"""
         pass
 

@@ -44,6 +44,7 @@ class CharmStatuses(Enum):
         "1 or more 'replica' shards are not assigned, please scale your application up."
     )
     WAITING_FOR_BUSY_SHARDS = MaintenanceStatus("Some shards are still initializing / relocating.")
+    WAITING_FOR_SPECIFIC_BUSY_SHARDS = WaitingStatus("The shards need to complete building")
 
     # Lock Status
     REQUEST_LOCK_ON_START = WaitingStatus("Requesting lock on operation: start")
@@ -76,6 +77,12 @@ class CharmStatuses(Enum):
     )
     DATA_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
         "Removal of data role from current deployment not allowed - the data cannot be reallocated."
+    )
+
+    # TLS
+    TLS_CA_ROTATION = MaintenanceStatus("Applying new CA certificate...")
+    TLS_RELATION_BROKEN = BlockedStatus(
+        "Relation broken with the TLS Operator while TLS not fully configured. Stopping OpenSearch."
     )
 
 

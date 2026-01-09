@@ -4,8 +4,9 @@
 
 """OpenSearch Config manager."""
 from collections import namedtuple
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+from opensearch_single_kernel.common.constants import CertType
 from opensearch_single_kernel.core.models import (
     App,
     Node,
@@ -13,6 +14,7 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
+from opensearch_single_kernel.utils.helpers import normalized_tls_subject
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -215,3 +217,55 @@ class ConfigManager(BaseManager):
             with open(self.workload.paths.seed_hosts, "w+") as f:
                 lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
                 f.write(f"{lines}\n")
+
+    def set_admin_tls_conf(self, secrets: Dict[str, any]):
+        """Configures the admin certificate."""
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.authcz.admin_dn/{}",
+            f"{normalized_tls_subject(secrets['subject'])}",
+        )
+
+    def set_node_tls_conf(self, cert_type: CertType, truststore_pwd: str, keystore_pwd: str):
+        """Configures TLS for nodes."""
+        target_conf_layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+
+        for store_type, cert in [("keystore", target_conf_layer), ("truststore", "ca")]:
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_type",
+                "PKCS12",
+            )
+
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_filepath",
+                f"{self.workload.paths.certs_relative}/{cert if cert == 'ca' else cert_type}.p12",
+            )
+
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.keystore_alias",
+            cert_type.val,
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.keystore_keypassword",
+            keystore_pwd,
+        )
+
+        for store_type, pwd in [
+            ("keystore", keystore_pwd),
+            ("truststore", truststore_pwd),
+        ]:
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_password",
+                pwd,
+            )
+
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.enabled_protocols",
+            "TLSv1.2",
+        )

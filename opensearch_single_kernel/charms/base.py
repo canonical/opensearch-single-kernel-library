@@ -11,6 +11,7 @@ import ops
 from opensearch_single_kernel.common.constants import Substrates
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
+from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
@@ -48,6 +49,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC, WithLogging):
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
+        self.tls_events = TLSEventsHandler(self)
 
     @property
     @abstractmethod

@@ -15,9 +15,9 @@ from ops import Unit
 from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     DeploymentType,
-    Scope,
     StartMode,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
@@ -42,10 +42,13 @@ def trigger_peer_rel_changed(
         return
 
     if on_other_units or not on_current_unit:
-        charm.peers_data.put(Scope.APP if only_by_leader else Scope.UNIT, "update-ts", time_ns())
+        if only_by_leader:
+            charm.state.application.update_ts = time_ns()
+        else:
+            charm.state.server.update_ts = time_ns()
 
     if on_current_unit:
-        charm.on[PEER_RELATION].relation_changed.emit(charm.model.get_relation(PEER_RELATION))
+        charm.on[PEER_RELATION].relation_changed.emit(charm.state.peer_relation)
 
 
 def mask_sensitive_information(cmd: str) -> str:
@@ -99,3 +102,31 @@ def deployment_type(
         if not config.init_hold
         else DeploymentType.FAILOVER_ORCHESTRATOR
     )
+
+
+def split_ca_chain(pem_content: str) -> list[str]:
+    """Split PEM chain into individual certificates."""
+    end_cert_marker = "-----END CERTIFICATE-----"
+    parts = [part.strip() for part in pem_content.split(end_cert_marker) if part.strip()]
+    return [f"{part}\n{end_cert_marker}" for part in parts]
+
+
+def normalized_tls_subject(subject: string) -> str:
+    """Removes any / character from a subject."""
+    if subject.startswith("/"):
+        subject = subject[1:]
+    return subject.replace("/", ",")
+
+
+def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
+    """Return True if keytool says that given alias does not exist.
+
+    Args:
+        exc: The OpenSearchCmdError to check.
+        alias: The alias that was attempted to be deleted.
+
+    Returns:
+        bool: True if the error message indicates that the alias does not exist.
+    """
+    msg = (exc.out or "") + (exc.err or "")
+    return f"Alias <{alias}> does not exist" in msg

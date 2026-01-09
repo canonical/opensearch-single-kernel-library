@@ -662,7 +662,7 @@ class OpenSearchServer(RelationState):
 
     @bootstrap_contributor.setter
     def bootstrap_contributor(self, value: bool):
-        """Set the value of 'bootstrap_contributor' in application state."""
+        """Set the value of 'bootstrap_contributor' in unit state."""
         self.update({"bootstrap_contributor": str(value)})
 
     @property
@@ -679,6 +679,46 @@ class OpenSearchServer(RelationState):
     def started(self) -> bool:
         """Get the value of 'started' key from unit data bag"""
         return bool(self.relation_data.get("started", ""))
+
+    @property
+    def tls_ca_renewing(self) -> bool:
+        """Return value of 'tls_ca_renewing' from unit state"""
+        return self.relation_data.get("tls_ca_renewing", "") == "True"
+
+    @tls_ca_renewing.setter
+    def tls_ca_renewing(self, value: bool):
+        """Update value of tls_ca_renewing from unit state."""
+        self.update({"tls_ca_renewing": str(value)})
+
+    @property
+    def tls_ca_renewed(self) -> bool:
+        """Get the value of 'tls_ca_renewed' from unit data bag"""
+        return self.relation_data.get("tls_ca_renewed", "") == "True"
+
+    @tls_ca_renewed.setter
+    def tls_ca_renewed(self, value: bool):
+        """Update value of 'tls_ca_renewed'"""
+        self.update({"tls_ca_renewed": str(value)})
+
+    @property
+    def tls_configured(self) -> bool:
+        """Get the value of 'tls_configured' from unit data bag."""
+        return self.relation_data.get("tls_configurd", "") == "True"
+
+    @tls_configured.setter
+    def tls_configured(self, value: bool):
+        """Update the value of 'tls_configured'"""
+        self.update({"tls_configured": str(value)})
+
+    @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the unit databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the unit databag."""
+        self.update({"update-ts": str(timestamp)})
 
 
 class OpenSearchApplication(RelationState):
@@ -794,6 +834,16 @@ class OpenSearchApplication(RelationState):
         elif not json.loads(cluster_fleet_apps):
             cluster_fleet_apps = json.loads(cluster_fleet_apps)
         return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
+
+    @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the application databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the application databag."""
+        self.update({"update-ts": str(timestamp)})
 
 
 class SecretCache:

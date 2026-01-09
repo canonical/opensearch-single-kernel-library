@@ -156,6 +156,117 @@ class ClusterState(Object, WithLogging):
         return self.model.get_unit(name)
 
     @property
+    def ca_rotation_complete_in_cluster(self) -> bool:
+        """Check whether the CA rotation completed in all units."""
+        rotation_happening = False
+        rotation_complete = True
+
+        # check current unit
+        self.logger.debug(
+            "current unit tls_ca_renewing:%s | tls_ca_renewed:%s",
+            self.server.tls_ca_renewing,
+            self.server.tls_ca_renewed,
+        )
+        if self.server.tls_ca_renewing:
+            rotation_happening = True
+        if not self.server.tls_ca_renewed:
+            self.logger.debug(
+                f"TLS CA rotation ongoing in unit: {self.server.unit_name}, will not update tls certificates."
+            )
+            rotation_complete = False
+        # TODO: Support peer cluster and peer cluster orchestrator
+        for relation_type in [
+            PEER_RELATION,
+            # PeerClusterRelationName,
+            # PeerClusterOrchestratorRelationName,
+        ]:
+            for relation in self.model.relations[relation_type]:
+                for unit in relation.units:
+                    self.logger.debug(
+                        f"Checking unit {unit} in relation {relation}: \
+                            tls_ca_renewing: {relation.data[unit].get('tls_ca_renewing')} \
+                            | tls_ca_renewed: {relation.data[unit].get('tls_ca_renewed')}"
+                    )
+                    if relation.data[unit].get("tls_ca_renewing"):
+                        rotation_happening = True
+
+                    if not relation.data[unit].get("tls_ca_renewed"):
+                        self.logger.debug(
+                            f"TLS CA rotation ongoing in unit {unit}, will not update tls certificates."
+                        )
+                        rotation_complete = False
+        self.logger.debug(
+            "CA rotation happening in cluster: %s | \
+                rotation complete in cluster: %s | return value: %s \
+                ",
+            rotation_happening,
+            rotation_complete,
+            not rotation_happening or rotation_complete,
+        )
+        # if no unit is renewing the CA, or all of them renewed it, the rotation is complete
+        return not rotation_happening or rotation_complete
+
+    def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
+        """Check whether the CA rotation completed in all units."""
+        rotation_complete = True
+
+        # the current unit is not in the relation.units list
+        # if tls is not configured or in the middle of rotation, return False
+        if not self.server.tls_configured or (
+            self.server.tls_ca_renewing and not self.server.tls_ca_renewed
+        ):
+            self.logger.debug("TLS CA and/or Cert rotation ongoing on this unit.")
+            return False
+
+        for relation_type in [
+            PEER_RELATION
+            # PeerClusterRelationName,
+            # PeerClusterOrchestratorRelationName,
+        ]:
+            for relation in self.model.relations[relation_type]:
+                self.logger.debug(f"Checking relation {relation}: units: {relation.units}")
+                for unit in relation.units:
+
+                    if relation.data[unit].get("tls_configured") != "True" or (
+                        relation.data[unit].get("tls_ca_renewing", False)
+                        and not relation.data[unit].get("tls_ca_renewed", False)
+                    ):
+                        self.logger.debug(
+                            f"TLS CA and or Cert rotation not complete for unit {unit}: {relation} \
+                                | tls_ca_renewing: {relation.data[unit].get('tls_ca_renewing')} \
+                                | tls_ca_renewed: {relation.data[unit].get('tls_ca_renewed')} \
+                                | tls_configured: {relation.data[unit].get('tls_configured')}"
+                        )
+                        rotation_complete = False
+                        break
+        return rotation_complete
+
+    def reset_ca_rotation_state(self) -> None:
+        """Handle internal flags during CA rotation routine."""
+        if not self.server.tls_ca_renewing:
+            # if the CA is not being renewed we don't have to do anything here
+            return
+
+        # if this flag is set, the CA rotation routine is complete for this unit
+        if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster():
+            # both CA rotation and certs rotation completed in the cluster
+            self.server.update({"tls_ca_renewing": None})
+            self.server.update({"tls_ca_renewed": None})
+            # TODO: Handle large deployment
+            # self.update_tls_flag_to_peer_cluster_relation(
+            # flag="tls_ca_renewing", operation="remove"
+            # )
+            # self.update_tls_flag_to_peer_cluster_relation(
+            #    flag="tls_ca_renewed", operation="remove"
+            # )
+            return
+
+        # this means only the CA rotation completed, still need to create certificates
+        self.server.tls_ca_renewed = True
+        # TODO: Handle large deployment
+        # self.update_tls_flag_to_peer_cluster_relation(flag="tls_ca_renewed", operation="add")
+
+    @property
     def network_ingress_address(self) -> str:
         """Get the public ip address of the unit."""
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
