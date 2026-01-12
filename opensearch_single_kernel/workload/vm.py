@@ -5,6 +5,7 @@
 """OpenSearch Machine VM Workload."""
 import os
 import subprocess
+from types import SimpleNamespace
 from typing import Optional
 
 from overrides import override
@@ -33,7 +34,7 @@ class VMWorkload(BaseWorkload):
 
     def __init__(self):
         super().__init__()
-        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(wait=5)):
+        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
                 self.opensearch_snap = cache["opensearch"]
@@ -61,27 +62,23 @@ class VMWorkload(BaseWorkload):
 
     @override
     def run_script(self, script_name: str, args: str = None):
-        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
+        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME.
+
+        Args:
+            script_name (str): The name of script file to execute.
+            args (str): Arguments passed to the script.
+        """
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):
-            self._run_cmd(f"chmod a+x {script_path}")
+            self.run_cmd(f"chmod a+x {script_path}")
 
-        self._run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @override
     def get_host_public_ip(self) -> Optional[str]:
         """Fetches the Public IP address of the current unit."""
         cmd = "unit-get public-address"
-        output = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-            text=True,
-            encoding="utf-8",
-            timeout=25,
-            env=os.environ,
-        )
+        output = self.run_cmd(cmd)
         if output.returncode != 0:
             return None
 
@@ -102,7 +99,7 @@ class VMWorkload(BaseWorkload):
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
         # First, we want to make sure the process is not stopped, dead or zombie.
         try:
-            pid = self._run_cmd("lsof", args="-ti:9200").out.rstrip()
+            pid = self.run_cmd("lsof", args="-ti:9200").out.rstrip()
             if not pid or not os.path.exists(f"/proc/{pid}/stat"):
                 return False
             with open(f"/proc/{pid}/stat") as f:
@@ -173,6 +170,8 @@ class VMWorkload(BaseWorkload):
         According to the kernel source code, the values are always in kB:
             https://github.com/torvalds/linux/blob/
                 2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
+        Returns:
+            meminfo: The memory info values.
         """
         with open("/proc/meminfo") as f:
             meminfo = f.read().split("\n")
@@ -182,27 +181,48 @@ class VMWorkload(BaseWorkload):
 
     @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
-        """Apply a system requirement."""
+        """Apply a system requirement.
+
+        Args:
+            system_requirement (str): Kernel parameter to update.
+            value (int): Value of the kernel parameter.
+
+        Returns:
+            applied (bool): Whether the kernel value is applied successfully.
+        """
         try:
-            self._run_cmd(f"sysctl -w {system_requirement}={value}")
-            return int(self._run_cmd(f"sysctl -n {system_requirement}")) == value
+            self.run_cmd(f"sysctl -w {system_requirement}={value}")
+            return int(self.run_cmd(f"sysctl -n {system_requirement}").out.rstrip()) == value
         except OpenSearchCmdError:
             return False
 
     @override
     def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter."""
-        return int(self._run_cmd(f"sysctl -n {prop}"))
+        """Get the value of a kernel parameter.
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.5), reraise=True)
+        Args:
+            prop (str): Kernel property name.
+
+        Returns:
+            value (int): Kernel property value.
+        """
+        return int(self._run_cmd(f"sysctl -n {prop}").out.rstrip())
+
     @override
-    def _run_cmd(self, command: str, args: str = None, stdin: str = None) -> str:
+    def run_cmd(
+        self,
+        command: str,
+        args: Optional[str] = None,
+        use_errors_replace: bool = False,
+        stdin: Optional[str] = None,
+    ) -> SimpleNamespace:
         """Run command.
 
-        Arg:
+        Args:
             command: can contain arguments
             args: command line arguments
             stdin: string input to be passed on the standard input of the subprocess
+            use_errors_replace: replace errors with empty string
 
         Returns the stdout
         """
@@ -214,18 +234,30 @@ class VMWorkload(BaseWorkload):
         command = mask_sensitive_information(command_with_args)
         self.logger.debug(f"Executing command: {command}")
 
+        run_kwargs = dict(
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True,
+            encoding="utf-8",
+            timeout=25,
+            env=os.environ,
+        )
+
+        # OpenSSL's "pkcs12 -in" output may contain non-UTF-8 bytes in Bag Attributes
+        # (e.g., friendlyName: debian:netlock_arany_=class_gold=_fQtanúsítvány.pem). When Python
+        # decodes stdout/stderr as UTF-8, this can raise UnicodeDecodeError.
+        #
+        # We enable errors="replace" only when explicitly requested (e.g., in list_cas or
+        # certificate-issuer parsing), because those commands only need ASCII PEM blocks
+        # and not the exact attribute encoding. All other commands (keytool, chmod, x509)
+        # should fail if their output is not valid UTF-8.
+        if use_errors_replace:
+            run_kwargs["errors"] = "replace"
+        if stdin:
+            run_kwargs["input"] = stdin
         try:
-            output = subprocess.run(
-                command_with_args,
-                input=stdin,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                env=os.environ,
-            )
+            output = subprocess.run(command_with_args, **run_kwargs)
 
             self.logger.debug(f"{command}:\n{output.stdout}")
 
@@ -233,13 +265,13 @@ class VMWorkload(BaseWorkload):
                 self.logger.debug(
                     f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}"
                 )
-                raise OpenSearchCmdError(output.stderr)
-        except (TimeoutError, subprocess.TimeoutExpired) as e:
-            raise OpenSearchCmdError(e)
-        return output.stdout.strip()
+                raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
+            return SimpleNamespace(cmd=command, out=output.stdout, err=output.stderr)
+        except (TimeoutError, subprocess.TimeoutExpired):
+            raise OpenSearchCmdError
 
     @property
     @override
-    def paths(self):
+    def paths(self) -> Paths:
         """Return Workload's paths"""
         return Paths(**VM_PATHS)

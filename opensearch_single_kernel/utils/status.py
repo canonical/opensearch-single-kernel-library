@@ -4,11 +4,10 @@
 
 """Helpers for Charm."""
 
-import logging
 import re
 from typing import TYPE_CHECKING, Optional
 
-from ops.model import ActiveStatus, WaitingStatus
+from ops.model import ActiveStatus
 
 from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.common.statuses import (
@@ -17,14 +16,13 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 from opensearch_single_kernel.utils.helpers import trigger_peer_rel_changed
-
-logger = logging.getLogger()
+from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
-class Status:
+class Status(WithLogging):
     """Class for managing the various status changes in a charm."""
 
     class CheckPattern(BaseStrEnum):
@@ -53,9 +51,9 @@ class Status:
         self.logger.info(f"Current health of cluster: {status}")
 
         if unit:
-            self._apply_for_unit(status)
+            self._apply_health_for_unit(status)
         if app:
-            self._apply_for_app(status)
+            self._apply_health_for_app(status)
 
         return status
 
@@ -80,11 +78,13 @@ class Status:
             # health is yellow permanently (some replica shards are unassigned)
             self.charm.status.set(CharmStatuses.CLUSTER_HEALTH_YELLOW, app=True)
 
-    def _apply_for_unit(self, status: str, host: Optional[str] = None):
+    def _apply_health_for_unit(self, status: str, host: Optional[str] = None):
         """Apply the health status on the current unit."""
         if status != HealthColors.YELLOW_TEMP:
             self.charm.status.clear(
-                WAITING_FOR_BUSY_SHARDS, pattern=Status.CheckPattern.Interpolated
+                CharmStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS,
+                dynamic_message="The shards: {} need to complete building.",
+                pattern=Status.CheckPattern.Interpolated,
             )
             return
 
@@ -98,8 +98,10 @@ class Status:
             return
 
         message = sorted([f"{key}/{','.join(val)}" for key, val in busy_shards.items()])
-        message = WAITING_FOR_BUSY_SHARDS.format(" - ".join(message))
-        self.charm.status.set(WaitingStatus(message))
+        message = "The shards: {} need to complete building.".format(" - ".join(message))
+        self.charm.status.set(
+            CharmStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS, dynamic_message=message
+        )
 
     def clear(
         self,

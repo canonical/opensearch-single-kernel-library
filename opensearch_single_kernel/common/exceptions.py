@@ -34,7 +34,7 @@ class OpenSearchSecretError(OpenSearchError):
 
 
 class OpenSearchSecretInsertionError(OpenSearchSecretError):
-    """Exception thrown when a secret (group) was not found."""
+    """Exception thrown when a secret couldn't be updated / added."""
 
 
 class OpenSearchHttpError(OpenSearchError):
@@ -62,7 +62,7 @@ class OpenSearchNotFullyReadyError(OpenSearchError):
     """Exception thrown when a node is started but not full ready to take on requests."""
 
 
-class OpenSearchUserMgmtError(Exception):
+class OpenSearchUserMgmtError(OpenSearchError):
     """Base exception class for OpenSearch user management errors."""
 
 
@@ -73,3 +73,4 @@ class OpenSearchCmdError(OpenSearchError):
         self.cmd = cmd
         self.out = out
         self.err = err
+        super().__init__(f"Command failed: {cmd}\nstdout={out}\nstderr={err}")

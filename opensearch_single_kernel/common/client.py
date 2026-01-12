@@ -41,8 +41,15 @@ class OpenSearchClient(WithLogging):
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def get_node_id(self, unit_name: str) -> str:
-        """Get the OpenSearch node id corresponding to the unit."""
+    def get_node_id(self, unit_name: str) -> Optional[str]:
+        """Get the OpenSearch node id corresponding to the unit.
+
+        Args:
+            unit_name: The name of opensearch unit.
+
+        Returns:
+            node_id (Optional[str]): The opensearch unit id.
+        """
         nodes = self.request("GET", "/_nodes").get("nodes")
 
         for n_id, node in nodes.items():
@@ -50,9 +57,20 @@ class OpenSearchClient(WithLogging):
                 return n_id
 
     def get_roles(self, unit_name: str, alt_hosts: Optional[List[str]]) -> List[str]:
-        """Get the list of the roles assigned to this node."""
-        nodes = self.request("GET", f"/_nodes/{self.get_node_id(unit_name)}", alt_hosts=alt_hosts)
-        return nodes["nodes"][self.get_node_id]["roles"]
+        """Get the list of the roles assigned to this node.
+
+        Args:
+            unit_name (str): The name of the unit.
+            alt_hosts: (Optional[List[str]]): List of alternative hosts.
+
+        Returns:
+            roles (List[str]): List of opensearch unit roles.
+        """
+        node_id = self.get_node_id(unit_name)
+        if not node_id:
+            return []
+        nodes = self.request("GET", f"/_nodes/{node_id}", alt_hosts=alt_hosts)
+        return nodes["nodes"][node_id]["roles"]
 
     @retry(
         stop=stop_after_attempt(3),
@@ -87,7 +105,7 @@ class OpenSearchClient(WithLogging):
                     shard_info = {
                         "index": index_name,
                         "shard": shard_num,
-                        "prirep": shard["primary"] and "p" or "r",
+                        "prirep": "p" if shard.get("primary") else "r",
                         "state": shard["state"],
                         "ip": node_ip,
                         "node": node_name,
@@ -173,6 +191,8 @@ class OpenSearchClient(WithLogging):
         alt_hosts: Optional[List[str]] = None,
     ) -> Dict[str, Dict[str, str]]:
         """Get all shards of all indexes in the cluster."""
+        if not host:
+            host = self.host
         # Get cluster state
         cluster_state = self.request(
             "GET", "/_cluster/state?filter_path=metadata.indices", host=host, alt_hosts=alt_hosts
@@ -195,8 +215,7 @@ class OpenSearchClient(WithLogging):
 
     def get_nodes(self, host: Optional[str] = None, alt_hosts: Optional[List[str]] = None):
         """Call the /_nodes API endpoint of opensearch"""
-        response = self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
-        return response
+        return self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
 
     def is_node_up(self, host: Optional[str] = None) -> bool:
         """Get status of node.
@@ -233,7 +252,7 @@ class OpenSearchClient(WithLogging):
         retries: int = 0,
         ignore_retry_on: Optional[List] = None,
         timeout: int = 5,
-        cert_files: Optional[Tuple[str]] = None,
+        cert_files: Optional[Tuple[str, str]] = None,
     ) -> Union[Dict[str, any], List[any], int]:
         """Make an HTTP request.
 
@@ -272,7 +291,8 @@ class OpenSearchClient(WithLogging):
                     if cert_files:
                         s.cert = cert_files
                     else:
-                        s.auth = ("admin", self.admin_secret)
+                        if self.admin_secret:
+                            s.auth = ("admin", self.admin_secret)
 
                     request_kwargs = {
                         "method": method.upper(),
@@ -293,7 +313,9 @@ class OpenSearchClient(WithLogging):
                     try:
                         response.raise_for_status()
                     except requests.RequestException as ex:
-                        if ex.response.status_code in (ignore_retry_on or []):
+                        if (ex.response is not None) and (
+                            ex.response.status_code in (ignore_retry_on or [])
+                        ):
                             raise OpenSearchHttpError(
                                 response_text=ex.response.text,
                                 response_code=ex.response.status_code,

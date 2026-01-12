@@ -3,7 +3,7 @@
 
 """Statuses for the OpenSearch Charm.
 
-This module defines various status enums that represent the state of the charm,
+This module defines various status enums that represent the state of the charm.
 """
 from enum import Enum
 
@@ -37,13 +37,14 @@ class CharmStatuses(Enum):
     CLUSTER_HEALTH_RED = BlockedStatus(
         "1 or more 'primary' shards are not assigned, please scale your application up."
     )
-    CLUSTER_HEALTH_UKNOWN = BlockedStatus(
+    CLUSTER_HEALTH_UNKNOWN = BlockedStatus(
         "No unit online, cannot determine if it's safe to scale-down."
     )
     CLUSTER_HEALTH_YELLOW = BlockedStatus(
         "1 or more 'replica' shards are not assigned, please scale your application up."
     )
     WAITING_FOR_BUSY_SHARDS = MaintenanceStatus("Some shards are still initializing / relocating.")
+    WAITING_FOR_SPECIFIC_BUSY_SHARDS = WaitingStatus("The shards need to complete building")
 
     # Lock Status
     REQUEST_LOCK_ON_START = WaitingStatus("Requesting lock on operation: start")
@@ -77,6 +78,3 @@ class CharmStatuses(Enum):
     DATA_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
         "Removal of data role from current deployment not allowed - the data cannot be reallocated."
     )
-
-
-WAITING_FOR_BUSY_SHARDS = "The shards: {} need to complete building."
