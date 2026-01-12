@@ -5,7 +5,13 @@
 """Handler for TLS events."""
 from typing import TYPE_CHECKING, Any, Dict, Union
 
-from ops import EventSource, Object, RelationBrokenEvent, RelationCreatedEvent
+from ops import (
+    ActionEvent,
+    EventSource,
+    Object,
+    RelationBrokenEvent,
+    RelationCreatedEvent,
+)
 
 from opensearch_single_kernel.common.constants import (
     TLS_RELATION,
@@ -44,6 +50,7 @@ class TLSEventsHandler(Object, WithLogging):
         self.certs = TLSCertificatesRequiresV3(charm, TLS_RELATION, expiry_notification_time=23)
 
         # Events
+        self.framework.observe(self.charm.on.set_tls_private_key_action, self._on_set_private_key)
         self.framework.observe(
             self.charm.on[TLS_RELATION].relation_created, self._on_tls_relation_created
         )
@@ -56,6 +63,35 @@ class TLSEventsHandler(Object, WithLogging):
         self.framework.observe(
             self.certs.on.certificate_invalidated, self._on_certificate_invalidated
         )
+
+    def _on_set_private_key(self, event: ActionEvent):
+        """Set the TLS private key, which will be used for requesting the certificate."""
+        if not self.charm.state.application.deployment_desc:
+            event.fail("The action can only be run once the deployment is complete.")
+            return
+        # TODO: Check if the charm is in upgrade
+
+        cert_type = CertType(event.params["category"])  # type
+        scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
+        if scope == Scope.APP and not (
+            self.charm.unit.is_leader()
+            and self.charm.state.application.deployment_desc.typ
+            == DeploymentType.MAIN_ORCHESTRATOR
+        ):
+            event.log(
+                "Only the juju leader unit of the main orchestrator can set private key for the admin certificates."
+            )
+            return
+
+        try:
+            csr = self.charm.tls_manager.create_certificate_signing_request(
+                scope, cert_type, event.params.get("key", None), event.params.get("password", None)
+            )
+            if self.charm.model.get_relation(TLS_RELATION):
+                self.certs.request_certificate_creation(certificate_signing_request=csr)
+
+        except ValueError as e:
+            event.fail(str(e))
 
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""

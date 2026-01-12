@@ -24,7 +24,7 @@ homepage = "https://github.com/canonical/opensearch-single-kernel-library"
 repository = "https://github.com/canonical/opensearch-single-kernel-library"
 "Bug Tracker" = "https://github.com/canonical/opensearch-single-kernel-library/issues"
 "Matrix" = "https://matrix.to/#/#charmhub-data-platform:ubuntu.com"
-"Contribute" = "https://github.com/canonical/mongo-single-kernel-library/blob/main/CONTRIBUTING.md"
+"Contribute" = "https://github.com/canonical/opensearch-single-kernel-library/blob/main/CONTRIBUTING.md"
 
 [tool.poetry]
 requires-poetry = ">=2.0.0"
