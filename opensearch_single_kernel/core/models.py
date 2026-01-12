@@ -22,7 +22,7 @@ from pydantic.utils import ROOT_KEY
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
-    MAX_HEAP_SIZE,
+    MAX_HEAP_SIZE_IN_KB,
     PERFORMANCE_PROFILE,
     DeploymentType,
     Directive,
@@ -491,7 +491,9 @@ class OpenSearchProfile(ABC):
     def get_jvm_heap_size(self, mem_size: float) -> int:
         """Get the JVM heap size in KB based on the memory requirements."""
         if self.memory_requirements.jvm_heap_percentage:
-            return min(int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE)
+            return min(
+                int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE_IN_KB
+            )
         return _1GB_IN_KB
 
     def __hash__(self):
