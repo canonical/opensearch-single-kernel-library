@@ -11,7 +11,6 @@ from ops.model import ActiveStatus
 
 from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.common.statuses import (
-    WAITING_FOR_BUSY_SHARDS,
     CharmStatuses,
 )
 from opensearch_single_kernel.utils.enum import BaseStrEnum
@@ -93,7 +92,7 @@ class Status(WithLogging):
         )
         if not busy_shards:
             self.charm.status.clear(
-                WAITING_FOR_BUSY_SHARDS, pattern=Status.CheckPattern.Interpolated
+                CharmStatuses.WAITING_FOR_BUSY_SHARDS, pattern=Status.CheckPattern.Interpolated
             )
             return
 
