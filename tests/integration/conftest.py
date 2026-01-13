@@ -1,6 +1,5 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-
 import os
 from logging import getLogger
 from pathlib import Path
@@ -61,6 +60,6 @@ def series(ubuntu_base) -> str:
 @pytest.fixture
 def charm(substrate: Substrate, opensearch_base_path: str, ubuntu_base: str) -> str:
     """The OpenSearch charm path, to deploy charms, according to the substrate."""
-    if substrate == "microk8s":
+    if substrate == "k8s":
         return f"./{opensearch_base_path}/opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm"
     return f"./{opensearch_base_path}/opensearch_ubuntu@{ubuntu_base}-amd64.charm"
