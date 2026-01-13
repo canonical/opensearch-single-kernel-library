@@ -42,8 +42,8 @@ jobs:
           )
           jobs = []
           for job in spread_jobs:
-              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py"
-              _, runner, task = job.split(":")
+              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
+              _, runner, task, variant = job.split(":")
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
@@ -51,9 +51,9 @@ jobs:
               else:
                   architecture = "amd64"
               # Example: "test_charm.py | amd64"
-              name = f"{task} | {architecture}"
+              name = f"{task}:{variant} | {architecture}"
               # ":" character not valid in GitHub Actions artifact
-              name_in_artifact = f"{task.replace('/', '-')}-{architecture}"
+              name_in_artifact = f"{task.replace('/', '-')}-{variant}-{architecture}"
               jobs.append({
                   "spread_job": job,
                   "name": name,
