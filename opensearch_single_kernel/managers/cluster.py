@@ -3,9 +3,10 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Cluster manager."""
+
+import logging
 import time
 from datetime import datetime
-from typing import List, Optional
 
 from shortuuid import ShortUUID
 from tenacity import (
@@ -44,6 +45,8 @@ from opensearch_single_kernel.utils.helpers import deployment_type
 from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
+logger = logging.getLogger(__name__)
+
 
 class ClusterManager(BaseManager):
     """OpenSearch Cluster Manager.
@@ -75,17 +78,17 @@ class ClusterManager(BaseManager):
         while not (connected := _is_connected()) and (datetime.now() - start).seconds < 180:
             time.sleep(3)
         if not connected:
-            self.logger.debug(f"waited {datetime.now() - start} opensearch did not start")
+            logger.debug(f"waited {datetime.now() - start} opensearch did not start")
             raise OpenSearchStartTimeoutError()
 
     def reconcile_peer_cluster_config(self) -> None:
         """Init, or updates / recomputes current peer cluster related config if applies."""
-        self.logger.debug("Running peer cluster manager reconcile function")
+        logger.debug("Running peer cluster manager reconcile function")
         user_config = self._user_config()
         if not (self.state.application.deployment_desc):
             # new cluster
             deployment_desc = self._new_cluster_setup(user_config)
-            self.logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
+            logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
             self.state.application.put_object("deployment-description", deployment_desc.to_dict())
             return
 
@@ -93,7 +96,7 @@ class ClusterManager(BaseManager):
 
     def _new_cluster_setup(self, config: PeerClusterConfig) -> DeploymentDescription:
         """Build deployment description of a new cluster."""
-        self.logger.debug("New cluster setup")
+        logger.debug("New cluster setup")
         directives = []
         deployment_state = DeploymentState(value=State.ACTIVE)
         if config.init_hold:
@@ -221,7 +224,7 @@ class ClusterManager(BaseManager):
             self._put_security_index_initialised()
 
         except OpenSearchCmdError as e:
-            self.logger.debug(f"Error when initializing the security index: {e.out}")
+            logger.debug(f"Error when initializing the security index: {e.out}")
             raise e
 
     def apply_peer_cm_directives_and_check_if_can_start(self) -> bool:
@@ -231,7 +234,7 @@ class ClusterManager(BaseManager):
             return False
 
         # check possibility to start
-        self.logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
+        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
         if self.can_start(deployment_desc):
             try:
                 self.get_nodes(False)
@@ -259,7 +262,7 @@ class ClusterManager(BaseManager):
                 if not self.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
-    def can_start(self, deployment_desc: Optional[DeploymentDescription] = None) -> bool:
+    def can_start(self, deployment_desc: DeploymentDescription | None = None) -> bool:
         """Return whether the service of a node can start."""
         if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
@@ -270,15 +273,15 @@ class ClusterManager(BaseManager):
             Directive.VALIDATE_CLUSTER_NAME,
             Directive.INHERIT_CLUSTER_NAME,
         ]
-        self.logger.debug("Directives: %s", deployment_desc.pending_directives)
+        logger.debug("Directives: %s", deployment_desc.pending_directives)
         for directive in deployment_desc.pending_directives:
             if directive in blocking_directives:
-                self.logger.debug("blocking directive %s", directive)
+                logger.debug("blocking directive %s", directive)
                 return False
 
         return True
 
-    def get_nodes(self, use_localhost: bool) -> List[Node]:
+    def get_nodes(self, use_localhost: bool) -> list[Node]:
         """Fetch the list of nodes of the cluster, depending on the requester."""
         if self.state.planned_units == 0 and not self.state.application.deployment_desc:
             # This app is going away and the -broken event already happened
@@ -307,10 +310,10 @@ class ClusterManager(BaseManager):
             return
 
         deployment_desc.pending_directives.remove(directive)
-        self.logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
+        logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
         self.state.application.put_object("deployment-description", deployment_desc.to_dict())
 
-    def compute_and_broadcast_updated_topology(self, current_nodes: List[Node]) -> bool:
+    def compute_and_broadcast_updated_topology(self, current_nodes: list[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
 
         Returns whether a nodes_config object has been updated or not.
@@ -327,7 +330,7 @@ class ClusterManager(BaseManager):
             deployment_desc := self.state.application.deployment_desc
         ).start == StartMode.WITH_GENERATED_ROLES:
             updated_nodes = ClusterTopology.recompute_nodes_conf(
-                logger=self.logger, app_id=deployment_desc.app.id, nodes=current_nodes
+                app_id=deployment_desc.app.id, nodes=current_nodes
             )
         else:
             updated_nodes = {}
@@ -385,9 +388,9 @@ class ClusterManager(BaseManager):
 
     def configure_bootstrap_contributors(
         self,
-        computed_roles: List[str],
-        cm_names: List[str],
-        cm_ips: List[str],
+        computed_roles: list[str],
+        cm_names: list[str],
+        cm_ips: list[str],
     ) -> bool:
         """Configure application state with bootstrap contributors.
 
@@ -445,12 +448,12 @@ class ClusterManager(BaseManager):
         """Returns whether OpenSearch has started."""
         reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
         if not reachable:
-            self.logger.debug("Cannot connect to the OpenSearch server...")
+            logger.debug("Cannot connect to the OpenSearch server...")
 
         return reachable
 
     @property
-    def roles(self) -> List[str]:
+    def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
             return self.opensearch_client.get_roles(

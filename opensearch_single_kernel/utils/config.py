@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Utilities for editing yaml config files at any depth level and maintaining comments."""
-
+import logging
 import re
 import sys
 import uuid
@@ -12,13 +12,13 @@ from collections.abc import Mapping
 from enum import Enum
 from io import StringIO
 from os.path import exists
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from overrides import override
 from ruamel.yaml import YAML, CommentedSeq
 from ruamel.yaml.comments import CommentedSet
 
-from opensearch_single_kernel.utils.logging import WithLogging
+logger = logging.getLogger(__name__)
 
 
 class OutputType(Enum):
@@ -34,7 +34,7 @@ class OutputType(Enum):
         return self.value
 
 
-class ConfigSetter(ABC, WithLogging):
+class ConfigSetter(ABC):
     """Base class for manipulating YAML Config, of multiple types and any depth level.
 
     conf_setter = YamlConfigSetter() or another config setter
@@ -53,7 +53,7 @@ class ConfigSetter(ABC, WithLogging):
         self.base_path = self.__clean_base_path(base_path)
 
     @abstractmethod
-    def load(self, config_file: str) -> Dict[str, any]:
+    def load(self, config_file: str) -> Dict[str, Any]:
         """Load the content of a YAML file."""
         pass
 
@@ -62,12 +62,12 @@ class ConfigSetter(ABC, WithLogging):
         self,
         config_file: str,
         key_path: str,
-        val: any,
+        val: Any,
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
         output_file: str = None,
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """Add or update the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -95,7 +95,7 @@ class ConfigSetter(ABC, WithLogging):
         sep="/",
         output_type: OutputType = OutputType.file,
         output_file: str = None,
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """Delete the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -116,7 +116,7 @@ class ConfigSetter(ABC, WithLogging):
         self,
         config_file: str,
         old_val: str,
-        new_val: any,
+        new_val: Any,
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
@@ -171,7 +171,7 @@ class YamlConfigSetter(ConfigSetter):
         self.yaml = YAML()
 
     @override
-    def load(self, config_file: str) -> Dict[str, any]:
+    def load(self, config_file: str) -> Dict[str, Any]:
         """Load the content of a YAML file."""
         path = f"{self.base_path}{config_file}"
 
@@ -194,12 +194,12 @@ class YamlConfigSetter(ConfigSetter):
         self,
         config_file: str,
         key_path: str,
-        val: any,
+        val: Any,
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
         output_file: str = None,
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """Add or update the value of a key (or content of array at index / key) if it exists."""
         data = self.load(config_file)
 
@@ -243,7 +243,7 @@ class YamlConfigSetter(ConfigSetter):
         self,
         config_file: str,
         old_val: str,
-        new_val: any,
+        new_val: Any,
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
@@ -276,7 +276,7 @@ class YamlConfigSetter(ConfigSetter):
             data = f"{data.rstrip()}\n{new_val}\n"
 
         if output_type in [OutputType.console, OutputType.all]:
-            self.logger.info(data)
+            logger.info(data)
 
         if output_file is None:
             output_file = path
@@ -304,7 +304,7 @@ class YamlConfigSetter(ConfigSetter):
         with open(path, "a") as f:
             f.write("\n" + text_to_append)
 
-    def __dump(self, data: Dict[str, any], output_type: OutputType, target_file: str):
+    def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream."""
         if not data:
             return
@@ -316,7 +316,7 @@ class YamlConfigSetter(ConfigSetter):
             with open(target_file, mode="w") as f:
                 self.yaml.dump(data, f)
 
-    def __deep_update(self, source, node_keys: List[str], val: any):
+    def __deep_update(self, source, node_keys: List[str], val: Any):
         """Recursively traverses the tree of nodes, and writes the value accordingly.
 
         Arg:
@@ -405,7 +405,7 @@ class YamlConfigSetter(ConfigSetter):
             del leaf_container[target_index]
         except AttributeError:
             # element not found
-            self.logger.debug("Target element not found.")
+            logger.debug("Target element not found.")
             pass
 
     def __leaf_container(self, current, node_names: List[str]):
@@ -446,7 +446,7 @@ class YamlConfigSetter(ConfigSetter):
 
         return int(str_index) if index is None else index
 
-    def __inline_array_format(self, data, node_keys: List[str], val: List[any]) -> Dict[str, any]:
+    def __inline_array_format(self, data, node_keys: List[str], val: List[Any]) -> Dict[str, Any]:
         """Reformat a multiline YAML array into one with square braces."""
         leaf_k = node_keys[-1]
 

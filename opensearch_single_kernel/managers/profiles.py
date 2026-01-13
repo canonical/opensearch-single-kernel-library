@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch profiles."""
-from typing import List
+import logging
 
 from opensearch_single_kernel.common.constants import PerformanceType, StartMode
 from opensearch_single_kernel.core.models import (
@@ -18,6 +18,8 @@ from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
+logger = logging.getLogger(__name__)
+
 
 class ProfilesManager(BaseManager):
     """Manage all profile related operations"""
@@ -27,19 +29,19 @@ class ProfilesManager(BaseManager):
         self.name = "profiles_manager"
         try:
             if self.profile.type == PerformanceType.TESTING:
-                self.logger.warning(
+                logger.warning(
                     "Testing profile is used. This profile is not suitable for production use and should only be used for testing purposes."
                 )
         except ValueError:
-            self.logger.error(
+            logger.error(
                 "Invalid profile configuration. Value: %s", self.state.config.get("profile")
             )
 
-    def check_missing_system_requirements(self) -> List[str]:
+    def check_missing_system_requirements(self) -> list[str]:
         """Checks the system requirements."""
         return self.workload.check_missing_system_requirements()
 
-    def check_memory_requirements(self, profile: OpenSearchProfile) -> List[str]:
+    def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
         memory_size = self.workload.meminfo()["MemTotal"]
 
@@ -47,7 +49,7 @@ class ProfilesManager(BaseManager):
             profile.memory_requirements.memory_size
             and memory_size < profile.memory_requirements.memory_size
         ):
-            self.logger.error(
+            logger.error(
                 "Insufficient memory: %s < %s",
                 memory_size,
                 profile.memory_requirements.memory_size,
@@ -59,7 +61,7 @@ class ProfilesManager(BaseManager):
 
         return []
 
-    def check_cluster_topology(self, profile: OpenSearchProfile) -> List[str]:
+    def check_cluster_topology(self, profile: OpenSearchProfile) -> list[str]:
         """Check the cluster topology requirements."""
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         current_app = self._current_peer_cluster_app()
@@ -68,7 +70,7 @@ class ProfilesManager(BaseManager):
         if not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps:
             cluster_fleet_apps[current_app.app.id] = current_app
 
-        self.logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)
+        logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)
         error_message = None
 
         nbr_cm_nodes = sum(
@@ -90,7 +92,7 @@ class ProfilesManager(BaseManager):
             case _:
                 return []
 
-        self.logger.error("Missing cluster topology requirements: %s", error_message)
+        logger.error("Missing cluster topology requirements: %s", error_message)
         return [error_message]
 
     def _current_peer_cluster_app(self) -> PeerClusterApp:

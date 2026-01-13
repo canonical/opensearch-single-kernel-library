@@ -3,9 +3,9 @@
 # See LICENSE file for licensing details.
 
 """Helpers for Charm."""
-
+import logging
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ops.model import ActiveStatus
 
@@ -15,13 +15,14 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 from opensearch_single_kernel.utils.helpers import trigger_peer_rel_changed
-from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
+logger = logging.getLogger(__name__)
 
-class Status(WithLogging):
+
+class Status:
     """Class for managing the various status changes in a charm."""
 
     class CheckPattern(BaseStrEnum):
@@ -47,7 +48,7 @@ class Status(WithLogging):
         status = self.charm.health_manager.get(
             wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
         )
-        self.logger.info(f"Current health of cluster: {status}")
+        logger.info(f"Current health of cluster: {status}")
 
         if unit:
             self._apply_health_for_unit(status)
@@ -77,7 +78,7 @@ class Status(WithLogging):
             # health is yellow permanently (some replica shards are unassigned)
             self.charm.status.set(CharmStatuses.CLUSTER_HEALTH_YELLOW, app=True)
 
-    def _apply_health_for_unit(self, status: str, host: Optional[str] = None):
+    def _apply_health_for_unit(self, status: str, host: str | None = None):
         """Apply the health status on the current unit."""
         if status != HealthColors.YELLOW_TEMP:
             self.charm.status.clear(
@@ -106,7 +107,7 @@ class Status(WithLogging):
         self,
         status: CharmStatuses,
         pattern: CheckPattern = CheckPattern.Equal,
-        dynamic_message: Optional[str] = None,
+        dynamic_message: str | None = None,
         app: bool = False,
     ):
         """Resets the unit status if it was previously blocked/maintenance with message."""
@@ -143,7 +144,7 @@ class Status(WithLogging):
             context.status = ActiveStatus()
 
     def set(
-        self, charm_status: CharmStatuses, app: bool = False, dynamic_message: Optional[str] = None
+        self, charm_status: CharmStatuses, app: bool = False, dynamic_message: str | None = None
     ):
         """Set status on unit or app IF not already set.
 

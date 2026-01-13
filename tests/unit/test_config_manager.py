@@ -3,7 +3,7 @@
 
 """Unit Tests for config Manager functions."""
 
-from typing import Dict
+from typing import Any
 from unittest.mock import PropertyMock
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode, State
@@ -27,7 +27,7 @@ def test_set_client_auth(harness, mocker):
     yaml_conf_setter = YamlConfigSetter()
     configure_opensearch_config(harness, mocker)
 
-    def authc() -> Dict[str, any]:
+    def authc() -> dict[str, Any]:
         return security_conf["config"]["dynamic"]["authc"]
 
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)

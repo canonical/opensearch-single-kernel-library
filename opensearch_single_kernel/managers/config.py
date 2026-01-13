@@ -3,8 +3,9 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Config manager."""
+
+import logging
 from collections import namedtuple
-from typing import List, Optional
 
 from opensearch_single_kernel.core.models import (
     App,
@@ -14,6 +15,8 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigManager(BaseManager):
@@ -33,11 +36,11 @@ class ConfigManager(BaseManager):
         app: App,
         cluster_name: str,
         unit_name: str,
-        roles: List[str],
-        cm_names: List[str],
-        cm_ips: List[str],
+        roles: list[str],
+        cm_names: list[str],
+        cm_ips: list[str],
         contribute_to_bootstrap: bool,
-        node_temperature: Optional[str] = None,
+        node_temperature: str | None = None,
     ) -> None:
         """Set base config for each node in the cluster."""
         self.yaml_setter.put(self.CONFIG_YML, "cluster.name", cluster_name)
@@ -167,7 +170,7 @@ class ConfigManager(BaseManager):
                 continue
 
             if host.old != host.new:
-                self.logger.info(f"Updating {host.entry} from: {host.old} - to: {host.new}")
+                logger.info(f"Updating {host.entry} from: {host.old} - to: {host.new}")
                 self.yaml_setter.put(self.CONFIG_YML, host.entry, host.new)
                 result = True
 
@@ -205,7 +208,7 @@ class ConfigManager(BaseManager):
             return False
         return True
 
-    def add_seed_hosts(self, cm_ips: List[str]):
+    def add_seed_hosts(self, cm_ips: list[str]):
         """Add CM nodes ips / host names to the seed host list of this unit."""
         cm_ips_set = set(cm_ips)
 

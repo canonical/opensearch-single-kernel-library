@@ -6,8 +6,9 @@
 """OpenSearch Client."""
 
 import json
+import logging
 import random
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import requests
 import urllib3
@@ -22,15 +23,16 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.workload.base import BaseWorkload
 
+logger = logging.getLogger(__name__)
 
-class OpenSearchClient(WithLogging):
+
+class OpenSearchClient:
     """Handle OpenSearch Interaction with Server."""
 
     def __init__(
-        self, workload: BaseWorkload, host: str, port: int, admin_secret: Optional[str] = None
+        self, workload: BaseWorkload, host: str, port: int, admin_secret: str | None = None
     ):
         """Initialise the client.
 
@@ -41,7 +43,7 @@ class OpenSearchClient(WithLogging):
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def get_node_id(self, unit_name: str) -> Optional[str]:
+    def get_node_id(self, unit_name: str) -> str | None:
         """Get the OpenSearch node id corresponding to the unit.
 
         Args:
@@ -56,7 +58,7 @@ class OpenSearchClient(WithLogging):
             if node["name"] == unit_name:
                 return n_id
 
-    def get_roles(self, unit_name: str, alt_hosts: Optional[List[str]]) -> List[str]:
+    def get_roles(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
         """Get the list of the roles assigned to this node.
 
         Args:
@@ -79,10 +81,10 @@ class OpenSearchClient(WithLogging):
     )
     def get_shards(
         self,
-        host: Optional[str] = None,
-        alt_hosts: Optional[List[str]] = None,
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
         verbose: bool = False,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """Get all shards of all indexes in the cluster."""
         cluster_state = self.request(
             "GET", "_cluster/state/routing_table,metadata,nodes", host=host, alt_hosts=alt_hosts
@@ -119,9 +121,9 @@ class OpenSearchClient(WithLogging):
 
     def get_busy_shards_by_unit(
         self,
-        host: Optional[str] = None,
-        alt_hosts: Optional[List[str]] = None,
-    ) -> Dict[str, List[str]]:
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> dict[str, list[str]]:
         """Get the busy shards of each index in the cluster."""
         shards = self.get_shards(host=host, alt_hosts=alt_hosts)
 
@@ -146,9 +148,9 @@ class OpenSearchClient(WithLogging):
     )
     def get_allocation_explain(
         self,
-        host: Optional[str] = None,
-        alt_hosts: Optional[List[str]] = None,
-    ) -> List[Dict[str, str]]:
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> list[dict[str, str]]:
         """Get all shards of all indexes in the cluster."""
         return self.request(
             "GET",
@@ -158,8 +160,8 @@ class OpenSearchClient(WithLogging):
         )
 
     def get_health(
-        self, host: str, wait_for_green: bool, alt_hosts: Optional[List[str]] = None
-    ) -> Optional[Dict[str, any]]:
+        self, host: str, wait_for_green: bool, alt_hosts: list[str] | None = None
+    ) -> dict[str, Any] | None:
         """Fetch the cluster health."""
         endpoint = "/_cluster/health"
 
@@ -187,9 +189,9 @@ class OpenSearchClient(WithLogging):
     )
     def get_indices(
         self,
-        host: Optional[str] = None,
-        alt_hosts: Optional[List[str]] = None,
-    ) -> Dict[str, Dict[str, str]]:
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> dict[str, dict[str, str]]:
         """Get all shards of all indexes in the cluster."""
         if not host:
             host = self.host
@@ -213,11 +215,11 @@ class OpenSearchClient(WithLogging):
             }
         return idx
 
-    def get_nodes(self, host: Optional[str] = None, alt_hosts: Optional[List[str]] = None):
+    def get_nodes(self, host: str | None = None, alt_hosts: list[str] | None = None):
         """Call the /_nodes API endpoint of opensearch"""
         return self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
 
-    def is_node_up(self, host: Optional[str] = None) -> bool:
+    def is_node_up(self, host: str | None = None) -> bool:
         """Get status of node.
 
         This assumes OpenSearch is Running. Defaults to this unit
@@ -237,23 +239,23 @@ class OpenSearchClient(WithLogging):
             )
             return resp_code < 400
         except (OpenSearchHttpError, Exception) as e:
-            self.logger.debug(f"Error when checking if host {host} is up: {e}")
+            logger.debug(f"Error when checking if host {host} is up: {e}")
             return False
 
     def request(  # noqa
         self,
         method: str,
         endpoint: str,
-        payload: Optional[Union[str, Dict[str, any], List[Dict[str, any]]]] = None,
-        host: Optional[str] = None,
-        alt_hosts: Optional[List[str]] = None,
+        payload: str | dict[str, Any] | list[dict[str, Any]] | None = None,
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
         check_hosts_reach: bool = True,
         resp_status_code: bool = False,
         retries: int = 0,
-        ignore_retry_on: Optional[List] = None,
+        ignore_retry_on: list | None = None,
         timeout: int = 5,
-        cert_files: Optional[Tuple[str, str]] = None,
-    ) -> Union[Dict[str, any], List[any], int]:
+        cert_files: tuple[str, str] | None = None,
+    ) -> dict[str, Any] | list[Any] | int:
         """Make an HTTP request.
 
         Args:
@@ -274,7 +276,7 @@ class OpenSearchClient(WithLogging):
             OpenSearchHttpError if hosts are unreachable
         """
 
-        def call(urls: List[str]) -> requests.Response:
+        def call(urls: list[str]) -> requests.Response:
             """Performs an HTTP request."""
             random.shuffle(urls)
 
@@ -291,8 +293,7 @@ class OpenSearchClient(WithLogging):
                     if cert_files:
                         s.cert = cert_files
                     else:
-                        if self.admin_secret:
-                            s.auth = ("admin", self.admin_secret)
+                        s.auth = ("admin", self.admin_secret)
 
                     request_kwargs = {
                         "method": method.upper(),
@@ -367,13 +368,13 @@ class OpenSearchClient(WithLogging):
             raise OpenSearchHttpError(response_text=str(e))
 
     def get_log_error_http_retry(
-        self, retry_max: int, method: str, urls: List[str], payload: Optional[Dict[str, Any]]
+        self, retry_max: int, method: str, urls: list[str], payload: dict[str, Any] | None
     ):
         """Return a custom log function to run before a new Tenacity retry."""
 
         def log_error(retry_state: RetryCallState):
             url = urls[(retry_state.attempt_number - 1) % len(urls)]
-            self.logger.debug(
+            logger.debug(
                 f"Request {method} to {url} with payload: {payload} failed."
                 f"(Attempts left: {retry_max - retry_state.attempt_number})\n"
                 f"\tError: {retry_state.outcome.exception()}"

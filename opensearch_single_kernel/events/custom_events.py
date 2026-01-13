@@ -5,7 +5,7 @@
 
 """Collection of Custom Events defined for this charm."""
 
-from typing import Any, Dict
+from typing import Any
 
 from ops import EventBase
 
@@ -24,7 +24,7 @@ class StartOpenSearch(EventBase):
         self.after_upgrade = after_upgrade
         self.is_first_data_node = is_first_data_node
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Snapshot of the event data."""
         return {
             "ignore_lock": self.ignore_lock,
@@ -32,7 +32,7 @@ class StartOpenSearch(EventBase):
             "is_first_data_node": self.is_first_data_node,
         }
 
-    def restore(self, snapshot: Dict[str, Any]):
+    def restore(self, snapshot: dict[str, Any]):
         """Restore data from Dict."""
         self.ignore_lock = snapshot["ignore_lock"]
         self.after_upgrade = snapshot["after_upgrade"]

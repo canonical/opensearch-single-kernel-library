@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Base interface for common workload operations."""
+import logging
 import socket
 from abc import ABC, abstractmethod
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from opensearch_single_kernel.utils.logging import WithLogging
+logger = logging.getLogger(__name__)
 
 
 class Paths(BaseModel):
@@ -56,7 +57,7 @@ class Paths(BaseModel):
 
 
 # --- Base Workload
-class BaseWorkload(ABC, WithLogging):
+class BaseWorkload(ABC):
     """Base interface for common workload operations."""
 
     @abstractmethod
@@ -94,7 +95,7 @@ class BaseWorkload(ABC, WithLogging):
             with socket.create_connection((host, port), timeout=5):
                 return True
         except OSError as e:
-            self.logger.debug(f"Connection to {host}:{port} fails with: {e}")
+            logger.debug(f"Connection to {host}:{port} fails with: {e}")
             return False
 
     @abstractmethod
@@ -157,5 +158,5 @@ class BaseWorkload(ABC, WithLogging):
             missing_requirements.append(f"{prop} should be at most {val}")
 
         if missing_requirements:
-            self.logger.error("Missing system requirements: %s", missing_requirements)
+            logger.error("Missing system requirements: %s", missing_requirements)
         return missing_requirements

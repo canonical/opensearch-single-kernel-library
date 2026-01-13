@@ -3,7 +3,6 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch TLS manager."""
-
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload

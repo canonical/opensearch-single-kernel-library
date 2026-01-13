@@ -4,8 +4,9 @@
 
 """Handler for General OpenSearch charm events."""
 
+import logging
 import time
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from ops import (
     BlockedStatus,
@@ -44,15 +45,16 @@ from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
 )
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.utils.topology import ClusterTopology
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
+logger = logging.getLogger(__name__)
 
-class OpenSearchEventsHandler(Object, WithLogging):
+
+class OpenSearchEventsHandler(Object):
     """Class implementing OpenSearch Charm events handling."""
 
     _start_opensearch_event = EventSource(StartOpenSearch)
@@ -97,7 +99,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
             # TODO: Handle cluster change to main orchestrator
         if not self.charm.state.application.deployment_desc:
-            self.logger.debug("Deployment description not yet computed, deferring event.")
+            logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
             return
 
@@ -126,7 +128,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 if self.charm.config_manager.reconfigure_unit():
                     # Restart needed
                     self.charm.status.set(CharmStatuses.WAITING_TO_START)
-                    self.logger.debug("Restarting opensearch due to reconfiguring node roles")
+                    logger.debug("Restarting opensearch due to reconfiguring node roles")
                     self._restart_opensearch_event.emit()
 
             return
@@ -165,7 +167,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
             # if we had a "start" hook (i.e. the actual machine has rebooted)
             # and we are a cluster_manager with the service down
             # After these conditions are met, then we can simply restart the service.
-            self.logger.debug(
+            logger.debug(
                 "Start hook: snap already installed and service should be up, but it is not. Restarting it..."
             )
 
@@ -181,19 +183,17 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 # We're done here, we can return
                 return
             except OpenSearchStartError as e:
-                self.logger.warning(
-                    f"Machine restart detected but error at service start with: {e}"
-                )
+                logger.warning(f"Machine restart detected but error at service start with: {e}")
                 # Defer and retry later
                 event.defer()
                 return
             except OpenSearchMissingError:
                 # This is unlike to happen, unless the snap has been manually removed
-                self.logger.error("Service previously started but now misses the snap.")
+                logger.error("Service previously started but now misses the snap.")
                 return
         # apply the directives computed and emitted by the peer cluster manager
         if not self.charm.cluster_manager.apply_peer_cm_directives_and_check_if_can_start():
-            self.logger.debug("cannot start peer cm had a blocking directive")
+            logger.debug("cannot start peer cm had a blocking directive")
             event.defer()
             return
 
@@ -266,7 +266,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
         # TODO: Add checks on whether we should ignore lock. Since we are not
         # adding large deployment yet, we always ignore
         if self.charm.lock_manager.should_ignore_lock(deployment_desc):
-            self.logger.debug(
+            logger.debug(
                 f"Requesting start as first data node without lock: {self.charm.state.unit_name}"
             )
             # TODO:
@@ -304,7 +304,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 OpenSearchNotFullyReadyError,
             ):
                 # check if cluster should have started but is blocked
-                self.logger.debug("OpenSearch already started, but post-start init failed.")
+                logger.debug("OpenSearch already started, but post-start init failed.")
                 if (
                     ClusterTopology.is_data_role_in_cluster_fleet_apps(self.charm.state)
                     and self.charm.state.application.bootstrapped
@@ -313,7 +313,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                     # In large deployments with cluster-manager-only-nodes,
                     # the startup might fail if the cluster was bootstrapped earlier
                     # and the cluster-manager node lost its data
-                    self.logger.warning(
+                    logger.warning(
                         "Node is not ready to start, but data node exists and"
                         " the cluster was previously bootstrapped."
                     )
@@ -322,7 +322,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 event.defer()
             except OpenSearchUserMgmtError as e:
                 # Either generic start failure or cluster is not read to create the internal users
-                self.logger.warning(e)
+                logger.warning(e)
                 self.charm.lock_manager.release()
                 self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
                 event.defer()
@@ -334,16 +334,16 @@ class OpenSearchEventsHandler(Object, WithLogging):
         self.charm.state.server.update({"started": None})
 
         if not self.can_service_start(event.is_first_data_node):
-            self.logger.info("Conditions not met to start opensearch. Will retry next event.")
+            logger.info("Conditions not met to start opensearch. Will retry next event.")
             event.defer()
             return
 
         if event.ignore_lock:
             # Only used for force upgrades and starting 1 data node on a large deployment
             # where the main orchestrator has cluster-manager only nodes
-            self.logger.debug("Starting without lock")
+            logger.debug("Starting without lock")
         elif not self.charm.lock_manager.acquired:
-            self.logger.debug("Lock to start opensearch not acquired. Will retry next event")
+            logger.debug("Lock to start opensearch not acquired. Will retry next event")
             event.defer()
             return
 
@@ -361,7 +361,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
             # Set the configuration of the node
             self._set_node_conf(nodes)
         except OpenSearchHttpError as e:
-            self.logger.debug(f"error getting the nodes: {e}")
+            logger.debug(f"error getting the nodes: {e}")
             self.charm.lock_manager.release()
             event.defer()
             return
@@ -380,14 +380,14 @@ class OpenSearchEventsHandler(Object, WithLogging):
             OpenSearchStartError,
             OpenSearchUserMgmtError,
         ) as e:
-            self.logger.debug("error of type: %s", type(e).__name__)
+            logger.debug("error of type: %s", type(e).__name__)
             self.charm.lock_manager.release()
-            self.logger.warning(e)
+            logger.warning(e)
             self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
             event.defer()
         except OpenSearchNotFullyReadyError as e:
             self.charm.lock_manager.release()
-            self.logger.debug("Node started but not fully ready: %s", e)
+            logger.debug("Node started but not fully ready: %s", e)
             event.defer()
         finally:
             # In large deployments with cluster-manager-only-nodes, the startup might fail
@@ -420,7 +420,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
                 use_localhost=self.charm.cluster_manager.is_node_up()
             )
         except OpenSearchHttpError:
-            self.logger.info("Failed to get online nodes")
+            logger.info("Failed to get online nodes")
             event.defer()
             return
 
@@ -515,7 +515,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         return True
 
-    def check_profile_missing_requirements(self, set_status: bool = True) -> List[str]:
+    def check_profile_missing_requirements(self, set_status: bool = True) -> list[str]:
         """Check all requirements of profile
 
         Requirements include:
@@ -523,11 +523,11 @@ class OpenSearchEventsHandler(Object, WithLogging):
         - Memory requirements
         - Cluster topology requirements
         """
-        missing_requirements: List[str] = []
+        missing_requirements: list[str] = []
         try:
             profile = self.charm.profiles_manager.config_profile
         except ValueError:
-            self.logger.error(
+            logger.error(
                 "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
             )
             self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
@@ -541,7 +541,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
         if set_status:
             if missing_requirements:
-                self.logger.error("Missing profile requirements: %s", missing_requirements)
+                logger.error("Missing profile requirements: %s", missing_requirements)
                 self.charm.status.set(
                     CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
                     dynamic_message=f"Missing requirements: {' - '.join(missing_requirements)}",
@@ -565,7 +565,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
 
     def _apply_status_if_needed(
         self,
-        deployment_desc: Optional[DeploymentDescription] = None,
+        deployment_desc: DeploymentDescription | None = None,
         show_status_only_once: bool = True,
     ):
         """Resolve and applies corresponding status from the deployment state."""
@@ -612,7 +612,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
             and not self.charm.workload.is_service_started()
         )
 
-    def _set_node_conf(self, nodes: List[Node]) -> None:
+    def _set_node_conf(self, nodes: list[Node]) -> None:
         """Set the configuration of the current node / unit."""
         computed_roles = self.charm.cluster_manager.computed_roles()
 
@@ -642,7 +642,7 @@ class OpenSearchEventsHandler(Object, WithLogging):
         secret.get_content(refresh=True)
 
         if not event.secret.label:
-            self.logger.info("Secret %s has no label, ignoring it.", event.secret.id)
+            logger.info("Secret %s has no label, ignoring it.", event.secret.id)
             return
 
         # TODO: Address secrets management in a separate PR

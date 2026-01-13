@@ -6,7 +6,7 @@
 """Object representing the global state of OpenSearch Charm."""
 
 import socket
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from ops import JujuVersion, Object, Relation, Unit
 
@@ -31,13 +31,12 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerUnitData,
 )
 from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
-class ClusterState(Object, WithLogging):
+class ClusterState(Object):
     """The global OpenSearch Cluster State ."""
 
     def __init__(self, charm: "OpenSearchBaseCharm", substrate: Substrates):
@@ -133,7 +132,7 @@ class ClusterState(Object, WithLogging):
         return str(address)
 
     @property
-    def network_hosts(self) -> List[str]:
+    def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
         return [socket.getfqdn(), self.host_ip]
 
@@ -161,7 +160,7 @@ class ClusterState(Object, WithLogging):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def units_ips(self) -> Dict[str, str]:
+    def units_ips(self) -> dict[str, str]:
         """Returns the mapping "unit id / ip address" of all units."""
         unit_ip_map = {}
         if not self.peer_relation:
@@ -178,7 +177,7 @@ class ClusterState(Object, WithLogging):
         return unit_ip_map
 
     @property
-    def all_units(self) -> List[Unit]:
+    def all_units(self) -> list[Unit]:
         """Fetch the list of units for the current app."""
         return list(self.peer_relation.units.union({self.server.unit}))
 

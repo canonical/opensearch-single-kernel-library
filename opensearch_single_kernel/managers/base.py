@@ -10,11 +10,10 @@ from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import Scope
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
-class BaseManager(WithLogging):
+class BaseManager:
     """Base OpenSearch Manager.
 
     Include a set of functions and properties useful to other managers.

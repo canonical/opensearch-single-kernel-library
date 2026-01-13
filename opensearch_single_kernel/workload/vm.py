@@ -3,10 +3,10 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
+import logging
 import os
 import subprocess
 from types import SimpleNamespace
-from typing import Optional
 
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
@@ -25,6 +25,8 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
 from opensearch_single_kernel.utils.helpers import mask_sensitive_information
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
+
+logger = logging.getLogger(__name__)
 
 
 class VMWorkload(BaseWorkload):
@@ -57,7 +59,7 @@ class VMWorkload(BaseWorkload):
                 # hold the snap in charm determined revision
                 self.opensearch_snap.hold()
         except snap.SnapError as e:
-            self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
+            logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
 
     @override
@@ -75,7 +77,7 @@ class VMWorkload(BaseWorkload):
         self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @override
-    def get_host_public_ip(self) -> Optional[str]:
+    def get_host_public_ip(self) -> str | None:
         """Fetches the Public IP address of the current unit."""
         cmd = "unit-get public-address"
         output = self.run_cmd(cmd)
@@ -85,7 +87,7 @@ class VMWorkload(BaseWorkload):
         return output.stdout.strip()
 
     @override
-    def is_service_started(self, paused: Optional[bool] = False) -> bool:
+    def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
 
         Set paused=True if the process was intentionally paused.
@@ -136,7 +138,7 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
             raise OpenSearchStartError()
 
     @override
@@ -154,13 +156,13 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            self.logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
+            logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
             return
 
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
             raise OpenSearchStartError()
 
     @override
@@ -212,9 +214,9 @@ class VMWorkload(BaseWorkload):
     def run_cmd(
         self,
         command: str,
-        args: Optional[str] = None,
+        args: str | None = None,
         use_errors_replace: bool = False,
-        stdin: Optional[str] = None,
+        stdin: str | None = None,
     ) -> SimpleNamespace:
         """Run command.
 
@@ -232,7 +234,7 @@ class VMWorkload(BaseWorkload):
 
         # only log the command and no arguments to avoid logging sensitive information
         command = mask_sensitive_information(command_with_args)
-        self.logger.debug(f"Executing command: {command}")
+        logger.debug(f"Executing command: {command}")
 
         run_kwargs = dict(
             stdout=subprocess.PIPE,
@@ -259,12 +261,10 @@ class VMWorkload(BaseWorkload):
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
 
-            self.logger.debug(f"{command}:\n{output.stdout}")
+            logger.debug(f"{command}:\n{output.stdout}")
 
             if output.returncode != 0:
-                self.logger.debug(
-                    f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}"
-                )
+                logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
             return SimpleNamespace(cmd=command, out=output.stdout, err=output.stderr)
         except (TimeoutError, subprocess.TimeoutExpired):

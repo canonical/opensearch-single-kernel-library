@@ -3,7 +3,8 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Configuration manager."""
-from typing import Dict, List, Optional
+import logging
+from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
@@ -29,6 +30,8 @@ USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
+logger = logging.getLogger(__name__)
+
 
 class UsersManager(BaseManager):
     """OpenSearch Users Manager.
@@ -44,13 +47,13 @@ class UsersManager(BaseManager):
     def put_or_update_internal_user_leader(
         self,
         user: str,
-        pwd: Optional[str] = None,
+        pwd: str | None = None,
         update: bool = True,
     ) -> None:
         """Create system user or update it with a new password."""
         # Leader is to set new password and hash, others populate existing hash locally
         if not self.state.server.is_app_leader:
-            self.logger.error("Credential change can be only performed by the leader unit.")
+            logger.error("Credential change can be only performed by the leader unit.")
             return
 
         secret = self.state.secrets.get(Scope.APP, self.state.secrets.password_key(user))
@@ -111,7 +114,7 @@ class UsersManager(BaseManager):
         if user in OPENSEARCH_SYSTEM_USERS:
             self.put_internal_user(user, hashed_pwd)
 
-    def get_roles(self) -> Dict[str, any]:
+    def get_roles(self) -> dict[str, Any]:
         """Gets list of roles.
 
         Raises:
@@ -125,9 +128,9 @@ class UsersManager(BaseManager):
     def create_role(
         self,
         role_name: str,
-        permissions: Optional[Dict[str, str]] = None,
-        action_groups: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, any]:
+        permissions: dict[str, str] | None = None,
+        action_groups: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Creates a role with the given permissions.
 
         This method assumes the dicts provided are valid opensearch config. If not, raises
@@ -156,12 +159,12 @@ class UsersManager(BaseManager):
         if resp.get("status") != "CREATED" and not (
             resp.get("status") == "OK" and "updated" in resp.get("message")
         ):
-            self.logger.error(f"Couldn't create role: {resp}")
+            logger.error(f"Couldn't create role: {resp}")
             raise OpenSearchUserMgmtError(f"creating role {role_name} failed")
 
         return resp
 
-    def remove_role(self, role_name: str) -> Dict[str, any]:
+    def remove_role(self, role_name: str) -> dict[str, Any]:
         """Remove the given role from opensearch distribution.
 
         Args:
@@ -189,13 +192,13 @@ class UsersManager(BaseManager):
             else:
                 raise OpenSearchUserMgmtError(e)
 
-        self.logger.debug(resp)
+        logger.debug(resp)
         if resp.get("status") != "OK":
             raise OpenSearchUserMgmtError(f"removing role {role_name} failed")
 
         return resp
 
-    def get_users(self) -> Dict[str, any]:
+    def get_users(self) -> dict[str, Any]:
         """Gets list of users.
 
         Raises:
@@ -207,8 +210,8 @@ class UsersManager(BaseManager):
             raise OpenSearchUserMgmtError(e)
 
     def create_user(
-        self, user_name: str, roles: Optional[List[str]], hashed_pwd: str
-    ) -> Dict[str, any]:
+        self, user_name: str, roles: list[str] | None, hashed_pwd: str
+    ) -> dict[str, Any]:
         """Create or update user and assign the requested roles to the user.
 
         Args:
@@ -233,7 +236,7 @@ class UsersManager(BaseManager):
                 payload=payload,
             )
         except OpenSearchHttpError as e:
-            self.logger.error(f"Couldn't create user {str(e)}")
+            logger.error(f"Couldn't create user {str(e)}")
             raise OpenSearchUserMgmtError(e)
 
         if resp.get("status") != "CREATED" and not (
@@ -243,7 +246,7 @@ class UsersManager(BaseManager):
 
         return resp
 
-    def remove_user(self, user_name: str) -> Dict[str, any]:
+    def remove_user(self, user_name: str) -> dict[str, Any]:
         """Remove the given user from opensearch distribution.
 
         Args:
@@ -271,12 +274,12 @@ class UsersManager(BaseManager):
             else:
                 raise OpenSearchUserMgmtError(e)
 
-        self.logger.debug(resp)
+        logger.debug(resp)
         if resp.get("status") != "OK":
             raise OpenSearchUserMgmtError(f"removing user {user_name} failed")
         return resp
 
-    def patch_user(self, user_name: str, patches: List[Dict[str, any]]) -> Dict[str, any]:
+    def patch_user(self, user_name: str, patches: list[dict[str, Any]]) -> dict[str, Any]:
         """Applies patches to user.
 
         Args:
@@ -303,7 +306,7 @@ class UsersManager(BaseManager):
 
         return resp
 
-    def create_role_mapping(self, role: str, mapped_users: List[str]) -> None:
+    def create_role_mapping(self, role: str, mapped_users: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 
         Args:
@@ -320,7 +323,7 @@ class UsersManager(BaseManager):
                 payload={"users": mapped_users, "backend_roles": [role]},
             )
         except OpenSearchHttpError as e:
-            self.logger.error(f"Couldn't create role mapping {str(e)}")
+            logger.error(f"Couldn't create role mapping {str(e)}")
             raise OpenSearchUserMgmtError(e)
 
         if resp.get("status") != "CREATED" and not (
@@ -375,7 +378,7 @@ class UsersManager(BaseManager):
             # reserved: False, prevents this resource from being update-protected from:
             # updates made on the dashboard or the rest api.
             # we grant the admin user all opensearch access + security_rest_api_access
-            self.logger.debug("putting admin to internal_users.yml")
+            logger.debug("putting admin to internal_users.yml")
             self.yaml_setter.put(
                 "opensearch-security/internal_users.yml",
                 "admin",

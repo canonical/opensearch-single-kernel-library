@@ -8,11 +8,12 @@
 
 import enum
 import json
+import logging
 from abc import ABC, abstractmethod
 from ast import literal_eval
 from datetime import datetime
 from hashlib import md5
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from ops import Secret
 from ops.model import Application, Relation, Unit
@@ -38,7 +39,8 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     ProviderData,
     RequirerData,
 )
-from opensearch_single_kernel.utils.logging import WithLogging
+
+logger = logging.getLogger(__name__)
 
 
 class Model(ABC, BaseModel):
@@ -53,12 +55,12 @@ class Model(ABC, BaseModel):
         """Deserialize object into a string."""
         return json.dumps(Model.sort_payload(self.to_dict(by_alias=by_alias)))
 
-    def to_dict(self, by_alias: bool = False) -> Dict[str, Any]:
+    def to_dict(self, by_alias: bool = False) -> dict[str, Any]:
         """Deserialize object into a dict."""
         return self.dict(by_alias=by_alias)
 
     @classmethod
-    def from_dict(cls, input_dict: Optional[Dict[str, Any]]):
+    def from_dict(cls, input_dict: dict[str, Any] | None):
         """Create a new instance of this class from a json/dict repr."""
         if not input_dict:  # to handle when classes defined defaults
             return cls()
@@ -110,13 +112,13 @@ class DataStore(ABC):
         self._charm = charm
 
     @abstractmethod
-    def put(self, scope: Scope, key: str, value: Optional[any]) -> None:
+    def put(self, scope: Scope, key: str, value: Any | None) -> None:
         """Put string into the data store."""
         pass
 
     @abstractmethod
     def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
+        self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
     ) -> None:
         """Put object into the data store."""
         pass
@@ -128,13 +130,13 @@ class DataStore(ABC):
 
     @abstractmethod
     def get(
-        self, scope: Scope, key: str, default: Optional[Union[int, float, str, bool]] = None
-    ) -> Optional[Union[int, float, str, bool]]:
+        self, scope: Scope, key: str, default: int | float | str | bool | None = None
+    ) -> int | float | str | bool | None:
         """Get string from the data store."""
         pass
 
     @abstractmethod
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
+    def get_object(self, scope: Scope, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the data store."""
         pass
 
@@ -144,7 +146,7 @@ class DataStore(ABC):
         pass
 
     @staticmethod
-    def cast(str_val: str) -> Union[bool, int, float, str]:
+    def cast(str_val: str) -> bool | int | float | str:
         """Cast a string to the corresponding primitive type."""
         try:
             typed_val = literal_eval(str_val.capitalize())
@@ -156,7 +158,7 @@ class DataStore(ABC):
             return str_val
 
     @staticmethod
-    def put_or_delete(data: Dict[str, str], key: str, value: Optional[str]):
+    def put_or_delete(data: dict[str, str], key: str, value: str | None):
         """Put data into the key/val data store or delete if value is None."""
         if value is None:
             data.pop(key, None)
@@ -173,7 +175,7 @@ class RelationDataStore(DataStore):
         self.relation_name = relation_name
 
     @override
-    def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
+    def put(self, scope: Scope, key: str, value: Any | None) -> None:
         """Put string into the relation data store."""
         if scope is None:
             raise ValueError("Scope undefined.")
@@ -183,7 +185,7 @@ class RelationDataStore(DataStore):
 
     @override
     def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
+        self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
     ) -> None:
         """Put dict / json object into relation data store."""
         if merge:
@@ -216,9 +218,9 @@ class RelationDataStore(DataStore):
         self,
         scope: Scope,
         key: str,
-        default: Optional[Union[int, float, str, bool]] = None,
+        default: int | float | str | bool | None = None,
         auto_casting: bool = True,
-    ) -> Optional[Union[int, float, str, bool]]:
+    ) -> int | float | str | bool | None:
         """Get string from the relation data store."""
         if scope is None:
             raise ValueError("Scope undefined.")
@@ -235,7 +237,7 @@ class RelationDataStore(DataStore):
         return self.cast(value)
 
     @override
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
+    def get_object(self, scope: Scope, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
         data = self.get(scope, key)
         if data is None:
@@ -248,7 +250,7 @@ class RelationDataStore(DataStore):
         """Delete object from the relation data store."""
         self.put(scope, key, None)
 
-    def _get_relation_data(self, scope: Scope) -> Dict[str, str]:
+    def _get_relation_data(self, scope: Scope) -> dict[str, str]:
         """Relation data object."""
         relation = self._charm.model.get_relation(self.relation_name)
         if relation is None:
@@ -273,10 +275,10 @@ class RelationDataStore(DataStore):
 class App(Model):
     """Data class representing an application."""
 
-    id: Optional[str] = None
-    short_id: Optional[str] = None
-    name: Optional[str] = None
-    model_uuid: Optional[str] = None
+    id: str | None = None
+    short_id: str | None = None
+    name: str | None = None
+    model_uuid: str | None = None
 
     @root_validator
     def set_props(cls, values):  # noqa: N805
@@ -301,11 +303,11 @@ class Node(Model):
     """Data class representing a node in a cluster."""
 
     name: str
-    roles: List[str]
+    roles: list[str]
     ip: str
     app: App
     unit_number: int
-    temperature: Optional[str] = None
+    temperature: str | None = None
 
     @classmethod
     @validator("roles")
@@ -336,9 +338,9 @@ class PeerClusterOrchestrators(Model):
     _TYPES = Literal["main", "failover"]
 
     main_rel_id: int = -1
-    main_app: Optional[App]
+    main_app: App | None = None
     failover_rel_id: int = -1
-    failover_app: Optional[App]
+    failover_app: App | None = None
 
     def delete(self, typ: _TYPES) -> None:
         """Delete an orchestrator from the current pair."""
@@ -361,11 +363,11 @@ class PeerClusterConfig(Model):
 
     cluster_name: str
     init_hold: bool
-    roles: List[str]
+    roles: list[str]
     # We have a breaking change in the model
     # For older charms, this field will not exist and they will be set in the
     # profile called "testing".
-    data_temperature: Optional[str] = None
+    data_temperature: str | None = None
 
     @root_validator
     def set_node_temperature(cls, values):  # noqa: N805
@@ -401,14 +403,14 @@ class PeerClusterApp(Model):
 
     app: App
     planned_units: int
-    units: List[str]
-    roles: List[str]
+    units: list[str]
+    roles: list[str]
 
 
 class PeerClusterFleetApps(Model):
     """Model class for all applications in a large deployment as a dict."""
 
-    __root__: Dict[str, PeerClusterApp]
+    __root__: dict[str, PeerClusterApp]
 
     def __iter__(self):
         """Implements the iter magic method."""
@@ -442,11 +444,11 @@ class DeploymentDescription(Model):
     app: App
     config: PeerClusterConfig
     start: StartMode
-    pending_directives: List[Directive]
+    pending_directives: list[Directive]
     typ: DeploymentType
     state: DeploymentState = DeploymentState(value=State.ACTIVE)
     cluster_name_autogenerated: bool = False
-    promotion_time: Optional[float]
+    promotion_time: float | None
 
     @root_validator
     def set_promotion_time(cls, values):  # noqa: N805
@@ -460,8 +462,8 @@ class DeploymentDescription(Model):
 class ProfileMemoryRequirements(Model):
     """Memory requirements for a profile"""
 
-    memory_size: Optional[int] = None
-    jvm_heap_percentage: Optional[float] = None
+    memory_size: int | None = None
+    jvm_heap_percentage: float | None = None
 
 
 class ClusterTopologyRequirements(Model):
@@ -555,7 +557,7 @@ class TestingProfile(OpenSearchProfile):
         )
 
 
-class RelationState(WithLogging):
+class RelationState:
     """Relation state object."""
 
     def __init__(
@@ -579,7 +581,7 @@ class RelationState(WithLogging):
     def update(self, items: dict[str, str]) -> None:
         """Write to relation data."""
         if not self.relation:
-            self.logger.warning(
+            logger.warning(
                 f"Fields {list(items.keys())} were attempted to be written on the relation before it exists."
             )
             return
@@ -637,7 +639,7 @@ class OpenSearchServer(RelationState):
         return int(self.unit.name.split("/")[1])
 
     @property
-    def profile(self) -> Optional[OpenSearchProfile]:
+    def profile(self) -> OpenSearchProfile | None:
         """Current profile of the unit"""
         if profile_str := self.relation_data.get(PERFORMANCE_PROFILE, None):
             return (
@@ -696,7 +698,7 @@ class OpenSearchApplication(RelationState):
         super().__init__(relation, data_interface, component)
         self.app = component
 
-    def get_object(self, key: str) -> Optional[Dict[str, any]]:
+    def get_object(self, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
         data = self.relation_data.get(key)
         if data is None:
@@ -704,7 +706,7 @@ class OpenSearchApplication(RelationState):
 
         return json.loads(data)
 
-    def put_object(self, key: str, value: Dict[str, any], merge: bool = False) -> None:
+    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
         """Put dict / json object into relation data store."""
         if merge:
             stored = self.get_object(key)
@@ -769,7 +771,7 @@ class OpenSearchApplication(RelationState):
         return bool(self.relation_data.get("bootstrapped", ""))
 
     @property
-    def deployment_desc(self) -> Optional[DeploymentDescription]:
+    def deployment_desc(self) -> DeploymentDescription | None:
         """Return the deployment description object if any."""
         current_deployment_desc = self.get_object("deployment-description")
         if not current_deployment_desc:
@@ -777,7 +779,7 @@ class OpenSearchApplication(RelationState):
         return DeploymentDescription.from_dict(current_deployment_desc)
 
     @property
-    def cluster_fleet_apps(self) -> Dict[str, PeerClusterApp]:
+    def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
         cluster_fleet_apps = self.relation_data.get("cluster_fleet_apps", "")
         if not cluster_fleet_apps:
@@ -788,7 +790,7 @@ class OpenSearchApplication(RelationState):
             cluster_fleet_apps = json.loads(cluster_fleet_apps)
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
-    def apps_in_fleet(self) -> List[PeerClusterApp]:
+    def apps_in_fleet(self) -> list[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
         cluster_fleet_apps = self.get_object("cluster_fleet_apps")
         if not cluster_fleet_apps:
@@ -834,7 +836,7 @@ class SecretCache:
         # }
         self.secrets = {Scope.APP: {}, Scope.UNIT: {}}
 
-    def get_meta(self, scope: Scope, label: str) -> Optional[Secret]:
+    def get_meta(self, scope: Scope, label: str) -> Secret | None:
         """Getting cached secret meta-information."""
         return self.secrets[scope].get(label, {}).get(self.CACHED_META)
 
@@ -842,11 +844,11 @@ class SecretCache:
         """Setting cached secret meta-information."""
         self.secrets[scope].setdefault(label, {}).update({self.CACHED_META: secret})
 
-    def get_content(self, scope: Scope, label: str) -> Dict[str, str]:
+    def get_content(self, scope: Scope, label: str) -> dict[str, str]:
         """Getting cached secret content."""
         return self.secrets[scope].get(label, {}).get(self.CACHED_CONTENT)
 
-    def put_content(self, scope: Scope, label: str, content: Union[str, Dict[str, str]]):
+    def put_content(self, scope: Scope, label: str, content: str | dict[str, str]):
         """Setting cached secret content."""
         self.secrets[scope].setdefault(label, {}).update({self.CACHED_CONTENT: content})
 
@@ -854,8 +856,8 @@ class SecretCache:
         self,
         scope: Scope,
         label: str,
-        secret: Optional[Secret] = None,
-        content: Optional[Union[str, Dict[str, str]]] = None,
+        secret: Secret | None = None,
+        content: str | dict[str, str] | None = None,
     ) -> None:
         """Updating cached secret information."""
         if secret:
