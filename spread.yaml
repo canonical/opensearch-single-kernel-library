@@ -116,9 +116,9 @@ backends:
           username: ubuntu
 
 suites:
-  tests/spread/opensearch/lxd/:
+  tests/spread/lxd/:
     summary: Spread tests for OpenSearch VM
-  tests/spread/opensearch/k8s/:
+  tests/spread/k8s/:
     summary: Spread tests for OpenSearch Kubernetes
 
 path: /root/spread_project
