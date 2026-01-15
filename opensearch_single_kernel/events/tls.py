@@ -275,18 +275,16 @@ class TLSEventsHandler(Object):
             logger.debug("Unknown certificate expiring.")
             return
 
-        key = secrets["key"].encode("utf-8")
+        key = secrets["key"]
         key_password = secrets.get("key-password", None)
         old_csr = secrets["csr"].encode("utf-8")
 
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            scop=scope, cert_type=cert_type, key=key, password=key_password
+            scope=scope, cert_type=cert_type, key=key, password=key_password
         )
         self.certs.request_certificate_renewal(
             old_certificate_signing_request=old_csr, new_certificate_signing_request=new_csr
         )
-
-        self._request_certificate_renewal(scope, cert_type, secrets)
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
         """Handle a cert that was revoked or has expired"""

@@ -4,6 +4,9 @@ import shutil
 from pathlib import Path
 from unittest.mock import PropertyMock
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
@@ -113,4 +116,17 @@ def configure_opensearch_config(harness, mocker):
         "opensearch_single_kernel.core.state.ClusterState.host_ip",
         return_value="20.20.20.20",
         new_callable=PropertyMock,
+    )
+
+
+def create_utf8_encoded_private_key() -> str:
+    """Creates a private key."""
+    return (
+        rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        .private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        .decode("utf-8")
     )

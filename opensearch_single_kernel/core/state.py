@@ -425,7 +425,7 @@ class ClusterState(Object):
             rotation_happening = True
         if not self.server.tls_ca_renewed:
             logger.debug(
-                f"TLS CA rotation ongoing in unit: {self.unit_name}, will not update tls certificates."
+                f"TLS CA rotation ongoing in unit: {self.model.unit.name}, will not update tls certificates."
             )
             rotation_complete = False
         # TODO: Support peer cluster and peer cluster orchestrator
