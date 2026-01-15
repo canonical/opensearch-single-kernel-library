@@ -4,16 +4,14 @@
 
 """OpenSearch TLS manager."""
 
-import base64
-import re
+import logging
 import socket
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from opensearch_single_kernel.common.constants import CertType, Scope
+from opensearch_single_kernel.common.constants import CertType, Scope, StoreType
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
-    OpenSearchHttpError,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
@@ -24,9 +22,12 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     generate_password,
     is_alias_missing_error,
+    parse_tls_file,
     split_ca_chain,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class TlsManager(BaseManager):
@@ -97,18 +98,21 @@ class TlsManager(BaseManager):
         """Check if all TLS secrets and resources exist and are stored."""
         return self.all_certificates_available() and self.all_tls_resources_stored()
 
-    def get_tls_status(self) -> bool:
-        """Get TLS Status."""
-        pass
+    def create_store_pwd_if_not_exists(
+        self, scope: Scope, cert_type: CertType, store_type: StoreType
+    ):
+        """Create passwords for the key stores if not already created.
 
-    def create_keystore_pwd_if_not_exists(self, scope: Scope, cert_type: CertType, alias: str):
-        """Create passwords for the key stores if not already created."""
+        Args:
+            scope (Scope): The secret scope which can be UNIT / APP.
+            cert_type (CertType): The secret certificate type (unit-http, unit-transport).
+            store_type (StoreType): The type of store which can be "truststore" or "keystore".
+        """
         store_pwd = None
-        store_type = "truststore" if alias == "ca" else "keystore"
 
         secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True)
         if secrets:
-            store_pwd = secrets.get(f"{store_type}-password")
+            store_pwd = secrets.get(f"{store_type.val}-password")
 
         if not store_pwd:
             # and not (
@@ -120,20 +124,9 @@ class TlsManager(BaseManager):
             self.state.secrets.put_object(
                 scope,
                 cert_type.val,
-                {f"{store_type}-password": generate_password()},
+                {f"{store_type.val}-password": generate_password()},
                 merge=True,
             )
-
-    @staticmethod
-    def _parse_tls_file(raw_content: str) -> bytes:
-        """Parse TLS files from both plain text or base64 format."""
-        if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
-            return re.sub(
-                r"(-+(BEGIN|END) [A-Z ]+-+)",
-                "\\1",
-                raw_content,
-            ).encode("utf-8")
-        return base64.b64decode(raw_content)
 
     def _get_subject(self, cert_type: CertType) -> str:
         """Get subject of the certificate."""
@@ -144,7 +137,7 @@ class TlsManager(BaseManager):
 
         return cn
 
-    def _get_sans(self, cert_type: CertType) -> Dict[str, List[str]]:
+    def _get_sans(self, cert_type: CertType) -> dict[str, list[str]]:
         """Create a list of OID/IP/DNS names for an OpenSearch unit.
 
         Returns:
@@ -156,6 +149,7 @@ class TlsManager(BaseManager):
             return sans
 
         dns = {self.state.unit_name, socket.gethostname(), socket.getfqdn()}
+        logger.info(f"This is the current DNS {dns}")
         ips = {self.state.host_ip}
 
         host_public_ip = self.workload.get_host_public_ip()
@@ -165,6 +159,9 @@ class TlsManager(BaseManager):
         for ip in ips.copy():
             try:
                 name, aliases, addresses = socket.gethostbyaddr(ip)
+                logger.info(
+                    f"This is the actual return of gethostbyaddr {name, aliases, addresses}"
+                )
                 ips.update(addresses)
 
                 dns.add(name)
@@ -181,14 +178,14 @@ class TlsManager(BaseManager):
         self,
         scope: Scope,
         cert_type: CertType,
-        key: Optional[str] = None,
-        password: Optional[str] = None,
+        key: str | None = None,
+        password: str | None = None,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         if key is None:
             key = generate_private_key()
         else:
-            key = self._parse_tls_file(key)
+            key = parse_tls_file(key)
 
         if password is not None:
             password = password.encode("utf-8")
@@ -211,7 +208,7 @@ class TlsManager(BaseManager):
                 "key": key.decode("utf-8"),
                 "key-password": password,
                 "csr": csr.decode("utf-8"),
-                "subject": f"/O={self.state.application.deployment_desc.config.cluster_name}/CN={subject}",
+                "subject": f"/O={organization}/CN={subject}",
             },
             merge=True,
         )
@@ -245,7 +242,7 @@ class TlsManager(BaseManager):
 
     def find_secret(
         self, event_data: str, secret_name: str
-    ) -> Optional[Tuple[Scope, CertType, Dict[str, str]]]:
+    ) -> tuple[Scope, CertType, dict[str, str]] | None:
         """Find secret across all scopes (app, unit) and across all cert types.
 
         Returns:
@@ -254,7 +251,7 @@ class TlsManager(BaseManager):
             secret: dictionary of the data stored in this secret
         """
 
-        def is_secret_found(secrets: Optional[Dict[str, str]]) -> bool:
+        def is_secret_found(secrets: dict[str, str] | None) -> bool:
             return (
                 secrets is not None
                 and secrets.get(secret_name, "").rstrip() == event_data.rstrip()
@@ -278,11 +275,11 @@ class TlsManager(BaseManager):
 
         return None
 
-    def read_ca(self, alias: str, store_pwd: str, store_path: str) -> Optional[str]:
+    def read_ca(self, alias: str, store_pwd: str, store_path: str) -> str | None:
         """Load stored CA cert."""
         return (self.list_cas(store_pwd, store_path) or {}).get(alias)
 
-    def list_cas(self, store_pwd: str, store_path: str) -> Optional[dict[str, str]]:  # noqa: C901
+    def list_cas(self, store_pwd: str, store_path: str) -> dict[str, str] | None:  # noqa: C901
         """List the CAs currently stored in a trust store.
 
         Args:
@@ -302,7 +299,7 @@ class TlsManager(BaseManager):
         try:
             stored_certs = self.workload.run_cmd(cmd, args, use_errors_replace=True).out
         except OpenSearchCmdError as e:
-            self.logger.error("Error reading the current truststore: %s", e)
+            logger.error("Error reading the current truststore: %s", e)
             return None
 
         # split by -----END CERTIFICATE-----
@@ -339,12 +336,12 @@ class TlsManager(BaseManager):
 
         return out
 
-    def read_stored_ca(self, alias: str = CA_ALIAS) -> Optional[str]:
+    def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         ca_trust_store = f"{self.workload.paths.certs}/ca.p12"
-        self.logger.debug(f"Reading stored ca from {ca_trust_store}")
-        self.logger.debug(secrets)
+        logger.debug(f"Reading stored ca from {ca_trust_store}")
+        logger.debug(secrets)
         if not (self.workload.exists(ca_trust_store) and secrets):
             return None
 
@@ -369,7 +366,7 @@ class TlsManager(BaseManager):
         Returns:
             bool: True if the operation succeeded, False otherwise.
         """
-        self.logger.info("Storing CA cert(s) with alias: %s into truststore.", alias)
+        logger.info("Storing CA cert(s) with alias: %s into truststore.", alias)
         return self._store_ca_chain(
             alias=alias,
             store_pwd=store_pwd,
@@ -443,7 +440,7 @@ class TlsManager(BaseManager):
                             f"-storepass {store_pwd}",
                         )
                     except OpenSearchCmdError as e:
-                        self.logger.error(
+                        logger.error(
                             "Failed to import cert for alias %s into %s: %s",
                             internal_alias,
                             store_path,
@@ -452,7 +449,7 @@ class TlsManager(BaseManager):
                         return False
             except OSError as e:
                 # tmp file creation issues
-                self.logger.error("Failed to create temporary file for CA import: %s", e)
+                logger.error("Failed to create temporary file for CA import: %s", e)
                 return False
 
         # post-actions
@@ -480,21 +477,21 @@ class TlsManager(BaseManager):
         if ca_cert not in bundle_content:
             self.workload.write_text(bundle_path, f"{bundle_content}\n{ca_cert}")
 
-    def store_new_tls_resources(self, cert_type: CertType, secrets: Dict[str, Any]):
+    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
         """Add key and cert to keystore."""
         if not self.state.ca_rotation_complete_in_cluster:
             return
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         if cert_type == CertType.APP_ADMIN:
-            self.create_keystore_pwd_if_not_exists(Scope.APP, cert_type, cert_type.val)
+            self.create_store_pwd_if_not_exists(Scope.APP, cert_type, StoreType.KEYSTORE)
         else:
-            self.create_keystore_pwd_if_not_exists(Scope.UNIT, cert_type, cert_type.val)
+            self.create_store_pwd_if_not_exists(Scope.UNIT, cert_type, StoreType.KEYSTORE)
 
         if not secrets.get("key"):
-            self.logger.error("TLS key not found, quitting.")
+            logger.error("TLS key not found, quitting.")
             return
-        self.logger.debug(f"Storing {cert_type.val} TLS resources on disk.")
+        logger.debug(f"Storing {cert_type.val} TLS resources on disk.")
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),
@@ -539,12 +536,12 @@ class TlsManager(BaseManager):
                 self.workload.run_cmd(cmd, args)
                 self.workload.run_cmd(f"sudo chmod +r {store_path}")
             except OpenSearchCmdError as e:
-                self.logger.error("Error storing the TLS certificates for %s: %s", name, e)
-        self.logger.info("TLS certificate for %s stored.", name)
+                logger.error("Error storing the TLS certificates for %s: %s", name, e)
+        logger.info("TLS certificate for %s stored.", name)
 
     def update_request_ca_bundle(self) -> None:
         """Create a new chain.pem file for requests module"""
-        self.logger.debug("Updating requests TLS CA bundle")
+        logger.debug("Updating requests TLS CA bundle")
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
 
         # we store the pem format to make it easier for the python requests lib
@@ -578,7 +575,7 @@ class TlsManager(BaseManager):
             # TODO: Update peer cluster relation
             # self.update_tls_flag_to_peer_cluster_relation("tls_configured", "add")
 
-    def get_cert_issuer(self, cert: str) -> Optional[str]:
+    def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
         with self.workload.tempfile(mode="w+t", dir="/tmp") as tmp_ca_file:
@@ -591,10 +588,10 @@ class TlsManager(BaseManager):
                     f"openssl x509 -in {tmp_ca_file.name} -noout -issuer"
                 ).out
             except OpenSearchCmdError as e:
-                self.logger.error("Error reading the current truststore: %s", e)
+                logger.error("Error reading the current truststore: %s", e)
                 return None
 
-    def get_cert_issuer_from_path(self, store_pwd: str, store_path: str) -> Optional[str]:
+    def get_cert_issuer_from_path(self, store_pwd: str, store_path: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         try:
             return self.workload.run_cmd(
@@ -606,14 +603,11 @@ class TlsManager(BaseManager):
                 use_errors_replace=True,
             ).out
         except OpenSearchCmdError as e:
-            self.logger.error("Error reading the current certificate: %s", e)
+            logger.error("Error reading the current certificate: %s", e)
             return None
 
     def reload_tls_certificates(self):
         """Reload transport and HTTP layer communication certificates via REST APIs."""
-        url_http = "_plugins/_security/api/ssl/http/reloadcerts"
-        url_transport = "_plugins/_security/api/ssl/transport/reloadcerts"
-
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         with (
@@ -628,26 +622,11 @@ class TlsManager(BaseManager):
             tmp_key.flush()
             tmp_key.seek(0)
 
-        try:
-            self.opensearch_client.request(
-                "PUT",
-                url_http,
-                cert_files=(tmp_cert.name, tmp_key.name),
-                retries=3,
-            )
-            self.opensearch_client.request(
-                "PUT",
-                url_transport,
-                cert_files=(tmp_cert.name, tmp_key.name),
-                retries=3,
-            )
-        except OpenSearchHttpError as e:
-            self.logger.error(f"Error reloading TLS certificates via API: {e}")
-            raise
+        self.opensearch_client.reload_tls_certificates(cert_files=(tmp_cert.name, tmp_key.name))
 
-    def on_ca_certs_rotation_complete(self) -> None:
+    def finalize_ca_certs_rotation(self) -> None:
         """Handle the completion of CA rotation."""
-        self.logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
+        logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
         self.remove_old_ca()
         self.update_request_ca_bundle()
 
@@ -675,7 +654,7 @@ class TlsManager(BaseManager):
             store_path: Path to the trust store.
         """
         if not self.workload.exists(store_path):
-            self.logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
+            logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
             return
 
         list_cmd = f"{self.KEYTOOL} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
@@ -684,7 +663,7 @@ class TlsManager(BaseManager):
             self.workload.run_cmd(list_cmd, list_args)
         except OpenSearchCmdError as e:
             if is_alias_missing_error(e, alias):
-                self.logger.debug(
+                logger.debug(
                     "Alias %s not found in %s when listing before delete, ignoring.",
                     alias,
                     store_path,
@@ -699,7 +678,7 @@ class TlsManager(BaseManager):
             self.workload.run_cmd(del_cmd, del_args)
         except OpenSearchCmdError as e:
             if is_alias_missing_error(e, alias):
-                self.logger.debug(
+                logger.debug(
                     "Alias %s already gone from %s when deleting, ignoring.",
                     alias,
                     store_path,
@@ -707,7 +686,7 @@ class TlsManager(BaseManager):
                 return
             raise
 
-        self.logger.info("Removed %s from truststore.", alias)
+        logger.info("Removed %s from truststore.", alias)
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""

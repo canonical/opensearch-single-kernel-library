@@ -21,13 +21,12 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
 )
 from opensearch_single_kernel.utils.helpers import generate_password
-from opensearch_single_kernel.utils.logging import WithLogging
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
-class ActionsEventsHandler(Object, WithLogging):
+class ActionsEventsHandler(Object):
     """Class implementing OpenSearch Charm actions handling."""
 
     def __init__(self, charm: "OpenSearchBaseCharm"):

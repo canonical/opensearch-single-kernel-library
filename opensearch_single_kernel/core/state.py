@@ -6,6 +6,7 @@
 """Object representing the global state of OpenSearch Charm."""
 
 import json
+import logging
 import socket
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,8 @@ from opensearch_single_kernel.utils.helpers import format_unit_name
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+logger = logging.getLogger(__name__)
 
 
 class OpenSearchServer(RelationState):
@@ -101,6 +104,46 @@ class OpenSearchServer(RelationState):
     def started(self) -> bool:
         """Get the value of 'started' key from unit data bag"""
         return bool(self.relation_data.get("started", ""))
+
+    @property
+    def tls_ca_renewing(self) -> bool:
+        """Return value of 'tls_ca_renewing' from unit state"""
+        return self.relation_data.get("tls_ca_renewing", "") == "True"
+
+    @tls_ca_renewing.setter
+    def tls_ca_renewing(self, value: bool):
+        """Update value of tls_ca_renewing from unit state."""
+        self.update({"tls_ca_renewing": str(value)})
+
+    @property
+    def tls_ca_renewed(self) -> bool:
+        """Get the value of 'tls_ca_renewed' from unit data bag"""
+        return self.relation_data.get("tls_ca_renewed", "") == "True"
+
+    @tls_ca_renewed.setter
+    def tls_ca_renewed(self, value: bool):
+        """Update value of 'tls_ca_renewed'"""
+        self.update({"tls_ca_renewed": str(value)})
+
+    @property
+    def tls_configured(self) -> bool:
+        """Get the value of 'tls_configured' from unit data bag."""
+        return self.relation_data.get("tls_configurd", "") == "True"
+
+    @tls_configured.setter
+    def tls_configured(self, value: bool):
+        """Update the value of 'tls_configured'"""
+        self.update({"tls_configured": str(value)})
+
+    @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the unit databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the unit databag."""
+        self.update({"update-ts": str(timestamp)})
 
 
 class OpenSearchApplication(RelationState):
@@ -216,6 +259,16 @@ class OpenSearchApplication(RelationState):
         elif not json.loads(cluster_fleet_apps):
             cluster_fleet_apps = json.loads(cluster_fleet_apps)
         return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
+
+    @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the application databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the application databag."""
+        self.update({"update-ts": str(timestamp)})
 
 
 class ClusterState(Object):
@@ -349,7 +402,7 @@ class ClusterState(Object):
         rotation_complete = True
 
         # check current unit
-        self.logger.debug(
+        logger.debug(
             "current unit tls_ca_renewing:%s | tls_ca_renewed:%s",
             self.server.tls_ca_renewing,
             self.server.tls_ca_renewed,
@@ -357,7 +410,7 @@ class ClusterState(Object):
         if self.server.tls_ca_renewing:
             rotation_happening = True
         if not self.server.tls_ca_renewed:
-            self.logger.debug(
+            logger.debug(
                 f"TLS CA rotation ongoing in unit: {self.server.unit_name}, will not update tls certificates."
             )
             rotation_complete = False
@@ -369,7 +422,7 @@ class ClusterState(Object):
         ]:
             for relation in self.model.relations[relation_type]:
                 for unit in relation.units:
-                    self.logger.debug(
+                    logger.debug(
                         f"Checking unit {unit} in relation {relation}: \
                             tls_ca_renewing: {relation.data[unit].get('tls_ca_renewing')} \
                             | tls_ca_renewed: {relation.data[unit].get('tls_ca_renewed')}"
@@ -378,11 +431,11 @@ class ClusterState(Object):
                         rotation_happening = True
 
                     if not relation.data[unit].get("tls_ca_renewed"):
-                        self.logger.debug(
+                        logger.debug(
                             f"TLS CA rotation ongoing in unit {unit}, will not update tls certificates."
                         )
                         rotation_complete = False
-        self.logger.debug(
+        logger.debug(
             "CA rotation happening in cluster: %s | \
                 rotation complete in cluster: %s | return value: %s \
                 ",
@@ -402,7 +455,7 @@ class ClusterState(Object):
         if not self.server.tls_configured or (
             self.server.tls_ca_renewing and not self.server.tls_ca_renewed
         ):
-            self.logger.debug("TLS CA and/or Cert rotation ongoing on this unit.")
+            logger.debug("TLS CA and/or Cert rotation ongoing on this unit.")
             return False
 
         for relation_type in [
@@ -411,14 +464,14 @@ class ClusterState(Object):
             # PeerClusterOrchestratorRelationName,
         ]:
             for relation in self.model.relations[relation_type]:
-                self.logger.debug(f"Checking relation {relation}: units: {relation.units}")
+                logger.debug(f"Checking relation {relation}: units: {relation.units}")
                 for unit in relation.units:
 
                     if relation.data[unit].get("tls_configured") != "True" or (
                         relation.data[unit].get("tls_ca_renewing", False)
                         and not relation.data[unit].get("tls_ca_renewed", False)
                     ):
-                        self.logger.debug(
+                        logger.debug(
                             f"TLS CA and or Cert rotation not complete for unit {unit}: {relation} \
                                 | tls_ca_renewing: {relation.data[unit].get('tls_ca_renewing')} \
                                 | tls_ca_renewed: {relation.data[unit].get('tls_ca_renewed')} \

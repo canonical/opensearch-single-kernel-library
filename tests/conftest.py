@@ -13,9 +13,9 @@ def pytest_addoption(parser: Parser):
     parser.addoption(
         "--substrate",
         action="store",
-        help="Substrate to test, either lxd or k8s",
-        choices=("lxd", "k8s"),
-        default="lxd",
+        help="Substrate to test, either vm or k8s",
+        choices=("vm", "k8s"),
+        default="vm",
     )
 
 

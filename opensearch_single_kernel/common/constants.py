@@ -87,6 +87,13 @@ class CertType(BaseStrEnum):
     UNIT_HTTP = "unit-http"  # http for nodes (rest layer) - units act as servers
 
 
+class StoreType(BaseStrEnum):
+    """Type of certificates and keys store."""
+
+    KEYSTORE = "keystore"
+    TRUSTSTORE = "truststore"
+
+
 class TlsFileExt(BaseStrEnum):
     """Extensions of TLS generated files."""
 

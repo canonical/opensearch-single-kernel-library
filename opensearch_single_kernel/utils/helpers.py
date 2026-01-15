@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
+import base64
 import re
 import secrets
 import string
@@ -130,3 +131,14 @@ def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
     """
     msg = (exc.out or "") + (exc.err or "")
     return f"Alias <{alias}> does not exist" in msg
+
+
+def parse_tls_file(raw_content: str) -> bytes:
+    """Parse TLS files from both plain text or base64 format."""
+    if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
+        return re.sub(
+            r"(-+(BEGIN|END) [A-Z ]+-+)",
+            "\\1",
+            raw_content,
+        ).encode("utf-8")
+    return base64.b64decode(raw_content)

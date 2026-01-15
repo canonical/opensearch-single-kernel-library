@@ -20,6 +20,7 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    COS_USER,
     NODE_LOCK_RELATION,
     OPENSEARCH_SYSTEM_USERS,
     DeploymentType,
@@ -451,9 +452,8 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.application.deployment_desc.typ
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
-            pass
             # Creating the monitoring user
-            # self.charm.users_manager.put_or_update_internal_user_leader(COSUser, update=False)
+            self.charm.users_manager.put_or_update_internal_user_leader(COS_USER, update=False)
 
         self.charm.unit.open_port("tcp", 9200)
 
@@ -462,6 +462,9 @@ class OpenSearchEventsHandler(Object):
         self.charm.status.clear(CharmStatuses.WAITING_TO_START)
         self.charm.status.clear(CharmStatuses.SERVICE_START_ERROR)
         self.charm.status.clear(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
+
+        # TODO: Handle event.after_upgrade
+        # TODO: Handle refresh relation data of peer cluster
 
     def _on_node_lock_relation_changed(self, _=None):
         """Event handler for when the node-lock relation changed"""

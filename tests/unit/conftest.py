@@ -7,6 +7,7 @@ import pytest
 import yaml
 from ops.testing import Harness
 
+from opensearch_single_kernel.common.constants import PEER_RELATION, TLS_RELATION
 from tests.helpers import Substrate
 
 CONFIG = str(yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text()))
@@ -20,7 +21,7 @@ METADATA = str(
 
 @pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path) -> Harness:
-    if substrate == "lxd":
+    if substrate == "vm":
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
@@ -35,7 +36,10 @@ def harness(substrate: Substrate, opensearch_base_path: Path) -> Harness:
 
     harness = Harness(TestCharm, meta=metadata, actions=actions, config=config)
     harness.add_network("1.1.1.1")
-    harness.add_relation("opensearch-peers", "opensearch-peers")
+    harness.add_network("1.1.1.1", endpoint=TLS_RELATION)
     harness.begin()
+    rel_id = harness.add_relation(PEER_RELATION, harness.charm.app.name)
+    harness.add_relation_unit(rel_id, f"{harness.charm.app.name}/0")
+    harness.add_relation(TLS_RELATION, harness.charm.app.name),
 
     return harness
