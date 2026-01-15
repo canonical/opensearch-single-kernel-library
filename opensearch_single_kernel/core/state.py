@@ -396,6 +396,20 @@ class ClusterState(Object):
         return self.model.get_unit(name)
 
     @property
+    def is_tls_full_configured_in_cluster(self) -> bool:
+        """Check if TLS is configured in all the units of the current cluster."""
+        if not self.peer_relation:
+            return False
+        for unit in self.all_units(self):
+            if (
+                self.peer_relation.data[unit].get("tls_configured") != "True"
+                or "tls_ca_renewing" in self.peer_relation.data[unit]
+                or "tls_ca_renewed" in self.peer_relation.data[unit]
+            ):
+                return False
+        return True
+
+    @property
     def ca_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
         rotation_happening = False
@@ -411,7 +425,7 @@ class ClusterState(Object):
             rotation_happening = True
         if not self.server.tls_ca_renewed:
             logger.debug(
-                f"TLS CA rotation ongoing in unit: {self.server.unit_name}, will not update tls certificates."
+                f"TLS CA rotation ongoing in unit: {self.unit_name}, will not update tls certificates."
             )
             rotation_complete = False
         # TODO: Support peer cluster and peer cluster orchestrator

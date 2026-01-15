@@ -466,6 +466,8 @@ class OpenSearchEventsHandler(Object):
         # TODO: Handle event.after_upgrade
         # TODO: Handle refresh relation data of peer cluster
 
+        self.charm.tls_events.configure_tls_after_start()
+
     def _on_node_lock_relation_changed(self, _=None):
         """Event handler for when the node-lock relation changed"""
         self.charm.lock_manager.refresh_lock()

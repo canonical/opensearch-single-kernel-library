@@ -32,7 +32,7 @@ def test_get_sans(harness, mocker, substrate):
 
     print(f"Unit name in test {harness.charm.unit_name}")
     gethostbyaddr.return_value = (
-        harness.charm.state.server.unit_name,
+        harness.charm.state.unit_name,
         ["alias"],
         ["address1", "address2"],
     )
@@ -41,7 +41,7 @@ def test_get_sans(harness, mocker, substrate):
     get_host_public_ip.return_value = "XX.XXX.XX.XXX"
 
     base_ips = ["1.1.1.1", "address1", "address2"]
-    base_dns_entries = [harness.charm.state.server.unit_name, "nebula", "alias"]
+    base_dns_entries = [harness.charm.state.unit_name, "nebula", "alias"]
     print(f"The test is expecting this {base_dns_entries}")
     unit_http_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_HTTP)
     print(f"And is having this {unit_http_sans}")
