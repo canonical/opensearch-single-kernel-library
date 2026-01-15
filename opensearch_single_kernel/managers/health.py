@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Base class for the OpenSearch Health management."""
+import logging
 import time
 
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -16,6 +17,8 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class HealthManager(BaseManager):
@@ -56,11 +59,11 @@ class HealthManager(BaseManager):
         if not response:
             return HealthColors.UNKNOWN
 
-        self.logger.info(f"Health: {response}")
+        logger.info(f"Health: {response}")
         try:
             status = response["status"].lower()
         except (AttributeError, TypeError, KeyError) as e:
-            self.logger.error(e)  # means the status was reported as an int (i.e: 503)
+            logger.error(e)  # means the status was reported as an int (i.e: 503)
             return HealthColors.UNKNOWN
 
         # we differentiate between a temp yellow (moving shards) and a permanent
@@ -69,10 +72,10 @@ class HealthManager(BaseManager):
             response["initializing_shards"] > 0 or response["relocating_shards"] > 0
         ):
             try:
-                self.logger.debug(
+                logger.debug(
                     f"\n\nHealth: {status} -- Shards: {self.opensearch_client.get_shards(host, verbose=True)}\n\n"
                 )
-                self.logger.debug(
+                logger.debug(
                     f"Allocation explanations: {self.opensearch_client.get_allocation_explain(host)}\n\n"
                 )
             except OpenSearchHttpError:
@@ -89,7 +92,7 @@ class HealthManager(BaseManager):
         health = self.get(local_app_only=False)
 
         if health == HealthColors.YELLOW_TEMP:
-            self.logger.info("Shards still moving before stopping Opensearch.")
+            logger.info("Shards still moving before stopping Opensearch.")
             # we throw an error because various operations should NOT start while data
             # is being relocated. Examples are: simple stop, unit removal, upgrade
             raise OpenSearchHAError("Shards haven't completed relocating.")

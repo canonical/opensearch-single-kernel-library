@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Base interface for common workload operations."""
+import logging
 import socket
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -12,7 +13,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from opensearch_single_kernel.utils.logging import WithLogging
+logger = logging.getLogger(__name__)
 
 
 class Paths(BaseModel):
@@ -25,7 +26,7 @@ class Paths(BaseModel):
             logs: Path to the logs folder of opensearch
             jdk: Path of the jdk that comes bundled with the opensearch distro
             tmp: JNA temporary directory
-            bin: optional, Path to the bin/ folder
+            bin: Path to the bin/ folder
     """
 
     home: str
@@ -58,7 +59,7 @@ class Paths(BaseModel):
 
 
 # --- Base Workload
-class BaseWorkload(ABC, WithLogging):
+class BaseWorkload(ABC):
     """Base interface for common workload operations."""
 
     @abstractmethod
@@ -129,16 +130,12 @@ class BaseWorkload(ABC, WithLogging):
 
     def is_reachable(self, host: str, port: int) -> bool:
         """Attempting a socket connection to a host/port."""
-        s = socket.socket()
-        s.settimeout(5)
         try:
-            s.connect((host, port))
-            return True
-        except Exception as e:
-            self.logger.debug(f"Connection to {host}:{port} fails with: {e}")
+            with socket.create_connection((host, port), timeout=5):
+                return True
+        except OSError as e:
+            logger.debug(f"Connection to {host}:{port} fails with: {e}")
             return False
-        finally:
-            s.close()
 
     @abstractmethod
     def run_script(self, script_name: str, args: str = None):
@@ -172,6 +169,7 @@ class BaseWorkload(ABC, WithLogging):
         """Apply a system requirement."""
         pass
 
+    @abstractmethod
     def _get_kernel_property_value(self, prop: str) -> int:
         """Get the value of a kernel parameter."""
         pass
@@ -199,5 +197,5 @@ class BaseWorkload(ABC, WithLogging):
             missing_requirements.append(f"{prop} should be at most {val}")
 
         if missing_requirements:
-            self.logger.error("Missing system requirements: %s", missing_requirements)
+            logger.error("Missing system requirements: %s", missing_requirements)
         return missing_requirements

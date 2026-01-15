@@ -4,8 +4,7 @@
 
 """OpenSearch Topology Manager."""
 
-from logging import Logger
-from typing import Dict, List, Optional
+import logging
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
@@ -13,17 +12,18 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.logging import WithLogging
+
+logger = logging.getLogger(__name__)
 
 
-class ClusterTopology(WithLogging):
+class ClusterTopology:
     """OpenSearch Cluster Topology.
 
     Provides functions to manage cluster topology.
     """
 
     @staticmethod
-    def generated_roles() -> List[str]:
+    def generated_roles() -> list[str]:
         """Get generated roles for a Node."""
         return GENERATED_ROLES
 
@@ -31,17 +31,17 @@ class ClusterTopology(WithLogging):
     def nodes(
         opensearch_client: OpenSearchClient,
         use_localhost: bool,
-        hosts: Optional[List[str]] = None,
-    ) -> List[Node]:
+        hosts: list[str] | None = None,
+    ) -> list[Node]:
         """Get the list of nodes in a cluster."""
-        host: Optional[str] = None  # defaults to current unit ip
-        alt_hosts: Optional[List[str]] = hosts
+        host: str | None = None  # defaults to current unit ip
+        alt_hosts: list[str] | None = hosts
         if not use_localhost and hosts:
             host = hosts[0]
             if len(hosts) >= 2:
                 alt_hosts = hosts[1:]
 
-        nodes: List[Node] = []
+        nodes: list[Node] = []
         if use_localhost or host:
             response = opensearch_client.get_nodes(host, alt_hosts)
             if "nodes" in response:
@@ -58,7 +58,7 @@ class ClusterTopology(WithLogging):
         return nodes
 
     @staticmethod
-    def get_cluster_managers_ips(nodes: List[Node]) -> List[str]:
+    def get_cluster_managers_ips(nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
         result = []
         for node in nodes:
@@ -68,7 +68,7 @@ class ClusterTopology(WithLogging):
         return result
 
     @staticmethod
-    def get_cluster_managers_names(nodes: List[Node]) -> List[str]:
+    def get_cluster_managers_names(nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
         result = []
         for node in nodes:
@@ -86,7 +86,7 @@ class ClusterTopology(WithLogging):
         return data_apps_in_fleet and any(app.planned_units > 0 for app in data_apps_in_fleet)
 
     @staticmethod
-    def recompute_nodes_conf(logger: Logger, app_id: str, nodes: List[Node]) -> Dict[str, Node]:
+    def recompute_nodes_conf(app_id: str, nodes: list[Node]) -> dict[str, Node]:
         """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
         if not nodes:
             return {}

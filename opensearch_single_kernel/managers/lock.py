@@ -20,8 +20,8 @@ The workflow logic goes alongside the following:
    d) we release the lock by removing that flag from the rel data
 """
 import json
+import logging
 import os
-from typing import List, Optional
 
 import ops
 
@@ -33,6 +33,8 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class PeerLockManager(BaseManager):
@@ -54,12 +56,12 @@ class PeerLockManager(BaseManager):
         self._relation.data[self.state.server.unit]["lock-requested"] = json.dumps(True)
 
         if self.state.server.is_app_leader:
-            self.logger.debug("[Node lock] Requested peer lock as leader unit")
+            logger.debug("[Node lock] Requested peer lock as leader unit")
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
-        if self._unit_with_lock != self.state.server.unit_name:
-            self.logger.debug(
+        if self._unit_with_lock != self.state.unit_name:
+            logger.debug(
                 f"[Node lock] Not acquired. Unit with peer databag lock: {self._unit_with_lock}"
             )
             return False
@@ -83,18 +85,18 @@ class PeerLockManager(BaseManager):
                 # Therefore, no other unit will be able to trigger peer relation changed on this
                 # unit. We must use the lock now and accept that `unit-with-lock` could be reverted
                 # if the charm code raises an uncaught exception later in the Juju event.
-                self.logger.debug(
+                logger.debug(
                     "[Node lock] Single unit deployment. Not waiting until next Juju event to use peer "
                     "databag lock for leader unit"
                 )
             else:
-                self.logger.debug(
+                logger.debug(
                     "[Node lock] Not acquired. Waiting until next Juju event to use peer databag lock "
                     "for leader unit"
                 )
                 return False
 
-        self.logger.debug("[Node lock] Acquired via peer databag")
+        logger.debug("[Node lock] Acquired via peer databag")
         return True
 
     def release(self):
@@ -104,7 +106,7 @@ class PeerLockManager(BaseManager):
 
         self._relation.data[self.state.server.unit].pop("lock-requested", None)
         if self.state.server.is_app_leader:
-            self.logger.debug("[Node lock] Released peer lock as leader unit")
+            logger.debug("[Node lock] Released peer lock as leader unit")
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
@@ -130,8 +132,8 @@ class PeerLockManager(BaseManager):
         assert self._relation
         assert self._unit_with_lock != value
 
-        if value == self.state.server.unit_name:
-            self.logger.debug("[Node lock] (leader) granted peer lock to own unit")
+        if value == self.state.unit_name:
+            logger.debug("[Node lock] (leader) granted peer lock to own unit")
             # Prevent leader unit from using lock in the same Juju event that it was granted
             # If the charm code raises an uncaught exception later in the Juju event,
             # `unit-with-lock` will be reverted to its previous value—which could allow another
@@ -188,7 +190,7 @@ class PeerLockManager(BaseManager):
             self.state.get_unit(self._default_unit_name(self._unit_with_lock))
         ):
             # Lock still in use, do not release
-            self.logger.debug("[Node lock] (leader) lock still in use")
+            logger.debug("[Node lock] (leader) lock still in use")
             return
 
         # TODO: adjust which unit gets priority on lock after leader?
@@ -198,10 +200,10 @@ class PeerLockManager(BaseManager):
         for unit in (self.state.server.unit, *self._relation.units):
             if self._unit_requested_lock(unit):
                 self._unit_with_lock = format_unit_name(unit, app=deployment_desc.app)
-                self.logger.debug(f"[Node lock] (leader) granted peer lock to {unit.name=}")
+                logger.debug(f"[Node lock] (leader) granted peer lock to {unit.name=}")
                 break
         else:
-            self.logger.debug("[Node lock] (leader) cleared peer lock")
+            logger.debug("[Node lock] (leader) cleared peer lock")
             del self._unit_with_lock
 
     @staticmethod
@@ -276,7 +278,7 @@ class LockManager(PeerLockManager):
         host = self.state.host_ip if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
-            self.logger.debug("[Node lock] 1+ opensearch nodes online")
+            logger.debug("[Node lock] 1+ opensearch nodes online")
             try:
                 online_nodes = len(
                     ClusterTopology.nodes(
@@ -284,14 +286,14 @@ class LockManager(PeerLockManager):
                     )
                 )
             except OpenSearchHttpError:
-                self.logger.exception("Error getting OpenSearch nodes")
+                logger.exception("Error getting OpenSearch nodes")
                 return False
-            self.logger.debug(f"[Node lock] Opensearch {online_nodes=}")
+            logger.debug(f"[Node lock] Opensearch {online_nodes=}")
             assert online_nodes > 0
             try:
                 unit = self.unit_with_lock(host)
             except OpenSearchHttpError:
-                self.logger.exception("Error checking which unit has OpenSearch lock")
+                logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock
                 # this avoids hitting deadlock situations in cases where
                 # the .charm_node_lock index is not available
@@ -305,7 +307,7 @@ class LockManager(PeerLockManager):
             # Then, when 1+ OpenSearch nodes are online, a unit that no longer exists could hold
             # the lock.
             if not unit and online_nodes > 0:
-                self.logger.debug("[Node lock] Attempting to acquire opensearch lock")
+                logger.debug("[Node lock] Attempting to acquire opensearch lock")
                 # Acquire opensearch lock
                 # Create index if it doesn't exist
                 if not self._create_lock_index_if_needed(host, alt_hosts):
@@ -319,20 +321,20 @@ class LockManager(PeerLockManager):
                         host=host,
                         alt_hosts=self.alt_hosts,
                         retries=0,
-                        payload={"unit-name": self.state.server.unit_name},
+                        payload={"unit-name": self.state.unit_name},
                     )
                 except OpenSearchHttpError as e:
                     if e.response_code == 409 and "document already exists" in e.response_body.get(
                         "error", {}
                     ).get("reason", ""):
                         # Document already created
-                        self.logger.debug(
+                        logger.debug(
                             "[Node lock] Another unit acquired OpenSearch lock while this unit attempted "
                             "to acquire lock"
                         )
                         return False
                     else:
-                        self.logger.exception("Error creating OpenSearch lock document")
+                        logger.exception("Error creating OpenSearch lock document")
                         # in this case, try to acquire peer databag lock as fallback
                         return super().acquired
                 else:
@@ -348,8 +350,8 @@ class LockManager(PeerLockManager):
                     # from
                     # https://www.elastic.co/guide/en/elasticsearch/reference/8.13/docs-index_.html#index-wait-for-active-shards
                     if response["_shards"]["failed"] > 0:
-                        self.logger.error("Failed to write OpenSearch lock document to all nodes.")
-                        self.logger.debug(
+                        logger.error("Failed to write OpenSearch lock document to all nodes.")
+                        logger.debug(
                             "[Node lock] Deleting OpenSearch lock after failing to write to all nodes"
                         )
                         # Delete document id 0
@@ -360,30 +362,30 @@ class LockManager(PeerLockManager):
                             alt_hosts=self.alt_hosts,
                             retries=10,
                         )
-                        self.logger.debug(
+                        logger.debug(
                             "[Node lock] Deleted OpenSearch lock after failing to write to all nodes"
                         )
                         return False
 
                     # This unit has OpenSearch lock
-                    unit = self.state.server.unit_name
+                    unit = self.state.unit_name
 
-            if unit == self.state.server.unit_name:
+            if unit == self.state.unit_name:
                 # Lock acquired
                 # Release peer databag lock, if any
-                self.logger.debug("[Node lock] Acquired via opensearch")
+                logger.debug("[Node lock] Acquired via opensearch")
                 super().release()
-                self.logger.debug("[Node lock] Released redundant peer lock (if held)")
+                logger.debug("[Node lock] Released redundant peer lock (if held)")
                 return True
 
             if unit:
                 # Another unit has lock
-                self.logger.debug(f"[Node lock] Not acquired. Unit with opensearch lock: {unit}")
+                logger.debug(f"[Node lock] Not acquired. Unit with opensearch lock: {unit}")
                 return False
 
             assert online_nodes == 1
-            self.logger.debug("[Node lock] No unit has opensearch lock")
-        self.logger.debug("[Node lock] Using peer databag for lock")
+            logger.debug("[Node lock] No unit has opensearch lock")
+        logger.debug("[Node lock] Using peer databag for lock")
         # Request peer databag lock
         # If return value is True:
         # - Lock granted in previous Juju event
@@ -396,7 +398,7 @@ class LockManager(PeerLockManager):
         Limitation: if lock acquired via OpenSearch document and all units offline, OpenSearch
         document lock will not be released
         """
-        self.logger.debug("[Node lock] Releasing lock")
+        logger.debug("[Node lock] Releasing lock")
 
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
@@ -404,7 +406,7 @@ class LockManager(PeerLockManager):
         host = self.state.host_ip if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
-            self.logger.debug("[Node lock] Checking which unit has opensearch lock")
+            logger.debug("[Node lock] Checking which unit has opensearch lock")
             # Check if this unit currently has lock
             # or if there is a stale lock from a unit no longer existing
             # for large deployments the MAIN/FAILOVER orchestrators should broadcast info
@@ -429,10 +431,10 @@ class LockManager(PeerLockManager):
                     other_apps_units.extend(units)
 
             if unit_with_lock and (
-                unit_with_lock == self.state.server.unit_name
+                unit_with_lock == self.state.unit_name
                 or unit_with_lock not in current_app_units + other_apps_units
             ):
-                self.logger.debug("[Node lock] Releasing opensearch lock")
+                logger.debug("[Node lock] Releasing opensearch lock")
                 # Delete document id 0
                 try:
                     self.opensearch_client.request(
@@ -446,19 +448,19 @@ class LockManager(PeerLockManager):
                 except OpenSearchHttpError as e:
                     if e.response_code != 404:
                         raise
-                self.logger.debug("[Node lock] Released opensearch lock")
+                logger.debug("[Node lock] Released opensearch lock")
         super().release()
-        self.logger.debug("[Node lock] Released peer lock (if held)")
-        self.logger.debug("[Node lock] Released lock")
+        logger.debug("[Node lock] Released peer lock (if held)")
+        logger.debug("[Node lock] Released lock")
 
-    def _create_lock_index_if_needed(self, host: str, alt_hosts: Optional[List[str]]) -> bool:
+    def _create_lock_index_if_needed(self, host: str, alt_hosts: list[str] | None) -> bool:
         """Attempts the creation of the lock index if it doesn't exist."""
         # we do this, to circumvent opensearch raising a 429 error,
         # complaining about spamming the index creation endpoint
         try:
             indices = self.opensearch_client.get_indices(host, alt_hosts)
             if self.OPENSEARCH_INDEX in indices:
-                self.logger.debug(
+                logger.debug(
                     f"{self.OPENSEARCH_INDEX} already created. Skipping creation attempt. List:{indices}"
                 )
                 if self.state.application.app.planned_units() > 1:
@@ -492,5 +494,5 @@ class LockManager(PeerLockManager):
                 # Index already created
                 return True
             else:
-                self.logger.exception("Error creating OpenSearch lock index")
+                logger.exception("Error creating OpenSearch lock index")
                 return False

@@ -7,7 +7,7 @@ import re
 import secrets
 import string
 from time import time_ns
-from typing import TYPE_CHECKING, Optional, Tuple, Union
+from typing import TYPE_CHECKING
 
 import bcrypt
 from ops import Unit
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
-def format_unit_name(unit: Union[Unit, str], app: App) -> str:
+def format_unit_name(unit: Unit | str, app: App) -> str:
     """Format unit_name according the app."""
     if isinstance(unit, Unit):
         unit = unit.name
@@ -75,7 +75,7 @@ def generate_password() -> str:
     return "".join([secrets.choice(choices) for _ in range(32)])
 
 
-def generate_hashed_password(pwd: Optional[str] = None) -> Tuple[str, str]:
+def generate_hashed_password(pwd: str | None = None) -> tuple[str, str]:
     """Generates a password and its bcrypt hash.
 
     Returns:
@@ -88,7 +88,7 @@ def generate_hashed_password(pwd: Optional[str] = None) -> Tuple[str, str]:
 def deployment_type(
     config: PeerClusterConfig,
     start_mode: StartMode,
-    prev_deployment_type: Optional[DeploymentType] = None,
+    prev_deployment_type: DeploymentType | None = None,
 ) -> DeploymentType:
     """Check if the current cluster is an independent cluster."""
     has_cm_roles = (

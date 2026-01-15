@@ -21,12 +21,11 @@ from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.tls import TlsManager
 from opensearch_single_kernel.managers.users import UsersManager
-from opensearch_single_kernel.utils.logging import WithLogging
 from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
-class OpenSearchBaseCharm(ops.CharmBase, ABC, WithLogging):
+class OpenSearchBaseCharm(ops.CharmBase, ABC):
     """Base OpenSearch Charm, this will include base structure for both machine and k8s charms."""
 
     def __init__(self, *args):

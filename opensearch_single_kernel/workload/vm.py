@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
+import logging
 import os
 import pathlib
 import subprocess
@@ -10,7 +11,6 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
 
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
@@ -30,6 +30,8 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
 from opensearch_single_kernel.utils.helpers import mask_sensitive_information
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
+logger = logging.getLogger(__name__)
+
 
 class VMWorkload(BaseWorkload):
     """OpenSearch Machine VM Workload."""
@@ -38,7 +40,7 @@ class VMWorkload(BaseWorkload):
 
     def __init__(self):
         super().__init__()
-        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(wait=5)):
+        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
                 self.opensearch_snap = cache["opensearch"]
@@ -61,7 +63,7 @@ class VMWorkload(BaseWorkload):
                 # hold the snap in charm determined revision
                 self.opensearch_snap.hold()
         except snap.SnapError as e:
-            self.logger.error(f"Failed to install/upgrade opensearch. \n{e}")
+            logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
 
     @override
@@ -117,7 +119,12 @@ class VMWorkload(BaseWorkload):
 
     @override
     def run_script(self, script_name: str, args: str = None):
-        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
+        """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME.
+
+        Args:
+            script_name (str): The name of script file to execute.
+            args (str): Arguments passed to the script.
+        """
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):
             self.run_cmd(f"chmod a+x {script_path}")
@@ -125,26 +132,17 @@ class VMWorkload(BaseWorkload):
         self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @override
-    def get_host_public_ip(self) -> Optional[str]:
+    def get_host_public_ip(self) -> str | None:
         """Fetches the Public IP address of the current unit."""
         cmd = "unit-get public-address"
-        output = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-            text=True,
-            encoding="utf-8",
-            timeout=25,
-            env=os.environ,
-        )
+        output = self.run_cmd(cmd)
         if output.returncode != 0:
             return None
 
-        return output.stdout.strip()
+        return output.out.strip()
 
     @override
-    def is_service_started(self, paused: Optional[bool] = False) -> bool:
+    def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
 
         Set paused=True if the process was intentionally paused.
@@ -195,7 +193,7 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
             raise OpenSearchStartError()
 
     @override
@@ -228,13 +226,13 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            self.logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
+            logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
             return
 
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            self.logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
             raise OpenSearchStartError()
 
     @override
@@ -244,6 +242,8 @@ class VMWorkload(BaseWorkload):
         According to the kernel source code, the values are always in kB:
             https://github.com/torvalds/linux/blob/
                 2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
+        Returns:
+            meminfo: The memory info values.
         """
         with open("/proc/meminfo") as f:
             meminfo = f.read().split("\n")
@@ -253,7 +253,15 @@ class VMWorkload(BaseWorkload):
 
     @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
-        """Apply a system requirement."""
+        """Apply a system requirement.
+
+        Args:
+            system_requirement (str): Kernel parameter to update.
+            value (int): Value of the kernel parameter.
+
+        Returns:
+            applied (bool): Whether the kernel value is applied successfully.
+        """
         try:
             self.run_cmd(f"sysctl -w {system_requirement}={value}")
             return int(self.run_cmd(f"sysctl -n {system_requirement}").out.rstrip()) == value
@@ -262,25 +270,31 @@ class VMWorkload(BaseWorkload):
 
     @override
     def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter."""
+        """Get the value of a kernel parameter.
+
+        Args:
+            prop (str): Kernel property name.
+
+        Returns:
+            value (int): Kernel property value.
+        """
         return int(self.run_cmd(f"sysctl -n {prop}").out.rstrip())
 
     @override
     def run_cmd(
         self,
         command: str,
-        args: Optional[str] = None,
+        args: str | None = None,
         use_errors_replace: bool = False,
-        stdin: Optional[str] = None,
+        stdin: str | None = None,
     ) -> SimpleNamespace:
-        """Run command
+        """Run command.
 
-        Arg:
+        Args:
             command: can contain arguments
             args: command line arguments
             stdin: string input to be passed on the standard input of the subprocess
             use_errors_replace: replace errors with empty string
-
 
         Returns the stdout
         """
@@ -290,7 +304,7 @@ class VMWorkload(BaseWorkload):
 
         # only log the command and no arguments to avoid logging sensitive information
         command = mask_sensitive_information(command_with_args)
-        self.logger.debug(f"Executing command: {command}")
+        logger.debug(f"Executing command: {command}")
 
         run_kwargs = dict(
             stdout=subprocess.PIPE,
@@ -317,19 +331,19 @@ class VMWorkload(BaseWorkload):
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
 
-            self.logger.debug(f"{command}:\n{output.stdout}")
+            logger.debug(f"{command}:\n{output.stdout}")
 
             if output.returncode != 0:
-                self.logger.debug(
-                    f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}"
-                )
+                logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
-            return SimpleNamespace(cmd=command, out=output.stdout, err=output.stderr)
+            return SimpleNamespace(
+                cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
+            )
         except (TimeoutError, subprocess.TimeoutExpired):
-            raise OpenSearchCmdError(cmd=command)
+            raise OpenSearchCmdError
 
     @property
     @override
-    def paths(self):
+    def paths(self) -> Paths:
         """Return Workload's paths"""
         return Paths(**VM_PATHS)

@@ -8,8 +8,8 @@
 The idea is to keep some stuff here to be used in the state, but move the event handling
 to an event handler.
 """
-
-from typing import TYPE_CHECKING, Dict, Optional, Union
+import logging
+from typing import TYPE_CHECKING, Any
 
 from ops import Relation, Secret, SecretNotFoundError
 from ops.framework import Object
@@ -19,16 +19,19 @@ from opensearch_single_kernel.common.constants import (
     HASH_POSTFIX,
     OPENSEARCH_SYSTEM_USERS,
     PW_POSTFIX,
+    Scope,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchSecretInsertionError
-from opensearch_single_kernel.core.models import RelationDataStore, Scope, SecretCache
-from opensearch_single_kernel.utils.logging import WithLogging
+from opensearch_single_kernel.core.relations import RelationDataStore
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
-class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
+logger = logging.getLogger(__name__)
+
+
+class OpenSearchSecrets(Object, RelationDataStore):
     """Encapsulating Juju3 secrets handling."""
 
     LABEL_SEPARATOR = ":"
@@ -62,7 +65,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         components.append(key)
         return self.LABEL_SEPARATOR.join(components)
 
-    def breakdown_label(self, label: str) -> Dict[str, str]:
+    def breakdown_label(self, label: str) -> dict[str, str]:
         """Return meaningful components resolved from a secret label."""
         components = label.split(self.LABEL_SEPARATOR)
         if len(components) < 3 or len(components) > 4:
@@ -85,12 +88,12 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         }
 
     @staticmethod
-    def _safe_obj_data(indict: Dict) -> Dict[str, any]:
+    def _safe_obj_data(indict: dict) -> dict[str, Any]:
         return {
             key: str(val) for key, val in indict.items() if val is not None and str(val).strip()
         }
 
-    def _get_juju_secret(self, scope: Scope, key: str) -> Optional[Secret]:
+    def _get_juju_secret(self, scope: Scope, key: str) -> Secret | None:
         label = self.label(scope, key)
 
         cached_secret_meta = self.cached_secrets.get_meta(scope, label)
@@ -107,7 +110,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
 
     def _get_juju_secret_content(
         self, scope: Scope, key: str, peek: bool = False
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         cached_secret_content = self.cached_secrets.get_content(scope, self.label(scope, key))
         if cached_secret_content:
             return cached_secret_content
@@ -123,7 +126,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         self.cached_secrets.put_content(scope, self.label(scope, key), content=content)
         return content
 
-    def _add_juju_secret(self, scope: Scope, key: str, value: Dict[str, str]) -> Optional[Secret]:
+    def _add_juju_secret(self, scope: Scope, key: str, value: dict[str, str]) -> Secret | None:
         safe_value = self._safe_obj_data(value)
 
         if not safe_value:
@@ -134,9 +137,9 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         label = self.label(scope, key)
         try:
             secret = scope_obj.add_secret(safe_value, label=label)
-            self.logger.debug(f"Secret added {secret}")
+            logger.debug(f"Secret added {secret}")
         except ValueError as e:
-            self.logger.error("Secret %s:%s couldn't be added", str(scope.val), str(key))
+            logger.error("Secret %s:%s couldn't be added", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
 
         self.cached_secrets.put(scope, label, secret, safe_value)
@@ -151,8 +154,8 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         return secret
 
     def _update_juju_secret(
-        self, scope: Scope, key: str, value: Dict[str, str], merge: bool = False
-    ) -> Optional[Secret]:
+        self, scope: Scope, key: str, value: dict[str, str], merge: bool = False
+    ) -> Secret | None:
         # If the call below occurs for the 2nd time within the same flow,
         # it's hitting on the cache (i.e. cheap)
         secret = self._get_juju_secret(scope, key)
@@ -170,14 +173,14 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         try:
             secret.set_content(safe_content)
         except ValueError as e:
-            self.logger.error("Secret %s:%s couldn't be updated", str(scope.val), str(key))
+            logger.error("Secret %s:%s couldn't be updated", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
 
         self.cached_secrets.put(scope, self.label(scope, key), content=safe_content)
         return secret
 
     def _add_or_update_juju_secret(
-        self, scope: Scope, key: str, value: Dict[str, str], merge: bool = False
+        self, scope: Scope, key: str, value: dict[str, str], merge: bool = False
     ):
         # Existing secret?
         if not self._get_juju_secret(scope, key):
@@ -187,7 +190,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     def _remove_juju_secret(self, scope: Scope, key: str):
         secret = self._get_juju_secret(scope, key)
         if not secret:
-            self.logger.warning(f"Secret {scope}:{key} can't be deleted as it doesn't exist")
+            logger.warning(f"Secret {scope}:{key} can't be deleted as it doesn't exist")
             return None
 
         secret.remove_all_revisions()
@@ -209,11 +212,11 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         self,
         scope: Scope,
         key: str,
-        default: Optional[Union[int, float, str, bool]] = None,
+        default: int | float | str | bool | None = None,
         auto_casting: bool = True,
-    ) -> Optional[Union[int, float, str, bool]]:
+    ) -> int | float | str | bool | None:
         """Getting a secret's value."""
-        self.logger.debug(f"Getting secret {scope}:{key}")
+        logger.debug(f"Getting secret {scope}:{key}")
 
         if not self.charm.state.implements_secrets:
             return super().get(scope, key, default, auto_casting)
@@ -235,7 +238,7 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
             raise TypeError(f"Secret {scope}:{key} is to be retrieved with 'get_object()'")
 
     @override
-    def get_object(self, scope: Scope, key: str, peek: bool = False) -> Optional[Dict[str, any]]:
+    def get_object(self, scope: Scope, key: str, peek: bool = False) -> dict[str, Any] | None:
         """Get dict object from the relation data store."""
         if not self.charm.state.implements_secrets:
             return super().get_object(scope, key)
@@ -243,9 +246,9 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         return self._get_juju_secret_content(scope, key, peek)
 
     @override
-    def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
+    def put(self, scope: Scope, key: str, value: Any | None) -> None:
         """Adding or updating a secret's value."""
-        self.logger.debug(f"Putting secret {scope}:{key}")
+        logger.debug(f"Putting secret {scope}:{key}")
         if not self.charm.state.implements_secrets:
             return super().put(scope, key, value)
 
@@ -257,10 +260,10 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
 
     @override
     def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
+        self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
     ) -> None:
         """Put a dict object into relation data store."""
-        self.logger.debug(f"Putting secret object {scope}:{key}")
+        logger.debug(f"Putting secret object {scope}:{key}")
         if not self.charm.state.implements_secrets:
             return super().put_object(scope, key, value, merge)
 
@@ -273,16 +276,16 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
     @override
     def delete(self, scope: Scope, key: str) -> None:
         """Removing a secret."""
-        self.logger.debug(f"Removing secret {scope}:{key}")
+        logger.debug(f"Removing secret {scope}:{key}")
 
         if not self.charm.state.implements_secrets:
             return super().delete(scope, key)
 
         self._remove_juju_secret(scope, key)
 
-        self.logger.debug(f"Deleted secret {scope}:{key}")
+        logger.debug(f"Deleted secret {scope}:{key}")
 
-    def get_secret_id(self, scope: Scope, key: str) -> Optional[str]:
+    def get_secret_id(self, scope: Scope, key: str) -> str | None:
         """Get the secret ID from the cache."""
         label = self.label(scope, key)
         return self.charm.peers_data.get(scope, label)
@@ -291,3 +294,73 @@ class OpenSearchSecrets(Object, RelationDataStore, WithLogging):
         """Grant a secret to a relation."""
         secret = self.charm.model.get_secret(id=secret_id)
         secret.grant(relation)
+
+
+class SecretCache:
+    """Internal helper class locally cache secrets.
+
+    The data structure is precisely reusing/simulating as in the actual Secret Storage
+    """
+
+    CACHED_META = "meta"
+    CACHED_CONTENT = "content"
+
+    def __init__(self):
+        # Structure:
+        # NOTE: "objects" (i.e. dict-s) and scalar values are handled in a unified way
+        # precisely as done for the Secret objects themselves.
+        #
+        # self.secrets = {
+        #   "app": {
+        #       "opensearch:app:admin-password": {
+        #           "meta": <Secret instance>,
+        #           "content": {
+        #               "opensearch:app:admin-password": "bla"
+        #           }
+        #       }
+        #   },
+        #   "unit": {
+        #       "opensearch:unit:0:certificates": {
+        #           "meta": <Secret instance>,
+        #           "content": {
+        #               "ca-cert": "<certificate>",
+        #               "cert": "<certificate>",
+        #               "chain": "<certificate>"
+        #           }
+        #       }
+        #   }
+        # }
+        self.secrets = {Scope.APP: {}, Scope.UNIT: {}}
+
+    def get_meta(self, scope: Scope, label: str) -> Secret | None:
+        """Getting cached secret meta-information."""
+        return self.secrets[scope].get(label, {}).get(self.CACHED_META)
+
+    def set_meta(self, scope: Scope, label: str, secret: Secret) -> None:
+        """Setting cached secret meta-information."""
+        self.secrets[scope].setdefault(label, {}).update({self.CACHED_META: secret})
+
+    def get_content(self, scope: Scope, label: str) -> dict[str, str]:
+        """Getting cached secret content."""
+        return self.secrets[scope].get(label, {}).get(self.CACHED_CONTENT)
+
+    def put_content(self, scope: Scope, label: str, content: str | dict[str, str]):
+        """Setting cached secret content."""
+        self.secrets[scope].setdefault(label, {}).update({self.CACHED_CONTENT: content})
+
+    def put(
+        self,
+        scope: Scope,
+        label: str,
+        secret: Secret | None = None,
+        content: str | dict[str, str] | None = None,
+    ) -> None:
+        """Updating cached secret information."""
+        if secret:
+            self.set_meta(scope, label, secret)
+        if content:
+            self.put_content(scope, label, content)
+
+    def delete(self, scope: Scope, label: str) -> None:
+        """Removing cached secret information."""
+        self.secrets[scope].pop(label, None)

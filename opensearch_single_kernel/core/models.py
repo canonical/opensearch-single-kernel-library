@@ -3,42 +3,30 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Collection of models defining state structure of OpenSearch charm, relations and units."""
+"""Collection of models used for the operation of the charm."""
 
 
-import enum
 import json
+import logging
 from abc import ABC, abstractmethod
-from ast import literal_eval
 from datetime import datetime
 from hashlib import md5
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
-from ops import Secret
-from ops.model import Application, Relation, Unit
-from overrides import override
 from pydantic import BaseModel, Field, root_validator, validator
 from pydantic.utils import ROOT_KEY
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
-    MAX_HEAP_SIZE,
-    PERFORMANCE_PROFILE,
+    MAX_HEAP_SIZE_IN_KB,
     DeploymentType,
     Directive,
     PerformanceType,
-    Scope,
     StartMode,
     State,
 )
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
-    Data,
-    DataPeerData,
-    DataPeerUnitData,
-    ProviderData,
-    RequirerData,
-)
-from opensearch_single_kernel.utils.logging import WithLogging
+
+logger = logging.getLogger(__name__)
 
 
 class Model(ABC, BaseModel):
@@ -53,12 +41,12 @@ class Model(ABC, BaseModel):
         """Deserialize object into a string."""
         return json.dumps(Model.sort_payload(self.to_dict(by_alias=by_alias)))
 
-    def to_dict(self, by_alias: bool = False) -> Dict[str, Any]:
+    def to_dict(self, by_alias: bool = False) -> dict[str, Any]:
         """Deserialize object into a dict."""
         return self.dict(by_alias=by_alias)
 
     @classmethod
-    def from_dict(cls, input_dict: Optional[Dict[str, Any]]):
+    def from_dict(cls, input_dict: dict[str, Any] | None):
         """Create a new instance of this class from a json/dict repr."""
         if not input_dict:  # to handle when classes defined defaults
             return cls()
@@ -103,180 +91,13 @@ class Model(ABC, BaseModel):
         return equal
 
 
-class DataStore(ABC):
-    """Class representing a data store used in the OPs code of the charm."""
-
-    def __init__(self, charm):
-        self._charm = charm
-
-    @abstractmethod
-    def put(self, scope: Scope, key: str, value: Optional[any]) -> None:
-        """Put string into the data store."""
-        pass
-
-    @abstractmethod
-    def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
-    ) -> None:
-        """Put object into the data store."""
-        pass
-
-    @abstractmethod
-    def has(self, scope: Scope, key: str):
-        """Check if the said key is contained in the store."""
-        pass
-
-    @abstractmethod
-    def get(
-        self, scope: Scope, key: str, default: Optional[Union[int, float, str, bool]] = None
-    ) -> Optional[Union[int, float, str, bool]]:
-        """Get string from the data store."""
-        pass
-
-    @abstractmethod
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
-        """Get dict / json object from the data store."""
-        pass
-
-    @abstractmethod
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the data store."""
-        pass
-
-    @staticmethod
-    def cast(str_val: str) -> Union[bool, int, float, str]:
-        """Cast a string to the corresponding primitive type."""
-        try:
-            typed_val = literal_eval(str_val.capitalize())
-            if type(typed_val) not in {bool, int, float, str}:
-                return str_val
-
-            return typed_val
-        except (ValueError, SyntaxError):
-            return str_val
-
-    @staticmethod
-    def put_or_delete(data: Dict[str, str], key: str, value: Optional[str]):
-        """Put data into the key/val data store or delete if value is None."""
-        if value is None:
-            data.pop(key, None)
-            return
-
-        data.update({key: str(value)})
-
-
-class RelationDataStore(DataStore):
-    """Class representing a relation data store for a charm."""
-
-    def __init__(self, charm, relation_name: str):
-        super(RelationDataStore, self).__init__(charm)
-        self.relation_name = relation_name
-
-    @override
-    def put(self, scope: Scope, key: str, value: Optional[Union[any]]) -> None:
-        """Put string into the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-        self.put_or_delete(data, key, value)
-
-    @override
-    def put_object(
-        self, scope: Scope, key: str, value: Dict[str, any], merge: bool = False
-    ) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(scope, key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.put(scope, key, payload_str)
-
-    @override
-    def has(self, scope: Scope, key: str):
-        """Check if the said key is contained in the relation data."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        return key in (self._get_relation_data(scope) or {})
-
-    @override
-    def get(
-        self,
-        scope: Scope,
-        key: str,
-        default: Optional[Union[int, float, str, bool]] = None,
-        auto_casting: bool = True,
-    ) -> Optional[Union[int, float, str, bool]]:
-        """Get string from the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-
-        value = data.get(key)
-        if value is None:
-            return default
-
-        if not auto_casting:
-            return value
-
-        return self.cast(value)
-
-    @override
-    def get_object(self, scope: Scope, key: str) -> Optional[Dict[str, any]]:
-        """Get dict / json object from the relation data store."""
-        data = self.get(scope, key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    @override
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the relation data store."""
-        self.put(scope, key, None)
-
-    def _get_relation_data(self, scope: Scope) -> Dict[str, str]:
-        """Relation data object."""
-        relation = self._charm.model.get_relation(self.relation_name)
-        if relation is None:
-            return {}
-
-        relation_scope = self._charm.app if scope == Scope.APP else self._charm.unit
-
-        return relation.data.get(relation_scope)
-
-    @staticmethod
-    def _default_encoder(o: Any) -> Any:
-        """Default encoder for json dumps."""
-        if isinstance(o, enum.Enum):
-            return o.value
-
-        if hasattr(o, "__dict__"):
-            return vars(o)
-
-        raise TypeError(f"Unserializable {o.__class__.__name__}")
-
-
 class App(Model):
     """Data class representing an application."""
 
-    id: Optional[str] = None
-    short_id: Optional[str] = None
-    name: Optional[str] = None
-    model_uuid: Optional[str] = None
+    id: str | None = None
+    short_id: str | None = None
+    name: str | None = None
+    model_uuid: str | None = None
 
     @root_validator
     def set_props(cls, values):  # noqa: N805
@@ -301,11 +122,11 @@ class Node(Model):
     """Data class representing a node in a cluster."""
 
     name: str
-    roles: List[str]
+    roles: list[str]
     ip: str
     app: App
     unit_number: int
-    temperature: Optional[str] = None
+    temperature: str | None = None
 
     @classmethod
     @validator("roles")
@@ -336,9 +157,9 @@ class PeerClusterOrchestrators(Model):
     _TYPES = Literal["main", "failover"]
 
     main_rel_id: int = -1
-    main_app: Optional[App]
+    main_app: App | None = None
     failover_rel_id: int = -1
-    failover_app: Optional[App]
+    failover_app: App | None = None
 
     def delete(self, typ: _TYPES) -> None:
         """Delete an orchestrator from the current pair."""
@@ -361,11 +182,11 @@ class PeerClusterConfig(Model):
 
     cluster_name: str
     init_hold: bool
-    roles: List[str]
+    roles: list[str]
     # We have a breaking change in the model
     # For older charms, this field will not exist and they will be set in the
     # profile called "testing".
-    data_temperature: Optional[str] = None
+    data_temperature: str | None = None
 
     @root_validator
     def set_node_temperature(cls, values):  # noqa: N805
@@ -401,14 +222,14 @@ class PeerClusterApp(Model):
 
     app: App
     planned_units: int
-    units: List[str]
-    roles: List[str]
+    units: list[str]
+    roles: list[str]
 
 
 class PeerClusterFleetApps(Model):
     """Model class for all applications in a large deployment as a dict."""
 
-    __root__: Dict[str, PeerClusterApp]
+    __root__: dict[str, PeerClusterApp]
 
     def __iter__(self):
         """Implements the iter magic method."""
@@ -442,11 +263,11 @@ class DeploymentDescription(Model):
     app: App
     config: PeerClusterConfig
     start: StartMode
-    pending_directives: List[Directive]
+    pending_directives: list[Directive]
     typ: DeploymentType
     state: DeploymentState = DeploymentState(value=State.ACTIVE)
     cluster_name_autogenerated: bool = False
-    promotion_time: Optional[float]
+    promotion_time: float | None
 
     @root_validator
     def set_promotion_time(cls, values):  # noqa: N805
@@ -460,8 +281,8 @@ class DeploymentDescription(Model):
 class ProfileMemoryRequirements(Model):
     """Memory requirements for a profile"""
 
-    memory_size: Optional[int] = None
-    jvm_heap_percentage: Optional[float] = None
+    memory_size: int | None = None
+    jvm_heap_percentage: float | None = None
 
 
 class ClusterTopologyRequirements(Model):
@@ -491,7 +312,9 @@ class OpenSearchProfile(ABC):
     def get_jvm_heap_size(self, mem_size: float) -> int:
         """Get the JVM heap size in KB based on the memory requirements."""
         if self.memory_requirements.jvm_heap_percentage:
-            return min(int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE)
+            return min(
+                int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE_IN_KB
+            )
         return _1GB_IN_KB
 
     def __hash__(self):
@@ -551,366 +374,3 @@ class TestingProfile(OpenSearchProfile):
             cluster_managers=1,
             data=1,
         )
-
-
-class RelationState(WithLogging):
-    """Relation state object."""
-
-    def __init__(
-        self,
-        relation: Relation | None,
-        data_interface: Data,
-        component: Unit | Application | None,
-    ):
-        self.relation = relation
-        self.data_interface = data_interface
-        self.unit = component
-        self.relation_data = self.data_interface.as_dict(self.relation.id) if self.relation else {}
-
-    def __bool__(self) -> bool:
-        """Boolean evaluation based on the existence of self.relation."""
-        try:
-            return bool(self.relation)
-        except AttributeError:
-            return False
-
-    def update(self, items: dict[str, str]) -> None:
-        """Write to relation data."""
-        if not self.relation:
-            self.logger.warning(
-                f"Fields {list(items.keys())} were attempted to be written on the relation before it exists."
-            )
-            return
-
-        delete_fields = [key for key in items if not items[key]]
-        update_content = {k: items[k] for k in items if k not in delete_fields}
-
-        self.relation_data.update(update_content)
-
-        for field in delete_fields:
-            # use del instead of pop here because of error with dataplatform-libs
-            try:
-                del self.relation_data[field]
-            except KeyError:
-                pass
-
-
-class PeerClusterOrchestratorData(ProviderData, RequirerData):
-    """Orchestrator provider data model."""
-
-    # This is to bypass the PrematureDataAccessError, which is irrelevant in this case.
-    def _update_relation_data(self, relation: Relation, data: dict[str, str]) -> None:
-        """Set values for fields not caring whether it's a secret or not."""
-        super(ProviderData, self)._update_relation_data(relation, data)
-
-
-class PeerClusterData(ProviderData, RequirerData):
-    """Orchestrator requirer data model."""
-
-    # This is to bypass the PrematureDataAccessError, which is irrelevant in this case.
-    def _update_relation_data(self, relation: Relation, data: dict[str, str]) -> None:
-        """Set values for fields not caring whether it's a secret or not."""
-        super(ProviderData, self)._update_relation_data(relation, data)
-
-
-class PeerCluster(RelationState):
-    """State collection metadata for a peer-cluster application."""
-
-    def __init__(self, relation, data_interface, component):
-        super().__init__(relation, data_interface, component)
-
-
-class OpenSearchServer(RelationState):
-    """State/Relation data collection for an opensearch unit"""
-
-    def __init__(
-        self, relation: Relation | None, data_interface: DataPeerUnitData, component: Unit
-    ):
-        super().__init__(relation, data_interface, component)
-        self.unit = component
-
-    @property
-    def unit_id(self) -> int:
-        """The id of the unit from the unit name."""
-        return int(self.unit.name.split("/")[1])
-
-    @property
-    def profile(self) -> Optional[OpenSearchProfile]:
-        """Current profile of the unit"""
-        if profile_str := self.relation_data.get(PERFORMANCE_PROFILE, None):
-            return (
-                ProductionProfile()
-                if PerformanceType(profile_str) == PerformanceType.PRODUCTION
-                else TestingProfile()
-            )
-        return None
-
-    @property
-    def unit_name(self) -> str:
-        """The unit's name."""
-        return self.unit.name
-
-    @property
-    def is_app_leader(self) -> bool:
-        """Check if the current unit is the leader of the application."""
-        return self.unit.is_leader()
-
-    @property
-    def bootstrap_contributor(self) -> bool:
-        """Get value of 'bootstrap_contributor'"""
-        return self.relation.data.get("bootstrap_contributor", "") == "True"
-
-    @bootstrap_contributor.setter
-    def bootstrap_contributor(self, value: bool):
-        """Set the value of 'bootstrap_contributor' in unit state."""
-        self.update({"bootstrap_contributor": str(value)})
-
-    @property
-    def cluster_manager_removed(self) -> bool:
-        """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "") == "True"
-
-    @cluster_manager_removed.setter
-    def cluster_manager_removed(self, value: bool):
-        """Set value of 'cluster_manager_removed'"""
-        self.update({"cluster_manager_removed": str(value)})
-
-    @property
-    def started(self) -> bool:
-        """Get the value of 'started' key from unit data bag"""
-        return bool(self.relation_data.get("started", ""))
-
-    @property
-    def tls_ca_renewing(self) -> bool:
-        """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation_data.get("tls_ca_renewing", "") == "True"
-
-    @tls_ca_renewing.setter
-    def tls_ca_renewing(self, value: bool):
-        """Update value of tls_ca_renewing from unit state."""
-        self.update({"tls_ca_renewing": str(value)})
-
-    @property
-    def tls_ca_renewed(self) -> bool:
-        """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation_data.get("tls_ca_renewed", "") == "True"
-
-    @tls_ca_renewed.setter
-    def tls_ca_renewed(self, value: bool):
-        """Update value of 'tls_ca_renewed'"""
-        self.update({"tls_ca_renewed": str(value)})
-
-    @property
-    def tls_configured(self) -> bool:
-        """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation_data.get("tls_configurd", "") == "True"
-
-    @tls_configured.setter
-    def tls_configured(self, value: bool):
-        """Update the value of 'tls_configured'"""
-        self.update({"tls_configured": str(value)})
-
-    @property
-    def update_ts(self) -> str:
-        """Get the value of 'update-ts' from the unit databag."""
-        return self.relation_data.get("update-ts", "")
-
-    @update_ts.setter
-    def update_ts(self, timestamp: int):
-        """Update the value of 'update-ts' in the unit databag."""
-        self.update({"update-ts": str(timestamp)})
-
-
-class OpenSearchApplication(RelationState):
-    """An OpenSearch Application is a charm application with a given role.
-
-    In OpenSearch a cluster can be formed using one or more applications.
-    This class defines state/relation data for a single opensearch application.
-    """
-
-    def __init__(
-        self, relation: Relation | None, data_interface: DataPeerData, component: Application
-    ):
-        super().__init__(relation, data_interface, component)
-        self.app = component
-
-    def get_object(self, key: str) -> Optional[Dict[str, any]]:
-        """Get dict / json object from the relation data store."""
-        data = self.relation_data.get(key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    def put_object(self, key: str, value: Dict[str, any], merge: bool = False) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.update({key: payload_str})
-
-    @property
-    def name(self) -> str:
-        """Return the name of the Application."""
-        return self.app.name
-
-    @property
-    def is_admin_user_initialized(self) -> bool:
-        """Return the value of 'admin_user_initialized' in application state."""
-        return self.relation_data.get("admin_user_initialized", "") == "True"
-
-    @property
-    def bootstrap_contributors_count(self) -> int:
-        """Get the value of 'bootstrap_contributors_count'"""
-        return int(self.relation_data.get("bootstrap_contributors_count", 0))
-
-    @bootstrap_contributors_count.setter
-    def bootstrap_contributors_count(self, value: int):
-        """Set value of bootstrap contributors count in application state."""
-        self.update({"bootstrap_contributors_count": str(value)})
-
-    @is_admin_user_initialized.setter
-    def is_admin_user_initialized(self, value: bool):
-        """Update the value of 'admin_user_initialized' in application state."""
-        self.update({"admin_user_initialized": str(value)})
-
-    @property
-    def security_index_initialised(self) -> bool:
-        """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "") == "True"
-
-    @security_index_initialised.setter
-    def security_index_initialised(self, value: bool):
-        """Update the value of 'security_index_initialised' in application state."""
-        self.update({"security_index_initialised": str(value)})
-
-    @property
-    def nodes_config(self) -> str:
-        """Return the value of 'nodes_config' in application state"""
-        return self.relation_data.get("nodes_config", "")
-
-    @property
-    def bootstrapped(self) -> bool:
-        """Return the value of 'bootstrapped' in application state"""
-        return bool(self.relation_data.get("bootstrapped", ""))
-
-    @property
-    def deployment_desc(self) -> Optional[DeploymentDescription]:
-        """Return the deployment description object if any."""
-        current_deployment_desc = self.get_object("deployment-description")
-        if not current_deployment_desc:
-            return None
-        return DeploymentDescription.from_dict(current_deployment_desc)
-
-    @property
-    def cluster_fleet_apps(self) -> Dict[str, PeerClusterApp]:
-        """Get the cluster fleet applications."""
-        cluster_fleet_apps = self.relation_data.get("cluster_fleet_apps", "")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = {}
-        else:
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
-
-    def apps_in_fleet(self) -> List[PeerClusterApp]:
-        """Returns list of apps in cluster fleet"""
-        cluster_fleet_apps = self.get_object("cluster_fleet_apps")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
-        return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
-
-    @property
-    def update_ts(self) -> str:
-        """Get the value of 'update-ts' from the application databag."""
-        return self.relation_data.get("update-ts", "")
-
-    @update_ts.setter
-    def update_ts(self, timestamp: int):
-        """Update the value of 'update-ts' in the application databag."""
-        self.update({"update-ts": str(timestamp)})
-
-
-class SecretCache:
-    """Internal helper class locally cache secrets.
-
-    The data structure is precisely reusing/simulating as in the actual Secret Storage
-    """
-
-    CACHED_META = "meta"
-    CACHED_CONTENT = "content"
-
-    def __init__(self):
-        # Structure:
-        # NOTE: "objects" (i.e. dict-s) and scalar values are handled in a unified way
-        # precisely as done for the Secret objects themselves.
-        #
-        # self.secrets = {
-        #   "app": {
-        #       "opensearch:app:admin-password": {
-        #           "meta": <Secret instance>,
-        #           "content": {
-        #               "opensearch:app:admin-password": "bla"
-        #           }
-        #       }
-        #   },
-        #   "unit": {
-        #       "opensearch:unit:0:certificates": {
-        #           "meta": <Secret instance>,
-        #           "content": {
-        #               "ca-cert": "<certificate>",
-        #               "cert": "<certificate>",
-        #               "chain": "<certificate>"
-        #           }
-        #       }
-        #   }
-        # }
-        self.secrets = {Scope.APP: {}, Scope.UNIT: {}}
-
-    def get_meta(self, scope: Scope, label: str) -> Optional[Secret]:
-        """Getting cached secret meta-information."""
-        return self.secrets[scope].get(label, {}).get(self.CACHED_META)
-
-    def set_meta(self, scope: Scope, label: str, secret: Secret) -> None:
-        """Setting cached secret meta-information."""
-        self.secrets[scope].setdefault(label, {}).update({self.CACHED_META: secret})
-
-    def get_content(self, scope: Scope, label: str) -> Dict[str, str]:
-        """Getting cached secret content."""
-        return self.secrets[scope].get(label, {}).get(self.CACHED_CONTENT)
-
-    def put_content(self, scope: Scope, label: str, content: Union[str, Dict[str, str]]):
-        """Setting cached secret content."""
-        self.secrets[scope].setdefault(label, {}).update({self.CACHED_CONTENT: content})
-
-    def put(
-        self,
-        scope: Scope,
-        label: str,
-        secret: Optional[Secret] = None,
-        content: Optional[Union[str, Dict[str, str]]] = None,
-    ) -> None:
-        """Updating cached secret information."""
-        if secret:
-            self.set_meta(scope, label, secret)
-        if content:
-            self.put_content(scope, label, content)
-
-    def delete(self, scope: Scope, label: str) -> None:
-        """Removing cached secret information."""
-        self.secrets[scope].pop(label, None)

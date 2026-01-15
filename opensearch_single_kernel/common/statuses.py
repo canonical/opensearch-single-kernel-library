@@ -3,7 +3,7 @@
 
 """Statuses for the OpenSearch Charm.
 
-This module defines various status enums that represent the state of the charm,
+This module defines various status enums that represent the state of the charm.
 """
 from enum import Enum
 
@@ -37,7 +37,7 @@ class CharmStatuses(Enum):
     CLUSTER_HEALTH_RED = BlockedStatus(
         "1 or more 'primary' shards are not assigned, please scale your application up."
     )
-    CLUSTER_HEALTH_UKNOWN = BlockedStatus(
+    CLUSTER_HEALTH_UNKNOWN = BlockedStatus(
         "No unit online, cannot determine if it's safe to scale-down."
     )
     CLUSTER_HEALTH_YELLOW = BlockedStatus(
@@ -84,6 +84,3 @@ class CharmStatuses(Enum):
     TLS_RELATION_BROKEN = BlockedStatus(
         "Relation broken with the TLS Operator while TLS not fully configured. Stopping OpenSearch."
     )
-
-
-WAITING_FOR_BUSY_SHARDS = "The shards: {} need to complete building."

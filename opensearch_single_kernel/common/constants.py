@@ -5,12 +5,11 @@
 
 """OpenSearch Charm literals."""
 
-from enum import Enum
 
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
-class Substrates(str, Enum):
+class Substrates(BaseStrEnum):
     """Possible substrates."""
 
     K8S = "k8s"
@@ -24,7 +23,7 @@ class Scope(BaseStrEnum):
     UNIT = "unit"
 
 
-class HealthColors:
+class HealthColors(BaseStrEnum):
     """Colors the clusters or a unit may have depending on their health."""
 
     GREEN = "green"
@@ -101,7 +100,7 @@ class TlsFileExt(BaseStrEnum):
 
 # Profiles
 _1GB_IN_KB = 1024 * 1024  # 1GB in KB
-MAX_HEAP_SIZE = 31 * _1GB_IN_KB  # 31GB in KB
+MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
 OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
@@ -170,4 +169,4 @@ GCS_CREDENTIALS = "gcs-creds"
 
 # Messages
 PEER_CLUSTER_NO_RELATION = "Cannot start. Waiting for peer cluster relation..."
-PEER_CLUSTER_WRONG_RELATION = "Cluster name don't match with related cluster. Remove relation."
+PEER_CLUSTER_WRONG_RELATION = "Cluster name doesn't match with related cluster. Remove relation."
