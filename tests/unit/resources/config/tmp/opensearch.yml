@@ -86,7 +86,7 @@
 # Require explicit names when deleting indices:
 #
 #action.destructive_requires_name: true
-node.attr.app_id: 01059b16-97bb-4bbe-8319-c91b228fcffb/opensearch
+node.attr.app_id: eda3454b-7aa1-49ea-a817-afc00305b17b/opensearch
 node.attr.temp: hot
 node.roles:
 - cluster_manager

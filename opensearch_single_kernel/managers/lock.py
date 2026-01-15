@@ -60,7 +60,7 @@ class PeerLockManager(BaseManager):
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
-        if self._unit_with_lock != self.state.server.unit_name:
+        if self._unit_with_lock != self.state.unit_name:
             logger.debug(
                 f"[Node lock] Not acquired. Unit with peer databag lock: {self._unit_with_lock}"
             )
@@ -132,7 +132,7 @@ class PeerLockManager(BaseManager):
         assert self._relation
         assert self._unit_with_lock != value
 
-        if value == self.state.server.unit_name:
+        if value == self.state.unit_name:
             logger.debug("[Node lock] (leader) granted peer lock to own unit")
             # Prevent leader unit from using lock in the same Juju event that it was granted
             # If the charm code raises an uncaught exception later in the Juju event,
@@ -321,7 +321,7 @@ class LockManager(PeerLockManager):
                         host=host,
                         alt_hosts=self.alt_hosts,
                         retries=0,
-                        payload={"unit-name": self.state.server.unit_name},
+                        payload={"unit-name": self.state.unit_name},
                     )
                 except OpenSearchHttpError as e:
                     if e.response_code == 409 and "document already exists" in e.response_body.get(
@@ -368,9 +368,9 @@ class LockManager(PeerLockManager):
                         return False
 
                     # This unit has OpenSearch lock
-                    unit = self.state.server.unit_name
+                    unit = self.state.unit_name
 
-            if unit == self.state.server.unit_name:
+            if unit == self.state.unit_name:
                 # Lock acquired
                 # Release peer databag lock, if any
                 logger.debug("[Node lock] Acquired via opensearch")
@@ -431,7 +431,7 @@ class LockManager(PeerLockManager):
                     other_apps_units.extend(units)
 
             if unit_with_lock and (
-                unit_with_lock == self.state.server.unit_name
+                unit_with_lock == self.state.unit_name
                 or unit_with_lock not in current_app_units + other_apps_units
             ):
                 logger.debug("[Node lock] Releasing opensearch lock")

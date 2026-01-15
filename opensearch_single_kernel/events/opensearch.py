@@ -430,7 +430,7 @@ class OpenSearchEventsHandler(Object):
         else:
             raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
 
-        if self.charm.state.server.bootstrap_contributor:
+        if self.charm.state.bootstrap_contributor:
             self.charm.cluster_manager.cleanup_bootstrap_conf()
             self.charm.config_manager.cleanup_initial_cluster_managers()
 
@@ -439,7 +439,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.lock_manager.release()
 
         # Add a timestamp to always trigger relation changed
-        self.charm.state.server.update({"started": str(time.time())})
+        self.charm.state.update({"started": str(time.time())})
 
         # TODO: OpenSearch fixes
 

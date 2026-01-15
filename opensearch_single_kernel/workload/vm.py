@@ -84,7 +84,7 @@ class VMWorkload(BaseWorkload):
         if output.returncode != 0:
             return None
 
-        return output.stdout.strip()
+        return output.out.strip()
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -208,7 +208,7 @@ class VMWorkload(BaseWorkload):
         Returns:
             value (int): Kernel property value.
         """
-        return int(self._run_cmd(f"sysctl -n {prop}").out.rstrip())
+        return int(self.run_cmd(f"sysctl -n {prop}").out.rstrip())
 
     @override
     def run_cmd(
@@ -266,7 +266,9 @@ class VMWorkload(BaseWorkload):
             if output.returncode != 0:
                 logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
-            return SimpleNamespace(cmd=command, out=output.stdout, err=output.stderr)
+            return SimpleNamespace(
+                cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
+            )
         except (TimeoutError, subprocess.TimeoutExpired):
             raise OpenSearchCmdError
 

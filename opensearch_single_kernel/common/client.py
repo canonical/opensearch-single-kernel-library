@@ -251,7 +251,7 @@ class OpenSearchClient:
         alt_hosts: list[str] | None = None,
         check_hosts_reach: bool = True,
         resp_status_code: bool = False,
-        retries: int = 0,
+        retries: int = 1,
         ignore_retry_on: list | None = None,
         timeout: int = 5,
         cert_files: tuple[str, str] | None = None,

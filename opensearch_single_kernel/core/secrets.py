@@ -19,9 +19,10 @@ from opensearch_single_kernel.common.constants import (
     HASH_POSTFIX,
     OPENSEARCH_SYSTEM_USERS,
     PW_POSTFIX,
+    Scope,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchSecretInsertionError
-from opensearch_single_kernel.core.models import RelationDataStore, Scope, SecretCache
+from opensearch_single_kernel.core.relations import RelationDataStore
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -293,3 +294,73 @@ class OpenSearchSecrets(Object, RelationDataStore):
         """Grant a secret to a relation."""
         secret = self.charm.model.get_secret(id=secret_id)
         secret.grant(relation)
+
+
+class SecretCache:
+    """Internal helper class locally cache secrets.
+
+    The data structure is precisely reusing/simulating as in the actual Secret Storage
+    """
+
+    CACHED_META = "meta"
+    CACHED_CONTENT = "content"
+
+    def __init__(self):
+        # Structure:
+        # NOTE: "objects" (i.e. dict-s) and scalar values are handled in a unified way
+        # precisely as done for the Secret objects themselves.
+        #
+        # self.secrets = {
+        #   "app": {
+        #       "opensearch:app:admin-password": {
+        #           "meta": <Secret instance>,
+        #           "content": {
+        #               "opensearch:app:admin-password": "bla"
+        #           }
+        #       }
+        #   },
+        #   "unit": {
+        #       "opensearch:unit:0:certificates": {
+        #           "meta": <Secret instance>,
+        #           "content": {
+        #               "ca-cert": "<certificate>",
+        #               "cert": "<certificate>",
+        #               "chain": "<certificate>"
+        #           }
+        #       }
+        #   }
+        # }
+        self.secrets = {Scope.APP: {}, Scope.UNIT: {}}
+
+    def get_meta(self, scope: Scope, label: str) -> Secret | None:
+        """Getting cached secret meta-information."""
+        return self.secrets[scope].get(label, {}).get(self.CACHED_META)
+
+    def set_meta(self, scope: Scope, label: str, secret: Secret) -> None:
+        """Setting cached secret meta-information."""
+        self.secrets[scope].setdefault(label, {}).update({self.CACHED_META: secret})
+
+    def get_content(self, scope: Scope, label: str) -> dict[str, str]:
+        """Getting cached secret content."""
+        return self.secrets[scope].get(label, {}).get(self.CACHED_CONTENT)
+
+    def put_content(self, scope: Scope, label: str, content: str | dict[str, str]):
+        """Setting cached secret content."""
+        self.secrets[scope].setdefault(label, {}).update({self.CACHED_CONTENT: content})
+
+    def put(
+        self,
+        scope: Scope,
+        label: str,
+        secret: Secret | None = None,
+        content: str | dict[str, str] | None = None,
+    ) -> None:
+        """Updating cached secret information."""
+        if secret:
+            self.set_meta(scope, label, secret)
+        if content:
+            self.put_content(scope, label, content)
+
+    def delete(self, scope: Scope, label: str) -> None:
+        """Removing cached secret information."""
+        self.secrets[scope].pop(label, None)

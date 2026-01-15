@@ -32,7 +32,7 @@ def test_on_install_error(harness):
 def test_on_leader_elected(harness, mocker):
     """Test on leader elected event."""
     mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
@@ -78,7 +78,7 @@ def test_on_leader_elected(harness, mocker):
 
 def test_on_leader_elected_index_initialised(harness, mocker):
     mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
@@ -124,7 +124,7 @@ def test_on_start(harness, mocker):
     """Test on start event."""
     lock_acquired = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquired")
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
     can_start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.can_start")
@@ -135,7 +135,7 @@ def test_on_start(harness, mocker):
         "opensearch_single_kernel.managers.tls.TlsManager.is_fully_configured"
     )
     is_admin_user_initialized = mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.is_admin_user_initialized",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.is_admin_user_initialized",
         new_callable=PropertyMock,
     )
     set_client_auth = mocker.patch(
@@ -243,13 +243,15 @@ def test_host_ip(harness):
 def test_unit_name(harness, mocker):
     """Test current unit name."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
 
     app_short_id = deployment_desc().app.short_id
-    assert harness.charm.state.unit_name == f"{harness.charm.state.app_name}-0.{app_short_id}"
+    assert (
+        harness.charm.state.unit_name == f"{harness.charm.state.application.name}-0.{app_short_id}"
+    )
 
 
 def test_unit_id(harness):

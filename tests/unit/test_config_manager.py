@@ -60,7 +60,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
     yaml_conf_setter = YamlConfigSetter()
     configure_opensearch_config(harness, mocker)
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.models.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
     app = App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name)
