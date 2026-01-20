@@ -105,12 +105,12 @@ class OpenSearchEventsHandler(Object):
         try:
             config_profile = self.charm.profiles_manager.config_profile
             current_profile = self.charm.state.server.profile
-            self.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+            self.charm.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
             )
-            self.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             return
 
         if self.check_profile_missing_requirements():
@@ -350,7 +350,7 @@ class OpenSearchEventsHandler(Object):
         if not all(
             [
                 not self.check_profile_missing_requirements(),
-                self.charm.cluster_manager.can_service_start(event.is_first_data_node),
+                self.charm.cluster_manager.can_service_start(),
             ]
         ):
             logger.info("Conditions not met to start opensearch. Will retry next event.")
