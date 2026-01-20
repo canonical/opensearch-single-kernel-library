@@ -59,7 +59,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
     def label(self, scope: Scope, key: str) -> str:
         """Generated keys to be used within relation data to refer to secret IDs."""
-        components = [self.charm.app.name, scope.value]
+        components = [self.charm.app.name, scope.val]
         if scope == Scope.UNIT:
             components.append(str(self.charm.unit_id))
         components.append(key)
@@ -139,7 +139,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             secret = scope_obj.add_secret(safe_value, label=label)
             logger.debug(f"Secret added {secret}")
         except ValueError as e:
-            logger.error("Secret %s:%s couldn't be added", str(scope.value), str(key))
+            logger.error("Secret %s:%s couldn't be added", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
 
         self.cached_secrets.put(scope, label, secret, safe_value)
@@ -173,7 +173,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         try:
             secret.set_content(safe_content)
         except ValueError as e:
-            logger.error("Secret %s:%s couldn't be updated", str(scope.value), str(key))
+            logger.error("Secret %s:%s couldn't be updated", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
 
         self.cached_secrets.put(scope, self.label(scope, key), content=safe_content)
