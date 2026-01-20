@@ -6,24 +6,24 @@
 """OpenSearch Charm literals."""
 
 
-from enum import StrEnum
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
-class Substrates(StrEnum):
+class Substrates(BaseStrEnum):
     """Possible substrates."""
 
     K8S = "k8s"
     VM = "vm"
 
 
-class Scope(StrEnum):
+class Scope(BaseStrEnum):
     """Peer relations scope."""
 
     APP = "app"
     UNIT = "unit"
 
 
-class HealthColors(StrEnum):
+class HealthColors(BaseStrEnum):
     """Colors the clusters or a unit may have depending on their health."""
 
     GREEN = "green"
@@ -34,7 +34,7 @@ class HealthColors(StrEnum):
     IGNORE = "ignore"
 
 
-class Directive(StrEnum):
+class Directive(BaseStrEnum):
     """Directive indicating what the pending actions for the current deployments are."""
 
     NONE = "none"
@@ -45,21 +45,21 @@ class Directive(StrEnum):
     RECONFIGURE = "reconfigure-cluster"
 
 
-class StartMode(StrEnum):
+class StartMode(BaseStrEnum):
     """Mode of start of units in this deployment."""
 
     WITH_PROVIDED_ROLES = "start-with-provided-roles"
     WITH_GENERATED_ROLES = "start-with-generated-roles"
 
 
-class PerformanceType(StrEnum):
+class PerformanceType(BaseStrEnum):
     """Performance types available."""
 
     PRODUCTION = "production"
     TESTING = "testing"
 
 
-class DeploymentType(StrEnum):
+class DeploymentType(BaseStrEnum):
     """Nature of a sub cluster deployment."""
 
     MAIN_ORCHESTRATOR = "main-orchestrator"
@@ -67,7 +67,7 @@ class DeploymentType(StrEnum):
     OTHER = "other"
 
 
-class State(StrEnum):
+class State(BaseStrEnum):
     """State of a deployment, directly mapping to the juju statuses."""
 
     ACTIVE = "active"
@@ -78,7 +78,7 @@ class State(StrEnum):
 
 
 # TLS
-class CertType(StrEnum):
+class CertType(BaseStrEnum):
     """Certificate types."""
 
     APP_ADMIN = "app-admin"  # admin / management of cluster
@@ -87,14 +87,14 @@ class CertType(StrEnum):
     UNIT_HTTP = "unit-http"  # http for nodes (rest layer) - units act as servers
 
 
-class StoreType(StrEnum):
+class StoreType(BaseStrEnum):
     """Type of certificates and keys store."""
 
     KEYSTORE = "keystore"
     TRUSTSTORE = "truststore"
 
 
-class TlsFileExt(StrEnum):
+class TlsFileExt(BaseStrEnum):
     """Extensions of TLS generated files."""
 
     CA = ".ca"

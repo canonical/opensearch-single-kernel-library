@@ -5,7 +5,6 @@
 """Helpers for Charm."""
 import logging
 import re
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ops.model import ActiveStatus
@@ -14,6 +13,7 @@ from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.common.statuses import (
     CharmStatuses,
 )
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 from opensearch_single_kernel.utils.helpers import trigger_peer_rel_changed
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class Status:
     """Class for managing the various status changes in a charm."""
 
-    class CheckPattern(StrEnum):
+    class CheckPattern(BaseStrEnum):
         """Enum for types of status comparison."""
 
         Equal = "equal"

@@ -2781,7 +2781,7 @@ class DataPeerData(RequirerData, ProviderData):
     ) -> str:
         members = [relation_name, self._model.app.name]
         if self.scope:
-            members.append(self.scope.value)
+            members.append(self.scope.val)
         if group_mapping != SECRET_GROUPS.EXTRA:
             members.append(group_mapping)
         return f"{'.'.join(members)}"
