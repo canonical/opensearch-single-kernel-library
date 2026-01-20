@@ -297,9 +297,11 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
+        data = path.read_text()
+        data = data + "\n" + text_to_append
         if not path.exists():
             raise FileNotFoundError(f"{path} not found.")
-        path.write_text("\n" + text_to_append)
+        path.write_text(data)
 
     def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream."""
