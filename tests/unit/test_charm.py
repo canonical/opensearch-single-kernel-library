@@ -153,6 +153,9 @@ def test_on_start(harness, mocker):
     check_profile_missing_requirements = mocker.patch(
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_missing_requirements"
     )
+    unit_allowed_to_start = mocker.patch(
+        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.unit_allowed_to_start"
+    )
     initialise_security_index = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.initialise_security_index"
     )
@@ -195,7 +198,7 @@ def test_on_start(harness, mocker):
     is_admin_user_initialized.return_value = True
     get_nodes.side_effect = None
     can_service_start.return_value = False
-    check_profile_missing_requirements.return_value = False
+    check_profile_missing_requirements.return_value = True
     harness.charm.on.start.emit()
     _set_node_conf.assert_not_called()
     initialise_security_index.assert_not_called()
@@ -206,9 +209,10 @@ def test_on_start(harness, mocker):
     _set_node_conf.reset_mock()
     harness.charm.state.application.update({"security_index_initialised": None})
     can_service_start.return_value = True
-    check_profile_missing_requirements.return_value = True
+    check_profile_missing_requirements.return_value = False
     harness.set_leader(True)
     lock_acquired.return_value = True
+    unit_allowed_to_start.return_value = True
 
     harness.charm.on.start.emit()
 
@@ -218,9 +222,9 @@ def test_on_start(harness, mocker):
 
     get_nodes.side_effect = None
     get_nodes.assert_called()
-    _set_node_conf.assert_called()
     start.assert_called_once()
     _post_start_init.assert_called_once()
+    _set_node_conf.assert_called()
 
 
 def test_app_peers_data(harness):
