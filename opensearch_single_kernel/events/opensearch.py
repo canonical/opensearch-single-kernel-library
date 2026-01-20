@@ -102,6 +102,31 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        try:
+            config_profile = self.charm.profiles_manager.config_profile
+            current_profile = self.charm.state.server.profile
+            self.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+        except ValueError:
+            logger.error(
+                "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
+            )
+            self.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+            return
+
+        if self.check_profile_missing_requirements():
+            event.defer()
+            return
+
+        profile_restart_needed = self.charm.config_manager.set_profile_configuration_if_needed(
+            current_profile, config_profile
+        )
+        if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
+            logger.debug(
+                "Restarting opensearch due to config change: profile_restart_needed=%s",
+                profile_restart_needed,
+            )
+            self._restart_opensearch_event.emit()
+
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
@@ -324,12 +349,16 @@ class OpenSearchEventsHandler(Object):
         # - cluster health
         if not all(
             [
-                self.check_profile_missing_requirements(),
+                not self.check_profile_missing_requirements(),
                 self.charm.cluster_manager.can_service_start(event.is_first_data_node),
-                self.is_cluster_healthy_to_start(),
             ]
         ):
             logger.info("Conditions not met to start opensearch. Will retry next event.")
+            event.defer()
+            return
+
+        if not self.unit_allowed_to_start(event):
+            logger.info("The unit is not allowed to wait, the event need to be retried later.")
             event.defer()
             return
 
@@ -593,3 +622,30 @@ class OpenSearchEventsHandler(Object):
             return
 
         # TODO: Address secrets management in a separate PR
+
+    def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
+        """Check if the unit is allowed to start.
+
+        Basically, we will check if the unit is the only unit in the cluster
+        or if it is the first data node. If the cluster is already initialized
+        we check cluster health and start.
+        """
+        # Case of the first "main" cluster to get started.
+        deployment_desc = self.charm.state.application.deployment_desc
+        if (
+            not self.charm.state.application.is_security_index_initialised
+            or not self.charm.cluster_manager.alt_hosts
+        ):
+            return self.charm.unit.is_leader() and (
+                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                # first data node in a cluster-manager-only deployment
+                or (
+                    (
+                        deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+                        or "data" in deployment_desc.config.roles
+                    )
+                    and event.is_first_data_node
+                )
+            )
+        else:
+            return self.is_cluster_healthy_to_start()

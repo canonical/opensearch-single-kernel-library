@@ -81,6 +81,11 @@ class OpenSearchServer(RelationState):
             )
         return None
 
+    @profile.setter
+    def profile(self, profile_value: OpenSearchProfile):
+        """Set current profile of the unit."""
+        self.relation_data.update({PERFORMANCE_PROFILE: profile_value.type.value})
+
     @property
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""

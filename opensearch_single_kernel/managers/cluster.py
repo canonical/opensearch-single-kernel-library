@@ -459,7 +459,7 @@ class ClusterManager(BaseManager):
             and not self.workload.is_service_started()
         )
 
-    def can_service_start(self, is_first_data_node: bool = False) -> bool:
+    def can_service_start(self) -> bool:
         """Return if the opensearch service can start."""
         if not (deployment_desc := self.state.application.deployment_desc):
             return False
@@ -469,19 +469,5 @@ class ClusterManager(BaseManager):
 
         if not self.state.application.is_admin_user_initialized:
             return False
-
-        # Case of the first "main" cluster to get started.
-        if not self.state.application.is_security_index_initialised or not self.alt_hosts:
-            return self.state.server.is_app_leader and (
-                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                # first data node in a cluster-manager-only deployment
-                or (
-                    (
-                        deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-                        or "data" in deployment_desc.config.roles
-                    )
-                    and is_first_data_node
-                )
-            )
 
         return True
