@@ -11,9 +11,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from enum import Enum
 from io import StringIO
-from os.path import exists
 from typing import Any, Dict, List
 
+from charmlibs.pathops import PathProtocol
 from overrides import override
 from ruamel.yaml import YAML, CommentedSeq
 from ruamel.yaml.comments import CommentedSet
@@ -48,7 +48,7 @@ class ConfigSetter(ABC):
     put("file.yml", "a.b/c.arr.complex/[0]/new_val/new_sub_key", "updated")
     """
 
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: PathProtocol):
         """base_path: if set, where to look for files relatively on "load/put/delete" methods."""
         self.base_path = self.__clean_base_path(base_path)
 
@@ -151,13 +151,10 @@ class ConfigSetter(ABC):
         pass
 
     @staticmethod
-    def __clean_base_path(base_path: str):
-        if base_path is None:
-            return ""
+    def __clean_base_path(base_path: PathProtocol):
 
-        base_path = base_path.strip()
-        if not base_path.endswith("/"):
-            base_path = f"{base_path}/"
+        if not base_path.as_posix().endswith("/"):
+            base_path = base_path / ""
 
         return base_path
 
@@ -165,7 +162,7 @@ class ConfigSetter(ABC):
 class YamlConfigSetter(ConfigSetter):
     """Class for updating YAML config on the file system."""
 
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: PathProtocol):
         """base_path: if set, where to look for files relatively on "load/put/delete" methods."""
         super().__init__(base_path)
         self.yaml = YAML()
@@ -173,21 +170,24 @@ class YamlConfigSetter(ConfigSetter):
     @override
     def load(self, config_file: str) -> Dict[str, Any]:
         """Load the content of a YAML file."""
-        path = f"{self.base_path}{config_file}"
+        path = self.base_path / config_file
 
-        if not exists(path):
+        if not path.exists():
             raise FileNotFoundError(f"{path} not found.")
 
-        with open(path, "r") as f:
-            lines = f.read().splitlines()
+        lines = path.read_text().split("\n")
 
-            random_id = uuid.uuid4().hex
-            lines.append(f"{random_id}: {random_id}")
+        # We are adding a random key:value to the end of the yaml
+        # To make sure that the yaml reader will be able to read the file
+        # without throwing an exception since sometimes the file might be empty
+        # or filled only with comments.
+        random_id = uuid.uuid4().hex
+        lines.append(f"{random_id}: {random_id}")
 
-            data = self.yaml.load(StringIO("\n".join(lines)))
-            del data[random_id]
+        data = self.yaml.load(StringIO("\n".join(lines)))
+        del data[random_id]
 
-            return data
+        return data
 
     @override
     def put(
@@ -211,7 +211,7 @@ class YamlConfigSetter(ConfigSetter):
         self.__dump(
             data,
             output_type,
-            f"{self.base_path}{config_file}" if output_file is None else output_file,
+            config_file if output_file is None else output_file,
         )
 
         return data
@@ -233,7 +233,7 @@ class YamlConfigSetter(ConfigSetter):
         self.__dump(
             data,
             output_type,
-            f"{self.base_path}{config_file}" if output_file is None else output_file,
+            config_file if output_file is None else output_file,
         )
 
         return data
@@ -247,7 +247,7 @@ class YamlConfigSetter(ConfigSetter):
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
-        output_file: str = None,
+        output_file: PathProtocol = None,
     ) -> None:
         """Replace any substring in a text file.
 
@@ -262,11 +262,11 @@ class YamlConfigSetter(ConfigSetter):
             output_file: Target file for the result config, by default same as config_file
         """
         path = f"{self.base_path}{config_file}"
-        if not exists(path):
+        path = self.base_path / config_file
+        if not path.exists():
             raise FileNotFoundError(f"{path} not found.")
 
-        with open(path, "r+") as f:
-            data = f.read()
+        data = path.read_text()
 
         if regex and old_val and re.compile(old_val, re.MULTILINE).findall(data):
             data = re.sub(r"{}".format(old_val), f"{new_val}", data)
@@ -281,8 +281,7 @@ class YamlConfigSetter(ConfigSetter):
         if output_file is None:
             output_file = path
 
-        with open(output_file, "w") as f:
-            f.write(data)
+        output_file.write_text(data)
 
     @override
     def append(
@@ -296,13 +295,11 @@ class YamlConfigSetter(ConfigSetter):
             config_file (str): Path to the source config file
             text_to_append (str): The str to append to the config file
         """
-        path = f"{self.base_path}{config_file}"
+        path = self.base_path / config_file
 
-        if not exists(path):
+        if not path.exists():
             raise FileNotFoundError(f"{path} not found.")
-
-        with open(path, "a") as f:
-            f.write("\n" + text_to_append)
+        path.write_text("\n" + text_to_append)
 
     def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream."""
@@ -313,8 +310,8 @@ class YamlConfigSetter(ConfigSetter):
             self.yaml.dump(data, sys.stdout)
 
         if output_type in [OutputType.file, OutputType.all]:
-            with open(target_file, mode="w") as f:
-                self.yaml.dump(data, f)
+            target_path = self.base_path / target_file
+            self.yaml.dump(data, target_path)
 
     def __deep_update(self, source, node_keys: List[str], val: Any):
         """Recursively traverses the tree of nodes, and writes the value accordingly.

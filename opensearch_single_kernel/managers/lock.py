@@ -31,7 +31,6 @@ from opensearch_single_kernel.core.models import DeploymentDescription, PeerClus
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -124,11 +123,13 @@ class PeerLockManager(BaseManager):
 
     @property
     def _unit_with_lock(self) -> str | None:
+        """Get the unit that has lock."""
         if self._relation:
             return self._relation.data[self.state.application.app].get("unit-with-lock")
 
     @_unit_with_lock.setter
     def _unit_with_lock(self, value: str):
+        """Set the unit that has lock."""
         assert self._relation
         assert self._unit_with_lock != value
 
@@ -151,6 +152,7 @@ class PeerLockManager(BaseManager):
 
     @_unit_with_lock.deleter
     def _unit_with_lock(self):
+        """Remove the lock."""
         assert self._relation
         self._relation.data[self.state.application.app].pop("unit-with-lock", None)
         self._relation.data[self.state.application.app].pop(
@@ -159,6 +161,7 @@ class PeerLockManager(BaseManager):
 
     @property
     def _relation(self):
+        """Get the lock relation"""
         # Use property instead of `self._relation =` in `__init__()` because of ops Harness unit
         # tests
         return self.state.node_lock_relation
@@ -234,7 +237,7 @@ class LockManager(PeerLockManager):
             )
             and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
             and (
-                not self.state.application.security_index_initialised
+                not self.state.application.is_security_index_initialised
                 or (
                     # in case all data-nodes are powered down after being previously started
                     # ignore the lock to get a data-node started, as it holds security index
@@ -280,11 +283,7 @@ class LockManager(PeerLockManager):
         if host or alt_hosts:
             logger.debug("[Node lock] 1+ opensearch nodes online")
             try:
-                online_nodes = len(
-                    ClusterTopology.nodes(
-                        self.opensearch_client, use_localhost=host is not None, hosts=alt_hosts
-                    )
-                )
+                online_nodes = len(self.nodes(use_localhost=host is not None, hosts=alt_hosts))
             except OpenSearchHttpError:
                 logger.exception("Error getting OpenSearch nodes")
                 return False

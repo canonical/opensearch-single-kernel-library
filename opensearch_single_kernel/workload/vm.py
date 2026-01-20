@@ -12,10 +12,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+from charmlibs import pathops
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION, VM_PATHS
+from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -40,6 +41,7 @@ class VMWorkload(BaseWorkload):
 
     def __init__(self):
         super().__init__()
+        self.root = pathops.LocalPath("/")
         for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
@@ -346,4 +348,4 @@ class VMWorkload(BaseWorkload):
     @override
     def paths(self) -> Paths:
         """Return Workload's paths"""
-        return Paths(**VM_PATHS)
+        return Paths(self.root)

@@ -36,8 +36,8 @@ def test_on_leader_elected(harness, mocker):
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
-    purge_initial_users = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_users"
+    purge_initial_default_users = mocker.patch(
+        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_default_users"
     )
     put_or_update_internal_user_leader = mocker.patch(
         "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
@@ -46,7 +46,7 @@ def test_on_leader_elected(harness, mocker):
     harness.set_leader(True)
 
     # Make sure that we are removing initial users
-    purge_initial_users.assert_called_once()
+    purge_initial_default_users.assert_called_once()
 
     # Make sure thate we create system users
     put_or_update_internal_user_leader.assert_has_calls(
@@ -59,14 +59,14 @@ def test_on_leader_elected(harness, mocker):
     assert isinstance(harness.model.unit.status, ActiveStatus)
 
     # Reset mocks
-    purge_initial_users.reset_mock()
+    purge_initial_default_users.reset_mock()
     put_or_update_internal_user_leader.reset_mock()
 
     # Set admin user initialized
     harness.charm.state.application.is_admin_user_initialized = True
     # Make sure that admin user is updated even if it is already initialised
     harness.charm.on.leader_elected.emit()
-    purge_initial_users.assert_called_once()
+    purge_initial_default_users.assert_called_once()
     put_or_update_internal_user_leader.assert_has_calls(
         [
             call("admin", update=False),
@@ -82,8 +82,8 @@ def test_on_leader_elected_index_initialised(harness, mocker):
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
-    purge_initial_users = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_users"
+    purge_initial_default_users = mocker.patch(
+        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_default_users"
     )
     put_or_update_internal_user_leader = mocker.patch(
         "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
@@ -93,18 +93,18 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 
     # security_index_initialised
     harness.set_leader(True)
-    harness.charm.state.application.security_index_initialised = True
+    harness.charm.state.application.is_security_index_initialised = True
 
     # Reset mocks
-    purge_initial_users.reset_mock()
+    purge_initial_default_users.reset_mock()
     put_or_update_internal_user_leader.reset_mock()
 
     harness.charm.on.leader_elected.emit()
     put_or_update_internal_user_leader.assert_not_called()
-    purge_initial_users.assert_not_called()
+    purge_initial_default_users.assert_not_called()
 
     # admin_user_initialized
-    harness.charm.state.application.update({"security_index_initialised": None})
+    harness.charm.state.application.is_security_index_initialised = False
     harness.charm.state.application.is_admin_user_initialized = True
     harness.charm.on.leader_elected.emit()
     put_or_update_internal_user_leader.assert_has_calls(
@@ -114,7 +114,7 @@ def test_on_leader_elected_index_initialised(harness, mocker):
         ],
         any_order=True,
     )
-    purge_initial_users.assert_called_once()
+    purge_initial_default_users.assert_called_once()
 
 
 # TODO: Add large deployment unit tests
@@ -127,7 +127,9 @@ def test_on_start(harness, mocker):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
-    can_start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.can_start")
+    check_blocking_directives = mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.check_blocking_directives"
+    )
     should_ignore_lock = mocker.patch(
         "opensearch_single_kernel.managers.lock.LockManager.should_ignore_lock"
     )
@@ -146,7 +148,10 @@ def test_on_start(harness, mocker):
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler._set_node_conf"
     )
     can_service_start = mocker.patch(
-        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.can_service_start"
+        "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
+    )
+    check_profile_missing_requirements = mocker.patch(
+        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_missing_requirements"
     )
     initialise_security_index = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.initialise_security_index"
@@ -162,7 +167,7 @@ def test_on_start(harness, mocker):
     should_ignore_lock.return_value = False
     harness.set_leader(True)
     is_node_up.return_value = True
-    harness.charm.state.application.security_index_initialised = True
+    harness.charm.state.application.is_security_index_initialised = True
     harness.charm.on.start.emit()
     is_fully_configured.assert_not_called()
     is_admin_user_initialized.assert_not_called()
@@ -183,23 +188,25 @@ def test_on_start(harness, mocker):
 
     get_nodes.reset_mock()
 
+    mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_failed", return_value=False)
+    start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
     # _get_nodes succeeds
     is_fully_configured.return_value = True
     is_admin_user_initialized.return_value = True
     get_nodes.side_effect = None
     can_service_start.return_value = False
+    check_profile_missing_requirements.return_value = False
     harness.charm.on.start.emit()
-    get_nodes.assert_called_once()
     _set_node_conf.assert_not_called()
     initialise_security_index.assert_not_called()
+    get_nodes.assert_called_once()
 
-    start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
-    mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_failed", return_value=False)
     # initialisation of the security index
     get_nodes.reset_mock()
     _set_node_conf.reset_mock()
     harness.charm.state.application.update({"security_index_initialised": None})
     can_service_start.return_value = True
+    check_profile_missing_requirements.return_value = True
     harness.set_leader(True)
     lock_acquired.return_value = True
 
@@ -207,7 +214,7 @@ def test_on_start(harness, mocker):
 
     # peer cluster manager
     deployment_desc.return_value = deployment_descriptions["ok"]
-    can_start.return_value = True
+    check_blocking_directives.return_value = True
 
     get_nodes.side_effect = None
     get_nodes.assert_called()

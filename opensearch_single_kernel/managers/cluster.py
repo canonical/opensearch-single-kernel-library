@@ -16,6 +16,7 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    GENERATED_ROLES,
     PEER_CLUSTER_NO_RELATION,
     PEER_CLUSTER_WRONG_RELATION,
     CertType,
@@ -26,7 +27,6 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchCmdError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
     OpenSearchStartTimeoutError,
@@ -42,7 +42,6 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import deployment_type
-from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -66,7 +65,11 @@ class ClusterManager(BaseManager):
         """Start the opensearch service."""
 
         def _is_connected():
-            return self.is_node_up() if wait_until_http_200 else self.is_opensearch_started
+            return (
+                self.opensearch_client.is_node_up()
+                if wait_until_http_200
+                else self.is_opensearch_started
+            )
 
         if self.is_opensearch_started:
             return
@@ -81,7 +84,7 @@ class ClusterManager(BaseManager):
             logger.debug(f"waited {datetime.now() - start} opensearch did not start")
             raise OpenSearchStartTimeoutError()
 
-    def reconcile_peer_cluster_config(self) -> None:
+    def reconcile_cluster_config(self) -> None:
         """Init, or updates / recomputes current peer cluster related config if applies."""
         logger.debug("Running peer cluster manager reconcile function")
         user_config = self._user_config()
@@ -170,22 +173,35 @@ class ClusterManager(BaseManager):
             ],
         )
 
-    def cleanup_bootstrap_conf(self):
+    def update_bootstrap_state(self, cleanup_application: bool = False):
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
-        if self.state.server.is_app_leader:
+        if cleanup_application:
             self.state.application.update({"bootstrapped": "True"})
         self.state.server.update({"bootstrap_contributor": None})
 
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
-        return (
-            self.state.server.is_app_leader
-            and not self.state.application.security_index_initialised
-            and (
-                "data" in self.state.application.deployment_desc.config.roles
-                or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-            )
+        return not self.state.application.is_security_index_initialised and (
+            "data" in self.state.application.deployment_desc.config.roles
+            or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         )
+
+    def wait_opensearch_part_of_cluster(self):
+        """Wait for opensearch to become part of the cluster."""
+        # Get online nodes
+        try:
+            nodes = self.charm.cluster_manager.get_nodes(
+                use_localhost=self.charm.cluster_manager.opensearch_client.is_node_up()
+            )
+        except OpenSearchHttpError as e:
+            logger.info("Failed to get online nodes")
+            raise e
+
+        for node in nodes:
+            if node.name == self.charm.state.unit_name:
+                break
+        else:
+            raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
 
     def initialise_security_index(self):
         """Initialise security Index.
@@ -197,35 +213,30 @@ class ClusterManager(BaseManager):
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
         admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        try:
-            args = [
-                f"-cd {self.workload.paths.conf}/opensearch-security/",
-                f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-                f"-h {self.state.host_ip}",
-                f"-ts {self.workload.paths.certs}/ca.p12",
-                f"-tspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
-                "-tsalias ca",
-                "-tst PKCS12",
-                f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
-                f"-kspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
-                f"-ksalias {CertType.APP_ADMIN}",
-                "-kst PKCS12",
-            ]
+        args = [
+            f"-cd {self.workload.paths.conf}/opensearch-security/",
+            f"-cn {self.state.application.deployment_desc.config.cluster_name}",
+            f"-h {self.state.host_ip}",
+            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-tspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
+            "-tsalias ca",
+            "-tst PKCS12",
+            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-kspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
+            f"-ksalias {CertType.APP_ADMIN}",
+            "-kst PKCS12",
+        ]
 
-            admin_key_pwd = admin_secrets.get("key-password", None)
-            if admin_key_pwd is not None:
-                args.append(f"-keypass {admin_key_pwd}")
+        admin_key_pwd = admin_secrets.get("key-password", None)
+        if admin_key_pwd is not None:
+            args.append(f"-keypass {admin_key_pwd}")
 
-            self.workload.run_script(
-                "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
-            )
-            self._put_security_index_initialised()
+        self.workload.run_script(
+            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+        )
+        self._put_security_index_initialised()
 
-        except OpenSearchCmdError as e:
-            logger.debug(f"Error when initializing the security index: {e.out}")
-            raise e
-
-    def apply_peer_cm_directives_and_check_if_can_start(self) -> bool:
+    def check_if_can_start(self) -> bool:
         """Apply the directives computed by the opensearch peer cluster manager."""
         if not (deployment_desc := self.state.application.deployment_desc):
             # the deployment description hasn't finished being computed by the leader
@@ -233,7 +244,7 @@ class ClusterManager(BaseManager):
 
         # check possibility to start
         logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
-        if self.can_start(deployment_desc):
+        if self.check_blocking_directives(deployment_desc):
             try:
                 self.get_nodes(False)
             except OpenSearchHttpError:
@@ -244,7 +255,7 @@ class ClusterManager(BaseManager):
     def _put_security_index_initialised(self):
         """Set the security index initialized flag."""
         # TODO: Add peer cluster updates here we need to update relations
-        self.state.application.update({"security_index_initialised": "True"})
+        self.state.application.is_security_index_initialised = True
 
     def wait_for_opensearch_up(self):
         """Wait for opensearch to be fully ready."""
@@ -257,10 +268,12 @@ class ClusterManager(BaseManager):
             reraise=True,
         ):
             with attempt:
-                if not self.is_node_up():
+                if not self.opensearch_client.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
-    def can_start(self, deployment_desc: DeploymentDescription | None = None) -> bool:
+    def check_blocking_directives(
+        self, deployment_desc: DeploymentDescription | None = None
+    ) -> bool:
         """Return whether the service of a node can start."""
         if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
@@ -289,15 +302,15 @@ class ClusterManager(BaseManager):
         if self.state.application.deployment_desc.start == StartMode.WITH_PROVIDED_ROLES:
             computed_roles = self.state.application.deployment_desc.config.roles
         else:
-            computed_roles = ClusterTopology.generated_roles()
+            computed_roles = GENERATED_ROLES
 
         if (
             self.state.server.is_app_leader
             and "data" in computed_roles
-            and not self.state.application.security_index_initialised
+            and not self.state.application.is_security_index_initialised
         ):
             return []
-        return ClusterTopology.nodes(self.opensearch_client, use_localhost, self.alt_hosts)
+        return self.nodes(use_localhost, self.alt_hosts)
 
     def clear_directive(self, directive: Directive):
         """Remove directive after having applied it."""
@@ -327,7 +340,7 @@ class ClusterManager(BaseManager):
         if (
             deployment_desc := self.state.application.deployment_desc
         ).start == StartMode.WITH_GENERATED_ROLES:
-            updated_nodes = ClusterTopology.recompute_nodes_conf(
+            updated_nodes = self.recompute_nodes_conf(
                 app_id=deployment_desc.app.id, nodes=current_nodes
             )
         else:
@@ -346,7 +359,7 @@ class ClusterManager(BaseManager):
                     roles=roles,
                     ip=node.ip,
                     app=node.app,
-                    unit_number=self.state.server.unit_id,
+                    unit_id=self.state.server.unit_id,
                     temperature=temperature,
                 )
 
@@ -355,34 +368,6 @@ class ClusterManager(BaseManager):
 
         self.state.application.put_object("nodes_config", updated_nodes)
         return True
-
-    def clean_up_started_state(self) -> None:
-        """Remove the 'started' key from the unit state."""
-        self.state.server.relation_data.pop("started")
-
-    def is_node_up(self):
-        """Check whether opensearch is up"""
-        return self.opensearch_client.is_node_up()
-
-    def _is_failover_and_sole_data_app(self) -> bool:
-        """Check if the current node is a failover and the only data node in the cluster."""
-        deployment_desc = self.state.application.deployment_desc
-        cluster_fleet_apps = self.state.application.cluster_fleet_apps or {}
-        return (
-            # data node in a failover orchestrator deployment
-            deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
-            and (
-                "data" in deployment_desc.config.roles
-                or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-            )
-            # No pure data nodes in the cluster
-            and not any(
-                self.state.application.name != cluster_fleet_apps[app].get("app", {}).get("name")
-                and "data" in cluster_fleet_apps[app].get("roles", [])
-                and "cluster_manager" not in cluster_fleet_apps[app].get("roles", [])
-                for app in cluster_fleet_apps
-            )
-        )
 
     def configure_bootstrap_contributors(
         self,
@@ -413,33 +398,8 @@ class ClusterManager(BaseManager):
                         self.state.application.bootstrap_contributors_count = cms_in_bootstrap + 1
 
                     # indicates that this unit is part of the "initial cm nodes"
-                    self.state.server.bootstrap_contributor = True
+                    self.state.server.is_bootstrap_contributor = True
         return contribute_to_bootstrap
-
-    def computed_roles(self):
-        """Return computed_roles"""
-        if (
-            deployment_desc := self.state.application.deployment_desc
-        ).start == StartMode.WITH_PROVIDED_ROLES:
-            computed_roles = deployment_desc.config.roles
-        else:
-            computed_roles = ClusterTopology.generated_roles()
-
-        # If the failover orchestrator is the only data node in the cluster, remove the
-        # cluster-manager role from it to avoid it bootstrapping the cluster
-        # which is the responsibility of the main orchestrator
-        # who then broadcasts `security_index_initialized` to the peer clusters.
-        if (
-            self.state.server.is_app_leader
-            and self._is_failover_and_sole_data_app()
-            and not self.state.application.security_index_initialised
-        ):
-            self.state.server.cluster_manager_removed = True
-            computed_roles.remove("cluster_manager")
-
-        if computed_roles == ["coordinating"]:
-            computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list
-        return computed_roles
 
     @property
     def is_opensearch_started(self) -> bool:
@@ -454,6 +414,74 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
-            return self.opensearch_client.get_roles(self.state.unit_name, self.state.alt_hosts)
+            return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
+
+    def recompute_nodes_conf(self, app_id: str, nodes: list[Node]) -> dict[str, Node]:
+        """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
+        if not nodes:
+            return {}
+        logger.debug(f"Roles before re-balancing {({node.name: node.roles for node in nodes})=}")
+        nodes_by_name = {}
+        current_cluster_nodes = []
+        for node in nodes:
+            if node.app.id == app_id:
+                current_cluster_nodes.append(node)
+            else:
+                # Leave node unchanged
+                nodes_by_name[node.name] = node
+        for node in current_cluster_nodes:
+            nodes_by_name[node.name] = Node(
+                name=node.name,
+                # we do this in order to remove any non-default role / add any missing default role
+                roles=GENERATED_ROLES,
+                ip=node.ip,
+                app=node.app,
+                unit_id=node.unit_id,
+                temperature=node.temperature,
+            )
+        logger.debug(
+            f"Roles after re-balancing {({name: node.roles for name, node in nodes_by_name.items()})=}"
+        )
+        return nodes_by_name
+
+    @property
+    def needs_start_after_host_reboot(self) -> bool:
+        """Start Process Edge Case.
+
+        This handles an edge case where the charm is a cluster manager
+        the unit is marked as started but service couldn't start
+        """
+        return (
+            self.state.server.started
+            and "cluster_manager" in self.roles
+            and not self.workload.is_service_started()
+        )
+
+    def can_service_start(self, is_first_data_node: bool = False) -> bool:
+        """Return if the opensearch service can start."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return False
+
+        if not self.check_blocking_directives(deployment_desc):
+            return False
+
+        if not self.state.application.is_admin_user_initialized:
+            return False
+
+        # Case of the first "main" cluster to get started.
+        if not self.state.application.is_security_index_initialised or not self.alt_hosts:
+            return self.state.server.is_app_leader and (
+                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                # first data node in a cluster-manager-only deployment
+                or (
+                    (
+                        deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+                        or "data" in deployment_desc.config.roles
+                    )
+                    and is_first_data_node
+                )
+            )
+
+        return True

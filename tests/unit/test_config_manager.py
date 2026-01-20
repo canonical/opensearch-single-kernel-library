@@ -15,7 +15,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from tests.unit.helpers import (
-    configure_opensearch_config,
+    config_path,
     opensearch_yml,
     sec_conf_yml,
     seed_unicast_hosts,
@@ -24,8 +24,7 @@ from tests.unit.helpers import (
 
 def test_set_client_auth(harness, mocker):
     """Test setting the client authentication config."""
-    yaml_conf_setter = YamlConfigSetter()
-    configure_opensearch_config(harness, mocker)
+    yaml_conf_setter = YamlConfigSetter(config_path / "tmp")
 
     def authc() -> dict[str, Any]:
         return security_conf["config"]["dynamic"]["authc"]
@@ -39,6 +38,27 @@ def test_set_client_auth(harness, mocker):
     assert not authc()["clientcert_auth_domain"]["http_enabled"]
     assert not authc()["clientcert_auth_domain"]["transport_enabled"]
 
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.Paths.seed_hosts",
+        return_value=seed_unicast_hosts,
+        new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.yaml_setter",
+        return_value=YamlConfigSetter(config_path / "tmp"),
+        new_callable=PropertyMock,
+    )
+    # configure host and network hosts
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.network_hosts",
+        return_value=["10.10.10.10"],
+        new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.host_ip",
+        return_value="20.20.20.20",
+        new_callable=PropertyMock,
+    )
     # call method
     harness.charm.config_manager.set_client_auth()
 
@@ -57,8 +77,7 @@ def test_set_client_auth(harness, mocker):
 
 def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
     """Test setting the core config of a node."""
-    yaml_conf_setter = YamlConfigSetter()
-    configure_opensearch_config(harness, mocker)
+    yaml_conf_setter = YamlConfigSetter(config_path / "tmp")
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
@@ -82,6 +101,28 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
         return_value="30.30.30.30",
     )
 
+    mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.yaml_setter",
+        return_value=YamlConfigSetter(config_path / "tmp"),
+        new_callable=PropertyMock,
+    )
+    # configure host and network hosts
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.network_hosts",
+        return_value=["10.10.10.10"],
+        new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.Paths.seed_hosts",
+        return_value=config_path / "unicast_hosts.txt",
+        new_callable=PropertyMock,
+    )
+
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.host_ip",
+        return_value="20.20.20.20",
+        new_callable=PropertyMock,
+    )
     harness.charm.config_manager.set_node(
         app=app,
         cluster_name="opensearch-dev",
@@ -103,8 +144,6 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
     assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == ["cm1"]
-    assert opensearch_conf["path.data"] == "data"
-    assert opensearch_conf["path.logs"] == "logs"
     assert not opensearch_conf["plugins.security.disabled"]
     assert opensearch_conf["plugins.security.ssl.http.enabled"]
     assert opensearch_conf["plugins.security.ssl.transport.enforce_hostname_verification"]
@@ -115,7 +154,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
     assert "cluster.initial_cluster_manager_nodes" not in opensearch_conf
 
     # test unicast_hosts content
-    with open(seed_unicast_hosts, "r") as f:
+    with open(config_path / ("tmp/" + seed_unicast_hosts), "r") as f:
         stored = set([line.strip() for line in f.readlines()])
         expected = {"20.20.20.20"}
         assert stored == expected

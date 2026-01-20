@@ -13,16 +13,19 @@ from typing import TYPE_CHECKING, Any
 from ops import Application, JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
+    GENERATED_ROLES,
     NODE_LOCK_RELATION,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
     PERFORMANCE_PROFILE,
     TLS_RELATION,
+    StartMode,
     Substrates,
 )
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
+    DeploymentType,
     Model,
     OpenSearchProfile,
     PeerClusterApp,
@@ -46,6 +49,9 @@ from opensearch_single_kernel.utils.helpers import format_unit_name
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+logger = logging.getLogger(__name__)
+
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +87,27 @@ class OpenSearchServer(RelationState):
         return self.unit.is_leader()
 
     @property
-    def bootstrap_contributor(self) -> bool:
+    def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation.data.get("bootstrap_contributor", "") == "True"
+        return self.relation_data.get("bootstrap_contributor", "") == "True"
 
-    @bootstrap_contributor.setter
-    def bootstrap_contributor(self, value: bool):
+    @is_bootstrap_contributor.setter
+    def is_bootstrap_contributor(self, value: bool):
         """Set the value of 'bootstrap_contributor' in application state."""
         self.update({"bootstrap_contributor": str(value)})
 
     @property
-    def cluster_manager_removed(self) -> bool:
+    def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
         return self.relation_data.get("cluster_manager_removed", "") == "True"
 
-    @cluster_manager_removed.setter
-    def cluster_manager_removed(self, value: bool):
+    @is_cluster_manager_removed.setter
+    def is_cluster_manager_removed(self, value: bool):
         """Set value of 'cluster_manager_removed'"""
         self.update({"cluster_manager_removed": str(value)})
 
     @property
-    def started(self) -> bool:
+    def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
         return bool(self.relation_data.get("started", ""))
 
@@ -212,19 +218,22 @@ class OpenSearchApplication(RelationState):
         self.update({"admin_user_initialized": str(value)})
 
     @property
-    def security_index_initialised(self) -> bool:
+    def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
         return self.relation_data.get("security_index_initialised", "") == "True"
 
-    @security_index_initialised.setter
-    def security_index_initialised(self, value: bool):
+    @is_security_index_initialised.setter
+    def is_security_index_initialised(self, value: bool):
         """Update the value of 'security_index_initialised' in application state."""
         self.update({"security_index_initialised": str(value)})
 
     @property
-    def nodes_config(self) -> str:
+    def nodes_config(self) -> dict:
         """Return the value of 'nodes_config' in application state"""
-        return self.relation_data.get("nodes_config", "")
+        nodes_config = self.get_object("nodes_config")
+        if not nodes_config:
+            return {}
+        return nodes_config
 
     @property
     def bootstrapped(self) -> bool:
@@ -269,6 +278,11 @@ class OpenSearchApplication(RelationState):
     def update_ts(self, timestamp: int):
         """Update the value of 'update-ts' in the application databag."""
         self.update({"update-ts": str(timestamp)})
+
+    def is_data_role_in_cluster_fleet_apps(self) -> bool:
+        """Look for data-role through all the roles of all the nodes in all applications"""
+        data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
+        return data_apps_in_fleet and any(app.planned_units > 0 for app in data_apps_in_fleet)
 
 
 class ClusterState(Object):
@@ -558,3 +572,66 @@ class ClusterState(Object):
     def model_uuid(self):
         """UUID of the Charm Model."""
         return self.model.uuid
+
+    # TODO: Once we handle large deployment we will add a separate
+    # state object for peer cluster and peer cluster orchestrator
+    @property
+    def current_peer_cluster_app(self) -> PeerClusterApp:
+        """Return the current peer cluster App."""
+        deployment_desc = self.application.deployment_desc
+        logger.info(f"Current deployment desc {deployment_desc}")
+        return PeerClusterApp(
+            app=deployment_desc.app,
+            planned_units=self.planned_units,
+            units=[format_unit_name(u, app=deployment_desc.app) for u in self.all_units],
+            roles=(
+                deployment_desc.config.roles
+                if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
+                else GENERATED_ROLES
+            ),
+        )
+
+    def computed_roles(self) -> list[str]:
+        """Return computed_roles"""
+        if (
+            deployment_desc := self.application.deployment_desc
+        ).start == StartMode.WITH_PROVIDED_ROLES:
+            computed_roles = deployment_desc.config.roles
+        else:
+            computed_roles = GENERATED_ROLES
+
+        # If the failover orchestrator is the only data node in the cluster, remove the
+        # cluster-manager role from it to avoid it bootstrapping the cluster
+        # which is the responsibility of the main orchestrator
+        # who then broadcasts `security_index_initialized` to the peer clusters.
+        if (
+            self.model.unit.is_leader()
+            and self._is_failover_and_sole_data_app()
+            and not self.application.is_security_index_initialised
+        ):
+            self.server.is_cluster_manager_removed = True
+            computed_roles.remove("cluster_manager")
+
+        if computed_roles == ["coordinating"]:
+            computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list
+        return computed_roles
+
+    def _is_failover_and_sole_data_app(self) -> bool:
+        """Check if the current node is a failover and the only data node in the cluster."""
+        deployment_desc = self.application.deployment_desc
+        cluster_fleet_apps = self.application.cluster_fleet_apps or {}
+        return (
+            # data node in a failover orchestrator deployment
+            deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
+            and (
+                "data" in deployment_desc.config.roles
+                or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            )
+            # No pure data nodes in the cluster
+            and not any(
+                self.application.name != cluster_fleet_apps[app].get("app", {}).get("name")
+                and "data" in cluster_fleet_apps[app].get("roles", [])
+                and "cluster_manager" not in cluster_fleet_apps[app].get("roles", [])
+                for app in cluster_fleet_apps
+            )
+        )

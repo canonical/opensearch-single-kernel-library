@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import Scope
-from opensearch_single_kernel.core.models import Node
+from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -53,3 +53,50 @@ class BaseManager:
         return [
             host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
         ]
+
+    def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
+        """Get the nodes of cluster manager eligible nodes."""
+        result = []
+        for node in nodes:
+            if node.is_cm_eligible():
+                result.append(node.ip)
+
+        return result
+
+    def get_cluster_managers_names(self, nodes: list[Node]) -> list[str]:
+        """Get the nodes of cluster manager eligible nodes."""
+        result = []
+        for node in nodes:
+            if node.is_cm_eligible():
+                result.append(node.name)
+
+        return result
+
+    def nodes(
+        self,
+        use_localhost: bool,
+        hosts: list[str] | None = None,
+    ) -> list[Node]:
+        """Get the list of nodes in a cluster."""
+        host: str | None = None  # defaults to current unit ip
+        alt_hosts: list[str] | None = hosts
+        if not use_localhost and hosts:
+            host = hosts[0]
+            if len(hosts) >= 2:
+                alt_hosts = hosts[1:]
+
+        nodes: list[Node] = []
+        if use_localhost or host:
+            response = self.opensearch_client.get_nodes(host, alt_hosts)
+            if "nodes" in response:
+                for obj in response["nodes"].values():
+                    node = Node(
+                        name=obj["name"],
+                        roles=obj["roles"],
+                        ip=obj["ip"],
+                        app=App(id=obj["attributes"]["app_id"]),
+                        unit_id=int(obj["name"].split(".")[0].split("-")[-1]),
+                        temperature=obj.get("attributes", {}).get("temp"),
+                    )
+                    nodes.append(node)
+        return nodes
