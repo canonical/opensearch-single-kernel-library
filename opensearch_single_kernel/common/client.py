@@ -294,7 +294,7 @@ class OpenSearchClient:
                         s.cert = cert_files
                     else:
                         s.auth = ("admin", self.admin_secret)
-
+                    # TODO: Handle this when implementing the k8s version of start workflow.
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,

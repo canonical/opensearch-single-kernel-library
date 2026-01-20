@@ -52,10 +52,6 @@ class UsersManager(BaseManager):
     ) -> None:
         """Create system user or update it with a new password."""
         # Leader is to set new password and hash, others populate existing hash locally
-        if not self.state.server.is_app_leader:
-            logger.error("Credential change can be only performed by the leader unit.")
-            return
-
         secret = self.state.secrets.get(Scope.APP, self.state.secrets.password_key(user))
         if secret and not update:
             self._put_or_update_internal_user_unit(user)
@@ -90,10 +86,9 @@ class UsersManager(BaseManager):
         hashed_pwd = self.state.secrets.get(Scope.APP, self.state.secrets.hash_key(user))
 
         # System users have to be saved locally in internal_users.yml
-        if user in OPENSEARCH_SYSTEM_USERS:
-            self.put_internal_user(user, hashed_pwd)
+        self.put_internal_user(user, hashed_pwd)
 
-    def purge_initial_users(self):
+    def purge_initial_default_users(self):
         """Removes all users from internal_users yaml config.
 
         This is to be used when starting up the charm, to remove unnecessary default users.
@@ -108,11 +103,12 @@ class UsersManager(BaseManager):
             if user != "_meta":
                 self.yaml_setter.delete("opensearch-security/internal_users.yml", user)
 
-    def save_user_locally(self, user: str, hashed_pwd: str):
+    def save_user_locally(self, user: str):
         """Save the user in internal_users.yaml"""
+        user_hash = self.state.secrets.hash_key(user)
+        hashed_pwd = self.state.secrets.get(Scope.APP, user_hash)
         # System users have to be saved locally in internal_users.yml
-        if user in OPENSEARCH_SYSTEM_USERS:
-            self.put_internal_user(user, hashed_pwd)
+        self.put_internal_user(user, hashed_pwd)
 
     def get_roles(self) -> dict[str, Any]:
         """Gets list of roles.

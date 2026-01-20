@@ -125,7 +125,7 @@ class Node(Model):
     roles: list[str]
     ip: str
     app: App
-    unit_number: int
+    unit_id: int
     temperature: str | None = None
 
     @classmethod

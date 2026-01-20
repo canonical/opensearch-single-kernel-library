@@ -29,7 +29,11 @@ class ConfigManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "config_manager"
-        self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+
+    @property
+    def yaml_setter(self):
+        """Return the yaml_setter."""
+        return YamlConfigSetter(self.workload.paths.conf)
 
     def set_node(
         self,
@@ -71,8 +75,8 @@ class ConfigManager(BaseManager):
                 self.CONFIG_YML, "cluster.initial_cluster_manager_nodes", cm_names
             )
 
-        self.yaml_setter.put(self.CONFIG_YML, "path.data", self.workload.paths.data)
-        self.yaml_setter.put(self.CONFIG_YML, "path.logs", self.workload.paths.logs)
+        self.yaml_setter.put(self.CONFIG_YML, "path.data", str(self.workload.paths.data))
+        self.yaml_setter.put(self.CONFIG_YML, "path.logs", str(self.workload.paths.logs))
 
         self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={self.workload.paths.logs}/")
 
@@ -179,7 +183,8 @@ class ConfigManager(BaseManager):
     def reconfigure_unit(self) -> bool:
         """Reconfigure unit based on the nodes_config.
 
-        Returns if a restart is needed or not.
+        Returns if opensearch.yml on the unit was reconfigured, in which case a restart will
+        be required.
         """
         if not (nodes_config := self.state.application.get_object("nodes_config")):
             return False
@@ -213,8 +218,6 @@ class ConfigManager(BaseManager):
         cm_ips_set = set(cm_ips)
 
         # only update the file if there is data to update
-        # TODO: This should be handled at the workload level since on K8s it will be different
         if cm_ips_set:
-            with open(self.workload.paths.seed_hosts, "w+") as f:
-                lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
-                f.write(f"{lines}\n")
+            lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
+            self.workload.paths.seed_hosts.write_text(f"{lines}\n")

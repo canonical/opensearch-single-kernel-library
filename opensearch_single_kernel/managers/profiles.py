@@ -5,17 +5,14 @@
 """OpenSearch profiles."""
 import logging
 
-from opensearch_single_kernel.common.constants import PerformanceType, StartMode
+from opensearch_single_kernel.common.constants import PerformanceType
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
-    PeerClusterApp,
     ProductionProfile,
     TestingProfile,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -37,9 +34,14 @@ class ProfilesManager(BaseManager):
                 "Invalid profile configuration. Value: %s", self.state.config.get("profile")
             )
 
-    def check_missing_system_requirements(self) -> list[str]:
-        """Checks the system requirements."""
-        return self.workload.check_missing_system_requirements()
+    def get_missing_requirements(self) -> list[str]:
+        """Get the profile missing requirements."""
+        missing_requirements: list[str] = []
+
+        missing_requirements.extend(self.workload.check_missing_system_requirements())
+        missing_requirements.extend(self.check_memory_requirements(self.profile))
+        missing_requirements.extend(self.check_cluster_topology(self.profile))
+        return missing_requirements
 
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
@@ -64,7 +66,7 @@ class ProfilesManager(BaseManager):
     def check_cluster_topology(self, profile: OpenSearchProfile) -> list[str]:
         """Check the cluster topology requirements."""
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
-        current_app = self._current_peer_cluster_app()
+        current_app = self.state.current_peer_cluster_app
         # backwards compatibility for revisions that do not set generated roles
         # in cluster_fleet_apps
         if not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps:
@@ -94,19 +96,6 @@ class ProfilesManager(BaseManager):
 
         logger.error("Missing cluster topology requirements: %s", error_message)
         return [error_message]
-
-    def _current_peer_cluster_app(self) -> PeerClusterApp:
-        deployment_desc = self.state.application.deployment_desc
-        return PeerClusterApp(
-            app=deployment_desc.app,
-            planned_units=self.state.planned_units,
-            units=[format_unit_name(u, app=deployment_desc.app) for u in self.state.all_units],
-            roles=(
-                deployment_desc.config.roles
-                if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
-                else ClusterTopology.generated_roles()
-            ),
-        )
 
     @property
     def profile(self) -> OpenSearchProfile:

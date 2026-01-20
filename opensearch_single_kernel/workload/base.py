@@ -9,12 +9,20 @@ from abc import ABC, abstractmethod
 from types import SimpleNamespace
 from typing import List, Optional
 
-from pydantic import BaseModel
+from charmlibs.pathops import PathProtocol
+
+from opensearch_single_kernel.common.constants import (
+    BASE_SNAP_DIR,
+    PATHS,
+    SNAP,
+    SNAP_COMMON,
+    SNAP_DATA,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class Paths(BaseModel):
+class Paths:
     """This class represents the group of Paths that need to be exposed.
 
     Args:
@@ -27,23 +35,74 @@ class Paths(BaseModel):
             bin: Path to the bin/ folder
     """
 
-    home: str
-    conf: str
-    data: str
-    logs: str
-    jdk: str
-    tmp: str
-    bin: str
+    def __init__(self, root: PathProtocol):
+        super().__init__()
+        self.root = root
+
+    @property
+    def base_snap_dir(self) -> PathProtocol:
+        """Return path to the Base snap directory."""
+        return self.root / BASE_SNAP_DIR
+
+    @property
+    def snap_data(self) -> PathProtocol:
+        """Return path to the snap data directory."""
+        return self.base_snap_dir / SNAP_DATA
+
+    @property
+    def snap_common(self) -> PathProtocol:
+        """Return path to the snap common directory."""
+        return self.base_snap_dir / SNAP_COMMON
+
+    @property
+    def snap(self) -> PathProtocol:
+        """Return path to the snap directory."""
+        return self.root / SNAP
+
+    @property
+    def home(self) -> PathProtocol:
+        """Return path to the home snap directory."""
+        return self.snap_data / PATHS["home"]
+
+    @property
+    def conf(self) -> PathProtocol:
+        """Return path to the conf snap directory."""
+        return self.snap_data / PATHS["conf"]
+
+    @property
+    def data(self) -> PathProtocol:
+        """Return path to the data snap directory."""
+        return self.snap_common / PATHS["data"]
+
+    @property
+    def logs(self) -> PathProtocol:
+        """Return path to the logs snap directory."""
+        return self.snap_common / PATHS["logs"]
+
+    @property
+    def jdk(self) -> PathProtocol:
+        """Return path to the jdk directory."""
+        return self.snap / PATHS["jdk"]
+
+    @property
+    def tmp(self) -> PathProtocol:
+        """Return path to the tmp directory."""
+        return self.snap_common / PATHS["tmp"]
+
+    @property
+    def bin(self) -> PathProtocol:
+        """Return path to the bin directory."""
+        return self.snap / PATHS["bin"]
 
     @property
     def plugins(self):
         """Returns Plugins Path"""
-        return f"{self.home}/plugins"
+        return self.home / "plugins"
 
     @property
     def certs(self):
         """Returns Certificates Path"""
-        return f"{self.conf}/certificates"  # must be under config
+        return self.conf / "certificates"
 
     @property
     def certs_relative(self):
@@ -53,7 +112,7 @@ class Paths(BaseModel):
     @property
     def seed_hosts(self):
         """Returns Seed hosts"""
-        return f"{self.conf}/unicast_hosts.txt"
+        return self.conf / "unicast_hosts.txt"
 
 
 # --- Base Workload
@@ -67,7 +126,7 @@ class BaseWorkload(ABC):
 
     @property
     @abstractmethod
-    def paths(self) -> Paths:
+    def paths(self, root: PathProtocol) -> Paths:
         """Return the Workload's paths"""
         pass
 

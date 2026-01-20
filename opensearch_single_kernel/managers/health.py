@@ -15,7 +15,6 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.topology import ClusterTopology
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ class HealthManager(BaseManager):
         # compute health only in clusters where data nodes exist
         compute_health = (
             deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-            or ClusterTopology.is_data_role_in_cluster_fleet_apps(self.state)
+            or self.state.application.is_data_role_in_cluster_fleet_apps
             or not local_app_only
         )
         if not compute_health:

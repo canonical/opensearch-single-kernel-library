@@ -6,24 +6,24 @@
 """OpenSearch Charm literals."""
 
 
-from opensearch_single_kernel.utils.enum import BaseStrEnum
+from enum import StrEnum
 
 
-class Substrates(BaseStrEnum):
+class Substrates(StrEnum):
     """Possible substrates."""
 
     K8S = "k8s"
     VM = "vm"
 
 
-class Scope(BaseStrEnum):
+class Scope(StrEnum):
     """Peer relations scope."""
 
     APP = "app"
     UNIT = "unit"
 
 
-class HealthColors(BaseStrEnum):
+class HealthColors(StrEnum):
     """Colors the clusters or a unit may have depending on their health."""
 
     GREEN = "green"
@@ -34,7 +34,7 @@ class HealthColors(BaseStrEnum):
     IGNORE = "ignore"
 
 
-class Directive(BaseStrEnum):
+class Directive(StrEnum):
     """Directive indicating what the pending actions for the current deployments are."""
 
     NONE = "none"
@@ -45,21 +45,21 @@ class Directive(BaseStrEnum):
     RECONFIGURE = "reconfigure-cluster"
 
 
-class StartMode(BaseStrEnum):
+class StartMode(StrEnum):
     """Mode of start of units in this deployment."""
 
     WITH_PROVIDED_ROLES = "start-with-provided-roles"
     WITH_GENERATED_ROLES = "start-with-generated-roles"
 
 
-class PerformanceType(BaseStrEnum):
+class PerformanceType(StrEnum):
     """Performance types available."""
 
     PRODUCTION = "production"
     TESTING = "testing"
 
 
-class DeploymentType(BaseStrEnum):
+class DeploymentType(StrEnum):
     """Nature of a sub cluster deployment."""
 
     MAIN_ORCHESTRATOR = "main-orchestrator"
@@ -67,7 +67,7 @@ class DeploymentType(BaseStrEnum):
     OTHER = "other"
 
 
-class State(BaseStrEnum):
+class State(StrEnum):
     """State of a deployment, directly mapping to the juju statuses."""
 
     ACTIVE = "active"
@@ -78,7 +78,7 @@ class State(BaseStrEnum):
 
 
 # TLS
-class CertType(BaseStrEnum):
+class CertType(StrEnum):
     """Certificate types."""
 
     APP_ADMIN = "app-admin"  # admin / management of cluster
@@ -87,7 +87,7 @@ class CertType(BaseStrEnum):
     UNIT_HTTP = "unit-http"  # http for nodes (rest layer) - units act as servers
 
 
-class TlsFileExt(BaseStrEnum):
+class TlsFileExt(StrEnum):
     """Extensions of TLS generated files."""
 
     CA = ".ca"
@@ -125,23 +125,21 @@ PEER_CLUSTER_RELATION = "peer-cluster"
 
 
 # Paths
-_BASE_SNAP_DIR = "/var/snap/opensearch"
-_SNAP_DATA = f"{_BASE_SNAP_DIR}/current"
-_SNAP_COMMON = f"{_BASE_SNAP_DIR}/common"
-_SNAP = "/snap/opensearch/current"
+BASE_SNAP_DIR = "/var/snap/opensearch"
+SNAP_DATA = "current"
+SNAP_COMMON = "common"
+SNAP = "/snap/opensearch/current"
 
-VM_PATHS = {
-    "home": f"{_SNAP_DATA}/usr/share/opensearch",
-    "conf": f"{_SNAP_DATA}/etc/opensearch",
-    "data": f"{_SNAP_COMMON}/var/lib/opensearch",
-    "logs": f"{_SNAP_COMMON}/var/log/opensearch",
-    "jdk": f"{_SNAP}/usr/lib/jvm/java-21-openjdk-amd64",
-    "tmp": f"{_SNAP_COMMON}/usr/share/tmp",
-    "bin": f"{_SNAP}/usr/share/opensearch/bin",
+PATHS = {
+    "home": "usr/share/opensearch",
+    "conf": "etc/opensearch",
+    "data": "var/lib/opensearch",
+    "logs": "var/log/opensearch",
+    "jdk": "usr/lib/jvm/java-21-openjdk-amd64",
+    "tmp": "usr/share/tmp",
+    "bin": "usr/share/opensearch/bin",
 }
 
-
-K8S_PATHS = {}
 
 # Secrets
 PW_POSTFIX = "password"
