@@ -151,7 +151,14 @@ class BaseWorkload(ABC):
 
     @contextmanager
     def tempfile(
-        self, mode="w+b", encoding=None, dir=None, delete=True, *, errors=None, suffix=None
+        self,
+        mode: str = "w+b",
+        encoding=None,
+        dir: PathProtocol | None = None,
+        delete=True,
+        *,
+        errors=None,
+        suffix=None,
     ):
         """Context manager for creating temporary files."""
         pass

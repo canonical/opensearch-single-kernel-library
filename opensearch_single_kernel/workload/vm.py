@@ -70,12 +70,12 @@ class VMWorkload(BaseWorkload):
     def tempfile(
         self,
         mode="w+b",
-        encoding=None,
-        dir=None,
-        delete=True,
+        encoding: str | None = None,
+        dir: PathProtocol | None = None,
+        delete: bool = True,
         *,
-        errors=None,
-        suffix=None,
+        errors: str | None = None,
+        suffix: str | None = None,
     ):
         """Create a temporary file and return the file, clean it once context is closed."""
         f = tempfile.NamedTemporaryFile(

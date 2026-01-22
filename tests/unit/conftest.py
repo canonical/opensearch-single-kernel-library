@@ -39,3 +39,10 @@ def harness(substrate: Substrate, opensearch_base_path: Path) -> Harness:
     harness.add_relation(TLS_RELATION, harness.charm.app.name),
 
     return harness
+
+
+@pytest.fixture
+def mock_fs_interactions(mocker, substrate: Substrate) -> None:
+    """Mock Filesystem interactions."""
+    mocker.patch("charmlibs.pathops.PathProtocol.read_text")
+    mocker.patch("charmlibs.pathops.PathProtocol.write_text")

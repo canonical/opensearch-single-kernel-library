@@ -368,9 +368,8 @@ class TLSEventsHandler(Object):
         # request new certificates after rotating the CA
         if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
             self.charm.status.set(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
-            self.charm.tls_manager.reque
             self.request_new_unit_certificates()
-            if self.unit.is_leader():
+            if self.charm.unit.is_leader():
                 self.request_new_admin_certificate()
             else:
                 self.charm.tls_manager.store_admin_tls_secrets_if_applies()
@@ -414,9 +413,9 @@ class TLSEventsHandler(Object):
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
-                secrets=secrets,
                 key=key,
                 password=key_password,
+                tls_file=False,
             )
 
             self.certs.request_certificate_renewal(
@@ -429,21 +428,17 @@ class TLSEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
         admin_secrets = (
-            self.charm.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
 
         key = admin_secrets["key"].encode("utf-8")
         key_password = admin_secrets.get("key-password", None)
-        old_csr = admin_secrets["csr"].encode("utf-8")
         csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
-            secrets=admin_secrets,
             key=key,
             password=key_password,
+            tls_file=False,
         )
 
-        self.certs.request_certificate_renewal(
-            old_certificate_signing_request=old_csr,
-            new_certificate_signing_request=csr,
-        )
+        self.certs.request_certificate_creation(certificate_signing_request=csr)

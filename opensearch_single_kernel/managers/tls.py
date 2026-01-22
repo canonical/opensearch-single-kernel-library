@@ -182,12 +182,14 @@ class TlsManager(BaseManager):
         cert_type: CertType,
         key: str | None = None,
         password: str | None = None,
+        tls_file: bool = True,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         if key is None:
             key = generate_private_key()
         else:
-            key = parse_tls_file(key)
+            if tls_file:
+                key = parse_tls_file(key)
 
         if password is not None:
             password = password.encode("utf-8")
@@ -431,7 +433,7 @@ class TlsManager(BaseManager):
             # import the cert
             try:
                 with self.workload.tempfile(
-                    dir=tmpdir,
+                    dir=tmpdir.parent,
                     mode="w",
                     encoding="utf-8",
                     errors="replace",
@@ -585,7 +587,7 @@ class TlsManager(BaseManager):
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
-        with self.workload.tempfile(mode="w+t", dir="/tmp") as tmp_ca_file:
+        with self.workload.tempfile(mode="w+t", dir=self.workload.root / "/tmp") as tmp_ca_file:
             tmp_ca_file.write(cert)
             tmp_ca_file.flush()
             tmp_ca_file.seek(0)

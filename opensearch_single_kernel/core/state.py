@@ -139,7 +139,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation_data.get("tls_configurd", "") == "True"
+        return self.relation_data.get("tls_configured", "") == "True"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -419,7 +419,7 @@ class ClusterState(Object):
         """Check if TLS is configured in all the units of the current cluster."""
         if not self.peer_relation:
             return False
-        for unit in self.all_units(self):
+        for unit in self.all_units:
             if (
                 self.peer_relation.data[unit].get("tls_configured") != "True"
                 or "tls_ca_renewing" in self.peer_relation.data[unit]
