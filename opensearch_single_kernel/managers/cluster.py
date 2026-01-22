@@ -88,7 +88,7 @@ class ClusterManager(BaseManager):
         """Init, or updates / recomputes current peer cluster related config if applies."""
         logger.debug("Running peer cluster manager reconcile function")
         user_config = self._user_config()
-        if not (self.state.application.deployment_desc):
+        if not self.state.application.deployment_desc:
             # new cluster
             deployment_desc = self._new_cluster_setup(user_config)
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
@@ -359,7 +359,7 @@ class ClusterManager(BaseManager):
                     roles=roles,
                     ip=node.ip,
                     app=node.app,
-                    unit_id=self.state.server.unit_id,
+                    unit_id=node.unit_id,
                     temperature=temperature,
                 )
 

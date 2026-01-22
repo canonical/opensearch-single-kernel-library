@@ -150,6 +150,7 @@ class OpenSearchEventsHandler(Object):
                 HealthColors.YELLOW_TEMP,
             ]:
                 event.defer()
+                return 
             nodes = self.charm.cluster_manager.get_nodes(True)
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
                 # Nodes Config updated, we would need to reconfigure and restart

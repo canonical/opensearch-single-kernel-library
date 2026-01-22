@@ -112,7 +112,7 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return bool(self.relation_data.get("started", ""))
+        return self.relation_data.get("started", "")
 
 
 class OpenSearchApplication(RelationState):
@@ -201,7 +201,7 @@ class OpenSearchApplication(RelationState):
     @property
     def bootstrapped(self) -> bool:
         """Return the value of 'bootstrapped' in application state"""
-        return bool(self.relation_data.get("bootstrapped", ""))
+        return self.relation_data.get("bootstrapped", "") == "True"
 
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
@@ -283,7 +283,7 @@ class ClusterState(Object):
 
     @property
     def peer_cluster_orchestrator(self) -> PeerCluster:
-        """The state for the related 'peer-cluster-orchestrator' application requiring."""
+        """The State for the requirer side of the 'peer-cluster-orchestrator' relation.."""
         return PeerCluster(
             relation=self.peer_cluster_relation,
             data_interface=PeerClusterData(self.model, PEER_CLUSTER_RELATION),
@@ -292,7 +292,7 @@ class ClusterState(Object):
 
     @property
     def peer_cluster(self) -> PeerCluster:
-        """The state for the related 'peer-cluster-orchestrator' related application"""
+        """State for the provider side of the 'peer-cluster-orchestrator' relation."""
         return PeerCluster(
             relation=self.peer_cluster_orchestrator_relation,
             data_interface=PeerClusterOrchestratorData(
@@ -357,7 +357,8 @@ class ClusterState(Object):
 
         if self.peer_relation:
             private_address = self.peer_relation.data[unit].get("private-address")
-            return str(private_address)
+            if private_address:
+                return str(private_address)
 
     def get_unit(self, name: str):
         """Get unit by name"""

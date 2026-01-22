@@ -355,7 +355,7 @@ class UsersManager(BaseManager):
         if resp.get("status") != "OK":
             raise OpenSearchUserMgmtError(f"removing role mapping {role} failed")
 
-    def update_user_password(self, username: str, hashed_pwd: str = None):
+    def update_user_password(self, username: str, hashed_pwd: str):
         """Change user hashed password."""
         resp = self.opensearch_client.request(
             "PATCH",
