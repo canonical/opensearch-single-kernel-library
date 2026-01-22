@@ -505,7 +505,7 @@ class OpenSearchEventsHandler(Object):
 
         return True
 
-    def check_profile_missing_requirements(self, set_status: bool = True) -> list[str]:
+    def check_profile_missing_requirements(self) -> list[str]:
         """Check all requirements of profile
 
         Requirements include:
@@ -524,21 +524,24 @@ class OpenSearchEventsHandler(Object):
 
         missing_requirements = self.charm.profiles_manager.get_missing_requirements()
 
-        if set_status:
-            if missing_requirements:
-                logger.error("Missing profile requirements: %s", missing_requirements)
-                self.charm.status.set(
-                    CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                    dynamic_message=f"Missing requirements: {' - '.join(missing_requirements)}",
-                )
-            else:
-                self.charm.status.clear(
-                    CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                    dynamic_message="Missing requirements:",
-                    pattern=Status.CheckPattern.Start,
-                )
+        self.set_profile_status(missing_requirements)
 
         return missing_requirements
+
+    def set_profile_status(self, missing_requirements: list[str]):
+        """Set the charm status based on the missing requirements"""
+        if missing_requirements:
+            logger.error("Missing profile requirements: %s", missing_requirements)
+            self.charm.status.set(
+                CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
+                dynamic_message=f"Missing requirements: {' - '.join(missing_requirements)}",
+            )
+        else:
+            self.charm.status.clear(
+                CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
+                dynamic_message="Missing requirements:",
+                pattern=Status.CheckPattern.Start,
+            )
 
     def cleanup_start_state(self) -> None:
         """Clean Up Start statuses and state."""
