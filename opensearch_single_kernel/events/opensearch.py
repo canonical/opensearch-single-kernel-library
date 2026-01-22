@@ -453,7 +453,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.lock_manager.release()
 
         # Add a timestamp to always trigger relation changed
-        self.charm.state.update({"started": str(time.time())})
+        self.charm.state.server.update({"started": str(time.time())})
 
         # TODO: OpenSearch fixes
 
