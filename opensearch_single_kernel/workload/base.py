@@ -7,7 +7,6 @@ import logging
 import socket
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -121,6 +120,12 @@ class Paths:
 class BaseWorkload(ABC):
     """Base interface for common workload operations."""
 
+    @property
+    @abstractmethod
+    def root(self) -> PathProtocol:
+        """Return the root path."""
+        pass
+
     @abstractmethod
     def install(self) -> None:
         """Install the workload."""
@@ -132,25 +137,17 @@ class BaseWorkload(ABC):
         """Return the Workload's paths"""
         pass
 
-    @abstractmethod
-    def read_text(self, path: Path) -> str:
-        """Open file, read it and close file."""
-        pass
-
-    @abstractmethod
-    def write_text(self, path: Path, content: str) -> str:
-        """Open file, write in it and close file."""
-        pass
-
-    @abstractmethod
-    def write_file(self, path: str, data: str, override: bool = True):
+    def write_file(self, path_str: str, data: str, override: bool = True):
         """Persists data into file. Useful for files generated on the fly, such as certs etc."""
-        pass
+        if not override and self.exists(path_str):
+            return
+        path = self.root / path_str
 
-    @abstractmethod
-    def dirname(self, path: str) -> str:
-        """Return the directory name of a give path."""
-        pass
+        parent_dir_path = path.parent
+        if parent_dir_path:
+            parent_dir_path.mkdir(parents=True, exist_ok=True)
+
+        path.write_text(data)
 
     @contextmanager
     def tempfile(
@@ -159,10 +156,10 @@ class BaseWorkload(ABC):
         """Context manager for creating temporary files."""
         pass
 
-    @abstractmethod
-    def exists(self, path: str) -> bool:
+    def exists(self, path_str: str) -> bool:
         """Return whether the path exists in filesystem."""
-        pass
+        path = self.root / path_str
+        return path.exists()
 
     @abstractmethod
     def remove_file(self, file_path: str):

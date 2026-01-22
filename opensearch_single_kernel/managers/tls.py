@@ -6,8 +6,9 @@
 
 import logging
 import socket
-from pathlib import Path
 from typing import Any
+
+from charmlibs.pathops import PathProtocol
 
 from opensearch_single_kernel.common.constants import CertType, Scope, StoreType
 from opensearch_single_kernel.common.exceptions import (
@@ -61,7 +62,8 @@ class TlsManager(BaseManager):
         ca_issuer = self.get_cert_issuer(cert=current_ca)
 
         for cert_type in cert_types:
-            if not self.workload.exists(f"{self.workload.paths.certs}/{cert_type}.p12"):
+            cert_type_path = self.workload.paths.certs / f"{cert_type}.p12"
+            if not cert_type_path.exists():
                 return False
 
             scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
@@ -69,7 +71,7 @@ class TlsManager(BaseManager):
 
             cert_issuer = self.get_cert_issuer_from_path(
                 store_pwd=secret.get("keystore-password"),
-                store_path=f"{self.workload.paths.certs}/{cert_type}.p12",
+                store_path=self.workload.paths.certs / f"{cert_type}.p12",
             )
             if not cert_issuer:
                 return False
@@ -275,11 +277,13 @@ class TlsManager(BaseManager):
 
         return None
 
-    def read_ca(self, alias: str, store_pwd: str, store_path: str) -> str | None:
+    def read_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> str | None:
         """Load stored CA cert."""
         return (self.list_cas(store_pwd, store_path) or {}).get(alias)
 
-    def list_cas(self, store_pwd: str, store_path: str) -> dict[str, str] | None:  # noqa: C901
+    def list_cas(
+        self, store_pwd: str, store_path: PathProtocol
+    ) -> dict[str, str] | None:  # noqa: C901
         """List the CAs currently stored in a trust store.
 
         Args:
@@ -291,7 +295,7 @@ class TlsManager(BaseManager):
             If an alias is partitioned as <alias>-0, <alias>-1, ... in the store,
             they are reassembled and returned under the base <alias> key.
         """
-        if not self.workload.exists(store_path):
+        if not store_path.exists():
             return None
 
         cmd = f"openssl pkcs12 -in {store_path}"
@@ -339,20 +343,24 @@ class TlsManager(BaseManager):
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        ca_trust_store = f"{self.workload.paths.certs}/ca.p12"
+        ca_trust_store = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
         logger.debug(f"Reading stored ca from {ca_trust_store}")
-        logger.debug(secrets)
-        if not (self.workload.exists(ca_trust_store) and secrets):
+        if not (ca_trust_store.exists() and secrets):
             return None
 
         return self.read_ca(
             alias=alias,
             store_pwd=secrets.get("truststore-password"),
-            store_path=f"{self.workload.paths.certs}/{self.CA_ALIAS}.p12",
+            store_path=ca_trust_store,
         )
 
     def store_ca(
-        self, alias: str, store_pwd: str, store_path: str, ca: str, keep_previous: bool = True
+        self,
+        alias: str,
+        store_pwd: str,
+        store_path: PathProtocol,
+        ca: str,
+        keep_previous: bool = True,
     ) -> bool:
         """Add new CA cert(s) to a PKCS12 trust store (generic).
 
@@ -381,20 +389,20 @@ class TlsManager(BaseManager):
         *,
         alias: str,
         store_pwd: str,
-        store_path: str,
+        store_path: PathProtocol,
         ca: str,
         keep_previous: bool,
         snap_user_with_write_permission: bool = False,
         add_read_perm: bool = False,
     ) -> bool:
         """Common implementation to store a CA chain into a PKCS12 keystore."""
-        tmpdir = self.workload.dirname(store_path)
+        tmpdir = store_path.parent
         starter_mode = "0664"
         snap_user = "snap_daemon:root"
         final_mode = "0640"
         # import root first, then intermediates
         certs = list(reversed(split_ca_chain(ca)))
-        if snap_user_with_write_permission and self.workload.exists(store_path):
+        if snap_user_with_write_permission and store_path.exists():
             try:
                 self.workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
             except OpenSearchCmdError:
@@ -469,13 +477,13 @@ class TlsManager(BaseManager):
 
     def add_ca_to_request_bundle(self, ca_cert: str) -> None:
         """Add the CA cert to the request bundle for the requests module."""
-        bundle_path = Path(self.workload.paths.certs) / "chain.pem"
-        if not self.workload.exists(bundle_path):
+        bundle_path = self.workload.paths.certs / "chain.pem"
+        if not bundle_path.exists():
             return
 
-        bundle_content = self.workload.read_text(bundle_path)
+        bundle_content = bundle_path.read_text()
         if ca_cert not in bundle_content:
-            self.workload.write_text(bundle_path, f"{bundle_content}\n{ca_cert}")
+            bundle_path.write_text(f"{bundle_content}\n{ca_cert}")
 
     def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
         """Add key and cert to keystore."""
@@ -495,28 +503,27 @@ class TlsManager(BaseManager):
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),
-            store_path=f"{self.workload.paths.certs}/{cert_type}.p12",
+            store_path=self.workload.paths.certs / f"{cert_type}.p12",
             cert=secrets.get("cert"),
             key=secrets.get("key"),
             key_pwd=secrets.get("key-password"),
         )
 
     def store_key_pair(
-        self, name: str, store_pwd: str, store_path: str, cert: str, key: str, key_pwd: str | None
+        self,
+        name: str,
+        store_pwd: str,
+        store_path: PathProtocol,
+        cert: str,
+        key: str,
+        key_pwd: str | None,
     ) -> None:
         """Store cert in keystore."""
-        try:
-            self.workload.remove_file(store_path)
-        except OSError:
-            pass
+        store_path.unlink(missing_ok=True)
 
         with (
-            self.workload.tempfile(
-                mode="w+t", suffix=".pem", dir=self.workload.dirname(store_path)
-            ) as tmp_key,
-            self.workload.tempfile(
-                mode="w+t", suffix=".cert", dir=self.workload.dirname(store_path)
-            ) as tmp_cert,
+            self.workload.tempfile(mode="w+t", suffix=".pem", dir=store_path.parent) as tmp_key,
+            self.workload.tempfile(mode="w+t", suffix=".cert", dir=store_path.parent) as tmp_cert,
         ):
             # Write key
             tmp_key.write(key)
@@ -591,7 +598,7 @@ class TlsManager(BaseManager):
                 logger.error("Error reading the current truststore: %s", e)
                 return None
 
-    def get_cert_issuer_from_path(self, store_pwd: str, store_path: str) -> str | None:
+    def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         try:
             return self.workload.run_cmd(
@@ -634,7 +641,7 @@ class TlsManager(BaseManager):
         """Remove old CA cert from trust store."""
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         trust_store_pwd = secrets.get("truststore-password")
-        trust_store_path = f"{self.workload.paths.certs}/{self.CA_ALIAS}.p12"
+        trust_store_path = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
 
         old_ca = self.read_stored_ca(alias=self.OLD_CA_ALIAS)
         self.remove_ca(
@@ -645,7 +652,7 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def remove_ca(self, alias: str, store_pwd: str, store_path: str) -> None:
+    def remove_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> None:
         """Remove old CA cert from the truststore.
 
         Args:
@@ -653,7 +660,7 @@ class TlsManager(BaseManager):
             store_pwd: Password for the trust store.
             store_path: Path to the trust store.
         """
-        if not self.workload.exists(store_path):
+        if not store_path.exists():
             logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
             return
 
@@ -690,10 +697,35 @@ class TlsManager(BaseManager):
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
-        bundle_path = Path(self.workload.paths.certs) / "chain.pem"
-        if not self.workload.exists(str(bundle_path)):
+        bundle_path = self.workload.paths.certs / "chain.pem"
+        if not bundle_path.exists():
             return
 
-        bundle_content = self.workload.read_text(bundle_path)
-        self.workload.write_text(bundle_path, bundle_content)
+        bundle_content = bundle_path.read_text()
         bundle_path.write_text(bundle_content.replace(ca_cert, ""))
+
+    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:  # noqa: C901
+        """Add new CA cert to trust store."""
+        if create_store_pwd:
+            self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
+
+        admin_secrets = (
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
+
+        if not ((secrets or {}).get("ca-cert") and admin_secrets.get("truststore-password")):
+            logger.error("CA cert  or truststore-password not found, quitting.")
+            return False
+
+        if not self.store_ca(
+            alias=self.CA_ALIAS,
+            store_pwd=admin_secrets.get("truststore-password"),
+            store_path=self.workload.paths.certs / f"{self.CA_ALIAS}.p12",
+            ca=secrets.get("ca-cert"),
+            keep_previous=True,
+        ):
+            return False
+
+        self.add_ca_to_request_bundle(secrets.get("chain"))
+
+        return True

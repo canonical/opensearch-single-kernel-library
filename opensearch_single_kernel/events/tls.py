@@ -4,7 +4,7 @@
 
 """Handler for TLS events."""
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
@@ -184,8 +184,14 @@ class TLSEventsHandler(Object):
 
         current_stored_ca = self.charm.tls_manager.read_stored_ca()
         if current_stored_ca != event.ca:
-            if not self.store_new_ca(
-                self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
+            if not (deployment_desc := self.charm.state.application.deployment_desc):
+                logger.debug("Could not store new CA certificate.")
+                event.defer()
+                return
+            if not self.charm.tls_manager.store_new_ca(
+                self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
+                create_store_pwd=self.charm.unit.is_leader()
+                and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR,
             ):
                 logger.debug("Could not store new CA certificate.")
                 event.defer()
@@ -290,37 +296,6 @@ class TLSEventsHandler(Object):
         """Handle a cert that was revoked or has expired"""
         logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
         self._on_certificate_expiring(event)
-
-    def store_new_ca(self, secrets: dict[str, Any]) -> bool:  # noqa: C901
-        """Add new CA cert to trust store."""
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
-            return False
-
-        if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            self.charm.tls_manager.create_store_pwd_if_not_exists(
-                Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE
-            )
-
-        admin_secrets = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
-
-        if not ((secrets or {}).get("ca-cert") and admin_secrets.get("truststore-password")):
-            logger.error("CA cert  or truststore-password not found, quitting.")
-            return False
-
-        if not self.charm.tls_manager.store_ca(
-            alias=self.charm.tls_manager.CA_ALIAS,
-            store_pwd=admin_secrets.get("truststore-password"),
-            store_path=f"{self.charm.workload.paths.certs}/{self.charm.tls_manager.CA_ALIAS}.p12",
-            ca=secrets.get("ca-cert"),
-            keep_previous=True,
-        ):
-            return False
-
-        self.charm.tls_manager.add_ca_to_request_bundle(secrets.get("chain"))
-
-        return True
 
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool

@@ -37,8 +37,8 @@ from .tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
-
-DEFAULT_NUM_UNITS = 2
+# TODO: Change back to 2 once scale up is refactored
+DEFAULT_NUM_UNITS = 1
 
 
 @pytest.mark.abort_on_fail

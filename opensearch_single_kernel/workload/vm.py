@@ -5,14 +5,13 @@
 """OpenSearch Machine VM Workload."""
 import logging
 import os
-import pathlib
 import subprocess
 import tempfile
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
 from charmlibs import pathops
+from charmlibs.pathops import PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
@@ -41,7 +40,6 @@ class VMWorkload(BaseWorkload):
 
     def __init__(self):
         super().__init__()
-        self.root = pathops.LocalPath("/")
         for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
@@ -67,30 +65,6 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
-
-    @override
-    def exists(self, path: str) -> bool:
-        """Return whether the path exists in filesystem."""
-        return os.path.exists(path)
-
-    @override
-    def dirname(self, path: str) -> str:
-        """Return the directory name of a give path."""
-        return os.path.dirname(path)
-
-    @override
-    def write_file(self, path: str, data: str, override: bool = True):
-        """Persists data into file. Useful for files generated on the fly, such as certs etc."""
-        pass
-        if not override and self.exists(path):
-            return
-
-        parent_dir_path = "/".join(path.split("/")[:-1])
-        if parent_dir_path:
-            pathlib.Path(parent_dir_path).mkdir(parents=True, exist_ok=True)
-
-        with open(path, mode="w") as f:
-            f.write(data)
 
     @contextmanager
     def tempfile(
@@ -207,19 +181,11 @@ class VMWorkload(BaseWorkload):
         return service_failed("snap.opensearch.daemon.service")
 
     @override
-    def read_text(self, path: Path) -> str:
-        """Open file, read it and close file."""
-        return path.read_text()
-
-    @override
-    def write_text(self, path: Path, content: str) -> str:
-        """Open file, write in it and close file."""
-        return path.write_text(content)
-
-    @override
     def remove_file(self, file_path: str):
         """Remove file from the filesystem."""
-        os.remove(file_path)
+        path = self.root / file_path
+        if path.exists():
+            path.unlink()
 
     @override
     def start_service(self):
@@ -349,3 +315,9 @@ class VMWorkload(BaseWorkload):
     def paths(self) -> Paths:
         """Return Workload's paths"""
         return Paths(self.root)
+
+    @property
+    @override
+    def root(self) -> PathProtocol:
+        """Return the root path."""
+        return pathops.LocalPath("/")
