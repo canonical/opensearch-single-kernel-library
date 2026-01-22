@@ -190,15 +190,13 @@ class ClusterManager(BaseManager):
         """Wait for opensearch to become part of the cluster."""
         # Get online nodes
         try:
-            nodes = self.charm.cluster_manager.get_nodes(
-                use_localhost=self.charm.cluster_manager.opensearch_client.is_node_up()
-            )
+            nodes = self.get_nodes(use_localhost=self.opensearch_client.is_node_up())
         except OpenSearchHttpError as e:
             logger.info("Failed to get online nodes")
             raise e
 
         for node in nodes:
-            if node.name == self.charm.state.unit_name:
+            if node.name == self.state.unit_name:
                 break
         else:
             raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
