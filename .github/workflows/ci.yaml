@@ -93,7 +93,7 @@ jobs:
     strategy:
       matrix:
         env:
-          - lxd
+          - vm
           #- k8s
     name: Unit test charm (${{ matrix.env }})
     runs-on: ubuntu-latest
