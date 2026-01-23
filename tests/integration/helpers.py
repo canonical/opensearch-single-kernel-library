@@ -25,6 +25,7 @@ from tenacity import (
     stop_after_attempt,
     stop_after_delay,
     wait_fixed,
+    wait_random,
 )
 
 from .conftest import APP_NAME
@@ -629,3 +630,109 @@ async def get_application_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> Li
         list of current unit IPs of the application
     """
     return [unit.ip for unit in await get_application_units(ops_test, app)]
+
+
+async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
+    secrets_raw = await ops_test.juju("list-secrets")
+    secret_ids = [
+        secret_line.split()[0] for secret_line in secrets_raw[1].split("\n")[1:] if secret_line
+    ]
+
+    for secret_id in secret_ids:
+        secret_data_raw = await ops_test.juju(
+            "show-secret", "--format", "json", "--reveal", secret_id
+        )
+        secret_data = json.loads(secret_data_raw[1])
+
+        if label == secret_data[secret_id].get("label"):
+            return secret_data[secret_id]["content"]["Data"]
+
+
+@retry(
+    wait=wait_fixed(wait=5) + wait_random(0, 5),
+    stop=stop_after_attempt(15),
+)
+async def check_cluster_formation_successful(
+    ops_test: OpsTest, unit_ip: str, unit_names: List[str]
+) -> bool:
+    """Returns whether the cluster formation was successful and all nodes successfully joined.
+
+    Args:
+        ops_test: The ops test framework instance.
+        unit_ip: The ip of the unit of the OpenSearch unit.
+        unit_names: The list of unit names in the cluster.
+
+    Returns:
+        Whether The cluster formation is successful.
+    """
+    response = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes")
+    if "_nodes" not in response or "nodes" not in response:
+        return False
+
+    successful_nodes = response["_nodes"]["successful"]
+    if successful_nodes < len(unit_names):
+        return False
+
+    registered_nodes = [node_desc["name"] for node_desc in response["nodes"].values()]
+    return set(unit_names) == set(registered_nodes)
+
+
+@retry(
+    wait=wait_fixed(wait=5) + wait_random(0, 5),
+    stop=stop_after_attempt(15),
+)
+async def cluster_health(
+    ops_test: OpsTest, unit_ip: str, wait_for_green_first: bool = False
+) -> Dict[str, any]:
+    """Fetch the cluster health."""
+    if wait_for_green_first:
+        try:
+            return await http_request(
+                ops_test,
+                "GET",
+                f"https://{unit_ip}:9200/_cluster/health?wait_for_status=green&timeout=1m",
+            )
+        except requests.HTTPError:
+            # it timed out, settle with current status, fetched next without the 1min wait
+            pass
+
+    return await http_request(
+        ops_test,
+        "GET",
+        f"https://{unit_ip}:9200/_cluster/health",
+    )
+
+
+async def get_application_unit_ips_names(ops_test: OpsTest, app: str = APP_NAME) -> Dict[str, str]:
+    """List the units of an application by name and corresponding IPs.
+
+    Args:
+        ops_test: The ops test framework instance
+        app: the name of the app
+
+    Returns:
+        Dictionary unit_name / unit_ip, of the application
+    """
+    result = {}
+    for unit in await get_application_units(ops_test, app):
+        result[unit.name] = unit.ip
+
+    return result
+
+
+def get_application_unit_names(ops_test: OpsTest, app: str = APP_NAME) -> List[str]:
+    """List the unit names of an application.
+
+    Args:
+        ops_test: The ops test framework instance
+        app: the name of the app
+
+    Returns:
+        list of current unit names of the application
+    """
+    app_id = f"{ops_test.model.uuid}/{app}"
+    app_short_id = md5(app_id.encode()).hexdigest()[:3]
+    return [
+        f"{unit.name.replace('/', '-')}.{app_short_id}"
+        for unit in ops_test.model.applications[app].units
+    ]
