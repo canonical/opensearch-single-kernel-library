@@ -108,13 +108,13 @@ class TlsFileExt(BaseStrEnum):
 class OpenSearchPaths(BaseStrEnum):
     """Base Paths for OpenSearch Snap."""
 
-    HOME = ("usr/share/opensearch",)
-    CONF = ("etc/opensearch",)
-    DATA = ("var/lib/opensearch",)
-    LOGS = ("var/log/opensearch",)
-    JDK = ("usr/lib/jvm/java-21-openjdk-amd64",)
-    TMP = ("usr/share/tmp",)
-    BIN = ("usr/share/opensearch/bin",)
+    HOME = "usr/share/opensearch"
+    CONF = "etc/opensearch"
+    DATA = "var/lib/opensearch"
+    LOGS = "var/log/opensearch"
+    JDK = "usr/lib/jvm/java-21-openjdk-amd64"
+    TMP = "usr/share/tmp"
+    BIN = "usr/share/opensearch/bin"
 
 
 # Profiles
