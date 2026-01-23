@@ -9,9 +9,20 @@ import pytest
 import requests
 from pytest_operator.plugin import OpsTest
 
-from ..conftest import APP_NAME, CONFIG_OPTS, IDLE_PERIOD, MODEL_CONFIG, UNIT_IDS
-from ..ha.continuous_writes import ContinuousWrites
-from ..helpers import get_leader_unit_ip, get_secret_by_label, wait_until
+from tests.integration.conftest import (
+    APP_NAME,
+    CONFIG_OPTS,
+    IDLE_PERIOD,
+    MODEL_CONFIG,
+    UNIT_IDS,
+)
+from tests.integration.ha.continuous_writes import ContinuousWrites
+from tests.integration.helpers import (
+    get_leader_unit_ip,
+    get_secret_by_label,
+    wait_until,
+)
+
 from .conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)

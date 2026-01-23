@@ -8,9 +8,12 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
-from ..conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
-from ..helpers import wait_until
-from .helpers_manual_tls import MANUAL_TLS_CERTIFICATES_APP_NAME, ManualTLSAgent
+from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
+from tests.integration.helpers import wait_until
+from tests.integration.tls.helpers_manual_tls import (
+    MANUAL_TLS_CERTIFICATES_APP_NAME,
+    ManualTLSAgent,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -9,13 +9,13 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from ..conftest import (
+from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
     MODEL_CONFIG,
     UNIT_IDS,
 )
-from ..helpers import (
+from tests.integration.helpers import (
     check_cluster_formation_successful,
     cluster_health,
     get_application_unit_ids,
@@ -27,7 +27,7 @@ from ..helpers import (
     run_action,
     wait_until,
 )
-from ..tls.helpers import (
+from tests.integration.tls.helpers import (
     check_security_index_initialised,
     check_unit_tls_configured,
     get_loaded_tls_certificates,

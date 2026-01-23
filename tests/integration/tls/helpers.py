@@ -7,7 +7,7 @@ import requests
 from pytest_operator.plugin import OpsTest
 from tenacity import retry, stop_after_attempt, wait_fixed, wait_random
 
-from ..helpers import get_secret_by_label, http_request
+from tests.integration.helpers import get_secret_by_label, http_request
 
 
 @retry(
