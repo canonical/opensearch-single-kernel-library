@@ -114,7 +114,7 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return bool(self.relation_data.get("started", ""))
+        return self.relation_data.get("started", "")
 
     @property
     def tls_ca_renewing(self) -> bool:
@@ -243,7 +243,7 @@ class OpenSearchApplication(RelationState):
     @property
     def bootstrapped(self) -> bool:
         """Return the value of 'bootstrapped' in application state"""
-        return bool(self.relation_data.get("bootstrapped", ""))
+        return self.relation_data.get("bootstrapped", "") == "True"
 
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
@@ -256,13 +256,7 @@ class OpenSearchApplication(RelationState):
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = self.relation_data.get("cluster_fleet_apps", "")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = {}
-        else:
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
+        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     def apps_in_fleet(self) -> list[PeerClusterApp]:
@@ -334,7 +328,7 @@ class ClusterState(Object):
 
     @property
     def peer_cluster_orchestrator(self) -> PeerCluster:
-        """The state for the related 'peer-cluster-orchestrator' application requiring."""
+        """The State for the requirer side of the 'peer-cluster-orchestrator' relation.."""
         return PeerCluster(
             relation=self.peer_cluster_relation,
             data_interface=PeerClusterData(self.model, PEER_CLUSTER_RELATION),
@@ -343,7 +337,7 @@ class ClusterState(Object):
 
     @property
     def peer_cluster(self) -> PeerCluster:
-        """The state for the related 'peer-cluster-orchestrator' related application"""
+        """State for the provider side of the 'peer-cluster-orchestrator' relation."""
         return PeerCluster(
             relation=self.peer_cluster_orchestrator_relation,
             data_interface=PeerClusterOrchestratorData(
@@ -408,7 +402,8 @@ class ClusterState(Object):
 
         if self.peer_relation:
             private_address = self.peer_relation.data[unit].get("private-address")
-            return str(private_address)
+            if private_address:
+                return str(private_address)
 
     def get_unit(self, name: str):
         """Get unit by name"""

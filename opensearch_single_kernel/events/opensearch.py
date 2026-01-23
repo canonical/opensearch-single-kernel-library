@@ -150,6 +150,7 @@ class OpenSearchEventsHandler(Object):
                 HealthColors.YELLOW_TEMP,
             ]:
                 event.defer()
+                return
             nodes = self.charm.cluster_manager.get_nodes(True)
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
                 # Nodes Config updated, we would need to reconfigure and restart
@@ -519,7 +520,7 @@ class OpenSearchEventsHandler(Object):
             logger.error(
                 "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
             )
-            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             return [CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message]
 
         missing_requirements = self.charm.profiles_manager.get_missing_requirements()

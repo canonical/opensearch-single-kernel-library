@@ -96,22 +96,22 @@ class Paths:
         return self.snap / PATHS["bin"]
 
     @property
-    def plugins(self):
+    def plugins(self) -> PathProtocol:
         """Returns Plugins Path"""
         return self.home / "plugins"
 
     @property
-    def certs(self):
+    def certs(self) -> PathProtocol:
         """Returns Certificates Path"""
         return self.conf / "certificates"
 
     @property
-    def certs_relative(self):
+    def certs_relative(self) -> str:
         """Returns Certificates relative Path"""
         return "certificates"
 
     @property
-    def seed_hosts(self):
+    def seed_hosts(self) -> PathProtocol:
         """Returns Seed hosts"""
         return self.conf / "unicast_hosts.txt"
 
@@ -133,7 +133,7 @@ class BaseWorkload(ABC):
 
     @property
     @abstractmethod
-    def paths(self, root: PathProtocol) -> Paths:
+    def paths(self) -> Paths:
         """Return the Workload's paths"""
         pass
 
