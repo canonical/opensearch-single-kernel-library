@@ -61,7 +61,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         """Generated keys to be used within relation data to refer to secret IDs."""
         components = [self.charm.app.name, scope.val]
         if scope == Scope.UNIT:
-            components.append(str(self.charm.unit_id))
+            components.append(str(self.charm.state.server.unit_id))
         components.append(key)
         return self.LABEL_SEPARATOR.join(components)
 
