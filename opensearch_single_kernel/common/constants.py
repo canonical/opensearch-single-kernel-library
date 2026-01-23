@@ -105,6 +105,18 @@ class TlsFileExt(BaseStrEnum):
     KEYPASS = ".key-password"
 
 
+class OpenSearchPaths(BaseStrEnum):
+    """Base Paths for OpenSearch Snap."""
+
+    HOME = ("usr/share/opensearch",)
+    CONF = ("etc/opensearch",)
+    DATA = ("var/lib/opensearch",)
+    LOGS = ("var/log/opensearch",)
+    JDK = ("usr/lib/jvm/java-21-openjdk-amd64",)
+    TMP = ("usr/share/tmp",)
+    BIN = ("usr/share/opensearch/bin",)
+
+
 # Profiles
 _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
@@ -136,16 +148,6 @@ BASE_SNAP_DIR = "/var/snap/opensearch"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
 SNAP = "/snap/opensearch/current"
-
-PATHS = {
-    "home": "usr/share/opensearch",
-    "conf": "etc/opensearch",
-    "data": "var/lib/opensearch",
-    "logs": "var/log/opensearch",
-    "jdk": "usr/lib/jvm/java-21-openjdk-amd64",
-    "tmp": "usr/share/tmp",
-    "bin": "usr/share/opensearch/bin",
-}
 
 
 # Secrets

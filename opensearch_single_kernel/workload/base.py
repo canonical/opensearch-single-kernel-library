@@ -14,10 +14,10 @@ from charmlibs.pathops import PathProtocol
 
 from opensearch_single_kernel.common.constants import (
     BASE_SNAP_DIR,
-    PATHS,
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
+    OpenSearchPaths,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,37 +63,37 @@ class Paths:
     @property
     def home(self) -> PathProtocol:
         """Return path to the home snap directory."""
-        return self.snap_data / PATHS["home"]
+        return self.snap_data / OpenSearchPaths.HOME.val
 
     @property
     def conf(self) -> PathProtocol:
         """Return path to the conf snap directory."""
-        return self.snap_data / PATHS["conf"]
+        return self.snap_data / OpenSearchPaths.CONF.val
 
     @property
     def data(self) -> PathProtocol:
         """Return path to the data snap directory."""
-        return self.snap_common / PATHS["data"]
+        return self.snap_common / OpenSearchPaths.DATA.val
 
     @property
     def logs(self) -> PathProtocol:
         """Return path to the logs snap directory."""
-        return self.snap_common / PATHS["logs"]
+        return self.snap_common / OpenSearchPaths.LOGS.val
 
     @property
     def jdk(self) -> PathProtocol:
         """Return path to the jdk directory."""
-        return self.snap / PATHS["jdk"]
+        return self.snap / OpenSearchPaths.JDK.val
 
     @property
     def tmp(self) -> PathProtocol:
         """Return path to the tmp directory."""
-        return self.snap_common / PATHS["tmp"]
+        return self.snap_common / OpenSearchPaths.TMP.val
 
     @property
     def bin(self) -> PathProtocol:
         """Return path to the bin directory."""
-        return self.snap / PATHS["bin"]
+        return self.snap / OpenSearchPaths.BIN.val
 
     @property
     def plugins(self) -> PathProtocol:

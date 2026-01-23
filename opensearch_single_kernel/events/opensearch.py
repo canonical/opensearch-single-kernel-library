@@ -306,7 +306,10 @@ class OpenSearchEventsHandler(Object):
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
 
-        if self.charm.cluster_manager.is_opensearch_started:
+        if (
+            self.charm.cluster_manager.is_opensearch_started
+            and not self.charm.workload.is_failed()
+        ):
             try:
                 self._post_start_init(event)
             except (
