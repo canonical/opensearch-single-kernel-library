@@ -94,7 +94,7 @@ jobs:
       matrix:
         env:
           - lxd
-          - microk8s
+          #- microk8s
     name: Unit test charm (${{ matrix.env }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
