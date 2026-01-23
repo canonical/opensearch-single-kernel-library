@@ -515,7 +515,7 @@ class OpenSearchEventsHandler(Object):
             logger.error(
                 "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
             )
-            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             return [CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message]
 
         missing_requirements = self.charm.profiles_manager.get_missing_requirements()

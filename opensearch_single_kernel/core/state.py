@@ -214,13 +214,7 @@ class OpenSearchApplication(RelationState):
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = self.relation_data.get("cluster_fleet_apps", "")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = {}
-        else:
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
+        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     def apps_in_fleet(self) -> list[PeerClusterApp]:

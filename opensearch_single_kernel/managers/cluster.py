@@ -274,7 +274,7 @@ class ClusterManager(BaseManager):
     def check_blocking_directives(
         self, deployment_desc: DeploymentDescription | None = None
     ) -> bool:
-        """Return whether the service of a node can start."""
+        """Return If we have any blocking directives."""
         if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
 
