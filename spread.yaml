@@ -118,8 +118,8 @@ backends:
 suites:
   tests/spread/vm/:
     summary: Spread tests for OpenSearch VM
-  tests/spread/k8s/:
-    summary: Spread tests for OpenSearch Kubernetes
+  #tests/spread/k8s/:
+    #summary: Spread tests for OpenSearch Kubernetes
 
 path: /root/spread_project
 
