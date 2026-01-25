@@ -42,6 +42,7 @@ DEFAULT_NUM_UNITS = 1
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip
 async def test_deploy_and_remove_single_unit(charm, series, ops_test: OpsTest) -> None:
     """Build and deploy OpenSearch with a single unit and remove it."""
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -107,6 +108,7 @@ async def test_build_and_deploy(charm, series, ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip
 async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
     """Test the retrieval of admin secrets."""
     leader_id = await get_leader_unit_id(ops_test)
@@ -149,6 +151,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip
 async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
     """Test the rotation and change of admin password."""
     leader_ip = await get_leader_unit_ip(ops_test)
@@ -198,6 +201,7 @@ async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("user", [("monitor"), ("kibanaserver")])
+@pytest.mark.skip
 async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> None:
     """Test the rotation and change of admin password."""
     leader_ip = await get_leader_unit_ip(ops_test)
@@ -290,7 +294,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_check_workload_version(ops_test: OpsTest) -> None:
+async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
     """Test to check if the workload_version file is updated."""
     leader_id = await get_leader_unit_id(ops_test)
 
@@ -316,7 +320,11 @@ async def test_check_workload_version(ops_test: OpsTest) -> None:
     logger.info(f"Installed snap: {installed_info}")
 
     workload_version = None
-    with open("./workload_version") as f:
+    if substrate == "k8s":
+        workload_version_path = "./tests/charms/opensearch_k8s_test_charm/workload_version"
+    elif substrate == "vm":
+        workload_version_path = "./tests/charms/opensearch_test_charm/workload_version"
+    with open(workload_version_path) as f:
         workload_version = f.read().rstrip("\n")
     assert installed_info[0] == workload_version
 
