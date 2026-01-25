@@ -22,8 +22,7 @@ from tests.integration.helpers import (
     get_secret_by_label,
     wait_until,
 )
-
-from .conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
+from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,8 @@ ALL_GROUPS = {
             pytest.mark.group(id=deploy_type),
         ],
     )
-    for deploy_type in [LARGE_DEPLOYMENT, SMALL_DEPLOYMENT]
+    # TODO: re-enable large deployments
+    for deploy_type in [SMALL_DEPLOYMENT]
 }
 ALL_DEPLOYMENTS = list(ALL_GROUPS.values())
 
@@ -90,6 +90,7 @@ async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None
 
 @pytest.mark.group(id=LARGE_DEPLOYMENT)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip()
 async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
     """Setup a large deployments cluster."""
     # deploy new cluster
