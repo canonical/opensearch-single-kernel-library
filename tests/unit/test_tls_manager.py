@@ -478,7 +478,7 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
     )
     tempfile = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     event_mock = MagicMock(
         certificate_signing_request=csr, chain=new_chain, certificate=new_cert, ca=ca
@@ -626,7 +626,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
     )
     tempfile = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     event_mock = MagicMock(
         certificate_signing_request=f"{cert_type}-csr",
@@ -755,7 +755,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
     )
     tempfile = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
 
     harness.charm.state.secrets.put_object(
@@ -889,7 +889,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_non_leader
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
     )
     mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     event_mock = MagicMock(certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca)
 
@@ -1268,7 +1268,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
     tempfile = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
@@ -1418,7 +1418,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         "opensearch_single_kernel.managers.tls.TlsManager._remove_ca_from_request_bundle"
     )
     tempfile = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.write_file"
@@ -1593,7 +1593,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.add_ca_to_request_bundle")
     mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.tempfile"
+        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"

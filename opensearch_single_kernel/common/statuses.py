@@ -58,6 +58,10 @@ class CharmStatuses(Enum):
     )
     WAITING_TO_START = WaitingStatus("Waiting for OpenSearch to start...")
 
+    # Stop
+    SERVICE_IS_STOPPING = WaitingStatus("The OpenSearch service is stopping.")
+    SERVICE_STOPPED = WaitingStatus("The OpenSearch service stopped.")
+
     # Peer Cluster
     PEER_CLUSTER_NO_DATA_NODE = BlockedStatus(
         "Cannot run cluster with current roles. Waiting for data node..."

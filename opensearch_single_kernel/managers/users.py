@@ -369,6 +369,7 @@ class UsersManager(BaseManager):
         """User creation for specific system users."""
         if user not in OPENSEARCH_USERS:
             raise OpenSearchError(f"User {user} is not an internal user.")
+        logger.debug(f"Creating internal user {user}, with {hashed_pwd}")
 
         if user == ADMIN_USER:
             # reserved: False, prevents this resource from being update-protected from:

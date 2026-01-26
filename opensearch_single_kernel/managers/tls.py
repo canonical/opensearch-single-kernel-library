@@ -432,7 +432,7 @@ class TlsManager(BaseManager):
 
             # import the cert
             try:
-                with self.workload.tempfile(
+                with self.workload.temp_file(
                     dir=tmpdir.parent,
                     mode="w",
                     encoding="utf-8",
@@ -524,8 +524,8 @@ class TlsManager(BaseManager):
         store_path.unlink(missing_ok=True)
 
         with (
-            self.workload.tempfile(mode="w+t", suffix=".pem", dir=store_path.parent) as tmp_key,
-            self.workload.tempfile(mode="w+t", suffix=".cert", dir=store_path.parent) as tmp_cert,
+            self.workload.temp_file(mode="w+t", suffix=".pem", dir=store_path.parent) as tmp_key,
+            self.workload.temp_file(mode="w+t", suffix=".cert", dir=store_path.parent) as tmp_cert,
         ):
             # Write key
             tmp_key.write(key)
@@ -587,7 +587,7 @@ class TlsManager(BaseManager):
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
-        with self.workload.tempfile(mode="w+t", dir=self.workload.root / "/tmp") as tmp_ca_file:
+        with self.workload.temp_file(mode="w+t", dir=self.workload.root / "/tmp") as tmp_ca_file:
             tmp_ca_file.write(cert)
             tmp_ca_file.flush()
             tmp_ca_file.seek(0)
@@ -620,8 +620,8 @@ class TlsManager(BaseManager):
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         with (
-            self.workload.tempfile(mode="w+t", dir=self.workload.paths.conf) as tmp_cert,
-            self.workload.tempfile(mode="w+t", dir=self.workload.paths.conf) as tmp_key,
+            self.workload.temp_file(mode="w+t", dir=self.workload.paths.conf) as tmp_cert,
+            self.workload.temp_file(mode="w+t", dir=self.workload.paths.conf) as tmp_key,
         ):
             tmp_cert.write(admin_secret["cert"])
             tmp_cert.flush()
