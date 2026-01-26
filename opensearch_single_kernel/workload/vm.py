@@ -88,7 +88,6 @@ class VMWorkload(BaseWorkload):
         finally:
             if not f.closed:
                 f.close()
-
             if delete:
                 try:
                     os.unlink(f.name)

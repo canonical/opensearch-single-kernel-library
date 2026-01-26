@@ -86,7 +86,8 @@ class UsersManager(BaseManager):
         hashed_pwd = self.state.secrets.get(Scope.APP, self.state.secrets.hash_key(user))
 
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, hashed_pwd)
+        if user in OPENSEARCH_SYSTEM_USERS:
+            self.put_internal_user(user, hashed_pwd)
 
     def purge_initial_default_users(self):
         """Removes all users from internal_users yaml config.

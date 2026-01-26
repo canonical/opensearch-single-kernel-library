@@ -631,7 +631,9 @@ class TlsManager(BaseManager):
             tmp_key.flush()
             tmp_key.seek(0)
 
-        self.opensearch_client.reload_tls_certificates(cert_files=(tmp_cert.name, tmp_key.name))
+            self.opensearch_client.reload_tls_certificates(
+                cert_files=(tmp_cert.name, tmp_key.name)
+            )
 
     def finalize_ca_certs_rotation(self) -> None:
         """Handle the completion of CA rotation."""
