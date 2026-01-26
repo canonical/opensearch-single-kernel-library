@@ -48,8 +48,7 @@ ALL_GROUPS = {
             pytest.mark.group(id=deploy_type),
         ],
     )
-    # TODO: re-enable large deployments
-    for deploy_type in [SMALL_DEPLOYMENT]
+    for deploy_type in [SMALL_DEPLOYMENT, LARGE_DEPLOYMENT]
 }
 ALL_DEPLOYMENTS = list(ALL_GROUPS.values())
 
