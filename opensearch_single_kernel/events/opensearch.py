@@ -6,6 +6,7 @@
 
 import logging
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ops import (
@@ -16,12 +17,14 @@ from ops import (
     Object,
     SecretChangedEvent,
     StartEvent,
+    UpdateStatusEvent,
 )
 
 from opensearch_single_kernel.common.constants import (
     COS_USER,
     NODE_LOCK_RELATION,
     OPENSEARCH_SYSTEM_USERS,
+    CertType,
     DeploymentType,
     Directive,
     HealthColors,
@@ -69,10 +72,101 @@ class OpenSearchEventsHandler(Object):
         )
         self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.charm.on.update_status, self._on_update_status)
 
         # --- OpenSearch Custom events ---
         self.framework.observe(self.charm._start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm._restart_opensearch_event, self._on_restart_opensearch)
+
+    def _on_update_status(self, event: UpdateStatusEvent):  # noqa: C901
+        """On update status event.
+
+        We want to periodically check for the following:
+        1- The profile requirements are still met
+        2- Do we have users that need to be deleted, and if so we need to delete them.
+        3- every 6 hours check if certs are expiring soon (in 7 days),
+            as a safeguard in case relation broken. As there will be data loss
+            without the user noticing in case the cert of the unit transport layer expires.
+            So we want to stop opensearch in that case, since it cannot be recovered from.
+        """
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not yet computed")
+            return
+
+        if self.check_profile_missing_requirements():
+            return
+
+        # if node already shutdown - leave
+        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            return
+
+        # review available CMs
+        # TODO:
+        # self._add_cm_addresses_to_conf()
+
+        # if there are exclusions to be removed
+        # each unit should check its own exclusions' list
+        # self.opensearch_exclusions.cleanup()
+        if (
+            health := self.charm.status.apply_health(
+                wait_for_green_first=True, app=self.charm.unit.is_leader()
+            )
+        ) not in [
+            HealthColors.GREEN,
+            HealthColors.IGNORE,
+        ]:
+            logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
+
+            if health == HealthColors.UNKNOWN:
+                return
+
+        # TODO: Handle client relations updates
+        # for relation in self.model.relations.get(ClientRelationName, []):
+        # self.opensearch_provider.update_endpoints(relation)
+
+        # deployment_desc = self.charm.state.application.deployment_desc
+        # if self.upgrade_in_progress:
+        # logger.debug(
+        # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
+        # )
+        # elif (
+        #    self.unit.is_leader()
+        #    and deployment_desc
+        #    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        # ):
+        #    self.opensearch_provider.remove_lingering_relation_users_and_roles()
+
+        # If the unit reloads its certs but the other units are not ready yet
+        # we need to wait for them all to be ready before deleting the old CA
+        if (
+            self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+        ):
+            logger.debug("update_status: Detected CA rotation complete in cluster")
+            self.charm.tls_manager.finalize_ca_certs_rotation()
+        # If relation not broken - leave
+        if self.charm.state.tls_relation is not None:
+            return
+
+        # handle when/if certificates are expired
+        certs = self.charm.tls_manager.check_certs_expiration()
+        if certs:
+            missing = [cert.val for cert in certs.keys()]
+            self.charm.status.set(
+                CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
+                dynamic_message=f"The certificates: {', '.join(missing)} need to be refreshed.",
+            )
+
+            # stop opensearch in case the Node-transport certificate expires.
+            if certs.get(CertType.UNIT_TRANSPORT) is not None:
+                try:
+                    self.stop_opensearch()
+                except OpenSearchStopError:
+                    event.defer()
+                    return
+        self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
+            self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
+        )
 
     def _on_install(self, event: InstallEvent) -> None:
         """Event handler for install event."""
