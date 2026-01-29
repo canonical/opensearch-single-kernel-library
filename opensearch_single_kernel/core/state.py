@@ -21,6 +21,8 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     PERFORMANCE_PROFILE,
     TLS_RELATION,
+    CertType,
+    Scope,
     StartMode,
     Substrates,
 )
@@ -28,6 +30,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
     Model,
+    Node,
     OpenSearchProfile,
     PeerClusterApp,
     PerformanceType,
@@ -46,7 +49,10 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
-from opensearch_single_kernel.utils.helpers import format_unit_name
+from opensearch_single_kernel.utils.helpers import (
+    format_unit_name,
+    normalized_tls_subject,
+)
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -195,6 +201,16 @@ class OpenSearchServer(RelationState):
         """Set the value of 'delete_voting_exclusions' in application databag."""
         self.update({"delete-voting-exclusions": ",".join(value)})
 
+    @property
+    def last_host_ip(self) -> str | None:
+        """Get the last configured IP for the unit. Used for tracking the IP change."""
+        return self.relation_data.get("last_host_ip")
+
+    @last_host_ip.setter
+    def last_host_ip(self, value: str) -> None:
+        """Set the value of last configured IP for the unit. Used for tracking the IP change."""
+        self.update({"last_host_ip": value})
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -272,12 +288,12 @@ class OpenSearchApplication(RelationState):
         self.update({"security_index_initialised": str(value)})
 
     @property
-    def nodes_config(self) -> dict:
+    def nodes_config(self) -> dict[str, Node]:
         """Return the value of 'nodes_config' in application state"""
         nodes_config = self.get_object("nodes_config")
         if not nodes_config:
             return {}
-        return nodes_config
+        return {name: Node.from_dict(node) for name, node in nodes_config.items()}
 
     @property
     def bootstrapped(self) -> bool:
@@ -461,6 +477,16 @@ class ClusterState(Object):
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
     @property
+    def node_config(self) -> Node | None:
+        """Return the current node from 'nodes_config' in application state."""
+        return (
+            new_node_conf
+            if (nodes_config := self.application.nodes_config)
+            and (new_node_conf := nodes_config.get(self.unit_name))
+            else None
+        )
+
+    @property
     def planned_units(self) -> int:
         """Return the planned units for the charm."""
         return self.model.app.planned_units()
@@ -626,6 +652,43 @@ class ClusterState(Object):
                 if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
                 else GENERATED_ROLES
             ),
+        )
+
+    @property
+    def tls_truststore_password(self) -> str | None:
+        """Get the truststore-password from the TLS admin_secrets."""
+        return (
+            truststore_pwd
+            if (
+                admin_secrets := self.secrets.get_object(
+                    Scope.APP, CertType.APP_ADMIN.val, peek=True
+                )
+            )
+            and (truststore_pwd := admin_secrets.get("truststore-password"))
+            else None
+        )
+
+    def get_tls_keystore_password(self, cert_type: CertType) -> str | None:
+        """Get the keystore-password of provided cert_type from the TLS cert_secret."""
+        return (
+            keystore_pwd
+            if (cert_secret := self.secrets.get_object(Scope.UNIT, cert_type.val, peek=True))
+            and (keystore_pwd := cert_secret.get("keystore-password"))
+            else None
+        )
+
+    @property
+    def tls_subject(self) -> str | None:
+        """Get the normalized_tls_subject from the TLS admin_secrets."""
+        return (
+            normalized_tls_subject(subject)
+            if (
+                admin_secrets := self.secrets.get_object(
+                    Scope.APP, CertType.APP_ADMIN.val, peek=True
+                )
+            )
+            and (subject := admin_secrets.get("subject"))
+            else None
         )
 
     def computed_roles(self) -> list[str]:
