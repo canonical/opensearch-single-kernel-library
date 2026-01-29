@@ -455,11 +455,6 @@ class ClusterManager(BaseManager):
         if not current_nodes:
             return False
 
-        current_reported_nodes = {
-            name: Node.from_dict(node)
-            for name, node in (self.state.application.nodes_config or {}).items()
-        }
-
         if (
             deployment_desc := self.state.application.deployment_desc
         ).start == StartMode.WITH_GENERATED_ROLES:
@@ -486,7 +481,7 @@ class ClusterManager(BaseManager):
                     temperature=temperature,
                 )
 
-        if current_reported_nodes == updated_nodes:
+        if self.state.application.nodes_config == updated_nodes:
             return False
 
         self.state.application.put_object("nodes_config", updated_nodes)
