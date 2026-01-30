@@ -437,15 +437,12 @@ class TlsManager(BaseManager):
             try:
                 with self.workload.temp_file(
                     dir=tmpdir.parent,
+                    data=pem,
                     mode="w",
                     encoding="utf-8",
                     errors="replace",
                     delete=True,
-                ) as tmp:
-                    tmp.write(pem)
-                    tmp.flush()
-                    tmp_path = tmp.name
-
+                ) as tmp_path:
                     try:
                         self.workload.run_cmd(
                             f"{self.KEYTOOL} -importcert -noprompt "
@@ -527,19 +524,15 @@ class TlsManager(BaseManager):
         store_path.unlink(missing_ok=True)
 
         with (
-            self.workload.temp_file(mode="w+t", suffix=".pem", dir=store_path.parent) as tmp_key,
-            self.workload.temp_file(mode="w+t", suffix=".cert", dir=store_path.parent) as tmp_cert,
+            self.workload.temp_file(
+                mode="w+t", suffix=".pem", data=key, dir=store_path.parent
+            ) as tmp_key,
+            self.workload.temp_file(
+                mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
+            ) as tmp_cert,
         ):
-            # Write key
-            tmp_key.write(key)
-            tmp_key.flush()
-            tmp_key.seek(0)
-            # Write Cert
-            tmp_cert.write(cert)
-            tmp_cert.flush()
-            tmp_cert.seek(0)
 
-            cmd = f"openssl pkcs12 -export -in {tmp_cert.name} -inkey {tmp_key.name} -out {store_path} -name {name}"
+            cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
             args = f"-passout pass:{store_pwd}"
             if key_pwd:
                 args = f"{args} -passin pass:{key_pwd}"
@@ -557,10 +550,11 @@ class TlsManager(BaseManager):
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
 
         # we store the pem format to make it easier for the python requests lib
-        self.workload.write_file(
-            f"{self.workload.paths.certs}/chain.pem",
-            admin_secret["chain"],
-        )
+        chain_path = self.workload.paths.certs / "chain.pem"
+        parent_dir_path = chain_path.parent
+        if parent_dir_path:
+            parent_dir_path.mkdir(parents=True, exist_ok=True)
+        chain_path.write_text(admin_secret["chain"])
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
@@ -590,15 +584,12 @@ class TlsManager(BaseManager):
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
-        with self.workload.temp_file(mode="w+t", dir=self.workload.root / "/tmp") as tmp_ca_file:
-            tmp_ca_file.write(cert)
-            tmp_ca_file.flush()
-            tmp_ca_file.seek(0)
+        with self.workload.temp_file(
+            mode="w+t", data=cert, dir=self.workload.root / "/tmp"
+        ) as tmp_ca_file:
 
             try:
-                return self.workload.run_cmd(
-                    f"openssl x509 -in {tmp_ca_file.name} -noout -issuer"
-                ).out
+                return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
             except OpenSearchCmdError as e:
                 logger.error("Error reading the current truststore: %s", e)
                 return None
@@ -623,19 +614,16 @@ class TlsManager(BaseManager):
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         with (
-            self.workload.temp_file(mode="w+t", dir=self.workload.paths.conf) as tmp_cert,
-            self.workload.temp_file(mode="w+t", dir=self.workload.paths.conf) as tmp_key,
+            self.workload.temp_file(
+                mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
+            ) as tmp_cert,
+            self.workload.temp_file(
+                mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
+            ) as tmp_key,
         ):
-            tmp_cert.write(admin_secret["cert"])
-            tmp_cert.flush()
-            tmp_cert.seek(0)
-
-            tmp_key.write(admin_secret["key"])
-            tmp_key.flush()
-            tmp_key.seek(0)
 
             self.opensearch_client.reload_tls_certificates(
-                cert_files=(tmp_cert.name, tmp_key.name)
+                cert_files=(str(tmp_cert), str(tmp_key))
             )
 
     def finalize_ca_certs_rotation(self) -> None:
@@ -754,7 +742,7 @@ class TlsManager(BaseManager):
         bundle_content = bundle_path.read_text()
         bundle_path.write_text(bundle_content.replace(ca_cert, ""))
 
-    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:  # noqa: C901
+    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
