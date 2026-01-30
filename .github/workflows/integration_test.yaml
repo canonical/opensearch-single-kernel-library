@@ -126,10 +126,6 @@ jobs:
           EOT
 
           sudo sysctl -p
-      - name: Setup tmate session
-        uses: canonical/action-tmate@main
-        with:
-          detached: true
       - name: Run spread job
         timeout-minutes: 180
         id: spread
