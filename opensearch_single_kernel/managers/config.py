@@ -6,6 +6,7 @@
 
 import logging
 from collections import namedtuple
+from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType
 from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
@@ -221,7 +222,7 @@ class ConfigManager(BaseManager):
             lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
             self.workload.paths.seed_hosts.write_text(f"{lines}\n")
 
-    def set_admin_tls_conf(self, secrets: dict[str, any]):
+    def set_admin_tls_conf(self, secrets: dict[str, Any]):
         """Configures the admin certificate."""
         self.yaml_setter.put(
             self.CONFIG_YML,

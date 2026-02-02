@@ -323,6 +323,8 @@ class TlsManager(BaseManager):
                 (line for line in block.split("\n") if line.strip().startswith("friendlyName:")),
                 None,
             )
+            if alias_line is None:
+                continue
             alias = alias_line.split("friendlyName:", 1)[-1].strip()
             pem = f"{start_cert_marker}{block.split(start_cert_marker, 1)[1]}".strip()
 
@@ -471,7 +473,8 @@ class TlsManager(BaseManager):
                 )
             if add_read_perm:
                 command += f"sudo chmod +r {store_path}"
-            self.workload.run_cmd(command)
+            if command:
+                self.workload.run_cmd(command)
         except OpenSearchCmdError:
             pass
 
@@ -595,7 +598,7 @@ class TlsManager(BaseManager):
                 return None
 
     def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
-        """Retrieve the certificate issuer from a string certificate."""
+        """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
         try:
             return self.workload.run_cmd(
                 f"openssl pkcs12 -in {store_path}",
@@ -678,6 +681,9 @@ class TlsManager(BaseManager):
     def remove_old_ca(self) -> None:
         """Remove old CA cert from trust store."""
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        if secrets is None:
+            logger.error("Cannot remove old CA: admin secrets not found.")
+            return
         trust_store_pwd = secrets.get("truststore-password")
         trust_store_path = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
 

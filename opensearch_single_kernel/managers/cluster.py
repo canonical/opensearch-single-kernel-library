@@ -357,7 +357,7 @@ class ClusterManager(BaseManager):
                     roles=roles,
                     ip=node.ip,
                     app=node.app,
-                    unit_id=node.unit_id,
+                    unit_number=node.unit_number,
                     temperature=temperature,
                 )
 
@@ -436,7 +436,7 @@ class ClusterManager(BaseManager):
                 roles=GENERATED_ROLES,
                 ip=node.ip,
                 app=node.app,
-                unit_id=node.unit_id,
+                unit_number=node.unit_number,
                 temperature=node.temperature,
             )
         logger.debug(

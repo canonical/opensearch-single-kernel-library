@@ -188,7 +188,7 @@ def test_on_relation_created_only_main_orchestrator_requests_application_cert(ha
     harness.set_leader(is_leader=True)
     harness.charm.tls_events._on_tls_relation_created(event_mock)
 
-    create_certificate_signing_request.mock_calls == [
+    assert create_certificate_signing_request.mock_calls == [
         mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
         mock.call(Scope.UNIT, CertType.UNIT_HTTP),
     ]
@@ -231,7 +231,7 @@ def test_on_relation_created_non_admin(harness, mocker):
 
     harness.set_leader(is_leader=False)
     harness.charm.tls_events._on_tls_relation_created(event_mock)
-    create_certificate_signing_request == [
+    assert create_certificate_signing_request == [
         mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
         mock.call(Scope.UNIT, CertType.UNIT_HTTP),
     ]
