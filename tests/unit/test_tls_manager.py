@@ -231,7 +231,7 @@ def test_on_relation_created_non_admin(harness, mocker):
 
     harness.set_leader(is_leader=False)
     harness.charm.tls_events._on_tls_relation_created(event_mock)
-    assert create_certificate_signing_request == [
+    assert create_certificate_signing_request.mock_calls == [
         mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
         mock.call(Scope.UNIT, CertType.UNIT_HTTP),
     ]
@@ -1417,11 +1417,9 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     remove_ca_from_request_bundle = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager._remove_ca_from_request_bundle"
     )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
-    )
-    mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.write_file"
     )
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
