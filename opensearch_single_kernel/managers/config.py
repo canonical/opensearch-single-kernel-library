@@ -227,7 +227,7 @@ class ConfigManager(BaseManager):
         self.yaml_setter.put(
             self.CONFIG_YML,
             "plugins.security.authcz.admin_dn/{}",
-            f"{normalized_tls_subject(secrets['subject'])}",
+            normalized_tls_subject(secrets["subject"]),
         )
 
     def set_node_tls_conf(self, cert_type: CertType, truststore_pwd: str, keystore_pwd: str):
@@ -244,7 +244,7 @@ class ConfigManager(BaseManager):
             self.yaml_setter.put(
                 self.CONFIG_YML,
                 f"plugins.security.ssl.{target_conf_layer}.{store_type}_filepath",
-                f"{self.workload.paths.certs_relative}/{cert if cert == 'ca' else cert_type}.p12",
+                f"{self.workload.paths.certs_relative}/{cert if cert == 'ca' else cert_type.val}.p12",
             )
 
         self.yaml_setter.put(
