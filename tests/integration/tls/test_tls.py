@@ -165,7 +165,6 @@ async def test_tls_renewal(ops_test: OpsTest) -> None:
 async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     """Test that expiring TLS certificates are renewed."""
     # before we can run this test, need to clean up and deploy with different config
-    """
     if APP_NAME in ops_test.model.applications:
         logger.info(f"Removing application {APP_NAME}")
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
@@ -191,7 +190,6 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
         series=series,
         config=CONFIG_OPTS,
     )
-    """
 
     await wait_until(
         ops_test,
