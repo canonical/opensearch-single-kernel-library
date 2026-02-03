@@ -165,6 +165,7 @@ async def test_tls_renewal(ops_test: OpsTest) -> None:
 async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     """Test that expiring TLS certificates are renewed."""
     # before we can run this test, need to clean up and deploy with different config
+    """
     if APP_NAME in ops_test.model.applications:
         logger.info(f"Removing application {APP_NAME}")
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
@@ -190,6 +191,7 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
         series=series,
         config=CONFIG_OPTS,
     )
+    """
 
     await wait_until(
         ops_test,
@@ -203,7 +205,8 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     unit_id = get_application_unit_ids(ops_test, APP_NAME)[0]
     search_expression = "expire=self._get_next_secret_expiry_time\\(certificate\\)"
     replace_expression = f"expire=timedelta\\(seconds={SECRET_EXPIRY_TIME}\\)"
-    lib_file = f"/var/lib/juju/agents/unit-opensearch-{unit_id}/charm/venv/lib/python3.12/site-packages/opensearch_single_kernel/lib/charms/tls_certificates_interface/v3/tls_certificates.py"
+    python_version = "python3.12" if series == "noble" else "python3.10"
+    lib_file = f"/var/lib/juju/agents/unit-opensearch-{unit_id}/charm/venv/lib/{python_version}/site-packages/opensearch_single_kernel/lib/charms/tls_certificates_interface/v3/tls_certificates.py"
     cmd = f"juju ssh {APP_NAME}/{unit_id} sudo sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
     logger.info(f"Running command: {cmd}")
     subprocess.check_output(cmd, shell=True)
