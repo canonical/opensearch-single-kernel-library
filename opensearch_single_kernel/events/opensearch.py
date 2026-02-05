@@ -155,7 +155,7 @@ class OpenSearchEventsHandler(Object):
             missing = [cert.val for cert in certs.keys()]
             self.charm.status.set(
                 CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
-                dynamic_message=f"The certificates: {', '.join(missing)} need to be refreshed.",
+                dynamic_params={"certificates": ", ".join(missing)},
             )
 
             # stop opensearch in case the Node-transport certificate expires.
@@ -690,13 +690,12 @@ class OpenSearchEventsHandler(Object):
             logger.error("Missing profile requirements: %s", missing_requirements)
             self.charm.status.set(
                 CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                dynamic_message=f"Missing requirements: {' - '.join(missing_requirements)}",
+                dynamic_params={"requirements": " - ".join(missing_requirements)},
             )
         else:
             self.charm.status.clear(
                 CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                dynamic_message="Missing requirements:",
-                pattern=Status.CheckPattern.Start,
+                pattern=Status.CheckPattern.Interpolated,
             )
 
     def cleanup_start_state(self) -> None:
