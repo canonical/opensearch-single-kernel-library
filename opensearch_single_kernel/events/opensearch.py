@@ -844,7 +844,7 @@ class OpenSearchEventsHandler(Object):
 
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
-        self.charm.state.server.update({"tls_configured": None})
+        self.charm.state.server.update({"tls_configured": ""})
         # TODO: Update peer cluster relation
         # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
 

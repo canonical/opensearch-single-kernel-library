@@ -70,6 +70,10 @@ class TLSEventsHandler(Object):
             return
         # TODO: Check if the charm is in upgrade
 
+        if not self.charm.state.tls_relation:
+            event.fail("TLS relation not available.")
+            return
+
         cert_type = CertType(event.params["category"])  # type
         scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
         if scope == Scope.APP and not (
@@ -77,7 +81,7 @@ class TLSEventsHandler(Object):
             and self.charm.state.application.deployment_desc.typ
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
-            event.log(
+            event.fail(
                 "Only the juju leader unit of the main orchestrator can set private key for the admin certificates."
             )
             return
@@ -86,8 +90,7 @@ class TLSEventsHandler(Object):
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope, cert_type, event.params.get("key", None), event.params.get("password", None)
             )
-            if self.charm.model.get_relation(TLS_RELATION):
-                self.certs.request_certificate_creation(certificate_signing_request=csr)
+            self.certs.request_certificate_creation(certificate_signing_request=csr)
 
         except ValueError as e:
             event.fail(str(e))
@@ -96,6 +99,11 @@ class TLSEventsHandler(Object):
         """Request certificate when TLS relation created."""
         # TODO: Defer when upgrade is in progress
         if not (deployment_desc := self.charm.state.application.deployment_desc):
+            event.defer()
+            return
+
+        if not self.charm.state.tls_relation:
+            logger.debug("TLS relation created, no TLS relation state available.")
             event.defer()
             return
 
@@ -115,8 +123,7 @@ class TLSEventsHandler(Object):
                 Scope.APP, CertType.APP_ADMIN
             )
 
-            if self.charm.state.tls_relation:
-                self.certs.request_certificate_creation(certificate_signing_request=csr)
+            self.certs.request_certificate_creation(certificate_signing_request=csr)
         elif not admin_cert.get("truststore-password"):
             logger.debug("Truststore-password from main-orchestrator not available yet.")
             event.defer()
@@ -136,9 +143,8 @@ class TLSEventsHandler(Object):
         unit_http_csr = self.charm.tls_manager.create_certificate_signing_request(
             Scope.UNIT, CertType.UNIT_HTTP
         )
-        if self.charm.state.tls_relation:
-            self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
-            self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
+        self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
+        self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
@@ -163,8 +169,14 @@ class TLSEventsHandler(Object):
             logger.debug("Unknown certificate available.")
             return
 
+        # variables for better readability
+        is_unit_leader = self.charm.unit.is_leader()
+
+        deployment_desc = self.charm.state.application.deployment_desc
+        is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+
         # seems like the admin certificate is also broadcast to non leader units on refresh request
-        if not self.charm.unit.is_leader() and scope == Scope.APP:
+        if not is_unit_leader and scope == Scope.APP:
             return
 
         old_cert = secrets.get("cert", None)
@@ -180,14 +192,9 @@ class TLSEventsHandler(Object):
 
         current_stored_ca = self.charm.tls_manager.read_stored_ca()
         if current_stored_ca != event.ca:
-            if not (deployment_desc := self.charm.state.application.deployment_desc):
-                logger.debug("Could not store new CA certificate.")
-                event.defer()
-                return
             if not self.charm.tls_manager.store_new_ca(
                 self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
-                create_store_pwd=self.charm.unit.is_leader()
-                and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR,
+                create_store_pwd=is_unit_leader and is_main_orchestrator,
             ):
                 logger.debug("Could not store new CA certificate.")
                 event.defer()
@@ -266,7 +273,7 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
-        self.charm.state.server.update({"tls_configured": None})
+        self.charm.state.server.update({"tls_configured": ""})
         # TODO: Update peer cluster relation
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
