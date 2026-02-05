@@ -78,3 +78,7 @@ class OpenSearchCmdError(OpenSearchError):
 
 class OpenSearchStopError(OpenSearchError):
     """Exception thrown when OpenSearch fails to stop."""
+
+
+class OpenSearchFileOperationError(OpenSearchError):
+    """Exception thrown when file operations related to OpenSearch fail."""
