@@ -152,8 +152,13 @@ class ConfigSetter(ABC):
 
     @staticmethod
     def __clean_base_path(base_path: PathProtocol):
+        if base_path is None:
+            raise ValueError("base_path cannot be None")
 
-        if not base_path.as_posix().endswith("/"):
+        # posix_path is a string representation of the path using POSIX-style forward slashes (/)
+        posix_path = base_path.as_posix()
+        
+        if not posix_path.endswith("/"):
             base_path = base_path / ""
 
         return base_path
@@ -201,7 +206,14 @@ class YamlConfigSetter(ConfigSetter):
         output_file: str = None,
     ) -> Dict[str, Any]:
         """Add or update the value of a key (or content of array at index / key) if it exists."""
-        data = self.load(config_file)
+        # If file doesn't exist, start with empty dict
+        path = self.base_path / config_file
+        if not path.exists():
+            # Ensure parent directory exists
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+        else:
+            data = self.load(config_file)
 
         self.__deep_update(data, key_path.split(sep), val)
 

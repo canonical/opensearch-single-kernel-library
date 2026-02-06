@@ -137,6 +137,12 @@ class BaseWorkload(ABC):
         """Return the Workload's paths"""
         pass
 
+    @property
+    @abstractmethod
+    def workload_present(self) -> bool:
+        """Flag to check if workload is present and ready."""
+        pass
+
     @contextmanager
     def temp_file(
         self,
@@ -171,7 +177,7 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def start_service_only(self):
+    def start_pebble_service(self):
         """Start the actual service only (snap / pebble)."""
         pass
 

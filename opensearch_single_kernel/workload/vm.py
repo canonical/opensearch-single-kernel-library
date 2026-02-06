@@ -47,6 +47,15 @@ class VMWorkload(BaseWorkload):
                 cache = snap.SnapCache()
                 self.opensearch_snap = cache["opensearch"]
 
+    @property
+    @override
+    def workload_present(self) -> bool:
+        """Check if the snap is installed."""
+        try:
+            return self.opensearch_snap.present
+        except (snap.SnapError, AttributeError):
+            return False
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -166,7 +175,7 @@ class VMWorkload(BaseWorkload):
         return stat[2] not in ["Z", "T", "X"]
 
     @override
-    def start_service_only(self):
+    def start_pebble_service(self):
         """Start the actual service only (snap / pebble)."""
         if not self.opensearch_snap.present:
             raise OpenSearchMissingError()

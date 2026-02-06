@@ -11,7 +11,7 @@ from typing import Any
 
 from charmlibs.pathops import PathProtocol
 
-from opensearch_single_kernel.common.constants import CertType, Scope, StoreType
+from opensearch_single_kernel.common.constants import CertType, Scope, StoreType, Substrates
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
 )
@@ -159,7 +159,14 @@ class TlsManager(BaseManager):
 
         host_public_ip = self.workload.get_host_public_ip()
         if cert_type == CertType.UNIT_HTTP and host_public_ip:
-            ips.add(host_public_ip)
+            # For K8s, get_host_public_ip() returns DNS name instead of IP
+            # check if it's an IP address which contains only digits and dots or DNS name
+            if host_public_ip.replace(".", "").replace(":", "").isdigit() or ":" in host_public_ip:
+                # It's an IP address
+                ips.add(host_public_ip)
+            else:
+                # It's a DNS name
+                dns.add(host_public_ip)
 
         for ip in ips.copy():
             try:
@@ -409,7 +416,13 @@ class TlsManager(BaseManager):
         final_mode = "0640"
         # import root first, then intermediates
         certs = list(reversed(split_ca_chain(ca)))
-        if snap_user_with_write_permission and store_path.exists():
+        # adjust permissions for snap user for VMs
+        # for K8s, skip it.
+        if (
+            snap_user_with_write_permission
+            and store_path.exists()
+            and self.state.substrate == Substrates.VM
+        ):
             try:
                 self.workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
             except OpenSearchCmdError:
@@ -465,16 +478,26 @@ class TlsManager(BaseManager):
                 return False
 
         # post-actions
+        # For K8s, skip sudo chmod/chown as containers as they run as root or have proper permissions
+        # For VM, apply snap-specific permissions
         try:
-            command = ""
-            if snap_user_with_write_permission:
-                command = (
-                    f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
-                )
-            if add_read_perm:
-                command += f"sudo chmod +r {store_path}"
-            if command:
-                self.workload.run_cmd(command)
+            if self.state.substrate == Substrates.VM:
+                command = ""
+                if snap_user_with_write_permission:
+                    command = (
+                        f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
+                    )
+                if add_read_perm:
+                    command += f"sudo chmod +r {store_path}"
+                if command:
+                    self.workload.run_cmd(command)
+            elif add_read_perm and self.state.substrate == Substrates.K8S:
+                # For K8s, try chmod without sudo
+                try:
+                    self.workload.run_cmd(f"chmod +r {store_path}")
+                except OpenSearchCmdError:
+                    # If chmod fails, it's likely already readable or permissions are set correctly
+                    pass
         except OpenSearchCmdError:
             pass
 
@@ -489,6 +512,12 @@ class TlsManager(BaseManager):
         bundle_content = bundle_path.read_text()
         if ca_cert not in bundle_content:
             bundle_path.write_text(f"{bundle_content}\n{ca_cert}")
+            # For K8s, invalidate cache when chain.pem is updated
+            if self.state.substrate == Substrates.K8S:
+                try:
+                    self.opensearch_client.invalidate_chain_pem_cache()
+                except Exception:
+                    pass
 
     def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
         """Add key and cert to keystore."""
@@ -542,7 +571,18 @@ class TlsManager(BaseManager):
 
             try:
                 self.workload.run_cmd(cmd, args)
-                self.workload.run_cmd(f"sudo chmod +r {store_path}")
+                # For K8s skip sudo
+                # For VM use sudo
+                chmod_cmd = (
+                    f"chmod +r {store_path}"
+                    if self.state.substrate == Substrates.K8S
+                    else f"sudo chmod +r {store_path}"
+                )
+                try:
+                    self.workload.run_cmd(chmod_cmd)
+                except OpenSearchCmdError:
+                    # If chmod fails, file may already be readable or permissions are correct
+                    pass
             except OpenSearchCmdError as e:
                 logger.error("Error storing the TLS certificates for %s: %s", name, e)
         logger.info("TLS certificate for %s stored.", name)
@@ -558,6 +598,15 @@ class TlsManager(BaseManager):
         if parent_dir_path:
             parent_dir_path.mkdir(parents=True, exist_ok=True)
         chain_path.write_text(admin_secret["chain"])
+        
+        # For K8s, invalidate the cached chain.pem in charm container
+        # so it gets refreshed on next request
+        if self.state.substrate == Substrates.K8S:
+            try:
+                self.opensearch_client.invalidate_chain_pem_cache()
+            except Exception:
+                # If client not initialized yet, this is acceptable.
+                pass
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
@@ -747,6 +796,12 @@ class TlsManager(BaseManager):
 
         bundle_content = bundle_path.read_text()
         bundle_path.write_text(bundle_content.replace(ca_cert, ""))
+        # For K8s, invalidate cache when chain.pem is updated
+        if self.state.substrate == Substrates.K8S:
+            try:
+                self.opensearch_client.invalidate_chain_pem_cache()
+            except Exception:
+                pass
 
     def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""

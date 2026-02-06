@@ -54,6 +54,9 @@ class ConfigManager(BaseManager):
         )
         if self.state.host_ip:
             self.yaml_setter.put(self.CONFIG_YML, "network.publish_host", self.state.host_ip)
+        # For K8s, get_host_public_ip() returns DNS name which never changes
+        # For VM, returns IP address
+        # DNS names are preferred for K8s as pod IPs are ephemeral.
         public_address = self.workload.get_host_public_ip() or self.state.network_ingress_address
         self.yaml_setter.put(self.CONFIG_YML, "http.publish_host", public_address)
 
@@ -150,6 +153,12 @@ class ConfigManager(BaseManager):
         """
         NetworkHost = namedtuple("NetworkHost", ["entry", "old", "new"])
 
+        # Check if config file exists before trying to load it
+        config_path = self.yaml_setter.base_path / self.CONFIG_YML
+        if not config_path.exists():
+            logger.debug(f"Config file {config_path} does not exist yet. Skipping host update.")
+            return False
+
         node = self.yaml_setter.load(self.CONFIG_YML)
         result = False
         for host in [
@@ -166,6 +175,7 @@ class ConfigManager(BaseManager):
             NetworkHost(
                 "http.publish_host",
                 node.get("http.publish_host"),
+                # For K8s, get_host_public_ip() returns DNS name and for VM, it returns IP address
                 self.workload.get_host_public_ip() or self.state.network_ingress_address,
             ),
         ]:
@@ -280,8 +290,13 @@ class ConfigManager(BaseManager):
         """Configure the profile and return whether restart is needed or not"""
         logger.debug("current profile: %s, config profile: %s", current_profile, config_profile)
         if current_profile is None or current_profile != config_profile:
+            meminfo_data = self.workload.meminfo()
+            if "MemTotal" not in meminfo_data:
+                logger.warning("Could not read MemTotal from meminfo. Skipping profile configuration.")
+                return False
+            
             self.set_jvm_heap_size(
-                config_profile.get_jvm_heap_size(self.workload.meminfo()["MemTotal"])
+                config_profile.get_jvm_heap_size(meminfo_data["MemTotal"])
             )
 
             # store profile in unit state
@@ -291,6 +306,12 @@ class ConfigManager(BaseManager):
 
     def set_jvm_heap_size(self, heap_size_in_kb: int):
         """Apply the performance profile's jvm heap size to the opensearch config."""
+        # Check if jvm.options file exists before trying to modify it
+        jvm_options_path = self.yaml_setter.base_path / self.JVM_OPTIONS
+        if not jvm_options_path.exists():
+            logger.debug(f"JVM options file {jvm_options_path} does not exist yet. Skipping heap size configuration.")
+            return
+        
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xms[0-9]+[kmgKMG]",

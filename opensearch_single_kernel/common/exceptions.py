@@ -78,3 +78,7 @@ class OpenSearchCmdError(OpenSearchError):
 
 class OpenSearchStopError(OpenSearchError):
     """Exception thrown when OpenSearch fails to stop."""
+
+
+class ContainerNotReadyError(OpenSearchError):
+    """Raised when the container is not ready."""

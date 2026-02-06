@@ -45,6 +45,16 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         # State
         self.state = ClusterState(self, self.substrate)
 
+        # Initialize managers and event handlers
+        # Subclasses can override this if they need to set up workload first
+        self._initialize_managers()
+
+    def _initialize_managers(self):
+        """Initialize managers and event handlers.
+        
+        This method will be called by K8s subclass after setting up workload.
+        Managers will check workload.workload_present when they actually need to use it.
+        """
         # Managers
         self.tls_manager = TlsManager(self.state, self.workload)
         self.users_manager = UsersManager(self.state, self.workload)

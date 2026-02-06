@@ -18,6 +18,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
+    ContainerNotReadyError,
     OpenSearchError,
 )
 from opensearch_single_kernel.utils.helpers import generate_password
@@ -66,6 +67,8 @@ class ActionsEventsHandler(Object):
             # We know we are already running for MAIN_ORCH. and its leader unit
             # TODO: Update relation of peer cluster provider
             # self.peer_cluster_provider.refresh_relation_data(event)
+        except ContainerNotReadyError as e:
+            event.fail(f"Container is not ready. Try again later: {e}")
         except OpenSearchError as e:
             event.fail(f"Failed changing the password: {e}")
         except RuntimeError as e:
@@ -92,21 +95,24 @@ class ActionsEventsHandler(Object):
             event.fail(f"{user_name} user not configured yet.")
             return
 
-        if not self.charm.tls_manager.is_fully_configured():
-            event.fail("TLS certificates not configured yet.")
-            return
+        try:
+            if not self.charm.tls_manager.is_fully_configured():
+                event.fail("TLS certificates not configured yet.")
+                return
 
-        password = self.charm.state.secrets.get(
-            Scope.APP, self.charm.state.secrets.password_key(user_name)
-        )
-        cert = self.charm.state.secrets.get_object(
-            Scope.APP, CertType.APP_ADMIN.val, peek=True
-        )  # replace later with new user certs
+            password = self.charm.state.secrets.get(
+                Scope.APP, self.charm.state.secrets.password_key(user_name)
+            )
+            cert = self.charm.state.secrets.get_object(
+                Scope.APP, CertType.APP_ADMIN.val, peek=True
+            )  # replace later with new user certs
 
-        event.set_results(
-            {
-                "username": user_name,
-                "password": password,
-                "ca-chain": cert["chain"],
-            }
-        )
+            event.set_results(
+                {
+                    "username": user_name,
+                    "password": password,
+                    "ca-chain": cert["chain"],
+                }
+            )
+        except ContainerNotReadyError as e:
+            event.fail(f"Container is not ready. Try again later: {e}")

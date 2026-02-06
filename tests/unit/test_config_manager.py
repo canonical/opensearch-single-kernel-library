@@ -75,7 +75,7 @@ def test_set_client_auth(harness, mocker):
 # TODO: Add tests related to configuring tls
 
 
-def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
+def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     """Test setting the core config of a node."""
     yaml_conf_setter = YamlConfigSetter(config_path / "tmp")
     deployment_desc = mocker.patch(
@@ -96,8 +96,9 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
         typ=DeploymentType.MAIN_ORCHESTRATOR,
         state=DeploymentState(value=State.ACTIVE),
     )
+    workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
     mocker.patch(
-        "opensearch_single_kernel.workload.vm.VMWorkload.get_host_public_ip",
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip",
         return_value="30.30.30.30",
     )
 
