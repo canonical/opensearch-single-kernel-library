@@ -7,6 +7,7 @@
 
 import json
 import logging
+import os
 import random
 from typing import Any
 
@@ -21,7 +22,6 @@ from tenacity import (
     wait_exponential,
     wait_fixed,
 )
-import os
 
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -47,24 +47,24 @@ class OpenSearchClient:
 
     def _get_chain_pem_path(self) -> str:
         """Get the path to chain.pem file for certificate verification.
-        
+
         For VM: Returns the direct filesystem path
         For K8s: Pulls the file from workload container and caches it in charm container
         """
         chain_path = self.workload.paths.certs / "chain.pem"
         chain_path_str = str(chain_path)
-        
+
         # check if this is a K8s workload
         if hasattr(self.workload, "container"):
             if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
                 return self._chain_pem_cache_path
-            
+
             # pull chain.pem from workload container
             try:
                 if not self.workload.container.can_connect():
                     # fallback to path string if container not connected
                     return chain_path_str
-                
+
                 # read content from workload container
                 # it may return a file-like object if it has a read attribute or a string.
                 # We check which type it is and handle accordingly
@@ -75,28 +75,30 @@ class OpenSearchClient:
                 else:
                     # content is already a string
                     chain_content = content
-                
+
                 # write to temporary file in charm container
                 cache_dir = "/tmp/opensearch-certs"
                 os.makedirs(cache_dir, mode=0o755, exist_ok=True)
                 cache_path = os.path.join(cache_dir, "chain.pem")
-                
+
                 with open(cache_path, "w", encoding="utf-8") as f:
                     f.write(chain_content)
                 os.chmod(cache_path, 0o644)
-                
+
                 self._chain_pem_cache_path = cache_path
                 return cache_path
             except (OSError, PermissionError, FileNotFoundError, AttributeError) as e:
-                logger.warning(f"Failed to pull chain.pem from container, using path directly: {e}")
+                logger.warning(
+                    f"Failed to pull chain.pem from container, using path directly: {e}"
+                )
                 return chain_path_str
-        
+
         # For VM, return the direct path
         return chain_path_str
 
     def invalidate_chain_pem_cache(self) -> None:
         """Invalidate the cached chain.pem file.
-        
+
         This is called when chain.pem is updated in the workload container.
         """
         if self._chain_pem_cache_path:
@@ -104,7 +106,9 @@ class OpenSearchClient:
                 if os.path.exists(self._chain_pem_cache_path):
                     os.remove(self._chain_pem_cache_path)
             except (OSError, PermissionError) as e:
-                logger.warning(f"Failed to remove cached chain.pem file: {self._chain_pem_cache_path}. Error: {e}")
+                logger.warning(
+                    f"Failed to remove cached chain.pem file: {self._chain_pem_cache_path}. Error: {e}"
+                )
             self._chain_pem_cache_path = None
 
     def get_node_id(self, unit_name: str) -> str | None:
@@ -382,8 +386,9 @@ class OpenSearchClient:
                         s.cert = cert_files
                     else:
                         s.auth = ("admin", self.admin_secret)
-                    
-                    # For K8s, chain.pem is in workload container but requests runs in charm container
+
+                    # For K8s, chain.pem is in workload container
+                    # but requests runs in charm container
                     # We need to get the file path that charm container can access.
                     verify_path = self._get_chain_pem_path()
                     request_kwargs = {

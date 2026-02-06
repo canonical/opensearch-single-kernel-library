@@ -67,16 +67,36 @@ def test_get_sans(harness, mocker, substrate):
     )
     gethostname.return_value = "nebula"
     getfqdn.return_value = "nebula"
-    get_host_public_ip.return_value = "XX.XXX.XX.XXX"
+    # For VM: returns IP address, for K8s: returns DNS name
+    get_host_public_ip.return_value = (
+        "192.168.1.100"
+        if substrate == "vm"
+        else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
+    )
 
     base_ips = ["1.1.1.1", "address1", "address2"]
     base_dns_entries = [harness.charm.state.unit_name, "nebula", "alias"]
     unit_http_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_HTTP)
-    assert dict((key, sorted(val)) for key, val in unit_http_sans.items()) == {
-        "sans_oid": ["1.2.3.4.5.5"],
-        "sans_ip": sorted(base_ips + ["XX.XXX.XX.XXX"]),
-        "sans_dns": sorted(base_dns_entries),
-    }
+
+    # Expected results differ by substrate
+    if substrate == "vm":
+        expected_sans = {
+            "sans_oid": ["1.2.3.4.5.5"],
+            "sans_ip": sorted(base_ips + ["192.168.1.100"]),
+            "sans_dns": sorted(base_dns_entries),
+        }
+    else:
+        # k8s
+        expected_sans = {
+            "sans_oid": ["1.2.3.4.5.5"],
+            "sans_ip": sorted(base_ips),
+            "sans_dns": sorted(
+                base_dns_entries
+                + ["opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"]
+            ),
+        }
+
+    assert dict((key, sorted(val)) for key, val in unit_http_sans.items()) == expected_sans
 
     unit_transport_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_TRANSPORT)
     assert dict((key, sorted(val)) for key, val in unit_transport_sans.items()) == {

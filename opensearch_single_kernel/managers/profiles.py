@@ -47,9 +47,11 @@ class ProfilesManager(BaseManager):
         """Checks memory requirements for the unit."""
         meminfo_data = self.workload.meminfo()
         if "MemTotal" not in meminfo_data:
-            logger.warning("Could not read MemTotal from meminfo. Skipping memory requirement check.")
+            logger.warning(
+                "Could not read MemTotal from meminfo. Skipping memory requirement check."
+            )
             return []
-        
+
         memory_size = meminfo_data["MemTotal"]
 
         if (

@@ -118,7 +118,9 @@ class OpenSearchEventsHandler(Object):
                 HealthColors.GREEN,
                 HealthColors.IGNORE,
             ]:
-                logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
+                logger.warning(
+                    f"Update status: exclusions updated and cluster health is {health}."
+                )
 
             # handle when/if certificates are expired
             certs = self.charm.tls_manager.check_certs_expiration()
@@ -197,7 +199,7 @@ class OpenSearchEventsHandler(Object):
                 )
         except ContainerNotReadyError as e:
             logger.debug(f"Container not ready for update status: {e}")
-            # Don't defer update_status events - they'll retry on next interval
+            # Do not defer update_status events as they will retry on next interval
             return
 
     def _on_install(self, event: InstallEvent) -> None:
@@ -224,7 +226,9 @@ class OpenSearchEventsHandler(Object):
 
             if self.charm.unit.is_leader():
                 self.charm.cluster_manager.reconcile_cluster_config()
-                self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
+                self.apply_status_from_deployment_desc(
+                    self.charm.state.application.deployment_desc
+                )
 
                 # TODO: Handle cluster change to main orchestrator
             if not self.charm.state.application.deployment_desc:
@@ -238,7 +242,8 @@ class OpenSearchEventsHandler(Object):
                 self.charm.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             except ValueError:
                 logger.error(
-                    "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
+                    "Invalid profile configuration. Value: %s",
+                    self.charm.state.config.get("profile"),
                 )
                 self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
                 return
@@ -358,7 +363,9 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
                 except OpenSearchStartError as e:
-                    logger.warning(f"Machine restart detected but error at service start with: {e}")
+                    logger.warning(
+                        f"Machine restart detected but error at service start with: {e}"
+                    )
                     # Defer and retry later
                     event.defer()
                     return
@@ -487,7 +494,8 @@ class OpenSearchEventsHandler(Object):
 
                     event.defer()
                 except OpenSearchUserMgmtError as e:
-                    # Either generic start failure or cluster is not read to create the internal users
+                    # Either generic start failure or cluster is not read
+                    # to create the internal users
                     logger.warning(e)
                     self.charm.lock_manager.release()
                     self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
@@ -698,7 +706,9 @@ class OpenSearchEventsHandler(Object):
                     # 1. Add current node to the voting + alloc exclusions
                     # self.opensearch_exclusions.add_current(voting=True, allocation=not restart)
                 except OpenSearchHttpError:
-                    logger.debug("Failed to get online nodes, voting and alloc exclusions not added")
+                    logger.debug(
+                        "Failed to get online nodes, voting and alloc exclusions not added"
+                    )
 
             # block until all primary shards are moved away from the unit that is stopping
             self.charm.health_manager.wait_for_shards_relocation()

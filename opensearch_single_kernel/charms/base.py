@@ -51,7 +51,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     def _initialize_managers(self):
         """Initialize managers and event handlers.
-        
+
         This method will be called by K8s subclass after setting up workload.
         Managers will check workload.workload_present when they actually need to use it.
         """

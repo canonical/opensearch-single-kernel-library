@@ -6,23 +6,24 @@
 
 import logging
 from contextlib import contextmanager
+from pathlib import PurePath
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
-from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container
 from ops.model import ModelError
-from ops.pebble import ServiceStatus, ConnectionError as PebbleConnectionError, Error as PebbleError
+from ops.pebble import ConnectionError as PebbleConnectionError
+from ops.pebble import Error as PebbleError
+from ops.pebble import ServiceStatus
 from overrides import override
-from pathlib import PurePath
 
 from opensearch_single_kernel.common.constants import (
     BASE_SNAP_DIR,
-    OpenSearchPaths,
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
+    OpenSearchPaths,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default container name for OpenSearch workload
+
 CONTAINER_NAME = "opensearch"
 
 
@@ -72,7 +73,7 @@ class ContainerPathProtocol(PathProtocol):
     def parent(self):
         """Return parent path."""
         return ContainerPathProtocol(str(self._path.parent), self._container)
-    
+
     def as_posix(self) -> str:
         """Return the string representation of the path with forward slashes."""
         if self._path is None:
@@ -128,7 +129,9 @@ class ContainerPathProtocol(PathProtocol):
             if exist_ok and ("already exists" in str(e).lower() or isinstance(e, FileExistsError)):
                 logger.debug(f"Directory already exists (ignored): {self._path}")
             else:
-                logger.warning(f"Failed to create directory in container: {self._path}. Error: {e}")
+                logger.warning(
+                    f"Failed to create directory in container: {self._path}. Error: {e}"
+                )
                 raise OSError(f"Failed to create directory {self._path}: {e}") from e
 
     def unlink(self, missing_ok: bool = False) -> None:
@@ -240,7 +243,9 @@ class K8sWorkload(BaseWorkload):
             return self._container
         if self._container_getter is not None:
             return self._container_getter()
-        raise RuntimeError("Container not set. Use set_container() or provide container_getter in __init__")
+        raise RuntimeError(
+            "Container not set. Use set_container() or provide container_getter in __init__"
+        )
 
     @property
     @override
@@ -284,7 +289,7 @@ class K8sWorkload(BaseWorkload):
 
         # determine directory for temp file
         temp_dir = str(self.paths.tmp) if dir is None else str(dir)
-        
+
         # ensure directory exists
         try:
             self.container.make_dir(temp_dir, make_parents=True, permissions=0o755)
@@ -297,7 +302,9 @@ class K8sWorkload(BaseWorkload):
 
         try:
             if data:
-                self.container.push(file_path_str, data, encoding=encoding or "utf-8", make_dirs=True)
+                self.container.push(
+                    file_path_str, data, encoding=encoding or "utf-8", make_dirs=True
+                )
             yield file_path
         finally:
             if delete:
@@ -322,7 +329,7 @@ class K8sWorkload(BaseWorkload):
         self.run_cmd("bash", args=f"-c '{full_command}'")
 
     @override
-    def get_host_public_ip(self) -> str | None:
+    def get_host_public_ip(self) -> str | None:  # noqa: C901
         """Fetches the Public IP address of the current unit.
 
         For K8s, this returns the pod's DNS name instead of IP address.
@@ -359,10 +366,14 @@ class K8sWorkload(BaseWorkload):
                             # Return the hostname itself, it will resolve via K8s DNS
                             return hostname
                     except OpenSearchCmdError as e:
-                        logger.debug(f"Failed to get FQDN via 'getent hosts', using hostname. Error: {e}")
+                        logger.debug(
+                            f"Failed to get FQDN via 'getent hosts', using hostname. Error: {e}"
+                        )
                 return hostname
         except OpenSearchCmdError as e:
-            logger.warning(f"Failed to get pod hostname, cannot determine stable DNS name. Error: {e}")
+            logger.warning(
+                f"Failed to get pod hostname, cannot determine stable DNS name. Error: {e}"
+            )
 
         return None
 
@@ -465,13 +476,15 @@ class K8sWorkload(BaseWorkload):
                     meminfo = [line.split() for line in meminfo_lines if line.strip()]
                     parsed = {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
                     if parsed:
-                        logger.debug(f"Successfully parsed meminfo from command output despite non-zero exit code")
+                        logger.debug(
+                            f"Successfully parsed meminfo from command output despite non-zero exit code: {parsed}"
+                        )
                         return parsed
                 except (ValueError, IndexError, AttributeError) as parse_error:
                     logger.warning(f"Failed to parse meminfo output: {parse_error}")
             logger.warning(f"Failed to read meminfo: {e}")
             return {}
-        except (OSError, OpenSearchCmdError) as e:
+        except OSError as e:
             logger.warning(f"Failed to read meminfo: {e}")
             return {}
 
@@ -506,13 +519,13 @@ class K8sWorkload(BaseWorkload):
     @override
     def check_missing_system_requirements(self) -> list[str]:
         """Checks the system requirements for K8s.
-        
+
         In Kubernetes, vm.* and fs.* sysctls cannot be set from within containers
         and must be configured at the node level. Missing requirements will block
-        the charm and provide guidance on how to configure them.
+        the charm.
         """
         missing_requirements = []
-        
+
         # Check vm.max_map_count
         prop, val = "vm.max_map_count", 262144
         current_val = self._get_kernel_property_value(prop)
@@ -524,7 +537,7 @@ class K8sWorkload(BaseWorkload):
             )
             logger.warning(error_msg)
             missing_requirements.append(error_msg)
-        
+
         # Check vm.swappiness
         prop, val = "vm.swappiness", 0
         current_val = self._get_kernel_property_value(prop)
@@ -536,7 +549,7 @@ class K8sWorkload(BaseWorkload):
             )
             logger.warning(error_msg)
             missing_requirements.append(error_msg)
-        
+
         # Check net.ipv4.tcp_retries2
         prop, val = "net.ipv4.tcp_retries2", 5
         current_val = self._get_kernel_property_value(prop)
@@ -547,9 +560,9 @@ class K8sWorkload(BaseWorkload):
             )
             logger.warning(error_msg)
             missing_requirements.append(error_msg)
-        
+
         return missing_requirements
-    
+
     @override
     def _get_kernel_property_value(self, prop: str) -> int:
         """Get the value of a kernel parameter.
@@ -624,9 +637,7 @@ class K8sWorkload(BaseWorkload):
                 logger.debug(f"{masked_command}:\n Stderr: {stderr}\n Stdout: {stdout}")
                 raise OpenSearchCmdError(cmd=command, out=stdout, err=stderr)
 
-            return SimpleNamespace(
-                cmd=command, out=stdout, err=stderr, returncode=returncode
-            )
+            return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=returncode)
         except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
             if isinstance(e, OpenSearchCmdError):
                 raise

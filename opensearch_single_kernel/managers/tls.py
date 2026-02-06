@@ -11,7 +11,12 @@ from typing import Any
 
 from charmlibs.pathops import PathProtocol
 
-from opensearch_single_kernel.common.constants import CertType, Scope, StoreType, Substrates
+from opensearch_single_kernel.common.constants import (
+    CertType,
+    Scope,
+    StoreType,
+    Substrates,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
 )
@@ -159,13 +164,13 @@ class TlsManager(BaseManager):
 
         host_public_ip = self.workload.get_host_public_ip()
         if cert_type == CertType.UNIT_HTTP and host_public_ip:
+            # For VM, get_host_public_ip() always returns an IP address
             # For K8s, get_host_public_ip() returns DNS name instead of IP
-            # check if it's an IP address which contains only digits and dots or DNS name
-            if host_public_ip.replace(".", "").replace(":", "").isdigit() or ":" in host_public_ip:
-                # It's an IP address
+            if self.state.substrate == Substrates.VM:
+                # VM always returns IP addresses
                 ips.add(host_public_ip)
             else:
-                # It's a DNS name
+                # K8s: get_host_public_ip() returns DNS name
                 dns.add(host_public_ip)
 
         for ip in ips.copy():
@@ -425,8 +430,8 @@ class TlsManager(BaseManager):
         ):
             try:
                 self.workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
-            except OpenSearchCmdError:
-                pass
+            except OpenSearchCmdError as e:
+                logger.warning(f"Failed to set initial permissions on {store_path}: {e}")
 
         for i, pem in enumerate(certs):
             internal_alias = f"{alias}-{i}"
@@ -446,7 +451,14 @@ class TlsManager(BaseManager):
                     if ("does not exist" not in msg) and (
                         "Keystore file does not exist" not in msg
                     ):
+                        logger.warning(
+                            f"Failed to move alias {internal_alias} to {old_internal_alias}: {e}"
+                        )
                         return False
+                    else:
+                        logger.debug(
+                            f"Alias {internal_alias} does not exist, skipping move to {old_internal_alias}"
+                        )
 
             # import the cert
             try:
@@ -478,15 +490,14 @@ class TlsManager(BaseManager):
                 return False
 
         # post-actions
-        # For K8s, skip sudo chmod/chown as containers as they run as root or have proper permissions
+        # For K8s, skip sudo chmod/chown as containers as they run as root
+        # or have proper permissions
         # For VM, apply snap-specific permissions
         try:
             if self.state.substrate == Substrates.VM:
                 command = ""
                 if snap_user_with_write_permission:
-                    command = (
-                        f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
-                    )
+                    command = f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
                 if add_read_perm:
                     command += f"sudo chmod +r {store_path}"
                 if command:
@@ -495,11 +506,11 @@ class TlsManager(BaseManager):
                 # For K8s, try chmod without sudo
                 try:
                     self.workload.run_cmd(f"chmod +r {store_path}")
-                except OpenSearchCmdError:
+                except OpenSearchCmdError as e:
                     # If chmod fails, it's likely already readable or permissions are set correctly
-                    pass
-        except OpenSearchCmdError:
-            pass
+                    logger.warning(f"Failed to set read permissions on {store_path}: {e}")
+        except OpenSearchCmdError as e:
+            logger.warning(f"Failed to set permissions on {store_path}: {e}")
 
         return True
 
@@ -516,8 +527,8 @@ class TlsManager(BaseManager):
             if self.state.substrate == Substrates.K8S:
                 try:
                     self.opensearch_client.invalidate_chain_pem_cache()
-                except Exception:
-                    pass
+                except (AttributeError, RuntimeError) as e:
+                    logger.warning(f"Failed to invalidate chain.pem cache: {e}")
 
     def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
         """Add key and cert to keystore."""
@@ -580,9 +591,9 @@ class TlsManager(BaseManager):
                 )
                 try:
                     self.workload.run_cmd(chmod_cmd)
-                except OpenSearchCmdError:
+                except OpenSearchCmdError as e:
                     # If chmod fails, file may already be readable or permissions are correct
-                    pass
+                    logger.warning(f"Failed to set read permissions on {store_path}: {e}")
             except OpenSearchCmdError as e:
                 logger.error("Error storing the TLS certificates for %s: %s", name, e)
         logger.info("TLS certificate for %s stored.", name)
@@ -598,15 +609,17 @@ class TlsManager(BaseManager):
         if parent_dir_path:
             parent_dir_path.mkdir(parents=True, exist_ok=True)
         self.workload.write_text(admin_secret["chain"], chain_path)
-        
+
         # For K8s, invalidate the cached chain.pem in charm container
         # so it gets refreshed on next request
         if self.state.substrate == Substrates.K8S:
             try:
                 self.opensearch_client.invalidate_chain_pem_cache()
-            except Exception:
+            except (AttributeError, RuntimeError) as e:
                 # If client not initialized yet, this is acceptable.
-                pass
+                logger.warning(
+                    f"Failed to invalidate chain.pem cache (client may not be initialized): {e}"
+                )
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
@@ -800,8 +813,8 @@ class TlsManager(BaseManager):
         if self.state.substrate == Substrates.K8S:
             try:
                 self.opensearch_client.invalidate_chain_pem_cache()
-            except Exception:
-                pass
+            except (AttributeError, RuntimeError) as e:
+                logger.warning(f"Failed to invalidate chain.pem cache: {e}")
 
     def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""

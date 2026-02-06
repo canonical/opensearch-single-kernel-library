@@ -159,7 +159,7 @@ class ConfigSetter(ABC):
 
         # posix_path is a string representation of the path using POSIX-style forward slashes (/)
         posix_path = base_path.as_posix()
-        
+
         if not posix_path.endswith("/"):
             base_path = base_path / ""
 

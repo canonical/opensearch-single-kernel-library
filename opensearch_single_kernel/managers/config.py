@@ -292,12 +292,12 @@ class ConfigManager(BaseManager):
         if current_profile is None or current_profile != config_profile:
             meminfo_data = self.workload.meminfo()
             if "MemTotal" not in meminfo_data:
-                logger.warning("Could not read MemTotal from meminfo. Skipping profile configuration.")
+                logger.warning(
+                    "Could not read MemTotal from meminfo. Skipping profile configuration."
+                )
                 return False
-            
-            self.set_jvm_heap_size(
-                config_profile.get_jvm_heap_size(meminfo_data["MemTotal"])
-            )
+
+            self.set_jvm_heap_size(config_profile.get_jvm_heap_size(meminfo_data["MemTotal"]))
 
             # store profile in unit state
             self.state.server.profile = config_profile
@@ -309,9 +309,11 @@ class ConfigManager(BaseManager):
         # Check if jvm.options file exists before trying to modify it
         jvm_options_path = self.yaml_setter.base_path / self.JVM_OPTIONS
         if not jvm_options_path.exists():
-            logger.debug(f"JVM options file {jvm_options_path} does not exist yet. Skipping heap size configuration.")
+            logger.debug(
+                f"JVM options file {jvm_options_path} does not exist yet. Skipping heap size configuration."
+            )
             return
-        
+
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xms[0-9]+[kmgKMG]",

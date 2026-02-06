@@ -17,7 +17,9 @@ from tests.unit.helpers import deployment_descriptions
 def test_on_install(harness, substrate):
     """Test the install event callback on success."""
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
-    with patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install") as install:
+    with patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
+    ) as install:
         harness.charm.on.install.emit()
         install.assert_called_once()
 
@@ -25,7 +27,9 @@ def test_on_install(harness, substrate):
 def test_on_install_error(harness, substrate):
     """Test the install event callback on error."""
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
-    with patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install") as install:
+    with patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
+    ) as install:
         install.side_effect = OpenSearchInstallError()
         harness.charm.on.install.emit()
         assert isinstance(harness.model.unit.status, BlockedStatus)
@@ -167,7 +171,9 @@ def test_on_start(harness, mocker, substrate):
 
     is_node_up = mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.is_node_up")
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
-    mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started")
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
+    )
 
     # test when setup complete
     should_ignore_lock.return_value = False
@@ -186,7 +192,9 @@ def test_on_start(harness, mocker, substrate):
     harness.charm.on.start.emit()
     set_client_auth.assert_not_called()
 
-    mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started")
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
+    )
     # when _get_nodes fails
     get_nodes.side_effect = OpenSearchHttpError()
     harness.charm.on.start.emit()
@@ -194,7 +202,10 @@ def test_on_start(harness, mocker, substrate):
 
     get_nodes.reset_mock()
 
-    mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_failed", return_value=False)
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_failed",
+        return_value=False,
+    )
     start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
     # _get_nodes succeeds
     is_fully_configured.return_value = True
