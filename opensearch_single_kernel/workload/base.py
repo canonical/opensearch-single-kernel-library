@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import List, Optional
 
+from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 
 from opensearch_single_kernel.common.constants import (
@@ -19,6 +20,7 @@ from opensearch_single_kernel.common.constants import (
     SNAP_DATA,
     OpenSearchPaths,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +145,46 @@ class BaseWorkload(ABC):
         """Flag to check if workload is present and ready."""
         pass
 
+    def write_text(self, content: str, path: pathops.PathProtocol) -> None:
+        """Write content to a file on disk.
+
+        Args:
+            content (str): The content to be written.
+            path (str): The file path where the content should be written.
+        """
+        try:
+            path.write_text(content)
+        except (
+            FileNotFoundError,
+            LookupError,
+            NotADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+            ValueError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def read_text(self, path: pathops.PathProtocol) -> str:
+        """Read content from a file on disk.
+
+        Args:
+            path (str): The file path to read from.
+
+        Returns:
+            str: The content read from the file.
+        """
+        try:
+            return path.read_text()
+        except (
+            FileNotFoundError,
+            LookupError,
+            NotADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+            ValueError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
     @contextmanager
     def temp_file(
         self,
@@ -157,11 +199,6 @@ class BaseWorkload(ABC):
     ):
         """Context manager for creating temporary files."""
         pass
-
-    def exists(self, path_str: str) -> bool:
-        """Return whether the path exists in filesystem."""
-        path = self.root / path_str
-        return path.exists()
 
     @abstractmethod
     def is_service_started(self, paused: Optional[bool] = False) -> bool:

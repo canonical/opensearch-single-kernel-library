@@ -17,6 +17,7 @@ from tenacity import (
 
 from opensearch_single_kernel.common.constants import (
     GENERATED_ROLES,
+    OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_NO_RELATION,
     PEER_CLUSTER_WRONG_RELATION,
     CertType,
@@ -59,7 +60,7 @@ class ClusterManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "cluster_manager"
-        self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+        self.yaml_setter = YamlConfigSetter(self.workload)
 
     def start(self, wait_until_http_200: bool = True):
         """Start the opensearch service."""
@@ -402,7 +403,7 @@ class ClusterManager(BaseManager):
     @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
+        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -472,7 +473,7 @@ class ClusterManager(BaseManager):
 
     def is_started(self) -> bool:
         """Return whether the opensearch service is started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
+        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 

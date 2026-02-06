@@ -120,8 +120,29 @@ class OpenSearchEventsHandler(Object):
             ]:
                 logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
 
-                if health == HealthColors.UNKNOWN:
-                    return
+            # handle when/if certificates are expired
+            certs = self.charm.tls_manager.check_certs_expiration()
+            if certs:
+                missing = [cert.val for cert in certs.keys()]
+                self.charm.status.set(
+                    CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
+                    dynamic_message=f"The certificates: {', '.join(missing)} need to be refreshed.",
+                )
+
+                # stop opensearch in case the Node-transport certificate expires.
+                if certs.get(CertType.UNIT_TRANSPORT) is not None:
+                    try:
+                        self.stop_opensearch()
+                    except ContainerNotReadyError as e:
+                        logger.info(f"Container not ready for stop: {e}")
+                        event.defer()
+                        return
+                    except OpenSearchStopError:
+                        event.defer()
+                        return
+                self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
+                    self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
+                )
 
             # TODO: Handle client relations updates
             # for relation in self.model.relations.get(ClientRelationName, []):
@@ -742,13 +763,12 @@ class OpenSearchEventsHandler(Object):
             logger.error("Missing profile requirements: %s", missing_requirements)
             self.charm.status.set(
                 CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                dynamic_message=f"Missing requirements: {' - '.join(missing_requirements)}",
+                dynamic_params={"requirements": " - ".join(missing_requirements)},
             )
         else:
             self.charm.status.clear(
                 CharmStatuses.MISSING_PROFILE_REQUIREMENTS,
-                dynamic_message="Missing requirements:",
-                pattern=Status.CheckPattern.Start,
+                pattern=Status.CheckPattern.Interpolated,
             )
 
     def cleanup_start_state(self) -> None:
@@ -897,7 +917,7 @@ class OpenSearchEventsHandler(Object):
 
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
-        self.charm.state.server.update({"tls_configured": None})
+        self.charm.state.server.update({"tls_configured": ""})
         # TODO: Update peer cluster relation
         # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
 

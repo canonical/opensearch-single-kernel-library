@@ -82,3 +82,7 @@ class OpenSearchStopError(OpenSearchError):
 
 class ContainerNotReadyError(OpenSearchError):
     """Raised when the container is not ready."""
+
+
+class OpenSearchFileOperationError(OpenSearchError):
+    """Exception thrown when file operations related to OpenSearch fail."""
