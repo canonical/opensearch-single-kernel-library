@@ -599,7 +599,6 @@ class OpenSearchEventsHandler(Object):
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()
-            self.charm.status.set(CharmStatuses.SERVICE_IS_STOPPING)
             return
 
         # Ignore the lock if you are the only data node and restarting

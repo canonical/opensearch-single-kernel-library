@@ -499,8 +499,7 @@ class TlsManager(BaseManager):
 
         # we store the pem format to make it easier for the python requests lib
         chain_path = self.workload.paths.certs / "chain.pem"
-        parent_dir_path = chain_path.parent
-        if parent_dir_path:
+        if parent_dir_path := chain_path.parent:
             parent_dir_path.mkdir(parents=True, exist_ok=True)
 
         # if the chain.pem already contains the current CA chain, we can skip rewriting it
