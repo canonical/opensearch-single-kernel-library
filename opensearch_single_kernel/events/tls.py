@@ -155,7 +155,12 @@ class TLSEventsHandler(Object):
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
         # TODO: If upgrade log a warning
-        if self.charm.tls_manager.all_tls_resources_stored():
+        try:
+            if self.charm.tls_manager.all_tls_resources_stored():
+                return
+        except OpenSearchFileOperationError as e:
+            logger.debug(f"Error while checking TLS resources: {e}")
+            event.defer()
             return
 
         # Otherwise, we block.
@@ -198,11 +203,16 @@ class TLSEventsHandler(Object):
 
         current_stored_ca = self.charm.tls_manager.read_stored_ca()
         if current_stored_ca != event.ca:
-            if not self.charm.tls_manager.store_new_ca(
-                self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
-                create_store_pwd=is_leader_unit and is_main_orchestrator,
-            ):
-                logger.debug("Could not store new CA certificate.")
+            try:
+                if not self.charm.tls_manager.store_new_ca(
+                    self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
+                    create_store_pwd=is_leader_unit and is_main_orchestrator,
+                ):
+                    logger.debug("Could not store new CA certificate.")
+                    event.defer()
+                    return
+            except OpenSearchFileOperationError as e:
+                logger.debug(f"Error while storing new CA certificate: {e}")
                 event.defer()
                 return
             # replacing the current CA initiates a rolling restart and certificate renewal
@@ -220,9 +230,15 @@ class TLSEventsHandler(Object):
                 return
 
         # store the certificates and keys in a key store
-        self.charm.tls_manager.store_new_tls_resources(
-            cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
-        )
+        try:
+
+            self.charm.tls_manager.store_new_tls_resources(
+                cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
+            )
+        except OpenSearchFileOperationError as e:
+            logger.debug(f"Error while storing new TLS certificate and key: {e}")
+            event.defer()
+            return
 
         # apply the chain.pem file for API requests, only if the CA cert has not been updated
         admin_secrets = (
@@ -242,7 +258,14 @@ class TLSEventsHandler(Object):
         # if admin cert not available we need to defer, otherwise it will never be stored
         if not self.charm.unit.is_leader():
             if admin_secrets.get("cert"):
-                self.charm.tls_manager.store_new_tls_resources(CertType.APP_ADMIN, admin_secrets)
+                try:
+                    self.charm.tls_manager.store_new_tls_resources(
+                        CertType.APP_ADMIN, admin_secrets
+                    )
+                except OpenSearchFileOperationError as e:
+                    logger.debug(f"Error while storing admin TLS certificate and key: {e}")
+                    event.defer()
+                    return
             else:
                 logger.info("Admin certificate not available yet. Waiting for next events.")
                 event.defer()

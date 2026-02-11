@@ -171,11 +171,9 @@ class BaseWorkload(ABC):
             return path.read_text()
         except (
             FileNotFoundError,
-            LookupError,
-            NotADirectoryError,
+            UnicodeError,
             PermissionError,
             pathops.PebbleConnectionError,
-            ValueError,
         ) as e:
             raise OpenSearchFileOperationError(e)
 
