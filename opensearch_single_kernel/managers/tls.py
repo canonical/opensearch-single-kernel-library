@@ -22,12 +22,18 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     generate_private_key,
 )
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.certificates import (
+    CA_ALIAS,
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
+    read_ca,
+    remove_ca,
+    store_ca,
+)
 from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
     generate_password,
-    is_alias_missing_error,
     parse_tls_file,
-    split_ca_chain,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -41,12 +47,6 @@ class TlsManager(BaseManager):
     signing request, managing the keystore, and updating secrets related to tls. It
     can be used by different events handlers not only tls events handler.
     """
-
-    CA_ALIAS = "ca"
-    OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-    KEYTOOL = "opensearch.keytool"
-    OLD_CA_PREFIX = "old-"
-    CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
@@ -84,6 +84,21 @@ class TlsManager(BaseManager):
                 return False
 
         return True
+
+    def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
+        """Load stored CA cert."""
+        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
+        logger.debug(f"Reading stored ca from {ca_trust_store}")
+        if not (ca_trust_store.exists() and secrets):
+            return None
+
+        return read_ca(
+            workload=self.workload,
+            alias=alias,
+            store_pwd=secrets.get("truststore-password"),
+            store_path=ca_trust_store,
+        )
 
     def all_certificates_available(self) -> bool:
         """Method that checks if all certs available and issued from same CA."""
@@ -291,204 +306,6 @@ class TlsManager(BaseManager):
 
         return None
 
-    def read_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> str | None:
-        """Load stored CA cert."""
-        return (self.list_cas(store_pwd, store_path) or {}).get(alias)
-
-    def list_cas(
-        self, store_pwd: str, store_path: PathProtocol
-    ) -> dict[str, str] | None:  # noqa: C901
-        """List the CAs currently stored in a trust store.
-
-        Args:
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-
-        Returns:
-            A mapping from base alias to full concatenated PEM chain.
-            If an alias is partitioned as <alias>-0, <alias>-1, ... in the store,
-            they are reassembled and returned under the base <alias> key.
-        """
-        if not store_path.exists():
-            return None
-
-        cmd = f"openssl pkcs12 -in {store_path}"
-        args = f"-passin pass:{store_pwd}"
-        try:
-            stored_certs = self.workload.run_cmd(cmd, args, use_errors_replace=True).out
-        except OpenSearchCmdError as e:
-            logger.error("Error reading the current truststore: %s", e)
-            return None
-
-        # split by -----END CERTIFICATE-----
-        cert_blocks = split_ca_chain(stored_certs)
-
-        start_cert_marker = "-----BEGIN CERTIFICATE-----"
-        chains: dict[str, list[tuple[int, str]]] = {}
-
-        for block in cert_blocks:
-            # find the friendlyName: line produced by openssl pkcs12
-            alias_line = next(
-                (line for line in block.split("\n") if line.strip().startswith("friendlyName:")),
-                None,
-            )
-            if alias_line is None:
-                continue
-            alias = alias_line.split("friendlyName:", 1)[-1].strip()
-            pem = f"{start_cert_marker}{block.split(start_cert_marker, 1)[1]}".strip()
-
-            # parse optional trailing -<int> index
-            base = alias
-            idx = 0
-            parts = alias.rsplit("-", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                # Only treat as index if suffix is purely digits
-                idx = int(parts[1])
-                base = parts[0]
-
-            chains.setdefault(base, []).append((idx, pem))
-
-        # reassemble chains in index order
-        out: dict[str, str] = {}
-        for base, items in chains.items():
-            items.sort(key=lambda t: t[0])
-            out[base] = "\n".join(p for _, p in items if p)
-
-        return out
-
-    def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
-        """Load stored CA cert."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        ca_trust_store = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
-        logger.debug(f"Reading stored ca from {ca_trust_store}")
-        if not (ca_trust_store.exists() and secrets):
-            return None
-
-        return self.read_ca(
-            alias=alias,
-            store_pwd=secrets.get("truststore-password"),
-            store_path=ca_trust_store,
-        )
-
-    def store_ca(
-        self,
-        alias: str,
-        store_pwd: str,
-        store_path: PathProtocol,
-        ca: str,
-        keep_previous: bool = True,
-    ) -> bool:
-        """Add new CA cert(s) to a PKCS12 trust store (generic).
-
-        Args:
-            alias: Alias to use for the CA certs.
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-            ca: CA cert(s) to store.
-            keep_previous: Whether to keep the previous CA certs in the trust store.
-
-        Returns:
-            bool: True if the operation succeeded, False otherwise.
-        """
-        logger.info("Storing CA cert(s) with alias: %s into truststore.", alias)
-        return self._store_ca_chain(
-            alias=alias,
-            store_pwd=store_pwd,
-            store_path=store_path,
-            ca=ca,
-            keep_previous=keep_previous,
-            add_read_perm=True,
-        )
-
-    def _store_ca_chain(  # noqa: C901
-        self,
-        *,
-        alias: str,
-        store_pwd: str,
-        store_path: PathProtocol,
-        ca: str,
-        keep_previous: bool,
-        snap_user_with_write_permission: bool = False,
-        add_read_perm: bool = False,
-    ) -> bool:
-        """Common implementation to store a CA chain into a PKCS12 keystore."""
-        tmpdir = store_path.parent
-        starter_mode = "0664"
-        snap_user = "snap_daemon:root"
-        final_mode = "0640"
-        # import root first, then intermediates
-        certs = list(reversed(split_ca_chain(ca)))
-        if snap_user_with_write_permission and store_path.exists():
-            try:
-                self.workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
-            except OpenSearchCmdError:
-                pass
-
-        for i, pem in enumerate(certs):
-            internal_alias = f"{alias}-{i}"
-            old_internal_alias = f"old-{alias}-{i}"
-
-            # rename existing alias to old-<alias>-<i> if requested
-            if keep_previous:
-                try:
-                    self.workload.run_cmd(
-                        f"{self.KEYTOOL} -changealias "
-                        f"-alias {internal_alias} -destalias {old_internal_alias} "
-                        f"-keystore {store_path} -storetype PKCS12",
-                        f"-storepass {store_pwd}",
-                    )
-                except OpenSearchCmdError as e:
-                    msg = (e.out or "") + (e.err or "")
-                    if ("does not exist" not in msg) and (
-                        "Keystore file does not exist" not in msg
-                    ):
-                        return False
-
-            # import the cert
-            try:
-                with self.workload.temp_file(
-                    dir=tmpdir.parent,
-                    data=pem,
-                    mode="w",
-                    encoding="utf-8",
-                    errors="replace",
-                    delete=True,
-                ) as tmp_path:
-                    try:
-                        self.workload.run_cmd(
-                            f"{self.KEYTOOL} -importcert -noprompt "
-                            f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12",
-                            f"-storepass {store_pwd}",
-                        )
-                    except OpenSearchCmdError as e:
-                        logger.error(
-                            "Failed to import cert for alias %s into %s: %s",
-                            internal_alias,
-                            store_path,
-                            (e.out or "") + (e.err or ""),
-                        )
-                        return False
-            except (OSError, OpenSearchFileOperationError) as e:
-                # tmp file creation issues
-                logger.error("Failed to create temporary file for CA import: %s", e)
-                return False
-
-        # post-actions
-        try:
-            command = ""
-            if snap_user_with_write_permission:
-                command = (
-                    f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
-                )
-            if add_read_perm:
-                command += f"sudo chmod +r {store_path}"
-            if command:
-                self.workload.run_cmd(command)
-        except OpenSearchCmdError:
-            pass
-
-        return True
-
     def update_request_ca_bundle(self, ca_chain: str | None = None) -> None:
         """Create a new chain.pem file for requests module"""
         logger.debug("Updating requests TLS CA bundle")
@@ -501,7 +318,7 @@ class TlsManager(BaseManager):
         # we store the pem format to make it easier for the python requests lib
         chain_path = self.workload.paths.certs / "chain.pem"
         if parent_dir_path := chain_path.parent:
-            parent_dir_path.mkdir(parents=True, exist_ok=True)
+            self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
         # if the chain.pem already contains the current CA chain, we can skip rewriting it
         bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
@@ -678,7 +495,7 @@ class TlsManager(BaseManager):
     def check_certs_expiration(self) -> dict[CertType, str] | None:
         """Checks the certificates' expiration. and return those expiring soon."""
         last_cert_check = datetime.strptime(
-            self.state.server.certs_exp_checked_at, self.CERTS_EXPIRATION_DATE_FORMAT
+            self.state.server.certs_exp_checked_at, CERTS_EXPIRATION_DATE_FORMAT
         )
 
         # See if the last check was made less than 6h ago, if yes - leave
@@ -702,59 +519,17 @@ class TlsManager(BaseManager):
             logger.error("Cannot remove old CA: admin secrets not found.")
             return
         trust_store_pwd = secrets.get("truststore-password")
-        trust_store_path = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
+        trust_store_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
 
-        old_ca = self.read_stored_ca(alias=self.OLD_CA_ALIAS)
-        self.remove_ca(
-            alias=self.OLD_CA_ALIAS,
+        old_ca = self.read_stored_ca(alias=OLD_CA_ALIAS)
+        remove_ca(
+            workload=self.workload,
+            alias=OLD_CA_ALIAS,
             store_pwd=trust_store_pwd,
             store_path=trust_store_path,
         )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
-
-    def remove_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> None:
-        """Remove old CA cert from the truststore.
-
-        Args:
-            alias: Alias to use for the CA certs.
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-        """
-        if not store_path.exists():
-            logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
-            return
-
-        list_cmd = f"{self.KEYTOOL} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
-        list_args = f"-storepass {store_pwd}"
-        try:
-            self.workload.run_cmd(list_cmd, list_args)
-        except OpenSearchCmdError as e:
-            if is_alias_missing_error(e, alias):
-                logger.debug(
-                    "Alias %s not found in %s when listing before delete, ignoring.",
-                    alias,
-                    store_path,
-                )
-                return
-            # Anything else is a real error
-            raise
-
-        del_cmd = f"{self.KEYTOOL} -delete -keystore {store_path} -alias {alias} -storetype PKCS12"
-        del_args = f"-storepass {store_pwd}"
-        try:
-            self.workload.run_cmd(del_cmd, del_args)
-        except OpenSearchCmdError as e:
-            if is_alias_missing_error(e, alias):
-                logger.debug(
-                    "Alias %s already gone from %s when deleting, ignoring.",
-                    alias,
-                    store_path,
-                )
-                return
-            raise
-
-        logger.info("Removed %s from truststore.", alias)
 
     def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
@@ -769,10 +544,11 @@ class TlsManager(BaseManager):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
-        if not self.store_ca(
-            alias=self.CA_ALIAS,
+        if not store_ca(
+            workload=self.workload,
+            alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
-            store_path=self.workload.paths.certs / f"{self.CA_ALIAS}.p12",
+            store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=secrets.get("ca-cert"),
             keep_previous=True,
         ):

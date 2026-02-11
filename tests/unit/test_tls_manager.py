@@ -403,7 +403,7 @@ def test_truststore_password_secret(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.store_ca")
+    mocker.patch("opensearch_single_kernel.utils.certificates.store_ca")
     mocker.patch(
         "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
     )
@@ -750,7 +750,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     update_request_ca_bundle = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle"
     )
-    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.helpers.split_ca_chain")
+    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
     )
@@ -1583,7 +1583,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     mocker.patch(
         "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
     )
-    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.helpers.split_ca_chain")
+    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
 
     mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
     mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_admin_tls_conf")

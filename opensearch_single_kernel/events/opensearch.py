@@ -50,6 +50,10 @@ from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
 )
+from opensearch_single_kernel.utils.certificates import (
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
+)
 from opensearch_single_kernel.utils.status import Status
 
 if TYPE_CHECKING:
@@ -141,7 +145,7 @@ class OpenSearchEventsHandler(Object):
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
         if (
-            self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
+            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
@@ -166,7 +170,7 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
         self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
-            self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
+            CERTS_EXPIRATION_DATE_FORMAT
         )
 
     def _on_install(self, event: InstallEvent) -> None:
@@ -836,7 +840,7 @@ class OpenSearchEventsHandler(Object):
         # We remove the old CA and update the chain to only include the new one
         # if all certs are stored and CA rotation is complete in the cluster
         if (
-            self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
+            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")

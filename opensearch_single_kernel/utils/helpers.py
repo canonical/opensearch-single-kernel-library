@@ -108,13 +108,6 @@ def deployment_type(
     )
 
 
-def split_ca_chain(pem_content: str) -> list[str]:
-    """Split PEM chain into individual certificates."""
-    end_cert_marker = "-----END CERTIFICATE-----"
-    parts = [part.strip() for part in pem_content.split(end_cert_marker) if part.strip()]
-    return [f"{part}\n{end_cert_marker}" for part in parts]
-
-
 def normalized_tls_subject(subject: str) -> str:
     """Removes any / character from a subject."""
     if subject.startswith("/"):

@@ -263,7 +263,6 @@ class YamlConfigSetter(ConfigSetter):
                 i.e, set OutputType.all to have the output on both the console and target file
             output_file: Target file for the result config, by default same as config_file
         """
-        path = f"{self.base_path}{config_file}"
         path = self.base_path / config_file
         if not path.exists():
             raise FileNotFoundError(f"{path} not found.")

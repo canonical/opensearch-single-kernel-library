@@ -33,6 +33,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     CertificateInvalidatedEvent,
     TLSCertificatesRequiresV3,
 )
+from opensearch_single_kernel.utils.certificates import OLD_CA_ALIAS
 from opensearch_single_kernel.utils.helpers import generate_password
 
 if TYPE_CHECKING:
@@ -230,7 +231,7 @@ class TLSEventsHandler(Object):
             self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("chain") and not self.charm.tls_manager.read_stored_ca(
-            alias=self.charm.tls_manager.OLD_CA_ALIAS
+            alias=OLD_CA_ALIAS
         ):
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
@@ -272,9 +273,9 @@ class TLSEventsHandler(Object):
         # if self.charm.unit.is_leader() and self.charm.opensearch_peer_cm.is_provider(typ="main"):
         # self.charm.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
 
-        renewal = self.charm.tls_manager.read_stored_ca(
-            alias=self.charm.tls_manager.OLD_CA_ALIAS
-        ) is not None or (old_cert is not None and old_cert != event.certificate)
+        renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
+            old_cert is not None and old_cert != event.certificate
+        )
 
         try:
             self.on_tls_conf_set(event, scope, cert_type, renewal)
@@ -367,7 +368,7 @@ class TLSEventsHandler(Object):
                     # if all certs are stored and CA rotation is complete in the cluster
                     # we delete the old ca and update the chain to only include the new one
                     if (
-                        self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
+                        self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
                         and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
                     ):
                         logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
