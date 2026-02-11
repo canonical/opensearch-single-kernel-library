@@ -14,6 +14,7 @@ from charmlibs.pathops import PathProtocol
 from opensearch_single_kernel.common.constants import CertType, Scope, StoreType
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchFileOperationError,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
@@ -467,7 +468,7 @@ class TlsManager(BaseManager):
                             (e.out or "") + (e.err or ""),
                         )
                         return False
-            except OSError as e:
+            except (OSError, OpenSearchFileOperationError) as e:
                 # tmp file creation issues
                 logger.error("Failed to create temporary file for CA import: %s", e)
                 return False
@@ -516,7 +517,7 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(bundle_path)
         self.workload.write_text(bundle_content.replace(ca_cert, ""), bundle_path)
 
-    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
+    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]) -> None:
         """Add key and cert to keystore."""
         if not self.state.ca_rotation_complete_in_cluster:
             return
@@ -552,25 +553,28 @@ class TlsManager(BaseManager):
         """Store cert in keystore."""
         store_path.unlink(missing_ok=True)
 
-        with (
-            self.workload.temp_file(
-                mode="w+t", suffix=".pem", data=key, dir=store_path.parent
-            ) as tmp_key,
-            self.workload.temp_file(
-                mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
-            ) as tmp_cert,
-        ):
+        try:
+            with (
+                self.workload.temp_file(
+                    mode="w+t", suffix=".pem", data=key, dir=store_path.parent
+                ) as tmp_key,
+                self.workload.temp_file(
+                    mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
+                ) as tmp_cert,
+            ):
 
-            cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
-            args = f"-passout pass:{store_pwd}"
-            if key_pwd:
-                args = f"{args} -passin pass:{key_pwd}"
+                cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
+                args = f"-passout pass:{store_pwd}"
+                if key_pwd:
+                    args = f"{args} -passin pass:{key_pwd}"
 
-            try:
                 self.workload.run_cmd(cmd, args)
                 self.workload.run_cmd(f"sudo chmod +r {store_path}")
-            except OpenSearchCmdError as e:
-                logger.error("Error storing the TLS certificates for %s: %s", name, e)
+        except OpenSearchFileOperationError as e:
+            logger.error("Error storing the TLS certificates for %s: %s", name, e)
+        except OpenSearchCmdError as e:
+            logger.error("Error storing the TLS certificates for %s: %s", name, e)
+
         logger.info("TLS certificate for %s stored.", name)
 
     def store_admin_tls_secrets_if_applies(self) -> None:
@@ -601,14 +605,14 @@ class TlsManager(BaseManager):
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
-        with self.workload.temp_file(
-            mode="w+t", data=cert, dir=self.workload.root / "/tmp"
-        ) as tmp_ca_file:
-            try:
+        try:
+            with self.workload.temp_file(
+                mode="w+t", data=cert, dir=self.workload.root / "/tmp"
+            ) as tmp_ca_file:
                 return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
-            except OpenSearchCmdError as e:
-                logger.error("Error reading the current truststore: %s", e)
-                return None
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Error reading the current truststore: %s", e)
+            return None
 
     def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
         """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
