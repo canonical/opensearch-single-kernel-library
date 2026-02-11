@@ -17,6 +17,7 @@ from tenacity import (
 
 from opensearch_single_kernel.common.constants import (
     GENERATED_ROLES,
+    OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_NO_RELATION,
     PEER_CLUSTER_WRONG_RELATION,
     CertType,
@@ -59,7 +60,7 @@ class ClusterManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "cluster_manager"
-        self.yaml_setter = YamlConfigSetter(self.workload.paths.conf)
+        self.yaml_setter = YamlConfigSetter(self.workload)
 
     def start(self, wait_until_http_200: bool = True):
         """Start the opensearch service."""
@@ -215,16 +216,14 @@ class ClusterManager(BaseManager):
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {self.state.host_ip}",
-            # f"-ts {self.workload.paths.certs}/ca.p12",
-            # f"-tspass {self.state.secrets.get_object(Scope.APP,
-            # CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
-            # "-tsalias ca",
-            # "-tst PKCS12",
-            # f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
-            # f"-kspass {self.state.secrets.get_object(Scope.APP,
-            #  CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
-            # f"-ksalias {CertType.APP_ADMIN}",
-            # "-kst PKCS12",
+            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-tspass {admin_secrets['truststore-password']}",
+            "-tsalias ca",
+            "-tst PKCS12",
+            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-kspass {admin_secrets['keystore-password']}",
+            f"-ksalias {CertType.APP_ADMIN}",
+            "-kst PKCS12",
         ]
 
         admin_key_pwd = admin_secrets.get("key-password", None)
@@ -359,7 +358,7 @@ class ClusterManager(BaseManager):
                     roles=roles,
                     ip=node.ip,
                     app=node.app,
-                    unit_id=node.unit_id,
+                    unit_number=node.unit_number,
                     temperature=temperature,
                 )
 
@@ -404,7 +403,7 @@ class ClusterManager(BaseManager):
     @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, self.state.port)
+        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -438,7 +437,7 @@ class ClusterManager(BaseManager):
                 roles=GENERATED_ROLES,
                 ip=node.ip,
                 app=node.app,
-                unit_id=node.unit_id,
+                unit_number=node.unit_number,
                 temperature=node.temperature,
             )
         logger.debug(
@@ -471,3 +470,20 @@ class ClusterManager(BaseManager):
             return False
 
         return True
+
+    def is_started(self) -> bool:
+        """Return whether the opensearch service is started."""
+        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
+        if not reachable:
+            logger.debug("Cannot connect to the OpenSearch server...")
+
+        return reachable
+
+    def stop_workload(self) -> None:
+        """Stop the opensearch service."""
+        self.workload.stop()
+        start = datetime.now()
+        while self.is_started() and (datetime.now() - start).seconds < 60:
+            time.sleep(3)
+
+        self.state.server.update({"started": None})

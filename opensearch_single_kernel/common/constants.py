@@ -87,6 +87,13 @@ class CertType(BaseStrEnum):
     UNIT_HTTP = "unit-http"  # http for nodes (rest layer) - units act as servers
 
 
+class StoreType(BaseStrEnum):
+    """Type of certificates and keys store."""
+
+    KEYSTORE = "keystore"
+    TRUSTSTORE = "truststore"
+
+
 class TlsFileExt(BaseStrEnum):
     """Extensions of TLS generated files."""
 
@@ -126,6 +133,10 @@ COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
+
+
+# OpenSearch default port
+OPENSEARCH_HTTP_PORT = 9200
 
 
 # Relations

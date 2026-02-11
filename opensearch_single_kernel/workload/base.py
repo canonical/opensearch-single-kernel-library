@@ -6,9 +6,11 @@
 import logging
 import socket
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import List, Optional
 
+from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 
 from opensearch_single_kernel.common.constants import (
@@ -18,6 +20,7 @@ from opensearch_single_kernel.common.constants import (
     SNAP_DATA,
     OpenSearchPaths,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +122,12 @@ class Paths:
 class BaseWorkload(ABC):
     """Base interface for common workload operations."""
 
+    @property
+    @abstractmethod
+    def root(self) -> PathProtocol:
+        """Return the root path."""
+        pass
+
     @abstractmethod
     def install(self) -> None:
         """Install the workload."""
@@ -128,6 +137,81 @@ class BaseWorkload(ABC):
     @abstractmethod
     def paths(self) -> Paths:
         """Return the Workload's paths"""
+        pass
+
+    def write_text(self, content: str, path: pathops.PathProtocol) -> None:
+        """Write content to a file on disk.
+
+        Args:
+            content (str): The content to be written.
+            path (str): The file path where the content should be written.
+        """
+        try:
+            path.write_text(content)
+        except (
+            FileNotFoundError,
+            LookupError,
+            NotADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+            ValueError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def read_text(self, path: pathops.PathProtocol) -> str:
+        """Read content from a file on disk.
+
+        Args:
+            path (str): The file path to read from.
+
+        Returns:
+            str: The content read from the file.
+        """
+        try:
+            return path.read_text()
+        except (
+            FileNotFoundError,
+            UnicodeError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def mkdir(
+        self, path: pathops.PathProtocol, parents: bool = False, exist_ok: bool = False
+    ) -> None:
+        """Create a directory on disk.
+
+        Args:
+            path (str): The directory path to create.
+            parents (bool): Whether to create parent directories if they do not exist.
+            exist_ok (bool): Whether to ignore the error if the directory already exists.
+        """
+        try:
+            path.mkdir(parents=parents, exist_ok=exist_ok)
+        except (
+            FileExistsError,
+            FileNotFoundError,
+            LookupError,
+            NotADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
+    @contextmanager
+    def temp_file(
+        self,
+        mode: str = "w+b",
+        data: str | None = None,
+        encoding=None,
+        dir: PathProtocol | None = None,
+        delete=True,
+        *,
+        errors=None,
+        suffix=None,
+    ):
+        """Context manager for creating temporary files."""
         pass
 
     @abstractmethod
@@ -177,6 +261,11 @@ class BaseWorkload(ABC):
     @abstractmethod
     def is_failed(self) -> bool:
         """Check if snap service failed."""
+        pass
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Stop the opensearch service."""
         pass
 
     @abstractmethod

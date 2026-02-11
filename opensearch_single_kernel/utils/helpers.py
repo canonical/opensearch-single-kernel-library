@@ -3,21 +3,25 @@
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
+import base64
+import math
 import re
 import secrets
 import string
+from datetime import datetime
 from time import time_ns
 from typing import TYPE_CHECKING
 
 import bcrypt
+from cryptography import x509
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     DeploymentType,
-    Scope,
     StartMode,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
@@ -42,10 +46,13 @@ def trigger_peer_rel_changed(
         return
 
     if on_other_units or not on_current_unit:
-        charm.peers_data.put(Scope.APP if only_by_leader else Scope.UNIT, "update-ts", time_ns())
+        if only_by_leader:
+            charm.state.application.update_ts = time_ns()
+        else:
+            charm.state.server.update_ts = time_ns()
 
     if on_current_unit:
-        charm.on[PEER_RELATION].relation_changed.emit(charm.model.get_relation(PEER_RELATION))
+        charm.on[PEER_RELATION].relation_changed.emit(charm.state.peer_relation)
 
 
 def mask_sensitive_information(cmd: str) -> str:
@@ -99,3 +106,43 @@ def deployment_type(
         if not config.init_hold
         else DeploymentType.FAILOVER_ORCHESTRATOR
     )
+
+
+def normalized_tls_subject(subject: str) -> str:
+    """Removes any / character from a subject."""
+    if subject.startswith("/"):
+        subject = subject[1:]
+    return subject.replace("/", ",")
+
+
+def cert_expiration_remaining_hours(cert: str) -> int:
+    """Returns the remaining hours for the cert to expire."""
+    certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
+    time_difference = certificate_object.not_valid_after - datetime.utcnow()
+
+    return math.floor(time_difference.total_seconds() / 3600)
+
+
+def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
+    """Return True if keytool says that given alias does not exist.
+
+    Args:
+        exc: The OpenSearchCmdError to check.
+        alias: The alias that was attempted to be deleted.
+
+    Returns:
+        bool: True if the error message indicates that the alias does not exist.
+    """
+    msg = (exc.out or "") + (exc.err or "")
+    return f"Alias <{alias}> does not exist" in msg
+
+
+def parse_tls_file(raw_content: str) -> bytes:
+    """Parse TLS files from both plain text or base64 format."""
+    if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
+        return re.sub(
+            r"(-+(BEGIN|END) [A-Z ]+-+)",
+            "\\1",
+            raw_content,
+        ).encode("utf-8")
+    return base64.b64decode(raw_content)

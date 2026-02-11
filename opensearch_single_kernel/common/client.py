@@ -141,6 +141,29 @@ class OpenSearchClient:
 
         return busy_shards
 
+    def reload_tls_certificates(self, cert_files: tuple[str] | None = None) -> None:
+        """Reload TLS certificates in OpenSearch unit using REST API."""
+        url_http = "_plugins/_security/api/ssl/http/reloadcerts"
+        url_transport = "_plugins/_security/api/ssl/transport/reloadcerts"
+        try:
+            # Reload http certificates
+            self.request(
+                "PUT",
+                url_http,
+                cert_files=cert_files,
+                retries=3,
+            )
+            # Reload transport certificates
+            self.request(
+                "PUT",
+                url_transport,
+                cert_files=cert_files,
+                retries=3,
+            )
+        except OpenSearchHttpError as e:
+            logger.error(f"Error reloading TLS certificates via API: {e}")
+            raise
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

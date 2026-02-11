@@ -6,11 +6,14 @@
 
 import logging
 from collections import namedtuple
+from typing import Any
 
+from opensearch_single_kernel.common.constants import CertType
 from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
+from opensearch_single_kernel.utils.helpers import normalized_tls_subject
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -30,7 +33,7 @@ class ConfigManager(BaseManager):
     @property
     def yaml_setter(self):
         """Return the yaml_setter."""
-        return YamlConfigSetter(self.workload.paths.conf)
+        return YamlConfigSetter(self.workload)
 
     def set_node(
         self,
@@ -105,11 +108,11 @@ class ConfigManager(BaseManager):
             True,
         )
 
-    def cleanup_initial_cluster_managers(self):
+    def cleanup_initial_cluster_managers(self) -> None:
         """Update the opensearch.yaml by deleting initiali_cluster_manager_nodes."""
         self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
 
-    def set_client_auth(self):
+    def set_client_auth(self) -> None:
         """Configure TLS and basic http for clients."""
         # The security plugin will accept TLS client certs if certs but doesn't require them
         # TODO this may be set to REQUIRED if we want to ensure certs provided by the client app
@@ -210,14 +213,68 @@ class ConfigManager(BaseManager):
             return False
         return True
 
-    def add_seed_hosts(self, cm_ips: list[str]):
+    def add_seed_hosts(self, cm_ips: list[str]) -> None:
         """Add CM nodes ips / host names to the seed host list of this unit."""
         cm_ips_set = set(cm_ips)
 
         # only update the file if there is data to update
         if cm_ips_set:
             lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
-            self.workload.paths.seed_hosts.write_text(f"{lines}\n")
+            self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
+
+    def set_admin_tls_conf(self, secrets: dict[str, Any]) -> None:
+        """Configures the admin certificate."""
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.authcz.admin_dn/{}",
+            normalized_tls_subject(secrets["subject"]),
+        )
+
+    def set_node_tls_conf(
+        self, cert_type: CertType, truststore_pwd: str, keystore_pwd: str
+    ) -> None:
+        """Configures TLS for nodes."""
+        target_conf_layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+
+        for store_type, cert in [("keystore", target_conf_layer), ("truststore", "ca")]:
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_type",
+                "PKCS12",
+            )
+
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_filepath",
+                f"{self.workload.paths.certs_relative}/{cert if cert == 'ca' else cert_type.val}.p12",
+            )
+
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.keystore_alias",
+            cert_type.val,
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.keystore_keypassword",
+            keystore_pwd,
+        )
+
+        for store_type, pwd in [
+            ("keystore", keystore_pwd),
+            ("truststore", truststore_pwd),
+        ]:
+            self.yaml_setter.put(
+                self.CONFIG_YML,
+                f"plugins.security.ssl.{target_conf_layer}.{store_type}_password",
+                pwd,
+            )
+
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{target_conf_layer}.enabled_protocols",
+            "TLSv1.2",
+        )
 
     def set_profile_configuration_if_needed(
         self, current_profile: OpenSearchProfile, config_profile: OpenSearchProfile
@@ -234,7 +291,7 @@ class ConfigManager(BaseManager):
             return True
         return False
 
-    def set_jvm_heap_size(self, heap_size_in_kb: int):
+    def set_jvm_heap_size(self, heap_size_in_kb: int) -> None:
         """Apply the performance profile's jvm heap size to the opensearch config."""
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
