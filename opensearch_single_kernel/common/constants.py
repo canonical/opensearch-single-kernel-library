@@ -181,3 +181,50 @@ GCS_CREDENTIALS = "gcs-creds"
 # Messages
 PEER_CLUSTER_NO_RELATION = "Cannot start. Waiting for peer cluster relation..."
 PEER_CLUSTER_WRONG_RELATION = "Cluster name doesn't match with related cluster. Remove relation."
+
+# OpenSearch container runs as UID 584792 to match rockcraft.yaml
+OPENSEARCH_RUN_AS_USER = 584792
+OPENSEARCH_RUN_AS_GROUP = 584792
+
+# Container name for K8s deployments
+CONTAINER_NAME = "opensearch"
+
+# Service name for Pebble
+OPENSEARCH_SERVICE_NAME = "opensearch"
+
+# File permissions as octal
+DIR_PERMISSIONS_READONLY = 0o755  # standard directory permissions
+DIR_PERMISSIONS_WRITABLE = 0o777  # writable directory permissions (logs)
+DIR_PERMISSIONS_CERTIFICATES = 0o750  # certificates directory permissions
+DIR_PERMISSIONS_SECURE = 0o775  # secure directory permissions (after chown)
+
+# File permissions as decimal for chmod commands
+CHMOD_READONLY = "755"
+CHMOD_WRITABLE = "777"
+CHMOD_CERTIFICATES = "750"
+CHMOD_SECURE = "775"
+
+# Sysctl configuration
+SYSCTL_TCP_RETRIES2_NAME = "net.ipv4.tcp_retries2"
+SYSCTL_TCP_RETRIES2_VALUE = "5"
+
+# Kubernetes init container configuration
+INIT_CONTAINER_NAME = "fix-permissions"
+INIT_CONTAINER_IMAGE = "ubuntu:24.04"
+INIT_CONTAINER_ROOT_UID = 0
+INIT_CONTAINER_ROOT_GID = 0
+
+# Kubernetes security context
+FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
+
+# Kubernetes annotation for pod restart
+POD_RESTART_ANNOTATION_KEY = "opensearch-charm-restart-timestamp"
+
+# K8s volume mount paths
+K8S_DATA_MOUNT_PATH = "/var/lib/opensearch"
+K8S_LOGS_MOUNT_PATH = "/var/log/opensearch"
+K8S_CERTIFICATES_MOUNT_PATH = "/etc/opensearch/certificates"
+
+# Pebble service user/group
+PEBBLE_SERVICE_USER = "_daemon_"
+PEBBLE_SERVICE_GROUP = "_daemon_"

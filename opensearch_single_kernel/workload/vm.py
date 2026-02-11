@@ -175,7 +175,7 @@ class VMWorkload(BaseWorkload):
         return stat[2] not in ["Z", "T", "X"]
 
     @override
-    def start_pebble_service(self):
+    def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         if not self.opensearch_snap.present:
             raise OpenSearchMissingError()

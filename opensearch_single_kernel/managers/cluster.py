@@ -28,6 +28,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
     OpenSearchStartTimeoutError,
@@ -212,17 +213,37 @@ class ClusterManager(BaseManager):
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
         admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        if not admin_secrets:
+            raise OpenSearchError("Cannot initialize security index: admin secrets not found")
+
+        keystore_path = str(self.workload.paths.certs / f"{CertType.APP_ADMIN.val}.p12")
+        keystore_password = admin_secrets.get("keystore-password")
+        truststore_password = admin_secrets.get("truststore-password")
+        alias = CertType.APP_ADMIN.val
+
+        if not keystore_password:
+            raise OpenSearchError(
+                "Cannot initialize security index: keystore-password not found in admin secrets"
+            )
+        if not truststore_password:
+            raise OpenSearchError(
+                "Cannot initialize security index: truststore-password not found in admin secrets"
+            )
+        # Use DNS name for K8s (matches cert SANs) or host_ip for VM
+        # For K8s, get_host_public_ip() returns a stable DNS name that matches certificate SANs
+        securityadmin_host = self.workload.get_host_public_ip() or self.state.host_ip
+
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-            f"-h {self.state.host_ip}",
+            f"-h {securityadmin_host}",
             f"-ts {self.workload.paths.certs}/ca.p12",
-            f"-tspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['truststore-password']}",
+            f"-tspass {truststore_password}",
             "-tsalias ca",
             "-tst PKCS12",
-            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
-            f"-kspass {self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)['keystore-password']}",
-            f"-ksalias {CertType.APP_ADMIN}",
+            f"-ks {keystore_path}",
+            f"-kspass {keystore_password}",
+            f"-ksalias {alias}",
             "-kst PKCS12",
         ]
 
@@ -230,9 +251,11 @@ class ClusterManager(BaseManager):
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
+        logger.info("Executing securityadmin.sh with args: %s", " ".join(args))
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
+        logger.info("securityadmin.sh execution completed successfully")
         self._put_security_index_initialised()
 
     def check_if_can_start(self) -> bool:

@@ -78,15 +78,14 @@ def test_get_sans(harness, mocker, substrate):
     base_dns_entries = [harness.charm.state.unit_name, "nebula", "alias"]
     unit_http_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_HTTP)
 
-    # Expected results differ by substrate
+    # expected results differ by substrate
     if substrate == "vm":
         expected_sans = {
             "sans_oid": ["1.2.3.4.5.5"],
             "sans_ip": sorted(base_ips + ["192.168.1.100"]),
             "sans_dns": sorted(base_dns_entries),
         }
-    else:
-        # k8s
+    else:  # k8s
         expected_sans = {
             "sans_oid": ["1.2.3.4.5.5"],
             "sans_ip": sorted(base_ips),

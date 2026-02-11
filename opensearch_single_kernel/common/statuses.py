@@ -60,6 +60,9 @@ class CharmStatuses(Enum):
 
     # Security Index
     SECURITY_INDEX_INIT_IN_PROGRESS = MaintenanceStatus("Initializing the security index...")
+    SECURITY_INDEX_INIT_ERROR = BlockedStatus(
+        "Security index initialization failed: {dynamic_message}"
+    )
 
     # Start
     SERVICE_START_ERROR = BlockedStatus(

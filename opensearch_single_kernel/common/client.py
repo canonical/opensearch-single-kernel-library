@@ -48,53 +48,97 @@ class OpenSearchClient:
     def _get_chain_pem_path(self) -> str:
         """Get the path to chain.pem file for certificate verification.
 
-        For VM: Returns the direct filesystem path
-        For K8s: Pulls the file from workload container and caches it in charm container
+        For VM substrates: returns the direct filesystem path to chain.pem.
+        For K8s substrates: pulls chain.pem from the workload container and caches
+        it in the charm container's temporary directory for use by requests library.
+
+        Returns:
+            str: Path to chain.pem file accessible from the charm container.
+                For VM: direct filesystem path.
+                For K8s: cached path in /tmp/opensearch-certs/chain.pem.
+
+        Raises:
+            RuntimeError: If container is not connected (K8s only) and cached file
+                is not available.
+            OSError: If file operations fail.
+            PermissionError: If file permissions prevent access.
+            FileNotFoundError: If chain.pem does not exist in workload container.
         """
         chain_path = self.workload.paths.certs / "chain.pem"
         chain_path_str = str(chain_path)
 
-        # check if this is a K8s workload
-        if hasattr(self.workload, "container"):
-            if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
-                return self._chain_pem_cache_path
+        # For VM substrates, return the direct path
+        # Check if container attribute exists (VM workloads don't have container)
+        try:
+            container = self.workload.container
+        except AttributeError:
+            # VM substrate, no container attribute, return direct filesystem path
+            return chain_path_str
 
-            # pull chain.pem from workload container
-            try:
-                if not self.workload.container.can_connect():
-                    # fallback to path string if container not connected
-                    return chain_path_str
+        # For K8s substrates, check cache first
+        if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
+            return self._chain_pem_cache_path
 
-                # read content from workload container
-                # it may return a file-like object if it has a read attribute or a string.
-                # We check which type it is and handle accordingly
-                content = self.workload.container.pull(chain_path_str, encoding="utf-8")
-                if hasattr(content, "read"):
-                    # content is a file-like object, read from it
-                    chain_content = content.read()
-                else:
-                    # content is already a string
-                    chain_content = content
-
-                # write to temporary file in charm container
-                cache_dir = "/tmp/opensearch-certs"
-                os.makedirs(cache_dir, mode=0o755, exist_ok=True)
-                cache_path = os.path.join(cache_dir, "chain.pem")
-
-                with open(cache_path, "w", encoding="utf-8") as f:
-                    f.write(chain_content)
-                os.chmod(cache_path, 0o644)
-
-                self._chain_pem_cache_path = cache_path
-                return cache_path
-            except (OSError, PermissionError, FileNotFoundError, AttributeError) as e:
-                logger.warning(
-                    f"Failed to pull chain.pem from container, using path directly: {e}"
+        # ensure container is connected before attempting to pull
+        if not container.can_connect():
+            logger.warning(
+                "Container not connected, cannot pull chain.pem. "
+                "Certificate verification may fail if cached file is unavailable."
+            )
+            # If we have a cached path but file doesn't exist, raise error
+            if self._chain_pem_cache_path:
+                raise RuntimeError(
+                    "Container not connected and cached chain.pem not found at %s"
+                    % self._chain_pem_cache_path
                 )
-                return chain_path_str
+            # no cached path available and container not connected
+            raise RuntimeError(
+                "Container not connected and no cached chain.pem available. "
+                "Cannot retrieve certificate for verification."
+            )
 
-        # For VM, return the direct path
-        return chain_path_str
+        # Pull chain.pem from workload container and cache it
+        return self._pull_and_cache_chain_pem(chain_path_str)
+
+    def _pull_and_cache_chain_pem(self, container_path: str) -> str:
+        """Pull chain.pem from workload container and cache it in charm container.
+
+        Args:
+            container_path: Path to chain.pem inside the workload container.
+
+        Returns:
+            str: Path to cached chain.pem file in charm container.
+
+        Raises:
+            OSError: If file operations fail.
+            PermissionError: If file permissions prevent access.
+            FileNotFoundError: If chain.pem does not exist in workload container.
+        """
+        try:
+            # Use pathops ContainerPath.read_text() which handles pull internally
+            chain_path = self.workload.paths.certs / "chain.pem"
+            chain_content = chain_path.read_text()
+
+            # Write to temporary file in charm container
+            cache_dir = "/tmp/opensearch-certs"
+            os.makedirs(cache_dir, mode=0o755, exist_ok=True)
+            cache_path = os.path.join(cache_dir, "chain.pem")
+
+            with open(cache_path, "w", encoding="utf-8") as f:
+                f.write(chain_content)
+            os.chmod(cache_path, 0o644)
+
+            self._chain_pem_cache_path = cache_path
+            logger.debug("Successfully cached chain.pem from workload container to %s", cache_path)
+            return cache_path
+
+        except (OSError, PermissionError, FileNotFoundError) as e:
+            logger.warning(
+                "Failed to pull chain.pem from container: %s. "
+                "Certificate verification may fail.",
+                e,
+            )
+            raise
 
     def invalidate_chain_pem_cache(self) -> None:
         """Invalidate the cached chain.pem file.
@@ -271,7 +315,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.debug(f"HTTP error when checking cluster health, returning None. Error: {e}")
+            logger.debug("HTTP error when checking cluster health, returning None. Error: %s", e)
             return None
 
     @retry(

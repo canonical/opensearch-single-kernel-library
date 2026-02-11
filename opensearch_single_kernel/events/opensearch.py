@@ -84,123 +84,93 @@ class OpenSearchEventsHandler(Object):
         """On update status event.
 
         We want to periodically check for the following:
-        1- The profile requirements are still met
-        2- Do we have users that need to be deleted, and if so we need to delete them.
-        3- every 6 hours check if certs are expiring soon (in 7 days),
-            as a safeguard in case relation broken. As there will be data loss
-            without the user noticing in case the cert of the unit transport layer expires.
-            So we want to stop opensearch in that case, since it cannot be recovered from.
+        1. Profile requirements are still met
+        2. Cluster health status (for status reporting)
+        3. CA rotation finalization (fallback if TLS event handlers didn't catch it)
+        4. Certificate expiration (only when TLS relation is broken).As there will be data loss
+           If transport certificate expires, OpenSearch is stopped to prevent
+           data loss, as this cannot be recovered from.
         """
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed")
             return
 
-        try:
-            if self.check_profile_missing_requirements():
-                return
-
-            # if node already shutdown - leave
-            if not self.charm.cluster_manager.opensearch_client.is_node_up():
-                return
-
-            # review available CMs
-            # TODO:
-            # self._add_cm_addresses_to_conf()
-
-            # if there are exclusions to be removed
-            # each unit should check its own exclusions' list
-            # self.opensearch_exclusions.cleanup()
-            if (
-                health := self.charm.status.apply_health(
-                    wait_for_green_first=True, app=self.charm.unit.is_leader()
-                )
-            ) not in [
-                HealthColors.GREEN,
-                HealthColors.IGNORE,
-            ]:
-                logger.warning(
-                    f"Update status: exclusions updated and cluster health is {health}."
-                )
-
-            # handle when/if certificates are expired
-            certs = self.charm.tls_manager.check_certs_expiration()
-            if certs:
-                missing = [cert.val for cert in certs.keys()]
-                self.charm.status.set(
-                    CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
-                    dynamic_message=f"The certificates: {', '.join(missing)} need to be refreshed.",
-                )
-
-                # stop opensearch in case the Node-transport certificate expires.
-                if certs.get(CertType.UNIT_TRANSPORT) is not None:
-                    try:
-                        self.stop_opensearch()
-                    except ContainerNotReadyError as e:
-                        logger.info(f"Container not ready for stop: {e}")
-                        event.defer()
-                        return
-                    except OpenSearchStopError:
-                        event.defer()
-                        return
-                self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
-                    self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
-                )
-
-            # TODO: Handle client relations updates
-            # for relation in self.model.relations.get(ClientRelationName, []):
-            # self.opensearch_provider.update_endpoints(relation)
-
-            # deployment_desc = self.charm.state.application.deployment_desc
-            # if self.upgrade_in_progress:
-            # logger.debug(
-            # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
-            # )
-            # elif (
-            #    self.unit.is_leader()
-            #    and deployment_desc
-            #    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-            # ):
-            #    self.opensearch_provider.remove_lingering_relation_users_and_roles()
-
-            # If the unit reloads its certs but the other units are not ready yet
-            # we need to wait for them all to be ready before deleting the old CA
-            if (
-                self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
-                and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-            ):
-                logger.debug("update_status: Detected CA rotation complete in cluster")
-                self.charm.tls_manager.finalize_ca_certs_rotation()
-            # If relation not broken - leave
-            if self.charm.state.tls_relation is not None:
-                return
-
-            # handle when/if certificates are expired
-            certs = self.charm.tls_manager.check_certs_expiration()
-            if certs:
-                missing = [cert.val for cert in certs.keys()]
-                self.charm.status.set(
-                    CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
-                    dynamic_message=f"The certificates: {', '.join(missing)} need to be refreshed.",
-                )
-
-                # stop opensearch in case the Node-transport certificate expires.
-                if certs.get(CertType.UNIT_TRANSPORT) is not None:
-                    try:
-                        self.stop_opensearch()
-                    except ContainerNotReadyError as e:
-                        logger.info(f"Container not ready for stop: {e}")
-                        event.defer()
-                        return
-                    except OpenSearchStopError:
-                        event.defer()
-                        return
-                self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
-                    self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
-                )
-        except ContainerNotReadyError as e:
-            logger.debug(f"Container not ready for update status: {e}")
-            # Do not defer update_status events as they will retry on next interval
+        if self.check_profile_missing_requirements():
             return
+
+        # if node already shutdown - leave
+        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            return
+
+        # review available CMs
+        # TODO:
+        # self._add_cm_addresses_to_conf()
+
+        # if there are exclusions to be removed
+        # each unit should check its own exclusions' list
+        # self.opensearch_exclusions.cleanup()
+        if (
+            health := self.charm.status.apply_health(
+                wait_for_green_first=True, app=self.charm.unit.is_leader()
+            )
+        ) not in [
+            HealthColors.GREEN,
+            HealthColors.IGNORE,
+        ]:
+            logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
+
+            if health == HealthColors.UNKNOWN:
+                return
+
+        # TODO: Handle client relations updates
+        # for relation in self.model.relations.get(ClientRelationName, []):
+        # self.opensearch_provider.update_endpoints(relation)
+
+        # deployment_desc = self.charm.state.application.deployment_desc
+        # if self.upgrade_in_progress:
+        # logger.debug(
+        # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
+        # )
+        # elif (
+        #    self.unit.is_leader()
+        #    and deployment_desc
+        #    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        # ):
+        #    self.opensearch_provider.remove_lingering_relation_users_and_roles()
+
+        # If the unit reloads its certs but the other units are not ready yet
+        # we need to wait for them all to be ready before deleting the old CA
+        if (
+            self.charm.tls_manager.read_stored_ca(self.charm.tls_manager.OLD_CA_ALIAS)
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+        ):
+            logger.debug("update_status: Detected CA rotation complete in cluster")
+            self.charm.tls_manager.finalize_ca_certs_rotation()
+
+        # Certificate expiration check only needed when TLS relation is broken
+        # (when relation exists, cert updates are handled by TLS event handlers)
+        if self.charm.state.tls_relation is not None:
+            return
+
+        # handle when/if certificates are expired (only when TLS relation is broken)
+        # This is a safeguard in case relation broken - check if certs are expiring soon
+        if certs := self.charm.tls_manager.check_certs_expiration():
+            missing = [cert.val for cert in certs.keys()]
+            self.charm.status.set(
+                CharmStatuses.TLS_CERTS_EXPIRATION_ERROR,
+                dynamic_params={"certificates": ", ".join(missing)},
+            )
+
+            # stop opensearch in case the Node-transport certificate expires.
+            if certs.get(CertType.UNIT_TRANSPORT) is not None:
+                try:
+                    self.stop_opensearch()
+                except OpenSearchStopError:
+                    event.defer()
+                    return
+        self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
+            self.charm.tls_manager.CERTS_EXPIRATION_DATE_FORMAT
+        )
 
     def _on_install(self, event: InstallEvent) -> None:
         """Event handler for install event."""
@@ -217,54 +187,73 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchInstallError:
             self.charm.status.set(CharmStatuses.INSTALL_ERROR)
 
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        # For K8s charms, configure pod sysctls and securityContext via StatefulSet patch
+        # This ensures non-root execution and proper filesystem permissions from the start
+        if self.charm.state.substrate == Substrates.K8S:
+            if hasattr(self.charm, "configure_pod_sysctls"):
+                try:
+                    self.charm.configure_pod_sysctls()
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to configure pod sysctls during install (non-critical, will retry): {e}"
+                    )
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        try:
-            if self.charm.config_manager.update_host_if_needed():
-                # TODO: Handle TLS functions
-                pass
-
-            if self.charm.unit.is_leader():
-                self.charm.cluster_manager.reconcile_cluster_config()
-                self.apply_status_from_deployment_desc(
-                    self.charm.state.application.deployment_desc
-                )
-
-                # TODO: Handle cluster change to main orchestrator
-            if not self.charm.state.application.deployment_desc:
-                logger.debug("Deployment description not yet computed, deferring event.")
+        # For K8s, check container readiness before filesystem operations
+        if self.charm.state.substrate == Substrates.K8S:
+            if not self.charm.workload.workload_present:
+                logger.info("Container not ready for config-changed event, deferring")
                 event.defer()
                 return
 
-            try:
-                config_profile = self.charm.profiles_manager.config_profile
-                current_profile = self.charm.state.server.profile
-                self.charm.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
-            except ValueError:
-                logger.error(
-                    "Invalid profile configuration. Value: %s",
-                    self.charm.state.config.get("profile"),
-                )
-                self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
-                return
+            # For K8s charms, configure pod sysctls via StatefulSet patch
+            # The method is idempotent and will skip if sysctls are already configured correctly
+            if hasattr(self.charm, "configure_pod_sysctls"):
+                try:
+                    self.charm.configure_pod_sysctls()
+                except Exception as e:
+                    logger.debug("Failed to configure pod sysctls (non-critical): %s", e)
 
-            if self.check_profile_missing_requirements():
-                event.defer()
-                return
+        if self.charm.config_manager.update_host_if_needed():
+            # TODO: Handle TLS functions
+            pass
 
-            profile_restart_needed = self.charm.config_manager.set_profile_configuration_if_needed(
-                current_profile, config_profile
-            )
-            if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
-                logger.debug(
-                    "Restarting opensearch due to config change: profile_restart_needed=%s",
-                    profile_restart_needed,
-                )
-                self.charm.restart_opensearch_event.emit()
-        except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for config change: {e}")
+        if self.charm.unit.is_leader():
+            self.charm.cluster_manager.reconcile_cluster_config()
+            if deployment_desc := self.charm.state.application.deployment_desc:
+                self.apply_status_from_deployment_desc(deployment_desc)
+
+            # TODO: Handle cluster change to main orchestrator
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
             return
+
+        try:
+            config_profile = self.charm.profiles_manager.config_profile
+            current_profile = self.charm.state.server.profile
+            self.charm.status.clear(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+        except ValueError:
+            logger.error(
+                "Invalid profile configuration. Value: %s", self.charm.state.config.get("profile")
+            )
+            self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
+            return
+
+        if self.check_profile_missing_requirements():
+            event.defer()
+            return
+
+        profile_restart_needed = self.charm.config_manager.set_profile_configuration_if_needed(
+            current_profile, config_profile
+        )
+        if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
+            logger.debug(
+                "Restarting opensearch due to config change: profile_restart_needed=%s",
+                profile_restart_needed,
+            )
+            self.charm.restart_opensearch_event.emit()
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
@@ -329,6 +318,17 @@ class OpenSearchEventsHandler(Object):
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
         try:
+            # For K8s charms, ensure pod sysctls and securityContext are configured
+            # This is idempotent and will skip if already configured correctly
+            if self.charm.state.substrate == Substrates.K8S:
+                if hasattr(self.charm, "configure_pod_sysctls"):
+                    try:
+                        self.charm.configure_pod_sysctls()
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to configure pod sysctls during start (non-critical, will retry): {e}"
+                        )
+
             if self.charm.cluster_manager.opensearch_client.is_node_up():
                 self.cleanup_start_state()
                 return
@@ -336,7 +336,7 @@ class OpenSearchEventsHandler(Object):
             # VM-specific: Handle host reboot scenario where service should be up but isn't
             # This doesn't apply to K8s as pods are ephemeral and don't have host reboots
             if (
-                self.charm.substrate == Substrates.VM
+                self.charm.state.substrate == Substrates.VM
                 and self.charm.cluster_manager.needs_start_after_host_reboot
             ):
                 # This logic will only be triggered if the service has started (i.e. "started")
@@ -354,17 +354,15 @@ class OpenSearchEventsHandler(Object):
                 # Now, reissue a restart: we should not have stopped in the first place
                 # as "started" flag is still set to True.
                 # We do not wait for the 200 return, as maybe more than one unit is coming back
+                # Note: start_service_only() is polymorphic - for VM it starts snap service,
+                # for K8s it starts Pebble service.
                 try:
-                    self.charm.workload.start_pebble_service()
+                    self.charm.workload.start_service_only()
                     # We're done here, we can return
-                    return
-                except ContainerNotReadyError as e:
-                    logger.info(f"Container not ready for service start: {e}")
-                    event.defer()
                     return
                 except OpenSearchStartError as e:
                     logger.warning(
-                        f"Machine restart detected but error at service start with: {e}"
+                        "Machine restart detected but error at service start with: %s", e
                     )
                     # Defer and retry later
                     event.defer()
@@ -375,7 +373,9 @@ class OpenSearchEventsHandler(Object):
                     return
             # apply the directives computed and emitted by the peer cluster manager
             if not self.charm.cluster_manager.check_if_can_start():
-                logger.debug("cannot start peer cm had a blocking directive")
+                logger.info(
+                    "Cannot start OpenSearch: blocking directives present or nodes unreachable"
+                )
                 event.defer()
                 return
 
@@ -548,6 +548,10 @@ class OpenSearchEventsHandler(Object):
                 nodes = self.charm.cluster_manager.get_nodes(False)
 
                 # Set the configuration of the node
+                # This calls set_node() which writes base config to opensearch.yml
+                # set_node() uses yaml_setter.put() which should preserve
+                # existing keys via deep merge,
+                # but to be safe, we ensure TLS config is written after set_node() completes
                 self._set_node_conf(nodes)
             except OpenSearchHttpError as e:
                 logger.debug(f"error getting the nodes: {e}")
@@ -661,7 +665,7 @@ class OpenSearchEventsHandler(Object):
             self.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
         except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for restart: {e}")
+            logger.info("Container not ready for restart: %s", e)
             event.defer()
             return
         except OpenSearchStopError as e:
@@ -716,8 +720,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.stop_workload()
             self.charm.status.set(CharmStatuses.SERVICE_STOPPED)
         except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for stop: {e}")
-            # Don't raise - let caller handle deferral
+            logger.info("Container not ready for stop: %s", e)
             raise
 
     def _on_node_lock_relation_changed(self, _=None) -> None:
@@ -932,18 +935,33 @@ class OpenSearchEventsHandler(Object):
         # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
 
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            csr = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)[
-                "csr"
-            ].encode("utf-8")
+            secret_obj = (
+                self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
+            )
+            csr_str = secret_obj.get("csr")
+            if not csr_str:
+                logger.warning("Missing CSR for %s, skipping revocation", cert_type.val)
+                continue
+            csr = csr_str.encode("utf-8")
             self.charm.tls_events.certs.request_certificate_revocation(csr)
 
         # doing this sequentially (revoking -> requesting new ones), to avoid triggering
         # the "certificate available" callback with old certificates
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secrets = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
-            key = secrets["key"].encode("utf-8")
+            secrets = (
+                self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
+            )
+            key_str = secrets.get("key")
+            if not key_str:
+                logger.warning("Missing key for %s, skipping renewal", cert_type.val)
+                continue
+            key = key_str.encode("utf-8")
             key_password = secrets.get("key-password", None)
-            old_csr = secrets["csr"].encode("utf-8")
+            old_csr_str = secrets.get("csr")
+            if not old_csr_str:
+                logger.warning("Missing old CSR for %s, skipping renewal", cert_type.val)
+                continue
+            old_csr = old_csr_str.encode("utf-8")
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,

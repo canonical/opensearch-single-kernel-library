@@ -214,7 +214,7 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def start_pebble_service(self):
+    def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         pass
 
@@ -265,7 +265,7 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def _get_kernel_property_value(self, prop: str) -> int:
+    def _get_kernel_property_value(self, prop: str) -> int | None:
         """Get the value of a kernel parameter."""
         pass
 

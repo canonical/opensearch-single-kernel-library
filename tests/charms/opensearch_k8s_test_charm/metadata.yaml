@@ -64,21 +64,27 @@ requires:
 storage:
   opensearch-data:
     type: filesystem
-    location: /var/snap/opensearch/common/var/lib/opensearch
+    location: /var/lib/opensearch
     description: Storage for OpenSearch data files
   opensearch-logs:
     type: filesystem
-    location: /var/snap/opensearch/common/var/log/opensearch
+    location: /var/log/opensearch
     description: Storage for OpenSearch log files
+  certificates:
+    type: filesystem
+    description: Persistent TLS certificates storage
+    minimum-size: 50M
 
 containers:
   opensearch:
     resource: opensearch-image
     mounts:
       - storage: opensearch-data
-        location: /var/snap/opensearch/common/var/lib/opensearch
+        location: /var/lib/opensearch
       - storage: opensearch-logs
-        location: /var/snap/opensearch/common/var/log/opensearch
+        location: /var/log/opensearch
+      - storage: certificates
+        location: /etc/opensearch/certificates
 
 resources:
   opensearch-image:

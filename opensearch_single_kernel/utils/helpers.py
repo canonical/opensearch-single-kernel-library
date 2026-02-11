@@ -10,7 +10,7 @@ import secrets
 import string
 from datetime import datetime
 from time import time_ns
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import bcrypt
 from cryptography import x509
@@ -153,3 +153,98 @@ def parse_tls_file(raw_content: str) -> bytes:
             raw_content,
         ).encode("utf-8")
     return base64.b64decode(raw_content)
+
+
+def _env_name(item) -> str | None:
+    """Extract environment variable name from an item (dict or EnvVar object)."""
+    if isinstance(item, dict):
+        return item.get("name")
+    return getattr(item, "name", None)
+
+
+def remove_duplicates(env: list) -> list:
+    """Remove duplicates by preserving the first occurrence exactly.
+
+    Args:
+        env: List of env var items
+
+    Returns:
+        List with duplicates removed (keeps first occurrence exactly as-is)
+    """
+    seen = set()
+    out = []
+    for item in env or []:
+        name = _env_name(item)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(item)
+    return out
+
+
+def has_duplicate_env(env: list) -> bool:
+    """Check if env list contains duplicate entries by name.
+
+    Args:
+        env: List of env var items (dicts or EnvVar objects)
+
+    Returns:
+        True if duplicates found, False otherwise
+    """
+    seen = set()
+    for item in env or []:
+        name = _env_name(item)
+        if not name:
+            continue
+        if name in seen:
+            return True
+        seen.add(name)
+    return False
+
+
+def convert_to_int(value: Any) -> int | None:
+    """Convert value to int, return None if not convertible.
+
+    Safely converts a value to an integer. Returns None if the value
+    is None or cannot be converted to an integer.
+
+    Args:
+        value: The value to convert to integer. Can be any type.
+
+    Returns:
+        int | None: The integer value if conversion succeeds, None otherwise.
+    """
+    try:
+        return int(value) if value is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def get_nested_value(config: dict, key_path: str) -> Any:
+    """Get a nested value from config dict using dotted key path.
+
+    Handles both flat dicts (with dotted keys) and nested dicts.
+
+    Args:
+        config: Dictionary to search in.
+        key_path: Dotted key path (e.g., "plugins.security.ssl.transport.keystore_filepath").
+
+    Returns:
+        The value at the nested path, or None if not found.
+
+    Example:
+        config = {"plugins": {"security": {"ssl": {"transport":
+            {"keystore_filepath": "/path/to/keystore"}}}}}
+        get_nested_value(config, "plugins.security.ssl.transport.keystore_filepath")
+        '/path/to/keystore'
+    """
+    keys = key_path.split(".")
+    value = config
+    for key in keys:
+        if isinstance(value, dict):
+            value = value.get(key)
+            if value is None:
+                return None
+        else:
+            return None
+    return value

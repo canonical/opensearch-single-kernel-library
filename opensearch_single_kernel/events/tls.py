@@ -357,12 +357,6 @@ class TLSEventsHandler(Object):
                     keystore_pwd=keystore_pwd,
                 )
 
-                # write the admin cert conf on all units,
-                # in case there is a leader loss + cert renewal
-                if not admin_secrets.get("subject"):
-                    return
-                self.charm.config_manager.set_admin_tls_conf(admin_secrets)
-
             self.charm.tls_manager.store_admin_tls_secrets_if_applies()
 
             # In case of renewal of the unit transport layer cert - restart opensearch
