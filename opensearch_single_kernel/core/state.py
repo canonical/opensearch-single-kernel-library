@@ -15,6 +15,7 @@ from ops import Application, JujuVersion, Object, Relation, Unit
 from opensearch_single_kernel.common.constants import (
     GENERATED_ROLES,
     NODE_LOCK_RELATION,
+    OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
@@ -113,6 +114,56 @@ class OpenSearchServer(RelationState):
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
         return self.relation_data.get("started", "")
+
+    @property
+    def tls_ca_renewing(self) -> bool:
+        """Return value of 'tls_ca_renewing' from unit state"""
+        return self.relation_data.get("tls_ca_renewing", "") == "True"
+
+    @tls_ca_renewing.setter
+    def tls_ca_renewing(self, value: bool):
+        """Update value of tls_ca_renewing from unit state."""
+        self.update({"tls_ca_renewing": str(value)})
+
+    @property
+    def tls_ca_renewed(self) -> bool:
+        """Get the value of 'tls_ca_renewed' from unit data bag"""
+        return self.relation_data.get("tls_ca_renewed", "") == "True"
+
+    @tls_ca_renewed.setter
+    def tls_ca_renewed(self, value: bool):
+        """Update value of 'tls_ca_renewed'"""
+        self.update({"tls_ca_renewed": str(value)})
+
+    @property
+    def tls_configured(self) -> bool:
+        """Get the value of 'tls_configured' from unit data bag."""
+        return self.relation_data.get("tls_configured", "") == "True"
+
+    @tls_configured.setter
+    def tls_configured(self, value: bool):
+        """Update the value of 'tls_configured'"""
+        self.update({"tls_configured": str(value)})
+
+    @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the unit databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the unit databag."""
+        self.update({"update-ts": str(timestamp)})
+
+    @property
+    def certs_exp_checked_at(self) -> str:
+        """Get the value of 'certs_exp_checked_at' from unit data bag."""
+        return self.relation_data.get("certs_exp_checked_at", "1970-01-01 00:00:00")
+
+    @certs_exp_checked_at.setter
+    def certs_exp_checked_at(self, value: str):
+        """Update the value of 'certs_exp_checked_at'"""
+        self.update({"certs_exp_checked_at": value})
 
 
 class OpenSearchApplication(RelationState):
@@ -227,6 +278,15 @@ class OpenSearchApplication(RelationState):
         return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
 
     @property
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the application databag."""
+        return self.relation_data.get("update-ts", "")
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the application databag."""
+        self.update({"update-ts": str(timestamp)})
+
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
         data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
@@ -279,7 +339,7 @@ class ClusterState(Object):
     def peer_cluster_orchestrator(self) -> PeerCluster:
         """The State for the requirer side of the 'peer-cluster-orchestrator' relation.."""
         return PeerCluster(
-            relation=self.peer_cluster_relation,
+            relation=self.peer_cluster_orchestrator_relation,
             data_interface=PeerClusterData(self.model, PEER_CLUSTER_RELATION),
             component=self.model.app,
         )
@@ -288,7 +348,7 @@ class ClusterState(Object):
     def peer_cluster(self) -> PeerCluster:
         """State for the provider side of the 'peer-cluster-orchestrator' relation."""
         return PeerCluster(
-            relation=self.peer_cluster_orchestrator_relation,
+            relation=self.peer_cluster_relation,
             data_interface=PeerClusterOrchestratorData(
                 self.model, PEER_CLUSTER_ORCHESTRATOR_RELATION
             ),
@@ -305,6 +365,18 @@ class ClusterState(Object):
             data_interface=self.peer_unit_interface,
             component=self.model.unit,
         )
+
+    @property
+    def servers(self) -> list[OpenSearchServer]:
+        """Return all opensearch servers using peer relation."""
+        return [
+            OpenSearchServer(
+                relation=self.peer_relation,
+                data_interface=self.peer_unit_interface,
+                component=unit,
+            )
+            for unit in self.all_units
+        ]
 
     @property
     def application(self) -> OpenSearchApplication:
@@ -341,7 +413,7 @@ class ClusterState(Object):
     @property
     def port(self) -> int:
         """Return Port of OpenSearch unit."""
-        return 9200
+        return OPENSEARCH_HTTP_PORT
 
     def unit_ip(self, unit: Unit) -> str | None:
         """Returns the ip address of a given unit."""
@@ -357,6 +429,81 @@ class ClusterState(Object):
     def get_unit(self, name: str):
         """Get unit by name"""
         return self.model.get_unit(name)
+
+    @property
+    def is_tls_full_configured_in_cluster(self) -> bool:
+        """Check if TLS is configured in all the units of the current cluster."""
+        if not self.peer_relation:
+            return False
+        for unit in self.all_units:
+            if (
+                self.peer_relation.data[unit].get("tls_configured") != "True"
+                or "tls_ca_renewing" in self.peer_relation.data[unit]
+                or "tls_ca_renewed" in self.peer_relation.data[unit]
+            ):
+                return False
+        return True
+
+    @property
+    def ca_rotation_complete_in_cluster(self) -> bool:
+        """Check whether the CA rotation completed in all units."""
+        rotation_in_progress = False
+        rotation_complete = True
+
+        # check peer units and current unit
+        rotation_in_progress = any([server.tls_ca_renewing for server in self.servers])
+        rotation_complete = all([server.tls_ca_renewed for server in self.servers])
+
+        # TODO: Support peer cluster and peer cluster orchestrator
+        logger.debug(
+            "CA rotation happening in cluster: %s | \
+                rotation complete in cluster: %s | return value: %s \
+                ",
+            rotation_in_progress,
+            rotation_complete,
+            not rotation_in_progress or rotation_complete,
+        )
+        # if no unit is renewing the CA, or all of them renewed it, the rotation is complete
+        return not rotation_in_progress or rotation_complete
+
+    def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
+        """Check whether the CA rotation completed in all units."""
+        rotation_complete = True
+
+        # the current unit is not in the relation.units list
+        # if tls is not configured or in the middle of rotation, return False
+        if not all([server.tls_configured for server in self.servers]) or all(
+            [server.tls_ca_renewing and not server.tls_ca_renewed for server in self.servers]
+        ):
+            return False
+
+        # TODO: Support peer cluster and peer cluster orchestrator
+        return rotation_complete
+
+    def reset_ca_rotation_state(self) -> None:
+        """Handle internal flags during CA rotation routine."""
+        if not self.server.tls_ca_renewing:
+            # if the CA is not being renewed we don't have to do anything here
+            return
+
+        # if this flag is set, the CA rotation routine is complete for this unit
+        if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster():
+            # both CA rotation and certs rotation completed in the cluster
+            self.server.update({"tls_ca_renewing": ""})
+            self.server.update({"tls_ca_renewed": ""})
+            # TODO: Handle large deployment
+            # self.update_tls_flag_to_peer_cluster_relation(
+            # flag="tls_ca_renewing", operation="remove"
+            # )
+            # self.update_tls_flag_to_peer_cluster_relation(
+            #    flag="tls_ca_renewed", operation="remove"
+            # )
+            return
+
+        # this means only the CA rotation completed, still need to create certificates
+        self.server.tls_ca_renewed = True
+        # TODO: Handle large deployment
+        # self.update_tls_flag_to_peer_cluster_relation(flag="tls_ca_renewed", operation="add")
 
     @property
     def network_ingress_address(self) -> str:

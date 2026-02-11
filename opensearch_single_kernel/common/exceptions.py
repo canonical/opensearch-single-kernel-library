@@ -74,3 +74,11 @@ class OpenSearchCmdError(OpenSearchError):
         self.out = out
         self.err = err
         super().__init__(f"Command failed: {cmd}\nstdout={out}\nstderr={err}")
+
+
+class OpenSearchStopError(OpenSearchError):
+    """Exception thrown when OpenSearch fails to stop."""
+
+
+class OpenSearchFileOperationError(OpenSearchError):
+    """Exception thrown when file operations related to OpenSearch fail."""

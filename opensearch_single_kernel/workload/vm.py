@@ -6,9 +6,12 @@
 import logging
 import os
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from charmlibs import pathops
+from charmlibs.pathops import PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
@@ -18,12 +21,14 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchInstallError,
     OpenSearchMissingError,
     OpenSearchStartError,
+    OpenSearchStopError,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
     service_failed,
     service_running,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
+from opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap import SnapError
 from opensearch_single_kernel.utils.helpers import mask_sensitive_information
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
@@ -37,7 +42,6 @@ class VMWorkload(BaseWorkload):
 
     def __init__(self):
         super().__init__()
-        self.root = pathops.LocalPath("/")
         for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
@@ -63,6 +67,36 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             logger.error(f"Failed to install/upgrade opensearch. \n{e}")
             raise OpenSearchInstallError()
+
+    @contextmanager
+    def temp_file(
+        self,
+        mode="w+b",
+        data: str | None = None,
+        encoding: str | None = None,
+        dir: PathProtocol | None = None,
+        delete: bool = True,
+        *,
+        errors: str | None = None,
+        suffix: str | None = None,
+    ):
+        """Create a temporary file and return the file, clean it once context is closed."""
+        f = tempfile.NamedTemporaryFile(
+            mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
+        )
+        file_path: PathProtocol = self.root / f.name
+        try:
+            if data:
+                self.write_text(data, file_path)
+            yield file_path
+        finally:
+            if not f.closed:
+                f.close()
+            if delete:
+                try:
+                    file_path.unlink()
+                except OSError as e:
+                    raise e
 
     @override
     def run_script(self, script_name: str, args: str = None):
@@ -274,8 +308,26 @@ class VMWorkload(BaseWorkload):
         except (TimeoutError, subprocess.TimeoutExpired):
             raise OpenSearchCmdError
 
+    @override
+    def stop(self) -> None:
+        """Stop the opensearch service."""
+        if not self.opensearch_snap.present:
+            raise OpenSearchMissingError()
+
+        try:
+            self.opensearch_snap.stop([self.SERVICE_NAME])
+        except SnapError as e:
+            logger.error(f"Failed to stop the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            raise OpenSearchStopError()
+
     @property
     @override
     def paths(self) -> Paths:
         """Return Workload's paths"""
         return Paths(self.root)
+
+    @property
+    @override
+    def root(self) -> PathProtocol:
+        """Return the root path."""
+        return pathops.LocalPath("/")
