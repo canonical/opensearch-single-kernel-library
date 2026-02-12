@@ -418,7 +418,7 @@ class OpenSearchEventsHandler(Object):
         """On config changed event. Useful for IP changes or for user provided config changes."""
         if self.charm.config_manager.update_host_if_needed():
             # This happens when the unit IP has changed
-            self.charm.tls_events.on_unit_ip_changed(event)
+            self.on_unit_ip_changed(event)
 
         if self.charm.unit.is_leader():
             if self.charm.cluster_manager.reconcile_cluster_config():
@@ -1218,3 +1218,9 @@ class OpenSearchEventsHandler(Object):
         )
 
         self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
+
+    def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
+        """Triggered when the unit IP is changed."""
+        self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)
+        self.charm.tls_manager.delete_stored_tls_resources()
+        self.request_new_unit_certificates()
