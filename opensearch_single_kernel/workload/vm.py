@@ -122,6 +122,14 @@ class VMWorkload(BaseWorkload):
 
         return output.out.strip()
 
+    def is_started(self) -> bool:
+        """Check if OpenSearch is started."""
+        reachable = self.is_reachable(self.host, self.port)
+        if not reachable:
+            logger.debug("Cannot connect to the OpenSearch server...")
+
+        return reachable
+
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
@@ -306,7 +314,7 @@ class VMWorkload(BaseWorkload):
                 cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
             )
         except (TimeoutError, subprocess.TimeoutExpired):
-            raise OpenSearchCmdError
+            raise OpenSearchCmdError(cmd=command)
 
     @override
     def stop(self) -> None:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
+    ConfigChangedEvent,
     Object,
     RelationBrokenEvent,
     RelationCreatedEvent,
@@ -221,7 +222,6 @@ class TLSEventsHandler(Object):
                 return
 
         # store the certificates and keys in a key store
-
         self.charm.tls_manager.store_new_tls_resources(
             cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
         )
@@ -317,6 +317,12 @@ class TLSEventsHandler(Object):
         """Handle a cert that was revoked or has expired"""
         logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
         self._on_certificate_expiring(event)
+
+    def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
+        """Triggered when the unit IP is changed."""
+        self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)
+        self.charm.tls_manager.delete_stored_tls_resources()
+        self.request_new_unit_certificates()
 
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
