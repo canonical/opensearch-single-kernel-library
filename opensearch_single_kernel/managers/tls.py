@@ -29,6 +29,14 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     generate_private_key,
 )
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.certificates import (
+    CA_ALIAS,
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
+    read_ca,
+    remove_ca,
+    store_ca,
+)
 from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
     generate_password,
@@ -48,11 +56,6 @@ class TlsManager(BaseManager):
     signing request, managing the keystore, and updating secrets related to tls. It
     can be used by different events handlers not only tls events handler.
     """
-
-    CA_ALIAS = "ca"
-    OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-    OLD_CA_PREFIX = "old-"
-    CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
@@ -135,6 +138,21 @@ class TlsManager(BaseManager):
                 return False
 
         return True
+
+    def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
+        """Load stored CA cert."""
+        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
+        logger.debug(f"Reading stored ca from {ca_trust_store}")
+        if not (ca_trust_store.exists() and secrets):
+            return None
+
+        return read_ca(
+            workload=self.workload,
+            alias=alias,
+            store_pwd=secrets.get("truststore-password"),
+            store_path=ca_trust_store,
+        )
 
     def all_certificates_available(self) -> bool:
         """Method that checks if all certs available and issued from same CA."""
@@ -253,26 +271,34 @@ class TlsManager(BaseManager):
         self,
         scope: Scope,
         cert_type: CertType,
-        key: str | None = None,
-        password: str | None = None,
+        secrets: dict[str, str] | None = None,
         tls_file: bool = True,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
+        key = None
+        password = None
+        if secrets:
+            key = secrets.get("key") if secrets.get("key") else None
+            password = secrets.get("key-password", None)
+
         if key is None:
             key = generate_private_key()
         else:
             if tls_file:
                 key = parse_tls_file(key)
 
-        # Convert password to bytes for generate_csr, but keep original string for storage
-        password_bytes = password.encode("utf-8") if password else None
+        if type(key) is str:
+            key = key.encode("utf-8")
+
+        if password is not None:
+            password = password.encode("utf-8")
 
         subject = self._get_subject(cert_type)
         organization = self.state.application.deployment_desc.config.cluster_name
         csr = generate_csr(
             add_unique_id_to_subject_name=False,
             private_key=key,
-            private_key_password=password_bytes,
+            private_key_password=password,
             subject=subject,
             organization=organization,
             **self._get_sans(cert_type),
@@ -283,7 +309,7 @@ class TlsManager(BaseManager):
             key=cert_type.val,
             value={
                 "key": key.decode("utf-8"),
-                "key-password": password,  # Store as string, not bytes
+                "key-password": password,
                 "csr": csr.decode("utf-8"),
                 "subject": f"/O={organization}/CN={subject}",
             },
@@ -352,342 +378,35 @@ class TlsManager(BaseManager):
 
         return None
 
-    def read_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> str | None:
-        """Load stored CA cert."""
-        return (self.list_cas(store_pwd, store_path) or {}).get(alias)
-
-    def list_cas(
-        self, store_pwd: str, store_path: PathProtocol
-    ) -> dict[str, str] | None:  # noqa: C901
-        """List the CAs currently stored in a trust store.
-
-        Args:
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-
-        Returns:
-            A mapping from base alias to full concatenated PEM chain.
-            If an alias is partitioned as <alias>-0, <alias>-1, ... in the store,
-            they are reassembled and returned under the base <alias> key.
-        """
-        if not store_path.exists():
-            return None
-
-        cmd = f"openssl pkcs12 -in {store_path}"
-        args = f"-passin pass:{store_pwd}"
-        try:
-            stored_certs = self.workload.run_cmd(cmd, args, use_errors_replace=True).out
-        except OpenSearchCmdError as e:
-            logger.error("Error reading the current truststore: %s", e)
-            return None
-
-        # split by -----END CERTIFICATE-----
-        cert_blocks = split_ca_chain(stored_certs)
-
-        start_cert_marker = "-----BEGIN CERTIFICATE-----"
-        chains: dict[str, list[tuple[int, str]]] = {}
-
-        for block in cert_blocks:
-            # find the friendlyName: line produced by openssl pkcs12
-            alias_line = next(
-                (line for line in block.split("\n") if line.strip().startswith("friendlyName:")),
-                None,
+    def update_request_ca_bundle(self, ca_chain: str | None = None) -> None:
+        """Create a new chain.pem file for requests module"""
+        logger.debug("Updating requests TLS CA bundle")
+        if ca_chain is None:
+            admin_secret = self.state.secrets.get_object(
+                Scope.APP, CertType.APP_ADMIN.val, peek=True
             )
-            if alias_line is None:
-                continue
-            alias = alias_line.split("friendlyName:", 1)[-1].strip()
-            pem = f"{start_cert_marker}{block.split(start_cert_marker, 1)[1]}".strip()
+            ca_chain = admin_secret.get("chain")
 
-            # parse optional trailing -<int> index
-            base = alias
-            idx = 0
-            parts = alias.rsplit("-", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                # Only treat as index if suffix is purely digits
-                idx = int(parts[1])
-                base = parts[0]
+        # we store the pem format to make it easier for the python requests lib
+        chain_path = self.workload.paths.certs / "chain.pem"
+        if parent_dir_path := chain_path.parent:
+            self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
-            chains.setdefault(base, []).append((idx, pem))
+        # if the chain.pem already contains the current CA chain, we can skip rewriting it
+        bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
+        if ca_chain not in bundle_content:
+            self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
 
-        # reassemble chains in index order
-        out: dict[str, str] = {}
-        for base, items in chains.items():
-            items.sort(key=lambda t: t[0])
-            out[base] = "\n".join(p for _, p in items if p)
-
-        return out
-
-    def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
-        """Load stored CA cert."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        ca_trust_store = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
-        logger.debug(f"Reading stored ca from {ca_trust_store}")
-
-        # Check if file exists, handling container restart scenarios gracefully
-        try:
-            file_exists = ca_trust_store.exists()
-        except PebbleConnectionError as e:
-            # Container may be restarting (e.g., after StatefulSet patch)
-            logger.debug(f"Container not ready to check CA trust store: {e}")
-            return None
-
-        if not (file_exists and secrets):
-            return None
-
-        # Guard against missing truststore password
-        truststore_pwd = secrets.get("truststore-password")
-        if not truststore_pwd:
-            logger.warning("Truststore password not found in admin secrets, cannot read CA")
-            return None
-
-        return self.read_ca(
-            alias=alias,
-            store_pwd=truststore_pwd,
-            store_path=ca_trust_store,
-        )
-
-    def store_ca(
-        self,
-        alias: str,
-        store_pwd: str,
-        store_path: PathProtocol,
-        ca: str,
-        keep_previous: bool = True,
-    ) -> bool:
-        """Add new CA cert(s) to a PKCS12 trust store (generic).
-
-        Args:
-            alias: Alias to use for the CA certs.
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-            ca: CA cert(s) to store.
-            keep_previous: Whether to keep the previous CA certs in the trust store.
-
-        Returns:
-            bool: True if the operation succeeded, False otherwise.
-        """
-        logger.info("Storing CA cert(s) with alias: %s into truststore.", alias)
-        return self._store_ca_chain(
-            alias=alias,
-            store_pwd=store_pwd,
-            store_path=store_path,
-            ca=ca,
-            keep_previous=keep_previous,
-            add_read_perm=True,
-        )
-
-    def _store_ca_chain(  # noqa: C901
-        self,
-        *,
-        alias: str,
-        store_pwd: str,
-        store_path: PathProtocol,
-        ca: str,
-        keep_previous: bool,
-        snap_user_with_write_permission: bool = False,
-        add_read_perm: bool = False,
-    ) -> bool:
-        """Common implementation to store a CA chain into a PKCS12 keystore."""
-        # Convert PathProtocol to absolute string for keytool commands
-        # PathProtocol objects may not resolve correctly in shell commands for K8s
-        truststore_path = str(store_path)
-        if not truststore_path.startswith("/"):
-            # If relative, make it absolute based on workload paths
-            truststore_path = str(self.workload.paths.certs / truststore_path.lstrip("/"))
-
-        # Get directory for temp files (same directory as target file, like old VM code)
-        # Old VM code: tmpdir = os.path.dirname(store_path)
-        # This ensures temp files are created in the same directory as the target file
-        cert_dir = str(self.workload.paths.certs)
-        tmpdir = self.workload.paths.certs  # Use certs directory directly, not parent
-
-        starter_mode = "0664"
-        snap_user = "snap_daemon:root"
-        final_mode = "0640"
-
-        # Ensure certificates directory exists (uses the helper method)
-        self._ensure_cert_dir()
-
-        # For K8s, double-check directory exists before creating temp files
-        # Old VM code assumed directory existed, but for K8s we must ensure it
-        if self.state.substrate == Substrates.K8S:
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    if self.workload.container.can_connect():
-                        if not self.workload.container.exists(cert_dir):
-                            # Directory doesn't exist - create it now
-                            self.workload.run_cmd(f"mkdir -p {cert_dir}")
-                            self.workload.run_cmd(f"chmod 750 {cert_dir}")
-                            logger.info(
-                                f"Created certificates directory before storing CA chain: {cert_dir}"
-                            )
-                except Exception as dir_error:
-                    logger.warning(f"Could not ensure certificates directory exists: {dir_error}")
-
-        # Bootstrap keystore if it doesn't exist
-        # needed for -changealias which requires existing store
-        # This is especially important when keep_previous=True is used
-        keystore_exists = False
-        try:
-            # Check using absolute path string
-            check_path = (
-                self.workload.paths.certs / truststore_path.lstrip("/")
-                if not truststore_path.startswith("/")
-                else truststore_path
-            )
-            keystore_exists = check_path.exists()
-        except (PebbleConnectionError, AttributeError) as e:
-            # If we can't check existence (e.g., container not ready), assume it doesn't exist
-            logger.debug(f"Could not check if keystore exists: {e}, assuming it doesn't")
-
-        # Bootstrap keystore if it doesn't exist (always bootstrap for new keystores)
-        if not keystore_exists:
-            try:
-                logger.debug(f"Bootstrapping keystore {truststore_path} with dummy entry")
-                # Create a dummy entry, then delete it to initialize the PKCS12 store
-                # This ensures the keystore file exists before importing certificates
-                bootstrap_alias = "__bootstrap__"
-                bootstrap_cmd = (
-                    f"{self.keytool} -genkeypair "
-                    f"-alias {bootstrap_alias} -keystore {truststore_path} "
-                    f"-storetype PKCS12 -storepass {store_pwd} "
-                    f"-dname CN=bootstrap -keyalg RSA -keysize 2048 -validity 1"
-                )
-                self.workload.run_cmd(bootstrap_cmd)
-                # Delete the bootstrap entry
-                delete_cmd = (
-                    f"{self.keytool} -delete -alias {bootstrap_alias} "
-                    f"-keystore {truststore_path} -storetype PKCS12 -storepass {store_pwd}"
-                )
-                self.workload.run_cmd(delete_cmd)
-                logger.info(f"Successfully bootstrapped keystore {truststore_path}")
-            except OpenSearchCmdError as e:
-                # Bootstrap failed, log warning but continue
-                # keytool -importcert can create the keystore if
-                # it doesn't exist (depending on version)
-                logger.warning(
-                    f"Failed to bootstrap keystore {truststore_path}: {e}. Will attempt import anyway."
-                )
-
-        # import root first, then intermediates
-        certs = list(reversed(split_ca_chain(ca)))
-        # adjust permissions for snap user for VMs
-        # for K8s, skip it.
-        if snap_user_with_write_permission and self.state.substrate == Substrates.VM:
-            try:
-                # Check if file exists before chmod
-                check_path = (
-                    self.workload.paths.certs / truststore_path.lstrip("/")
-                    if not truststore_path.startswith("/")
-                    else truststore_path
-                )
-                if check_path.exists():
-                    self.workload.run_cmd(f"sudo chmod {starter_mode} {truststore_path}")
-            except (OpenSearchCmdError, PebbleConnectionError) as e:
-                logger.debug(f"Could not set initial permissions on {truststore_path}: {e}")
-
-        for i, pem in enumerate(certs):
-            internal_alias = f"{alias}-{i}"
-            old_internal_alias = f"old-{alias}-{i}"
-
-            # rename existing alias to old-<alias>-<i> if requested
-            if keep_previous:
-                try:
-                    self.workload.run_cmd(
-                        f"{self.keytool} -changealias "
-                        f"-alias {internal_alias} -destalias {old_internal_alias} "
-                        f"-keystore {truststore_path} -storetype PKCS12",
-                        f"-storepass {store_pwd}",
-                    )
-                except OpenSearchCmdError as e:
-                    msg = (e.out or "") + (e.err or "")
-                    if ("does not exist" not in msg) and (
-                        "Keystore file does not exist" not in msg
-                    ):
-                        logger.warning(
-                            f"Failed to move alias {internal_alias} to {old_internal_alias}: {e}"
-                        )
-                        return False
-                    else:
-                        logger.debug(
-                            f"Alias {internal_alias} does not exist, skipping move to {old_internal_alias}"
-                        )
-
-            # import the cert
-            try:
-                # Use tmpdir directly (certificates directory), not tmpdir.parent
-                # This matches old VM code: tempfile.NamedTemporaryFile(dir=tmpdir, ...)
-                with self.workload.temp_file(
-                    dir=tmpdir,
-                    data=pem,
-                    mode="w",
-                    encoding="utf-8",
-                    errors="replace",
-                    delete=True,
-                ) as tmp_path:
-                    try:
-                        # Convert tmp_path to string for keytool command
-                        tmp_path_str = str(tmp_path)
-                        self.workload.run_cmd(
-                            f"{self.keytool} -importcert -noprompt "
-                            f"-alias {internal_alias} -keystore {truststore_path} -file {tmp_path_str} -storetype PKCS12",
-                            f"-storepass {store_pwd}",
-                        )
-                    except OpenSearchCmdError as e:
-                        logger.error(
-                            "Failed to import cert for alias %s into %s: %s",
-                            internal_alias,
-                            truststore_path,
-                            (e.out or "") + (e.err or ""),
-                        )
-                        return False
-            except OSError as e:
-                # tmp file creation issues
-                logger.error("Failed to create temporary file for CA import: %s", e)
-                return False
-
-        # post-actions
-        # For K8s, skip sudo chmod/chown as containers as they run as root
-        # or have proper permissions
-        # For VM, apply snap-specific permissions
-        try:
-            if self.state.substrate == Substrates.VM:
-                command = ""
-                if snap_user_with_write_permission:
-                    command = f"sudo chown {snap_user} {truststore_path}; sudo chmod {final_mode} {truststore_path};"
-                if add_read_perm:
-                    command += f"sudo chmod +r {truststore_path}"
-                if command:
-                    self.workload.run_cmd(command)
-            elif add_read_perm and self.state.substrate == Substrates.K8S:
-                # For K8s, try chmod without sudo
-                try:
-                    self.workload.run_cmd(f"chmod 640 {truststore_path}")
-                except OpenSearchCmdError as e:
-                    # If chmod fails, it's likely already readable or permissions are set correctly
-                    logger.debug(f"Could not set permissions on {truststore_path}: {e}")
-        except OpenSearchCmdError as e:
-            logger.debug(f"Could not set permissions on {truststore_path}: {e}")
-
-        return True
-
-    def add_ca_to_request_bundle(self, ca_cert: str) -> None:
-        """Add the CA cert to the request bundle for the requests module."""
+    def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
+        """Remove the CA cert from the request bundle for the requests module."""
         bundle_path = self.workload.paths.certs / "chain.pem"
         if not bundle_path.exists():
             return
 
         bundle_content = self.workload.read_text(bundle_path)
-        if ca_cert not in bundle_content:
-            self.workload.write_text(f"{bundle_content}\n{ca_cert}", bundle_path)
-            # For K8s, invalidate cache when chain.pem is updated
-            if self.state.substrate == Substrates.K8S:
-                try:
-                    self.opensearch_client.invalidate_chain_pem_cache()
-                except (AttributeError, RuntimeError) as e:
-                    logger.warning(f"Failed to invalidate chain.pem cache: {e}")
+        self.workload.write_text(bundle_content.replace(ca_cert, ""), bundle_path)
 
-    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]):
+    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]) -> None:
         """Add key and cert to keystore."""
         if not self.state.ca_rotation_complete_in_cluster:
             return
@@ -702,108 +421,16 @@ class TlsManager(BaseManager):
             logger.error("TLS key not found, quitting.")
             return
         logger.debug(f"Storing {cert_type.val} TLS resources on disk.")
-        # Use cert_type.val for explicit filename mapping (matches ConfigManager)
-        # This ensures consistency: unit-transport.p12, unit-http.p12, app-admin.p12
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),
-            store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+            store_path=self.workload.paths.certs / f"{cert_type}.p12",
             cert=secrets.get("cert"),
             key=secrets.get("key"),
             key_pwd=secrets.get("key-password"),
         )
 
-    def _ensure_cert_dir(self) -> None:  # noqa: C901
-        """Ensure the certificates directory exists in the workload container.
-
-        For K8s, this uses container.make_dir() to create /etc/opensearch/certificates
-        with proper permissions. Falls back to mkdir command if make_dir fails.
-        For VM, directories are created via workload abstraction.
-        """
-        if self.state.substrate == Substrates.K8S:
-            # For K8s, ensure directory exists via container API
-            cert_dir = str(self.workload.paths.certs)
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    if self.workload.container.can_connect():
-                        cert_dir_created = False
-                        try:
-                            # try using container.make_dir() first
-                            self.workload.container.make_dir(
-                                cert_dir, make_parents=True, permissions=0o750
-                            )
-                            cert_dir_created = True
-                            logger.debug(
-                                f"Created certificates directory via make_dir: {cert_dir}"
-                            )
-                        except (PebbleError, FileExistsError) as e:
-                            # Directory might already exist, verify it
-                            try:
-                                if self.workload.container.exists(cert_dir):
-                                    logger.debug(
-                                        f"Certificates directory already exists: {cert_dir}"
-                                    )
-                                    cert_dir_created = True
-                                else:
-                                    logger.debug(
-                                        f"make_dir failed and directory doesn't exist, trying fallback: {e}"
-                                    )
-                            except Exception as check_error:
-                                logger.debug(
-                                    f"Could not verify directory existence, trying fallback: {check_error}"
-                                )
-
-                        # Fallback: use mkdir command if make_dir failed or directory doesn't exist
-                        if not cert_dir_created:
-                            try:
-                                self.workload.run_cmd(f"mkdir -p {cert_dir}")
-                                self.workload.run_cmd(f"chmod 750 {cert_dir}")
-                                logger.info(
-                                    f"Created certificates directory via fallback mkdir: {cert_dir}"
-                                )
-                            except Exception as fallback_error:
-                                logger.warning(
-                                    f"Failed to create certificates directory even with fallback: {fallback_error}"
-                                )
-                                # Don't raise, directory creation will be retried on next hook
-                except Exception as e:
-                    logger.warning(f"Failed to ensure certificates directory exists: {e}")
-                    # Don't raise, directory creation will be retried on next hook
-        # For VM, directory creation is handled by workload abstraction
-
-    def _get_workload_uid_gid(self) -> tuple[str, str]:
-        """Get the UID and GID of the workload user dynamically.
-
-        Returns:
-            tuple[str, str]: (uid, gid) as strings, e.g., ("584792", "584792")
-
-        Falls back to hardcoded values if stat fails.
-        """
-        if self.state.substrate == Substrates.K8S:
-            # For K8s, derive from /etc/opensearch ownership
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    if self.workload.container.can_connect():
-                        # Use container.exec() directly to avoid run_cmd() splitting arguments
-                        # bash -c expects a single string argument
-                        stat_cmd = "stat -c '%u %g' /etc/opensearch"
-                        process = self.workload.container.exec(
-                            ["bash", "-c", stat_cmd],
-                            encoding="utf-8",
-                            combine_stderr=True,
-                        )
-                        stdout, _ = process.wait_output()
-                        uid, gid = stdout.strip().split()
-                        logger.debug(f"Detected workload UID:GID: {uid}:{gid}")
-                        return uid, gid
-                except (OpenSearchCmdError, ValueError, IndexError, Exception) as e:
-                    logger.debug(f"Could not detect workload UID/GID: {e}, using defaults")
-            # Fallback to rockcraft.yaml default
-            return "584792", "584792"
-        # For VM, return default
-        return "1000", "1000"
-
-    def store_key_pair(  # noqa: C901
+    def store_key_pair(
         self,
         name: str,
         store_pwd: str,
@@ -813,9 +440,6 @@ class TlsManager(BaseManager):
         key_pwd: str | None,
     ) -> None:
         """Store cert in keystore."""
-        # Ensure certificates directory exists before writing
-        self._ensure_cert_dir()
-
         # Verify directory actually exists (critical check)
         cert_dir = str(self.workload.paths.certs)
         if self.state.substrate == Substrates.K8S:
@@ -925,30 +549,6 @@ class TlsManager(BaseManager):
                 raise
         logger.info("TLS certificate for %s stored.", name)
 
-    def update_request_ca_bundle(self) -> None:
-        """Create a new chain.pem file for requests module"""
-        logger.debug("Updating requests TLS CA bundle")
-        admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-
-        # we store the pem format to make it easier for the python requests lib
-        chain_path = self.workload.paths.certs / "chain.pem"
-
-        # Ensure certificates directory exists
-        self._ensure_cert_dir()
-
-        self.workload.write_text(admin_secret["chain"], chain_path)
-
-        # For K8s, invalidate the cached chain.pem in charm container
-        # so it gets refreshed on next request
-        if self.state.substrate == Substrates.K8S:
-            try:
-                self.opensearch_client.invalidate_chain_pem_cache()
-            except (AttributeError, RuntimeError) as e:
-                # If client not initialized yet, this is acceptable.
-                logger.warning(
-                    f"Failed to invalidate chain.pem cache (client may not be initialized): {e}"
-                )
-
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
         # In the case of the first units before TLS is initialized,
@@ -977,19 +577,14 @@ class TlsManager(BaseManager):
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
-        # Use /tmp directly or workload.paths.tmp if available
-        # Avoid joining absolute path with root (self.workload.root / "/tmp" is wrong)
-        temp_dir = "/tmp"
-        if hasattr(self.workload.paths, "tmp"):
-            temp_dir = str(self.workload.paths.tmp)
-
-        with self.workload.temp_file(mode="w+t", data=cert, dir=temp_dir) as tmp_ca_file:
-
-            try:
+        try:
+            with self.workload.temp_file(
+                mode="w+t", data=cert, dir=self.workload.root / "/tmp"
+            ) as tmp_ca_file:
                 return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
-            except OpenSearchCmdError as e:
-                logger.error("Error reading the current truststore: %s", e)
-                return None
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Error reading the current truststore: %s", e)
+            return None
 
     def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
         """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
@@ -1055,7 +650,7 @@ class TlsManager(BaseManager):
     def check_certs_expiration(self) -> dict[CertType, str] | None:
         """Checks the certificates' expiration. and return those expiring soon."""
         last_cert_check = datetime.strptime(
-            self.state.server.certs_exp_checked_at, self.CERTS_EXPIRATION_DATE_FORMAT
+            self.state.server.certs_exp_checked_at, CERTS_EXPIRATION_DATE_FORMAT
         )
 
         # See if the last check was made less than 6h ago, if yes - leave
@@ -1079,82 +674,22 @@ class TlsManager(BaseManager):
             logger.error("Cannot remove old CA: admin secrets not found.")
             return
         trust_store_pwd = secrets.get("truststore-password")
-        trust_store_path = self.workload.paths.certs / f"{self.CA_ALIAS}.p12"
+        trust_store_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
 
-        old_ca = self.read_stored_ca(alias=self.OLD_CA_ALIAS)
-        self.remove_ca(
-            alias=self.OLD_CA_ALIAS,
+        old_ca = self.read_stored_ca(alias=OLD_CA_ALIAS)
+        remove_ca(
+            workload=self.workload,
+            alias=OLD_CA_ALIAS,
             store_pwd=trust_store_pwd,
             store_path=trust_store_path,
         )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def remove_ca(self, alias: str, store_pwd: str, store_path: PathProtocol) -> None:
-        """Remove old CA cert from the truststore.
-
-        Args:
-            alias: Alias to use for the CA certs.
-            store_pwd: Password for the trust store.
-            store_path: Path to the trust store.
-        """
-        if not store_path.exists():
-            logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
-            return
-
-        list_cmd = f"{self.keytool} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
-        list_args = f"-storepass {store_pwd}"
-        try:
-            self.workload.run_cmd(list_cmd, list_args)
-        except OpenSearchCmdError as e:
-            if is_alias_missing_error(e, alias):
-                logger.debug(
-                    "Alias %s not found in %s when listing before delete, ignoring.",
-                    alias,
-                    store_path,
-                )
-                return
-            # Anything else is a real error
-            raise
-
-        del_cmd = f"{self.keytool} -delete -keystore {store_path} -alias {alias} -storetype PKCS12"
-        del_args = f"-storepass {store_pwd}"
-        try:
-            self.workload.run_cmd(del_cmd, del_args)
-        except OpenSearchCmdError as e:
-            if is_alias_missing_error(e, alias):
-                logger.debug(
-                    "Alias %s already gone from %s when deleting, ignoring.",
-                    alias,
-                    store_path,
-                )
-                return
-            raise
-
-        logger.info("Removed %s from truststore.", alias)
-
-    def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
-        """Remove the CA cert from the request bundle for the requests module."""
-        bundle_path = self.workload.paths.certs / "chain.pem"
-        if not bundle_path.exists():
-            return
-
-        bundle_content = self.workload.read_text(bundle_path)
-        self.workload.write_text(bundle_content.replace(ca_cert, ""), bundle_path)
-        # For K8s, invalidate cache when chain.pem is updated
-        if self.state.substrate == Substrates.K8S:
-            try:
-                self.opensearch_client.invalidate_chain_pem_cache()
-            except (AttributeError, RuntimeError) as e:
-                logger.warning(f"Failed to invalidate chain.pem cache: {e}")
-
     def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
         if create_store_pwd:
-            # CA store uses truststore password, not keystore password
-            self.create_store_pwd_if_not_exists(
-                Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
-            )
+            self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
 
         admin_secrets = (
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
@@ -1164,15 +699,16 @@ class TlsManager(BaseManager):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
-        if not self.store_ca(
-            alias=self.CA_ALIAS,
+        if not store_ca(
+            workload=self.workload,
+            alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
-            store_path=self.workload.paths.certs / f"{self.CA_ALIAS}.p12",
+            store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=secrets.get("ca-cert"),
             keep_previous=True,
         ):
             return False
 
-        self.add_ca_to_request_bundle(secrets.get("chain"))
+        self.update_request_ca_bundle(secrets.get("chain"))
 
         return True

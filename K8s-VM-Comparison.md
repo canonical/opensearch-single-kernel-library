@@ -565,23 +565,6 @@ Code Location:
 - K8s Logic: Ensures pod sysctls configured
 - VM Logic: Handles host reboot scenario (pods don't have host reboots)
 
-## Summary Table
-
-| Aspect | K8s | VM |
-|--------|-----|-----|
-| Workload Type | Container (Pebble) | Snap |
-| Paths | Standard Linux (/etc, /var/lib, etc.) | Snap paths (/var/snap, /snap) |
-| Node Name | Container hostname | Juju unit name |
-| Bootstrap Names | Hostname | Unit names |
-| Network Host | ["_site_", "_local_"] | ["_site_"] |
-| Publish Host | DNS name | IP address |
-| File Operations | ContainerPath (pull/push) | LocalPath (direct) |
-| Service Management | Pebble API | Snap API |
-| Sysctls | StatefulSet patch | sysctl command |
-| Readiness Check | container.can_connect | snap.present |
-| Certificate Access | Pull and cache | Direct filesystem |
-| Host Reboot | N/A (pods ephemeral) | Handled explicitly |
-
 
 ## Component Reference
 

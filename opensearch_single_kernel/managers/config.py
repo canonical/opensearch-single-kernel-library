@@ -7,6 +7,7 @@
 import logging
 import socket
 from collections import namedtuple
+from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType, Substrates
 from opensearch_single_kernel.common.exceptions import ContainerNotReadyError
@@ -15,6 +16,7 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import get_nested_value
+from opensearch_single_kernel.utils.helpers import normalized_tls_subject
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -107,10 +109,7 @@ class ConfigManager(BaseManager):
         # Use file-based discovery for hot reload of unicast_hosts.txt
         # This allows new CMs to be discovered automatically without restart
         self.yaml_setter.put(self.CONFIG_YML, "discovery.seed_providers", "file")
-        # write seed hosts file with host:port format (9300 is transport port)
-        if cm_ips:
-            seed_hosts_with_port = [f"{ip}:9300" for ip in cm_ips]
-            self.add_seed_hosts(seed_hosts_with_port)
+        self.add_seed_hosts(cm_ips)
 
         # Set initial cluster manager nodes for bootstrap
         # This is critical for brand-new clusters to elect a cluster-manager
@@ -194,11 +193,11 @@ class ConfigManager(BaseManager):
             sep=".",
         )
 
-    def cleanup_initial_cluster_managers(self):
+    def cleanup_initial_cluster_managers(self) -> None:
         """Update the opensearch.yaml by deleting initiali_cluster_manager_nodes."""
         self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
 
-    def set_client_auth(self):
+    def set_client_auth(self) -> None:
         """Configure TLS and basic http for clients."""
         # Set HTTP client auth mode to OPTIONAL to enable mTLS (mutual TLS) for HTTP layer
         # OPTIONAL allows clients to present certificates (required for securityadmin.sh)
@@ -294,11 +293,10 @@ class ConfigManager(BaseManager):
 
         nodes_config = {name: Node.from_dict(node) for name, node in nodes_config.items()}
 
-        # update CM IPs in seed hosts file
-        cm_ips = [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
-        if cm_ips:
-            seed_hosts_with_port = [f"{ip}:9300" for ip in cm_ips]
-            self.add_seed_hosts(seed_hosts_with_port)
+        # update (append) CM IPs
+        self.add_seed_hosts(
+            [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
+        )
 
         if not (new_node_conf := nodes_config.get(self.state.unit_name)):
             # the conf could not be computed / broadcast, because this node is
@@ -333,20 +331,13 @@ class ConfigManager(BaseManager):
 
         return True
 
-    def add_seed_hosts(self, seed_hosts: list[str]):
-        """Write CM nodes IPs/hostnames to the seed hosts file.
-
-        This completely overwrites the file with the provided seed hosts.
-        Format: one host:port per line (e.g., "10.0.0.1:9300")
-
-        Args:
-            seed_hosts: List of host:port strings (e.g., ["10.0.0.1:9300", "10.0.0.2:9300"])
-        """
-        seed_hosts_set = set(seed_hosts)
+    def add_seed_hosts(self, cm_ips: list[str]) -> None:
+        """Add CM nodes ips / host names to the seed host list of this unit."""
+        cm_ips_set = set(cm_ips)
 
         # only update the file if there is data to update
-        if seed_hosts_set:
-            lines = "\n".join([entry for entry in seed_hosts_set if entry.strip()])
+        if cm_ips_set:
+            lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
             self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
 
     def _validate_tls_config_inputs(
@@ -688,6 +679,14 @@ class ConfigManager(BaseManager):
 
         return written_transport or written_http
 
+    def set_admin_tls_conf(self, secrets: dict[str, Any]) -> None:
+        """Configures the admin certificate."""
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.authcz.admin_dn/{}",
+            normalized_tls_subject(secrets["subject"]),
+        )
+
     def set_profile_configuration_if_needed(
         self, current_profile: OpenSearchProfile, config_profile: OpenSearchProfile
     ) -> bool:
@@ -708,7 +707,7 @@ class ConfigManager(BaseManager):
             return True
         return False
 
-    def set_jvm_heap_size(self, heap_size_in_kb: int):
+    def set_jvm_heap_size(self, heap_size_in_kb: int) -> None:
         """Apply the performance profile's jvm heap size to the opensearch config."""
         # Check if jvm.options file exists before trying to modify it
         jvm_options_path = self.yaml_setter.base_path / self.JVM_OPTIONS

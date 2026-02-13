@@ -177,6 +177,27 @@ class BaseWorkload(ABC):
             return path.read_text()
         except (
             FileNotFoundError,
+            UnicodeError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def mkdir(
+        self, path: pathops.PathProtocol, parents: bool = False, exist_ok: bool = False
+    ) -> None:
+        """Create a directory on disk.
+
+        Args:
+            path (str): The directory path to create.
+            parents (bool): Whether to create parent directories if they do not exist.
+            exist_ok (bool): Whether to ignore the error if the directory already exists.
+        """
+        try:
+            path.mkdir(parents=parents, exist_ok=exist_ok)
+        except (
+            FileExistsError,
+            FileNotFoundError,
             LookupError,
             NotADirectoryError,
             PermissionError,
