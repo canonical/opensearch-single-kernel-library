@@ -322,6 +322,11 @@ def test_on_certificate_available(harness, mocker):
 
     harness.set_leader(is_leader=True)
     harness.charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"truststore-password": "truststore_12345"},
+    )
+    harness.charm.state.secrets.put_object(
         Scope.UNIT,
         secret_key,
         {"csr": csr, "keystore-password": keystore_password},
@@ -422,7 +427,6 @@ def test_truststore_password_secret(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.store_ca")
     mocker.patch(
         "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
     )
@@ -537,7 +541,7 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         run_cmd.call_args_list[0].args[0],
     )
     assert (
-        "sudo chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/app-admin.p12"
+        "sudo chmod 640 /var/snap/opensearch/current/etc/opensearch/certificates/app-admin.p12"
         in run_cmd.call_args_list[1].args[0]
     )
     assert "/var/snap/opensearch/current/etc/opensearch" in str(
@@ -686,7 +690,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
         run_cmd.call_args_list[0].args[0],
     )
     assert (
-        f"sudo chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
+        f"sudo chmod 640 /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
         in run_cmd.call_args_list[1].args[0]
     )
     assert "/var/snap/opensearch/current/etc/opensearch" in str(
@@ -765,10 +769,6 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
-
-    add_ca_request_to_bundle = mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.add_ca_to_request_bundle"
-    )
     update_request_ca_bundle = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle"
     )
@@ -818,8 +818,6 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     split_ca_chain.return_value = ["new_ca"]
     harness.charm.tls_events._on_certificate_available(event_mock)
-
-    add_ca_request_to_bundle.assert_called_once()
     update_request_ca_bundle.assert_called_once()
 
     # Old CA cert is saved with corresponding alias, new CA cert added to keystore
@@ -1360,7 +1358,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         run_cmd.call_args_list[0].args[0],
     )
     assert (
-        "chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/app-admin.p12"
+        "chmod 640 /var/snap/opensearch/current/etc/opensearch/certificates/app-admin.p12"
         in run_cmd.call_args_list[1].args[0]
     )
     assert "/var/snap/opensearch/current/etc/opensearch" in str(
@@ -1549,7 +1547,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         run_cmd.call_args_list[0].args[0],
     )
     assert (
-        f"chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
+        f"chmod 640 /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
         in run_cmd.call_args_list[1].args[0]
     )
 
@@ -1613,7 +1611,6 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.add_ca_to_request_bundle")
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
     mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"

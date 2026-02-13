@@ -141,7 +141,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     assert opensearch_conf["node.name"] == harness.charm.state.unit_name
     assert opensearch_conf["node.attr.temp"] == "hot"
     assert opensearch_conf["node.attr.app_id"] == app.id
-    assert opensearch_conf["network.host"] == ["_site_", "10.10.10.10"]
+    assert opensearch_conf["network.host"] == ["_site_", "_local_", "10.10.10.10"]
     assert opensearch_conf["network.publish_host"] == "20.20.20.20"
     assert opensearch_conf["http.publish_host"] == "30.30.30.30"
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]

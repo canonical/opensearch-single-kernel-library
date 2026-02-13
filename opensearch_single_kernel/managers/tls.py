@@ -11,7 +11,6 @@ from typing import Any
 
 from charmlibs.pathops import PathProtocol
 from ops.pebble import ConnectionError as PebbleConnectionError
-from ops.pebble import Error as PebbleError
 
 from opensearch_single_kernel.common.constants import (
     CertType,
@@ -40,9 +39,7 @@ from opensearch_single_kernel.utils.certificates import (
 from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
     generate_password,
-    is_alias_missing_error,
     parse_tls_file,
-    split_ca_chain,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -430,7 +427,7 @@ class TlsManager(BaseManager):
             key_pwd=secrets.get("key-password"),
         )
 
-    def store_key_pair(
+    def store_key_pair(  # noqa: C901
         self,
         name: str,
         store_pwd: str,

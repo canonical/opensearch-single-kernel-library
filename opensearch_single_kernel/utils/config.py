@@ -23,8 +23,6 @@ from ruamel.yaml.comments import CommentedSet
 from opensearch_single_kernel.common.exceptions import ContainerNotReadyError
 from opensearch_single_kernel.workload.base import BaseWorkload
 
-from opensearch_single_kernel.workload.base import BaseWorkload
-
 logger = logging.getLogger(__name__)
 
 

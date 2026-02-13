@@ -15,8 +15,10 @@ from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import get_nested_value
-from opensearch_single_kernel.utils.helpers import normalized_tls_subject
+from opensearch_single_kernel.utils.helpers import (
+    get_nested_value,
+    normalized_tls_subject,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)

@@ -956,25 +956,12 @@ class OpenSearchEventsHandler(Object):
         # doing this sequentially (revoking -> requesting new ones), to avoid triggering
         # the "certificate available" callback with old certificates
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secrets = (
-                self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
-            )
-            key_str = secrets.get("key")
-            if not key_str:
-                logger.warning("Missing key for %s, skipping renewal", cert_type.val)
-                continue
-            key = key_str.encode("utf-8")
-            key_password = secrets.get("key-password", None)
-            old_csr_str = secrets.get("csr")
-            if not old_csr_str:
-                logger.warning("Missing old CSR for %s, skipping renewal", cert_type.val)
-                continue
-            old_csr = old_csr_str.encode("utf-8")
+            secrets = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
+            old_csr = secrets["csr"].encode("utf-8")
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
-                key=key,
-                password=key_password,
+                secrets=secrets,
                 tls_file=False,
             )
 

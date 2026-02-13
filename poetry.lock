@@ -1371,27 +1371,12 @@ files = [
 ]
 
 [[package]]
-name = "jproperties"
-version = "2.1.2"
-description = "Java Property file parser and writer for Python"
-optional = false
-python-versions = ">=2.7"
-groups = ["main"]
-files = [
-    {file = "jproperties-2.1.2-py2.py3-none-any.whl", hash = "sha256:4108e868353a9f4a12bb86a92df5462d0e18d00119169533972ce473029be79a"},
-    {file = "jproperties-2.1.2.tar.gz", hash = "sha256:036fcd52c10a8a1c21e6fa2a1c292c93892e759b76490acc4809213a36ddc329"},
-]
-
-[package.dependencies]
-six = ">=1.13,<2.0"
-
-[[package]]
 name = "jsonschema"
 version = "4.25.1"
 description = "An implementation of JSON Schema validation for Python"
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "charm-libs"]
+groups = ["main", "charm-libs", "integration"]
 files = [
     {file = "jsonschema-4.25.1-py3-none-any.whl", hash = "sha256:3fba0169e345c7175110351d456342c364814cfcf3b964ba4587f22915230a63"},
     {file = "jsonschema-4.25.1.tar.gz", hash = "sha256:e4a9655ce0da0c0b67a085847e00a3a51449e1157f4f75e9fb5aa545e122eb85"},
@@ -3285,4 +3270,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "839a555d0aad44589d9ee6ad7b33f669192a14d4b0891269f39e049f8213e502"
+content-hash = "007adf98827d487615991da9752d8e437b401cb4c772cd2a9e7b9d04fc0983c2"

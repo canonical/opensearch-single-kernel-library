@@ -292,9 +292,9 @@ class TLSEventsHandler(Object):
             # and self.charm.opensearch_peer_cm.is_provider(typ="main"):
             # self.charm.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
 
-            renewal = self.charm.tls_manager.read_stored_ca(
-                alias=OLD_CA_ALIAS
-            ) is not None or (old_cert is not None and old_cert != event.certificate)
+            renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
+                old_cert is not None and old_cert != event.certificate
+            )
 
             try:
                 self.on_tls_conf_set(event, scope, cert_type, renewal)
@@ -324,12 +324,10 @@ class TLSEventsHandler(Object):
             )
             logger.debug(f"{scope.val}.{cert_type.val} TLS certificate expiring.")
 
-            key = secrets["key"]
-            key_password = secrets.get("key-password", None)
             old_csr = secrets["csr"].encode("utf-8")
 
             new_csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope=scope, cert_type=cert_type, key=key, password=key_password
+                scope=scope, cert_type=cert_type, secrets=secrets, tls_file=False
             )
             self.certs.request_certificate_renewal(
                 old_certificate_signing_request=old_csr, new_certificate_signing_request=new_csr
@@ -358,20 +356,21 @@ class TLSEventsHandler(Object):
         """
         try:
             admin_secrets = (
-                self.charm.state.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val, peek=True
-                )
+                self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
                 or {}
             )
-            
+
             if scope == Scope.UNIT:
                 if not (truststore_pwd := admin_secrets.get("truststore-password")):
                     event.defer()
                     return
 
-                keystore_pwd = self.charm.state.secrets.get_object(
-                    scope, cert_type.val, peek=True
-                )["keystore-password"]
+                unit_secrets = (
+                    self.charm.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+                )
+                if not (keystore_pwd := unit_secrets.get("keystore-password")):
+                    event.defer()
+                    return
 
                 # node http or transport cert
                 self.charm.config_manager.set_node_tls_conf(
@@ -400,9 +399,7 @@ class TLSEventsHandler(Object):
                         # if all certs are stored and CA rotation is complete in the cluster
                         # we delete the old ca and update the chain to only include the new one
                         if (
-                            self.charm.tls_manager.read_stored_ca(
-                                alias=OLD_CA_ALIAS
-                            )
+                            self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
                             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
                         ):
                             logger.info(
