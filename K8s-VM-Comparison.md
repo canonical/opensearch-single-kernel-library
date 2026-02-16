@@ -84,7 +84,7 @@ Code Location:
 - Method: set_node
 - Logic: Checks for K8s paths and appends /data and /logs subdirectories
 
-Special Handling: 
+Special Handling:
 - K8s requires /data and /logs subdirectories to be appended to paths
 - VM paths are already structured correctly via snap
 
@@ -100,7 +100,6 @@ Path Implementation:
 
 K8s:
 ```python
-# Uses container hostname (e.g., "opensearch-0")
 node_name = socket.gethostname()
 ```
 - Reason: OpenSearch uses hostname by default in containers
@@ -109,7 +108,6 @@ node_name = socket.gethostname()
 
 VM:
 ```python
-# Uses Juju unit name (e.g., "opensearch/0")
 node_name = unit_name
 ```
 - Reason: Unit name matches hostname on VM
@@ -202,7 +200,7 @@ Code Location:
 K8s:
 ```python
 # Uses DNS name (matches cert SANs)
-securityadmin_host = self.workload.get_host_public_ip() 
+securityadmin_host = self.workload.get_host_public_ip()
 ```
 
 VM:
@@ -432,11 +430,11 @@ def _get_chain_pem_path(self) -> str:
     except AttributeError:
         # VM substrate
         return chain_path_str
-    
+
     # For K8s, check cache first
     if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
         return self._chain_pem_cache_path
-    
+
     # Pull from container and cache
     return self._pull_and_cache_chain_pem(chain_path_str)
 ```
@@ -520,7 +518,7 @@ if self.state.substrate == Substrates.K8S:
     if not self.workload.workload_present:
         event.defer()
         return
-    
+
     # Configure sysctls
     if hasattr(self.charm, 'configure_pod_sysctls'):
         self.charm.configure_pod_sysctls()
@@ -577,7 +575,7 @@ Handles OpenSearch configuration file management:
   - Bootstrap configuration (K8s: hostname, VM: unit_names)
   - Network host configuration (includes _local_ for K8s)
   - Path configuration (appends /data and /logs for K8s)
-  
+
 - update_host_if_needed
   - Container readiness check for K8s
   - Network host updates
@@ -655,4 +653,3 @@ K8s-specific charm logic:
 
 - configure_pod_sysctls method: StatefulSet JSON Patch for sysctls
 - Called from event handlers: _on_install, _on_config_changed, _on_start
-

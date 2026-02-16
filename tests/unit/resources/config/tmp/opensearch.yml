@@ -127,8 +127,3 @@ discovery.seed_providers: file
 path.data: /var/snap/opensearch/common/var/lib/opensearch/data
 
 path.logs: /var/snap/opensearch/common/var/log/opensearch/logs
-
-
-
-
-
