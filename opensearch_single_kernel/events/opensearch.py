@@ -323,7 +323,7 @@ class OpenSearchEventsHandler(Object):
             # For K8s charms, ensure pod sysctls and securityContext are configured
             # This is idempotent and will skip if already configured correctly
             if self.charm.state.substrate == Substrates.K8S:
-                if hasattr(self.charm, "configure_pod_sysctls"):
+                if self.charm.unit.is_leader() and hasattr(self.charm, "configure_pod_sysctls"):
                     try:
                         self.charm.configure_pod_sysctls()
                     except Exception as e:

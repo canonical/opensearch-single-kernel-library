@@ -100,6 +100,8 @@ def store_ca(
     store_path: PathProtocol,
     ca: str,
     keep_previous: bool = True,
+    use_sudo: bool = True,
+    keytool_cmd: str = KEYTOOL,
 ) -> bool:
     """Add new CA cert(s) to a PKCS12 trust store (generic).
 
@@ -109,6 +111,8 @@ def store_ca(
         store_path: Path to the trust store.
         ca: CA cert(s) to store.
         keep_previous: Whether to keep the previous CA certs in the trust store.
+        use_sudo: use sudo if set to True
+        keytool_cmd: Command to perform keytool operation.
 
     Returns:
         bool: True if the operation succeeded, False otherwise.
@@ -122,6 +126,8 @@ def store_ca(
         ca=ca,
         keep_previous=keep_previous,
         add_read_perm=True,
+        use_sudo=use_sudo,
+        keytool_cmd=keytool_cmd,
     )
 
 
@@ -135,8 +141,11 @@ def store_ca_chain(  # noqa: C901
     keep_previous: bool,
     snap_user_with_write_permission: bool = False,
     add_read_perm: bool = False,
+    use_sudo: bool = True,
+    keytool_cmd: str = KEYTOOL,
 ) -> bool:
     """Common implementation to store a CA chain into a PKCS12 keystore."""
+    sudo_prefix = "sudo " if use_sudo else ""
     tmpdir = store_path.parent
     starter_mode = "0664"
     snap_user = "snap_daemon:root"
@@ -145,7 +154,7 @@ def store_ca_chain(  # noqa: C901
     certs = list(reversed(split_ca_chain(ca)))
     if snap_user_with_write_permission and store_path.exists():
         try:
-            workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
+            workload.run_cmd(f"{sudo_prefix}chmod {starter_mode} {store_path}")
         except OpenSearchCmdError:
             pass
 
@@ -157,7 +166,7 @@ def store_ca_chain(  # noqa: C901
         if keep_previous:
             try:
                 workload.run_cmd(
-                    f"{KEYTOOL} -changealias "
+                    f"{keytool_cmd} -changealias "
                     f"-alias {internal_alias} -destalias {old_internal_alias} "
                     f"-keystore {store_path} -storetype PKCS12",
                     f"-storepass {store_pwd}",
@@ -179,7 +188,7 @@ def store_ca_chain(  # noqa: C901
             ) as tmp_path:
                 try:
                     workload.run_cmd(
-                        f"{KEYTOOL} -importcert -noprompt "
+                        f"{keytool_cmd} -importcert -noprompt "
                         f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12",
                         f"-storepass {store_pwd}",
                     )
@@ -200,9 +209,12 @@ def store_ca_chain(  # noqa: C901
     try:
         command = ""
         if snap_user_with_write_permission:
-            command = f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
+            command = (
+                f"{sudo_prefix}chown {snap_user} {store_path}; "
+                f"{sudo_prefix}chmod {final_mode} {store_path};"
+            )
         if add_read_perm:
-            command += f"sudo chmod +r {store_path}"
+            command += f"{sudo_prefix}chmod +r {store_path}"
         if command:
             workload.run_cmd(command)
     except OpenSearchCmdError:
@@ -212,7 +224,11 @@ def store_ca_chain(  # noqa: C901
 
 
 def remove_ca(
-    workload: BaseWorkload, alias: str, store_pwd: str, store_path: PathProtocol
+    workload: BaseWorkload,
+    alias: str,
+    store_pwd: str,
+    store_path: PathProtocol,
+    keytool_cmd: str = KEYTOOL,
 ) -> None:
     """Remove old CA cert from the truststore.
 
@@ -221,12 +237,13 @@ def remove_ca(
         alias: Alias to use for the CA certs.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
+        keytool_cmd: command to run the keytool command.
     """
     if not store_path.exists():
         logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
         return
 
-    list_cmd = f"{KEYTOOL} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    list_cmd = f"{keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
     list_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(list_cmd, list_args)
@@ -241,7 +258,7 @@ def remove_ca(
         # Anything else is a real error
         raise
 
-    del_cmd = f"{KEYTOOL} -delete -keystore {store_path} -alias {alias} -storetype PKCS12"
+    del_cmd = f"{keytool_cmd} -delete -keystore {store_path} -alias {alias} -storetype PKCS12"
     del_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(del_cmd, del_args)

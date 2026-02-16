@@ -111,7 +111,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         """
         return Substrates.K8S
 
-    def _configure_pod_sysctls(self) -> None:
+    def configure_pod_sysctls(self) -> None:
         """Configure pod sysctls and security context using lightkube.
 
         Patches the StatefulSet to add:
@@ -328,7 +328,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
                         )
                 json_operations_env_repair.append(
                     {
-                        "operation": "replace",
+                        "op": "replace",
                         "path": f"/spec/template/spec/containers/{container_idx}/env",
                         "value": env_dicts,
                     }
@@ -498,7 +498,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         if not pod_spec:
             json_operations.append(
                 {
-                    "operation": "add",
+                    "op": "add",
                     "path": "/spec/template/spec/securityContext",
                     "value": {},
                 }
@@ -514,7 +514,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             ) != desired_fs_group:
                 json_operations.append(
                     {
-                        "operation": "replace" if "fsGroup" in pod_spec else "add",
+                        "op": "replace" if "fsGroup" in pod_spec else "add",
                         "path": "/spec/template/spec/securityContext/fsGroup",
                         "value": desired_fs_group,
                     }
@@ -522,7 +522,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             if pod_spec.get("fsGroupChangePolicy") != FS_GROUP_CHANGE_POLICY:
                 json_operations.append(
                     {
-                        "operation": "replace" if "fsGroupChangePolicy" in pod_spec else "add",
+                        "op": "replace" if "fsGroupChangePolicy" in pod_spec else "add",
                         "path": "/spec/template/spec/securityContext/fsGroupChangePolicy",
                         "value": FS_GROUP_CHANGE_POLICY,
                     }
@@ -534,7 +534,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             if field in pod_spec:
                 json_operations.append(
                     {
-                        "operation": "remove",
+                        "op": "remove",
                         "path": f"/spec/template/spec/securityContext/{field}",
                     }
                 )
@@ -575,7 +575,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             if not opensearch_sc:
                 json_operations.append(
                     {
-                        "operation": "add",
+                        "op": "add",
                         "path": f"/spec/template/spec/containers/{container_idx}/securityContext",
                         "value": {},
                     }
@@ -592,7 +592,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             for field_name, field_value in security_context_fields:
                 json_operations.append(
                     {
-                        "operation": "replace" if field_name in opensearch_sc else "add",
+                        "op": "replace" if field_name in opensearch_sc else "add",
                         "path": f"/spec/template/spec/containers/{container_idx}/securityContext/{field_name}",
                         "value": field_value,
                     }
@@ -636,7 +636,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             # add or replace sysctls
             json_operations.append(
                 {
-                    "operation": "replace" if "sysctls" in pod_spec else "add",
+                    "op": "replace" if "sysctls" in pod_spec else "add",
                     "path": "/spec/template/spec/securityContext/sysctls",
                     "value": merged_sysctls,
                 }
@@ -697,32 +697,35 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
                         )
 
             # build initContainer definition
-            init_container = self._create_fix_permissions_init_container(storage_volume_mounts)
+            desired_init_container = self._create_fix_permissions_init_container(
+                storage_volume_mounts
+            )
 
             # convert existing initContainers to list of dicts
             existing_init_containers_list = []
-            for init_container in existing_init_containers:
+            for existing_init_container in existing_init_containers:
                 init_container_dict = (
-                    init_container.to_dict()
-                    if hasattr(init_container, "to_dict")
-                    else init_container
+                    existing_init_container.to_dict()
+                    if hasattr(existing_init_container, "to_dict")
+                    else existing_init_container
                 )
                 if isinstance(init_container_dict, dict):
                     existing_init_containers_list.append(init_container_dict)
-                elif hasattr(init_container, "__dict__"):
-                    existing_init_containers_list.append(dict(init_container))
+                elif hasattr(existing_init_container, "__dict__"):
+                    existing_init_containers_list.append(dict(existing_init_container))
                 else:
                     logger.warning(
-                        "Could not convert initContainer to dict, skipping: %s", init_container
+                        "Could not convert initContainer to dict, skipping: %s",
+                        existing_init_container,
                     )
                     continue
 
             # Add our initContainer at the beginning
-            existing_init_containers_list.insert(0, init_container)
+            existing_init_containers_list.insert(0, desired_init_container)
 
             json_operations.append(
                 {
-                    "operation": "replace" if existing_init_containers else "add",
+                    "op": "replace" if existing_init_containers else "add",
                     "path": "/spec/template/spec/initContainers",
                     "value": existing_init_containers_list,
                 }
@@ -821,7 +824,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             if existing_annotations:
                 restart_annotation_operations = [
                     {
-                        "operation": (
+                        "op": (
                             "replace"
                             if POD_RESTART_ANNOTATION_KEY in existing_annotations
                             else "add"
@@ -834,7 +837,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
             else:
                 restart_annotation_operations = [
                     {
-                        "operation": "add",
+                        "op": "add",
                         "path": "/spec/template/metadata/annotations",
                         "value": {POD_RESTART_ANNOTATION_KEY: restart_timestamp},
                     }

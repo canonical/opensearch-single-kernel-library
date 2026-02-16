@@ -32,6 +32,7 @@ from opensearch_single_kernel.common.constants import (
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
     DIR_PERMISSIONS_WRITABLE,
+    OPENSEARCH_HTTP_PORT,
     OPENSEARCH_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
@@ -525,7 +526,7 @@ class K8sWorkload(BaseWorkload):
             'sh -c \'code=$(curl -ks --max-time 2 -o /dev/null -w "%%{http_code}" '
             "https://%s:%s || echo 000); "
             'test "$code" = "200" -o "$code" = "401" -o "$code" = "403"\''
-        ) % dns_name
+        ) % (dns_name, OPENSEARCH_HTTP_PORT)
 
         return {
             "override": "replace",
@@ -749,7 +750,7 @@ class K8sWorkload(BaseWorkload):
         return file_path_str, file_path
 
     def _write_temp_file_data(
-        self, file_path: PathProtocol, data: str, encoding: str | None
+        self, file_path: PathProtocol, data: str | bytes, encoding: str | None
     ) -> None:
         """Write data to temporary file in container.
 
@@ -757,12 +758,17 @@ class K8sWorkload(BaseWorkload):
 
         Args:
             file_path: PathProtocol object representing the file path.
-            data: string data to write.
-            encoding: encoding for data writing.
+            data: string/bytes data to write.
+            encoding: optional encoding for bytes decoding (defaults to utf-8).
         """
         # ensure parent directory exists (consistent with write_text() pattern)
         self._ensure_parent_dir(file_path)
-        file_path.write_text(data, encoding=encoding or "utf-8")
+        # NOTE: ContainerPath.write_text() does not accept an `encoding=` kwarg.
+        # Decode bytes here if needed, then push text content.
+        text = (
+            data if isinstance(data, str) else data.decode(encoding or "utf-8", errors="replace")
+        )
+        file_path.write_text(text)
 
     def _cleanup_temp_file(self, file_path_str: str) -> None:
         """Delete temporary file from container.
@@ -1334,7 +1340,7 @@ class K8sWorkload(BaseWorkload):
         return error_message
 
     @override
-    def _get_kernel_property_value(self, property_name: str) -> int | None:
+    def _get_kernel_property_value(self, prop: str) -> int | None:
         """Get the value of a kernel parameter.
 
         Try 3 methods in order to get the value of a kernel parameter:
@@ -1343,21 +1349,21 @@ class K8sWorkload(BaseWorkload):
         3. Read directly from /proc/sys/ (fallback)
 
         Args:
-            property_name: Kernel property name (e.g., "vm.max_map_count").
+            prop: Kernel property name (e.g., "vm.max_map_count").
 
         Returns:
             int | None: Kernel property value, or None if cannot be read.
         """
         # try sysctl -n first, most reliable method
-        if (property_value := self._read_kernel_property_via_sysctl_n(property_name)) is not None:
+        if (property_value := self._read_kernel_property_via_sysctl_n(prop)) is not None:
             return property_value
 
         # fallback: try sysctl without -n flag
-        if (property_value := self._read_kernel_property_via_sysctl(property_name)) is not None:
+        if (property_value := self._read_kernel_property_via_sysctl(prop)) is not None:
             return property_value
 
         # final fallback: read directly from /proc/sys/
-        return self._read_kernel_property_via_procfs(property_name)
+        return self._read_kernel_property_via_procfs(prop)
 
     def _read_kernel_property_via_sysctl_n(self, property_name: str) -> int | None:
         """Read kernel property using 'sysctl -n' command.

@@ -13,6 +13,8 @@ from charmlibs.pathops import PathProtocol
 from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_RUN_AS_GROUP,
+    OPENSEARCH_RUN_AS_USER,
     CertType,
     Scope,
     StoreType,
@@ -57,6 +59,15 @@ class TlsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "tls_manager"
+
+    def _get_workload_uid_gid(self) -> tuple[int, int]:
+        """Return numeric uid/gid used by the workload process.
+
+        For Kubernetes substrates, the OpenSearch container runs as a fixed numeric UID/GID to
+        match the rock image user definition. These IDs are used for best-effort `chown` calls
+        when writing TLS artifacts. On VM, this value is currently unused.
+        """
+        return OPENSEARCH_RUN_AS_USER, OPENSEARCH_RUN_AS_GROUP
 
     @property
     def keytool(self) -> str:
@@ -679,6 +690,7 @@ class TlsManager(BaseManager):
             alias=OLD_CA_ALIAS,
             store_pwd=trust_store_pwd,
             store_path=trust_store_path,
+            keytool_cmd=self.keytool,
         )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
@@ -703,6 +715,8 @@ class TlsManager(BaseManager):
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=secrets.get("ca-cert"),
             keep_previous=True,
+            keytool_cmd=self.keytool,
+            use_sudo=self.state.substrate == Substrates.VM,
         ):
             return False
 
