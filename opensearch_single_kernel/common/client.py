@@ -22,7 +22,15 @@ from tenacity import (
     wait_fixed,
 )
 
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.constants import (
+    ROLE_ENDPOINT,
+    ROLESMAPPING_ENDPOINT,
+    USER_ENDPOINT,
+)
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchUserMgmtError,
+)
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -43,6 +51,279 @@ class OpenSearchClient:
         self.port = port
         self.workload = workload
         self.admin_secret = admin_secret
+
+    def create_index(self, index_name: str) -> None:
+        """Create an index in OpenSearch.
+
+        Args:
+            index_name: The name of the index to create.
+        """
+        try:
+            self.request("PUT", f"/{index_name}")
+        except OpenSearchHttpError as e:
+            if (
+                e.response_code == 400
+                and e.response_body.get("error", {}).get("type")
+                == "resource_already_exists_exception"
+            ):
+                logger.warning("Index failed to be created as it already exists, continuing...")
+            else:
+                raise e
+
+    def get_roles(self) -> dict[str, Any]:
+        """Gets list of roles.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+        """
+        try:
+            return self.request("GET", f"{ROLE_ENDPOINT}/")
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
+
+    def create_role(
+        self,
+        role_name: str,
+        permissions: dict[str, str] | None = None,
+        action_groups: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Creates a role with the given permissions.
+
+        This method assumes the dicts provided are valid opensearch config. If not, raises
+        OpenSearchUserMgmtError.
+
+        Args:
+            role_name: name of the role
+            permissions: A valid dict of existing opensearch permissions.
+            action_groups: A valid dict of existing opensearch action groups.
+
+        Raises:
+            OpenSearchUserMgmtError: If the role creation request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request(
+                "PUT",
+                f"{ROLE_ENDPOINT}/{role_name}",
+                payload={**(permissions or {}), **(action_groups or {})},
+            )
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            logger.error(f"Couldn't create role: {resp}")
+            raise OpenSearchUserMgmtError(f"creating role {role_name} failed")
+
+        return resp
+
+    def remove_role(self, role_name: str) -> dict[str, Any]:
+        """Remove the given role from opensearch distribution.
+
+        Args:
+            role_name: name of the role to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if role_name is empty
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        if not role_name:
+            raise OpenSearchUserMgmtError(
+                "role name empty - sending a DELETE request to endpoint root isn't permitted"
+            )
+
+        try:
+            resp = self.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return {
+                    "status": "OK",
+                    "response": "role does not exist, and therefore has not been removed",
+                }
+            else:
+                raise OpenSearchUserMgmtError(e)
+
+        logger.debug(resp)
+        if resp.get("status") != "OK":
+            raise OpenSearchUserMgmtError(f"removing role {role_name} failed")
+
+        return resp
+
+    def get_users(self) -> dict[str, Any]:
+        """Gets list of users.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+        """
+        try:
+            return self.request("GET", f"{USER_ENDPOINT}/")
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
+
+    def create_user(
+        self, user_name: str, roles: list[str] | None, hashed_pwd: str
+    ) -> dict[str, Any]:
+        """Create or update user and assign the requested roles to the user.
+
+        Args:
+            user_name: name of the user to be created.
+            roles: list of roles to be applied to the user. These must already exist.
+            hashed_pwd: the hashed password for the user.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        payload = {"hash": hashed_pwd}
+        if roles:
+            payload["opendistro_security_roles"] = roles
+
+        try:
+            resp = self.request(
+                "PUT",
+                f"{USER_ENDPOINT}/{user_name}",
+                payload=payload,
+            )
+        except OpenSearchHttpError as e:
+            logger.error(f"Couldn't create user {str(e)}")
+            raise OpenSearchUserMgmtError(e)
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            raise OpenSearchUserMgmtError(f"creating user {user_name} failed")
+
+        return resp
+
+    def remove_user(self, user_name: str) -> dict[str, Any]:
+        """Remove the given user from opensearch distribution.
+
+        Args:
+            user_name: name of the user to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if user_name is empty
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        if not user_name:
+            raise OpenSearchUserMgmtError(
+                "user name empty - sending a DELETE request to endpoint root isn't permitted"
+            )
+
+        try:
+            resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return {
+                    "status": "OK",
+                    "response": "user does not exist, and therefore has not been removed",
+                }
+            else:
+                raise OpenSearchUserMgmtError(e)
+
+        logger.debug(resp)
+        if resp.get("status") != "OK":
+            raise OpenSearchUserMgmtError(f"removing user {user_name} failed")
+        return resp
+
+    def patch_user(self, user_name: str, patches: list[dict[str, Any]]) -> dict[str, Any]:
+        """Applies patches to user.
+
+        Args:
+            user_name: name of the user to be created.
+            patches: a list of patches to be applied to the user in question.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request(
+                "PATCH",
+                f"{USER_ENDPOINT}/{user_name}",
+                payload=patches,
+            )
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
+
+        if resp.get("status") != "OK":
+            raise OpenSearchUserMgmtError(f"patching user {user_name} failed")
+
+        return resp
+
+    def create_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+        """Creates or replaces role mapping for selected role with all of its users mapped to it.
+
+        Args:
+            role: name of the role for users being mapped to.
+            mapped_users: all the users, that should be mapped to the specified role.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+        """
+        try:
+            resp = self.request(
+                "PUT",
+                f"{ROLESMAPPING_ENDPOINT}/{role}",
+                payload={"users": mapped_users, "backend_roles": [role]},
+            )
+        except OpenSearchHttpError as e:
+            logger.error(f"Couldn't create role mapping {str(e)}")
+            raise OpenSearchUserMgmtError(e)
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            raise OpenSearchUserMgmtError(f"creating role mapping {role} failed")
+
+    def remove_role_mapping(self, role: str) -> None:
+        """Remove the given role mapping if it exists.
+
+        Args:
+            role: name of the role mapping to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if role is empty
+        """
+        if not role:
+            raise OpenSearchUserMgmtError(
+                "role name empty - sending a DELETE request to endpoint root isn't permitted"
+            )
+
+        try:
+            resp = self.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                resp = {
+                    "status": "OK",
+                    "response": "role mapping does not exist, and therefore has not been removed",
+                }
+            else:
+                raise OpenSearchUserMgmtError(e)
+
+        if resp.get("status") != "OK":
+            raise OpenSearchUserMgmtError(f"removing role mapping {role} failed")
+
+    def update_user_password(self, username: str, hashed_pwd: str):
+        """Change user hashed password."""
+        resp = self.request(
+            "PATCH",
+            f"{USER_ENDPOINT}/{username}",
+            [{"op": "replace", "path": "/hash", "value": hashed_pwd}],
+        )
+        if resp.get("status") != "OK":
+            raise OpenSearchUserMgmtError(f"{resp}")
 
     def apply_no_replication_to_index(
         self,
@@ -170,7 +451,7 @@ class OpenSearchClient:
             temperature=current_node.get("attributes", {}).get("temp"),
         )
 
-    def get_roles(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
+    def get_roles_by_unit_name(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
         """Get the list of the roles assigned to this node.
 
         Args:

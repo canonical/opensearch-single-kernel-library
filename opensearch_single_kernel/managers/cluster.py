@@ -549,7 +549,9 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
-            return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
+            return self.opensearch_client.get_roles_by_unit_name(
+                self.state.unit_name, self.alt_hosts
+            )
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 

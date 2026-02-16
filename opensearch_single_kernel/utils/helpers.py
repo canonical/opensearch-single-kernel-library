@@ -4,6 +4,7 @@
 
 """A set of helpers functions."""
 import base64
+import logging
 import math
 import re
 import secrets
@@ -18,6 +19,7 @@ from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
+    PROTECTED_INDEX_NAMES,
     DeploymentType,
     StartMode,
 )
@@ -26,6 +28,9 @@ from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+
+logger = logging.getLogger(__name__)
 
 
 def format_unit_name(unit: Unit | str, app: App) -> str:
@@ -146,3 +151,26 @@ def parse_tls_file(raw_content: str) -> bytes:
             raw_content,
         ).encode("utf-8")
     return base64.b64decode(raw_content)
+
+
+def validate_index_name(index_name: str) -> bool:
+    """Validates that the index name provided in the relation is acceptable."""
+    if index_name in PROTECTED_INDEX_NAMES:
+        logger.error(
+            f"invalid index name {index_name} - tried to access a protected index in {PROTECTED_INDEX_NAMES}"
+        )
+        return False
+
+    if not index_name.islower():
+        logger.error(f"invalid index name {index_name} - index names must be lowercase")
+        return False
+
+    forbidden_chars = [" ", ",", ":", '"', "*", "+", "\\", "/", "|", "?", "#", ">", "<"]
+    if any([char in index_name for char in forbidden_chars]):
+        logger.error(
+            f"invalid index name {index_name} - index name includes one or more of "
+            f"the following forbidden characters: {forbidden_chars}"
+        )
+        return False
+
+    return True

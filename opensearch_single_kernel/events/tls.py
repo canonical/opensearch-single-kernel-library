@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
+    ConfigChangedEvent,
     Object,
     RelationBrokenEvent,
     RelationCreatedEvent,
@@ -317,6 +318,12 @@ class TLSEventsHandler(Object):
         logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
         self._on_certificate_expiring(event)
 
+    def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
+        """Triggered when the unit IP is changed."""
+        self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)
+        self.charm.tls_manager.delete_stored_tls_resources()
+        self.request_new_unit_certificates()
+
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
     ):
@@ -400,7 +407,9 @@ class TLSEventsHandler(Object):
 
         password = event.params.get("password") or generate_password()
         try:
-            self.charm.users_manager.put_or_update_internal_user_leader(user_name, password)
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                user_name, password
+            )
             label = self.charm.state.secrets.password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit

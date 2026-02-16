@@ -48,6 +48,12 @@ class TlsManager(BaseManager):
     can be used by different events handlers not only tls events handler.
     """
 
+    CA_ALIAS = "ca"
+    OLD_CA_ALIAS = f"old-{CA_ALIAS}"
+    KEYTOOL = "opensearch.keytool"
+    OLD_CA_PREFIX = "old-"
+    CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "tls_manager"

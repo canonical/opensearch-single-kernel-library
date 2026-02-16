@@ -37,10 +37,10 @@ def test_on_leader_elected(harness, mocker):
         new_callable=PropertyMock,
     )
     purge_initial_default_users = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_default_users"
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
     put_or_update_internal_user_leader = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
 
     harness.set_leader(True)
@@ -83,10 +83,10 @@ def test_on_leader_elected_index_initialised(harness, mocker):
         new_callable=PropertyMock,
     )
     purge_initial_default_users = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.purge_initial_default_users"
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
     put_or_update_internal_user_leader = mocker.patch(
-        "opensearch_single_kernel.managers.users.UsersManager.put_or_update_internal_user_leader"
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
 
     # Make sure users are not initialised when security index is already initialised

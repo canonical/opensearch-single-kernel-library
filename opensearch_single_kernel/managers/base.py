@@ -3,7 +3,9 @@
 # See LICENSE file for licensing details.
 
 """Base OpenSearch manager."""
+import logging
 import random
+from functools import cached_property
 from typing import List, Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
@@ -11,6 +13,8 @@ from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scop
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class BaseManager:
@@ -102,3 +106,17 @@ class BaseManager:
                     )
                     nodes.append(node)
         return nodes
+
+    @cached_property
+    def version(self) -> str:
+        """Returns the version number of this opensearch instance.
+
+        Raises:
+            OpenSearchError if the GET request fails.
+        """
+        # Will have a format similar to:
+        # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
+        result = self.workload.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null")
+        output = result.out.strip()
+        logger.debug(f"version call output: {output}")
+        return output.split(", ")[0].split(": ")[1]

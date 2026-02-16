@@ -160,9 +160,7 @@ class OpenSearchEventsHandler(Object):
         # if self.opensearch_peer_cm.is_consumer():
         # self.peer_cluster_requirer.refresh_requirer_relation_data()
 
-        # for relation in self.model.relations.get(ClientRelationName, []):
-        # self.opensearch_provider.update_endpoints(relation)
-
+        self.update_external_clients_endpoints()
         # register new cm addresses on every node
         self.charm.config_manager.add_cm_addresses_to_conf()
 
@@ -357,21 +355,19 @@ class OpenSearchEventsHandler(Object):
             if health == HealthColors.UNKNOWN:
                 return
 
-        # TODO: Handle client relations updates
-        # for relation in self.model.relations.get(ClientRelationName, []):
-        # self.opensearch_provider.update_endpoints(relation)
-
-        # deployment_desc = self.charm.state.application.deployment_desc
+        self.update_external_clients_endpoints()
+        deployment_desc = self.charm.state.application.deployment_desc
+        # TODO: Handle upgrade in progress
         # if self.upgrade_in_progress:
         # logger.debug(
         # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
         # )
-        # elif (
-        #    self.unit.is_leader()
-        #    and deployment_desc
-        #    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-        # ):
-        #    self.opensearch_provider.remove_lingering_relation_users_and_roles()
+        if (
+            self.charm.unit.is_leader()
+            and deployment_desc
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        ):
+            self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -414,11 +410,11 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchInstallError:
                 self.charm.status.set(CharmStatuses.INSTALL_ERROR)
 
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
         if self.charm.config_manager.update_host_if_needed():
             # This happens when the unit IP has changed
-            self.on_unit_ip_changed(event)
+            self.charm.tls_events.on_unit_ip_changed(event)
 
         if self.charm.unit.is_leader():
             if self.charm.cluster_manager.reconcile_cluster_config():
@@ -460,6 +456,10 @@ class OpenSearchEventsHandler(Object):
         profile_restart_needed = self.charm.config_manager.set_profile_configuration_if_needed(
             current_profile, config_profile
         )
+        if self.charm.unit.is_leader():
+            if not self.charm.external_clients_manager.update_relations_roles_mapping():
+                event.defer()
+
         if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
             logger.debug(
                 "Restarting opensearch due to config change: profile_restart_needed=%s",
@@ -506,7 +506,7 @@ class OpenSearchEventsHandler(Object):
 
         # User config is currently in a default state, which contains multiple insecure default
         # users. Purge the user list before initialising the users the charm requires.
-        self.charm.users_manager.purge_initial_default_users()
+        self.charm.internal_users_manager.purge_initial_default_users()
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
@@ -518,7 +518,9 @@ class OpenSearchEventsHandler(Object):
         # with corresponding credentials
         if self.charm.unit.is_leader():
             for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
+                self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                    user, update=False
+                )
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
@@ -591,9 +593,9 @@ class OpenSearchEventsHandler(Object):
 
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
-            self.charm.users_manager.purge_initial_default_users()
+            self.charm.internal_users_manager.purge_initial_default_users()
             for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.users_manager.save_user_locally(user)
+                self.charm.internal_users_manager.save_user_locally(user)
 
         # Configure Client Authentication
         try:
@@ -821,7 +823,9 @@ class OpenSearchEventsHandler(Object):
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
             # Creating the monitoring user
-            self.charm.users_manager.put_or_update_internal_user_leader(COS_USER, update=False)
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                COS_USER, update=False
+            )
 
         self.charm.unit.open_port("tcp", 9200)
 
@@ -1084,14 +1088,13 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Secret change for %s", str(label_key))
 
         if is_leader and label_key == self.charm.state.secrets.password_key(KIBANA_SERVER_USER):
-            pass
-            # self.charm.opensearch_provider.update_dashboards_password()
+            self.charm.external_clients_manager.update_dashboards_password()
 
         # Non-leader units need to maintain local users in internal_users.yml
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
             if sys_user := self.charm.state.secrets._user_from_hash_key(label_key):
-                self.charm.users_manager.put_internal_user(sys_user, password)
+                self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
@@ -1219,8 +1222,15 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
 
-    def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
-        """Triggered when the unit IP is changed."""
-        self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)
-        self.charm.tls_manager.delete_stored_tls_resources()
-        self.request_new_unit_certificates()
+    def update_external_clients_endpoints(self) -> None:
+        """Update the endpoints of all the external clients relations."""
+        for external_client in self.charm.state.external_clients:
+            if self.charm.unit.is_leader():
+                try:
+                    nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
+                except OpenSearchHttpError:
+                    logger.error("unable to get nodes")
+                    nodes = []
+                self.charm.external_clients_manager.update_relation_endpoints(
+                    external_client, nodes
+                )
