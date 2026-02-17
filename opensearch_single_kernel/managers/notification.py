@@ -15,11 +15,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRelationData
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import SMTP_SECRET_LABEL
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRelationData
 from opensearch_single_kernel.managers.base import BaseManager
 
 
@@ -125,9 +125,7 @@ class NotificationsManager(BaseManager):
         """
         return f"smtp-{relation_id}_smtp-account"
 
-    def get_smtp_config(
-        self, parameters: SmtpRelationData, relation_id: int
-    ) -> SmtpConfig:
+    def get_smtp_config(self, parameters: SmtpRelationData, relation_id: int) -> SmtpConfig:
         """Derive SMTP-related config IDs and normalized values from relation data.
 
         Args:
@@ -239,15 +237,11 @@ class NotificationsManager(BaseManager):
             "config_type": "email",
             "email": {
                 "email_account_id": smtp_account_id,
-                "recipient_list": [
-                    {"recipient": r} for r in (fallback_recipients or [])
-                ],
+                "recipient_list": [{"recipient": r} for r in (fallback_recipients or [])],
                 "email_group_id_list": list(email_group_ids),
             },
         }
-        self._create_or_update_config(
-            config_id=channel_id, name=channel_id, config=config
-        )
+        self._create_or_update_config(config_id=channel_id, name=channel_id, config=config)
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
     def delete_config(self, config_id: str) -> None:
@@ -299,9 +293,7 @@ class NotificationsManager(BaseManager):
             True if config exists, False if 404.
         """
         try:
-            self.opensearch_client.request(
-                "GET", f"/_plugins/_notifications/configs/{config_id}"
-            )
+            self.opensearch_client.request("GET", f"/_plugins/_notifications/configs/{config_id}")
             return True
         except OpenSearchHttpError as exc:
             code = getattr(exc, "response_code", None)
@@ -310,9 +302,7 @@ class NotificationsManager(BaseManager):
             raise
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def _create_config(
-        self, *, config_id: str, name: str, config: dict[str, object]
-    ) -> None:
+    def _create_config(self, *, config_id: str, name: str, config: dict[str, object]) -> None:
         """Create notification config.
 
         Args:

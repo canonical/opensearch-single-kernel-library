@@ -8,7 +8,7 @@
 import json
 import logging
 import socket
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ops import Application, JujuVersion, Object, Relation, Unit
 
@@ -27,7 +27,6 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
-    Model,
     OpenSearchProfile,
     PeerClusterApp,
     PerformanceType,
@@ -39,7 +38,6 @@ from opensearch_single_kernel.core.relations import (
     PeerCluster,
     PeerClusterData,
     PeerClusterOrchestratorData,
-    RelationDataStore,
     RelationState,
 )
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
@@ -226,7 +224,6 @@ class OpenSearchApplication(RelationState):
     ):
         super().__init__(relation, data_interface, component)
         self.app = component
-
 
     @property
     def name(self) -> str:

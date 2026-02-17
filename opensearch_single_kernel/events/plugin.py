@@ -79,6 +79,4 @@ class PluginEventsHandler(Object):
         self.charm.keystore_events.reload_event.emit()
 
         for label in removed:
-            self.charm.plugin_manager.remove_plugin_config(
-                scope=Scope.UNIT, label=label
-            )
+            self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)

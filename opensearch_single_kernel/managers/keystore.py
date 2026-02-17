@@ -16,7 +16,6 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -74,15 +73,11 @@ class KeystoreManager(BaseManager):
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup
-            logger.debug(
-                "Opensearch not running. Keystore settings will be loaded at start time."
-            )
+            logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
             return True
 
         try:
-            response = self.opensearch_client.request(
-                "POST", "_nodes/reload_secure_settings"
-            )
+            response = self.opensearch_client.request("POST", "_nodes/reload_secure_settings")
         except OpenSearchHttpError as e:
             logger.error("Could not reload secure settings: %s", e)
             return False

@@ -10,15 +10,14 @@ This class is instantiated at the operator level and is called at every relevant
 config-changed, upgrade, s3-credentials-changed, etc.
 """
 
+import json
 import logging
 
 from ops import ModelError, SecretNotFoundError
-import json
 
 from opensearch_single_kernel.common.constants import Scope
 from opensearch_single_kernel.core.models import PluginConfigInfo
 from opensearch_single_kernel.core.state import ClusterState
-
 
 logger = logging.getLogger(__name__)
 

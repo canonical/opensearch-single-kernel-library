@@ -20,9 +20,7 @@ class CharmStatuses(Enum):
 
     # TLS Status
     TLS_RELATION_MISSING = BlockedStatus("Missing TLS relation with this cluster.")
-    TLS_NOT_FULLY_CONFIGURED = MaintenanceStatus(
-        "Waiting for TLS to be fully configured..."
-    )
+    TLS_NOT_FULLY_CONFIGURED = MaintenanceStatus("Waiting for TLS to be fully configured...")
     TLS_CA_ROTATION = MaintenanceStatus("Applying new CA certificate...")
     TLS_RELATION_BROKEN = BlockedStatus(
         "Relation broken with the TLS Operator while TLS not fully configured. Stopping OpenSearch."
@@ -54,9 +52,7 @@ class CharmStatuses(Enum):
     CLUSTER_HEALTH_YELLOW = BlockedStatus(
         "1 or more 'replica' shards are not assigned, please scale your application up."
     )
-    WAITING_FOR_BUSY_SHARDS = MaintenanceStatus(
-        "Some shards are still initializing / relocating."
-    )
+    WAITING_FOR_BUSY_SHARDS = MaintenanceStatus("Some shards are still initializing / relocating.")
     WAITING_FOR_SPECIFIC_BUSY_SHARDS = WaitingStatus(
         "The shards {shards} need to complete building"
     )
@@ -65,9 +61,7 @@ class CharmStatuses(Enum):
     REQUEST_LOCK_ON_START = WaitingStatus("Requesting lock on operation: start")
 
     # Security Index
-    SECURITY_INDEX_INIT_IN_PROGRESS = MaintenanceStatus(
-        "Initializing the security index..."
-    )
+    SECURITY_INDEX_INIT_IN_PROGRESS = MaintenanceStatus("Initializing the security index...")
 
     # Start
     SERVICE_START_ERROR = BlockedStatus(
@@ -83,9 +77,7 @@ class CharmStatuses(Enum):
     PEER_CLUSTER_NO_DATA_NODE = BlockedStatus(
         "Cannot run cluster with current roles. Waiting for data node..."
     )
-    PEER_CLUSTER_NO_RELATION = BlockedStatus(
-        "Cannot start. Waiting for peer cluster relation..."
-    )
+    PEER_CLUSTER_NO_RELATION = BlockedStatus("Cannot start. Waiting for peer cluster relation...")
     PEER_CLUSTER_WRONG_RELATION = BlockedStatus(
         "Cluster name don't match with related cluster. Remove relation."
     )
@@ -118,6 +110,4 @@ class CharmStatuses(Enum):
     SMTP_MISSING_REQUIRED_PARAMETERS = BlockedStatus(
         "Parameters missing from smtp-integrator: {params}."
     )
-    SMTP_COULD_NOT_READ_DATA = BlockedStatus(
-        "Could not read smtp relation data: {exc}."
-    )
+    SMTP_COULD_NOT_READ_DATA = BlockedStatus("Could not read smtp relation data: {exc}.")

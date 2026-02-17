@@ -15,6 +15,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ops.charm import RelationBrokenEvent, SecretChangedEvent
+from ops.framework import Object
+
 from opensearch_single_kernel.common.constants import (
     SMTP_SECRET_LABEL,
     DeploymentType,
@@ -22,18 +25,16 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import CharmStatuses
-from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
-    DEFAULT_RELATION_NAME as SMTP_RELATION,
-    SmtpDataAvailableEvent,
-    SmtpRequires,
-)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     SecretError,
 )
-
-from ops.charm import RelationBrokenEvent, SecretChangedEvent
-from ops.framework import Object
-
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
+    DEFAULT_RELATION_NAME as SMTP_RELATION,
+)
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
+    SmtpDataAvailableEvent,
+    SmtpRequires,
+)
 from opensearch_single_kernel.managers.notification import NotificationsClientError
 from opensearch_single_kernel.utils.helpers import decode_plugin_secret_content
 from opensearch_single_kernel.utils.status import Status
@@ -54,9 +55,7 @@ class NotificationsEvents(Object):
         self.charm = charm
         self.smtp = SmtpRequires(self.charm, self.relation_name)
 
-        self.framework.observe(
-            self.smtp.on.smtp_data_available, self._on_smtp_credentials_changed
-        )
+        self.framework.observe(self.smtp.on.smtp_data_available, self._on_smtp_credentials_changed)
         self.framework.observe(
             self.charm.on[self.relation_name].relation_broken,
             self._on_smtp_credentials_gone,
@@ -142,9 +141,7 @@ class NotificationsEvents(Object):
                 app=True,
             )
 
-        config = self.charm.notifications_manager.get_smtp_config(
-            parameters, event.relation.id
-        )
+        config = self.charm.notifications_manager.get_smtp_config(parameters, event.relation.id)
 
         # create/update SMTP sender config (config_id is relation-based)
         if self.charm.unit.is_leader():
@@ -278,9 +275,7 @@ class NotificationsEvents(Object):
 
         # No smtp_account_id; nothing to clean in keystore or notifications
         if not smtp_account_id:
-            self.charm.plugin_manager.remove_plugin_config(
-                scope=Scope.UNIT, label=label
-            )
+            self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 # if self.charm.opensearch_peer_cm.is_provider(typ="main"):
@@ -290,19 +285,13 @@ class NotificationsEvents(Object):
         # Delete notification configs first so we never have configs that reference
         # missing keystore credentials (channel -> group -> smtp account dependency order)
         if self.charm.unit.is_leader():
-            channel_id = self.charm.notifications_manager.email_channel_id(
-                smtp_account_id
-            )
-            group_id = self.charm.notifications_manager.recipient_group_id(
-                smtp_account_id
-            )
+            channel_id = self.charm.notifications_manager.email_channel_id(smtp_account_id)
+            group_id = self.charm.notifications_manager.recipient_group_id(smtp_account_id)
             for config_id in (channel_id, group_id, smtp_account_id):
                 try:
                     self.charm.notifications_manager.delete_config(config_id)
                 except OpenSearchHttpError:
-                    logger.exception(
-                        "Failed deleting notifications config %s", config_id
-                    )
+                    logger.exception("Failed deleting notifications config %s", config_id)
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:

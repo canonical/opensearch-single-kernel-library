@@ -74,6 +74,7 @@ class Paths:
 
     @property
     def opensearch_keystore(self) -> PathProtocol:
+        """Return path to the opensearch keystore."""
         return self.conf / "opensearch.keystore"
 
     @property

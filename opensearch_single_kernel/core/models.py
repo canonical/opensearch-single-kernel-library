@@ -375,6 +375,7 @@ class TestingProfile(OpenSearchProfile):
             data=1,
         )
 
+
 class PluginConfigInfo(Model):
     """Model class for representing data needed to add or remove plugin configuration"""
 

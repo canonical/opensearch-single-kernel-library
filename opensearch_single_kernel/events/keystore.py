@@ -8,6 +8,7 @@ This module manages OpenSearch keystore access and lifecycle.
 
 import logging
 from typing import TYPE_CHECKING
+
 from ops import EventSource, Object
 
 from opensearch_single_kernel.events.custom_events import ReloadKeystoreEvent

@@ -101,8 +101,7 @@ def deployment_type(
 ) -> DeploymentType:
     """Check if the current cluster is an independent cluster."""
     has_cm_roles = (
-        start_mode == StartMode.WITH_GENERATED_ROLES
-        or "cluster_manager" in config.roles
+        start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in config.roles
     )
     if not has_cm_roles:
         return DeploymentType.OTHER
