@@ -3,14 +3,17 @@
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
+
 import base64
+import json
+import logging
 import math
 import re
 import secrets
 import string
 from datetime import datetime
 from time import time_ns
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 import bcrypt
 from cryptography import x509
@@ -26,6 +29,8 @@ from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+logger = logging.getLogger(__name__)
 
 
 def format_unit_name(unit: Unit | str, app: App) -> str:
@@ -96,7 +101,8 @@ def deployment_type(
 ) -> DeploymentType:
     """Check if the current cluster is an independent cluster."""
     has_cm_roles = (
-        start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in config.roles
+        start_mode == StartMode.WITH_GENERATED_ROLES
+        or "cluster_manager" in config.roles
     )
     if not has_cm_roles:
         return DeploymentType.OTHER
@@ -146,3 +152,34 @@ def parse_tls_file(raw_content: str) -> bytes:
             raw_content,
         ).encode("utf-8")
     return base64.b64decode(raw_content)
+
+
+def diff(desired: Iterable[str], current: Iterable[str]) -> tuple[set[str], set[str]]:
+    """Returns diff needed to turn current list into desired list"""
+    desired_labels = set(desired)
+    current_labels = set(current)
+
+    add = desired_labels - current_labels
+    remove = current_labels - desired_labels
+    return add, remove
+
+
+def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | None:
+    """Decodes JSON payload from plugin secret
+
+    Args:
+        content: dictionary of the secret content
+        label: label of the secfet
+
+    Returns:
+        A decoded dictionary if successful, else None
+    """
+    if not (raw := content.get(label)):
+        logger.warning("Key '%s' not found in secret content", label)
+        return None
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error("Malformed JSON in secret %s: %s", label, e)
+        return None

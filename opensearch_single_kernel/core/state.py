@@ -31,6 +31,7 @@ from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
     PeerClusterApp,
     PerformanceType,
+    PluginConfigInfo,
     ProductionProfile,
     TestingProfile,
 )
@@ -195,6 +196,23 @@ class OpenSearchServer(RelationState):
         """Set the value of 'delete_voting_exclusions' in application databag."""
         self.update({"delete-voting-exclusions": ",".join(value)})
 
+    @property
+    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
+        """Returns configuration information for plugins this app is managing"""
+        plugin_config_info = self.get_object("plugin_config_info") or {}
+        return {
+            label: PluginConfigInfo.from_dict(plugin)
+            for label, plugin in plugin_config_info.items()
+        }
+
+    @plugin_config_info.setter
+    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
+        """Returns configuration information for plugins this app is managing"""
+        if not value:
+            self.update({"plugin_config_info": ""})
+            return
+        self.put_object("plugin_config_info", value)
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -209,32 +227,6 @@ class OpenSearchApplication(RelationState):
         super().__init__(relation, data_interface, component)
         self.app = component
 
-    def get_object(self, key: str) -> dict[str, Any] | None:
-        """Get dict / json object from the relation data store."""
-        data = self.relation_data.get(key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.update({key: payload_str})
 
     @property
     def name(self) -> str:
@@ -352,6 +344,23 @@ class OpenSearchApplication(RelationState):
         """Look for data-role through all the roles of all the nodes in all applications"""
         data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
         return data_apps_in_fleet and any(app.planned_units > 0 for app in data_apps_in_fleet)
+
+    @property
+    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
+        """Returns configuration information for plugins this app is managing"""
+        plugin_config_info = self.get_object("plugin_config_info") or {}
+        return {
+            label: PluginConfigInfo.from_dict(plugin)
+            for label, plugin in plugin_config_info.items()
+        }
+
+    @plugin_config_info.setter
+    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
+        """Returns configuration information for plugins this app is managing"""
+        if not value:
+            self.update({"plugin_config_info": ""})
+            return
+        self.put_object("plugin_config_info", value)
 
 
 class ClusterState(Object):

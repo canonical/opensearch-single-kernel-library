@@ -374,3 +374,18 @@ class TestingProfile(OpenSearchProfile):
             cluster_managers=1,
             data=1,
         )
+
+class PluginConfigInfo(Model):
+    """Model class for representing data needed to add or remove plugin configuration"""
+
+    relation_name: str | None = None
+    secret_id: str | None = None
+    cleanup: dict[str, list[str]] = Field(default_factory=dict)
+
+    def add_cleanup_items(self, cleanup: dict[str, list[str]]) -> None:
+        """Merge items into cleanup dictionary avoiding duplicates."""
+        for key, items in cleanup.items():
+            current = self.cleanup.setdefault(key, [])
+            for item in items:
+                if item not in current:
+                    current.append(item)
