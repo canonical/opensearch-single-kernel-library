@@ -24,7 +24,6 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     normalized_tls_subject,
@@ -45,11 +44,9 @@ class ConfigManager(BaseManager):
         self,
         state: ClusterState,
         workload: BaseWorkload,
-        cluster_manager: ClusterManager,
     ):
         self.state = state
         self.workload = workload
-        self.cluster_manager = cluster_manager
 
     @property
     def yaml_setter(self) -> YamlConfigSetter:
@@ -83,7 +80,7 @@ class ConfigManager(BaseManager):
             | self._opensearch_general_config(roles)
             | self._opensearch_host_config()
             | self._openseearch_temperature_config()
-            | self._opensearch_manager_config(roles=roles, cm_names=cm_names)
+            | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
             | self._opensearch_tls_config(CertType.UNIT_HTTP)
             | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
@@ -157,16 +154,18 @@ class ConfigManager(BaseManager):
             else {}
         )
 
-    def _opensearch_manager_config(
+    def _opensearch_cluster_manager_config(
         self,
         roles: list[str],
         cm_names: list[str] | None = None,
     ) -> dict[str, Any]:
         return (
             {
-                "cluster.initial_cluster_manager_nodes": cm_names,
+                "cluster.initial_cluster_manager_nodes": sorted(cm_names),
             }
-            if "cluster_manager" in roles and self.state.server.is_bootstrap_contributor
+            if cm_names
+            and "cluster_manager" in roles
+            and self.state.server.is_bootstrap_contributor
             else {}
         )
 
