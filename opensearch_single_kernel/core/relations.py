@@ -233,6 +233,33 @@ class RelationState:
             except KeyError:
                 pass
 
+    def get_object(self, key: str) -> dict[str, Any] | None:
+        """Get dict / json object from the relation data store."""
+        data = self.relation_data.get(key)
+        if data is None:
+            return None
+
+        return json.loads(data)
+
+    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
+        """Put dict / json object into relation data store."""
+        if merge:
+            stored = self.get_object(key)
+
+            if stored is not None:
+                stored.update(value)
+                value = stored
+
+        sorted_value = Model.sort_payload(value)
+
+        payload_str = None
+        if value is not None:
+            payload_str = json.dumps(
+                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
+            )
+
+        self.update({key: payload_str})
+
 
 class PeerClusterOrchestratorData(ProviderData, RequirerData):
     """Orchestrator provider data model."""
