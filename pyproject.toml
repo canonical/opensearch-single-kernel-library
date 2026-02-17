@@ -7,13 +7,12 @@ dynamic = []
 description = "Shared and reusable code for OpenSearch charms"
 readme = "README.md"
 license = "Apache-2.0"
-authors = [
-]
+authors = []
 classifiers = [
- "Development Status :: 3 - Alpha",
- "Intended Audience :: Developers",
- "Intended Audience :: System Administrators",
- "Operating System :: POSIX :: Linux",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.10,<4.0"
 version = "0.0.1.post6.dev0+744f8cb.dirty"
@@ -29,9 +28,7 @@ repository = "https://github.com/canonical/opensearch-single-kernel-library"
 [tool.poetry]
 requires-poetry = ">=2.0.0"
 package-mode = true
-packages = [
-    {include = "opensearch_single_kernel"},
-]
+packages = [{ include = "opensearch_single_kernel" }]
 include = ["opensearch_single_kernel/templates/"]
 exclude = ["opensearch_single_kernel/charmcraft.yaml"]
 
@@ -65,6 +62,7 @@ jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
 cosl = "^1.0.0"
 bcrypt = "^4.3.0"
+email-validator = ">=2"
 
 
 [tool.poetry.group.format]
@@ -131,7 +129,6 @@ vcs = "git"
 dirty = true
 strict = true
 fix-shallow-repository = true
-
 
 
 [build-system]
