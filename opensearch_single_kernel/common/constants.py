@@ -180,6 +180,7 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+SMTP_SECRET_LABEL = "plugin-notifications"
 
 
 # Messages
