@@ -22,13 +22,18 @@ from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
 )
+from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
+from opensearch_single_kernel.events.notifications import NotificationsEvents
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
 from opensearch_single_kernel.managers.health import HealthManager
+from opensearch_single_kernel.managers.keystore import KeystoreManager
 from opensearch_single_kernel.managers.lock import LockManager
+from opensearch_single_kernel.managers.notification import NotificationsManager
+from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.tls import TlsManager
 from opensearch_single_kernel.managers.users import UsersManager
@@ -62,10 +67,15 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
         self.config_manager = ConfigManager(self.state, self.workload)
+        self.keystore_manager = KeystoreManager(self.state, self.workload)
+        self.plugin_manager = PluginManager(self.state)
+        self.notifications_manager = NotificationsManager(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
+        self.keystore_events = KeystoreEventsHandler(self)
+        self.notifications_events = NotificationsEvents(self)
 
     def trigger_peer_rel_changed(
         self,
