@@ -237,10 +237,30 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
         logger.debug(f"Deleted secret {scope}:{key}")
 
+    def get_tracked_secret(self, secret_id: str, scope: Scope, key: str) -> Secret | None:
+        """Track a granted secret and add it to the cache"""
+        label = self.label(scope, key)
+        if cached_secret_meta := self.cached_secrets.get_meta(scope, label):
+            # already tracking
+            return cached_secret_meta
+        try:
+            secret = self._charm.model.get_secret(id=secret_id)
+        except SecretNotFoundError:
+            logger.info("Could not find secret: %s - %s", key, secret_id)
+            return None
+
+        self.cached_secrets.set_meta(scope, label, secret)
+        self.cached_secrets.put_content(scope, label, secret.get_content(refresh=True))
+        return secret
+
     def get_secret_id(self, scope: Scope, key: str) -> str | None:
         """Get the secret ID from the cache."""
         label = self.label(scope, key)
-        return self.charm.peers_data.get(scope, label)
+        return (
+            self.charm.state.application.relation_data.get(label)
+            if scope == Scope.APP
+            else self.charm.state.server.relation_data.get(label)
+        )
 
     def grant_secret_to_relation(self, secret_id: str, relation: Relation):
         """Grant a secret to a relation."""

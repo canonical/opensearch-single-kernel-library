@@ -17,7 +17,12 @@ class StartOpenSearch(EventBase):
     """
 
     def __init__(
-        self, handle, *, ignore_lock=False, after_upgrade=False, is_first_data_node=False
+        self,
+        handle,
+        *,
+        ignore_lock=False,
+        after_upgrade=False,
+        is_first_data_node=False,
     ):
         super().__init__(handle)
         self.ignore_lock = ignore_lock
@@ -44,3 +49,7 @@ class RestartOpenSearch(EventBase):
 
     This event will be deferred until OpenSearch stops. Then, `_StartOpenSearch` will be emitted.
     """
+
+
+class ReloadKeystoreEvent(EventBase):
+    """Event to signal that the keystore should be reloaded."""
