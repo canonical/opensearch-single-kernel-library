@@ -53,3 +53,7 @@ class RestartOpenSearch(EventBase):
 
 class ReloadKeystoreEvent(EventBase):
     """Event to signal that the keystore should be reloaded."""
+
+
+class VerifyBackupCredentialsEvent(EventBase):
+    """Event to verify backup credentials on main orchestrator leader unit."""

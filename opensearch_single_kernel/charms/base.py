@@ -11,13 +11,17 @@ from ops import EventSource
 
 from opensearch_single_kernel.common.constants import Substrates
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.events.backup import BackupEventsHandler
 from opensearch_single_kernel.events.custom_events import (
+    ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
+    VerifyBackupCredentialsEvent,
 )
 from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
+from opensearch_single_kernel.managers.backup import BackupManager
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
@@ -36,8 +40,11 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 class OpenSearchBaseCharm(ops.CharmBase, ABC):
     """Base OpenSearch Charm, this will include base structure for both machine and k8s charms."""
 
+    # Custom Events
     restart_opensearch_event = EventSource(RestartOpenSearch)
     start_opensearch_event = EventSource(StartOpenSearch)
+    verify_backup_credentials_event = EventSource(VerifyBackupCredentialsEvent)
+    reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -60,11 +67,13 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.keystore_manager = KeystoreManager(self.state, self.workload)
         self.plugin_manager = PluginManager(self.state)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
+        self.backup_manager = BackupManager(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
         self.keystore_events = KeystoreEventsHandler(self)
+        self.backup_events = BackupEventsHandler(self)
 
     @property
     @abstractmethod

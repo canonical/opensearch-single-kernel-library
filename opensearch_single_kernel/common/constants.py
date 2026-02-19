@@ -9,6 +9,18 @@
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
+class ObjectStorageType(BaseStrEnum):
+    """The object storage types."""
+
+    S3 = "s3"
+    AZURE = "azure"
+    GCS = "gcs"
+    S3_PCLUSTER = "s3-pcluster"
+    AZURE_PCLUSTER = "azure-pcluster"
+    GCS_PCLUSTER = "gcs-pcluster"
+    CONFLICT = "conflict"
+
+
 class Substrates(BaseStrEnum):
     """Possible substrates."""
 
@@ -134,6 +146,14 @@ COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
+# OpenSearch indices
+OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
+SYSTEM_INDICES = {
+    ".opendistro_security",
+    ".opensearch-sap-log-types-config",
+    OPENSEARCH_NODE_LOCK_INDEX,
+}
+
 
 # OpenSearch default port
 OPENSEARCH_HTTP_PORT = 9200
@@ -148,7 +168,36 @@ TLS_RELATION = "certificates"
 NODE_LOCK_RELATION = "node-lock-fallback"
 PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
+S3_RELATION = "s3-credentials"
+AZURE_RELATION = "azure-credentials"
+GCS_RELATION = "gcs-credentials"
 
+
+# Backup
+S3_CREDENTIALS = "s3-creds"
+S3_PEER_SECRET_KEYS = [
+    "secret-key",
+    "access-key",
+    "s3-secret-key",
+    "s3-access-key",
+    S3_CREDENTIALS,
+]
+AZURE_CREDENTIALS = "azure-creds"
+AZURE_PEER_SECRET_KEYS = [
+    "azure-storage-account",
+    "azure-secret-key",
+    "secret-key",
+    "storage-account",
+    AZURE_CREDENTIALS,
+]
+GCS_CREDENTIALS = "gcs-creds"
+S3_CA_ALIAS = "s3-snapshots-gateway"
+STORE_PASSWORD = "changeit"
+GCS_SERVICE_ACCOUNT_JSON = "/var/snap/opensearch/common/home/snap_daemon/gcs_service_account.json"
+S3_REPOSITORY = "s3-repository"
+AZURE_REPOSITORY = "azure-repository"
+GCS_REPOSITORY = "gcs-repository"
+OPENSEARCH_BACKUP_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 # Paths
 BASE_SNAP_DIR = "/var/snap/opensearch"

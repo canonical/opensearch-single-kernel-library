@@ -28,7 +28,7 @@ from opensearch_single_kernel.utils.certificates import (
     OLD_CA_ALIAS,
     read_ca,
     remove_ca,
-    store_ca,
+    store_ca_chain,
 )
 from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
@@ -550,13 +550,14 @@ class TlsManager(BaseManager):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
-        if not store_ca(
+        if not store_ca_chain(
             workload=self.workload,
             alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=secrets.get("ca-cert"),
             keep_previous=True,
+            add_read_perm=True,
         ):
             return False
 

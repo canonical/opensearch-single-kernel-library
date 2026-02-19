@@ -8,6 +8,7 @@
 import json
 import logging
 import random
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -22,8 +23,17 @@ from tenacity import (
     wait_fixed,
 )
 
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_BACKUP_ID_FORMAT,
+    SYSTEM_INDICES,
+    ObjectStorageType,
+)
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
+from opensearch_single_kernel.utils.cloud_storage import (
+    repository_name,
+    repository_type,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -43,6 +53,416 @@ class OpenSearchClient:
         self.port = port
         self.workload = workload
         self.admin_secret = admin_secret
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def create_repository(
+        self,
+        object_storage_type: ObjectStorageType,
+        object_storage_config: ObjectStorageConfig,
+        name: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> str | None:
+        """Create an opensearch repository for storing backups.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type
+            object_storage_config (ObjectStorageConfig): Object storage config
+            name (str, optional): Name of the repository. Defaults to None.
+
+        Returns:
+            str: Repository name
+        """
+        repo_name = name or repository_name(object_storage_type)
+        settings = {}
+        if object_storage_type == ObjectStorageType.S3:
+            settings = {
+                "bucket": object_storage_config.s3.bucket,
+                "base_path": object_storage_config.s3.base_path,
+                "region": object_storage_config.s3.region,
+                "endpoint": object_storage_config.s3.endpoint,
+            }
+
+        elif object_storage_type == ObjectStorageType.AZURE:
+            settings = {
+                "container": object_storage_config.azure.container,
+                "base_path": object_storage_config.azure.base_path,
+            }
+        elif object_storage_type == ObjectStorageType.GCS:
+            settings = {
+                "bucket": object_storage_config.gcs.bucket,
+                "base_path": object_storage_config.gcs.base_path,
+            }
+
+        repo_type = repository_type(object_storage_type)
+        response = self.request(
+            "PUT",
+            f"_snapshot/{repo_name}?verify=false",
+            payload={"type": repo_type, "settings": settings},
+            alt_hosts=alt_hosts,
+        )
+        logger.debug("Snapshot repository creation response: %s", response)
+
+        # This should always pass and is set for documentation purposes
+        assert response.get("acknowledged") is True
+        return repo_name
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def verify_repository(
+        self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
+    ) -> bool:
+        """Verify repository by listing snapshots.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type
+
+        Returns:
+            True if the repository can be listed successfully.
+
+        Raises:
+            OpenSearchHttpError if there are any backend issues such as auth/perm errors.
+        """
+        repository = repository_name(object_storage_type)
+        # If creds/endpoint/perm are wrong, this call raises OpenSearchHttpError with a 500.
+        self.request(
+            "GET",
+            f"_snapshot/{repository}/_all",
+            alt_hosts=alt_hosts,
+            timeout=30,
+        )
+        return True
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def get_snapshot(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot_id: str,
+        alt_hosts: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch a snapshot by id.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type.
+            snapshot_id (str): Snapshot id.
+
+        Returns:
+            dict[str, Any] | None: Snapshot information.
+        """
+        repo_name = repository_name(object_storage_type)
+        try:
+            response = self.request(
+                "GET", f"_snapshot/{repo_name}/{snapshot_id}", alt_hosts=alt_hosts
+            )
+            return response["snapshots"][0]
+        except OpenSearchHttpError as e:
+            if e.response_body.get("error", {}).get("type") == "snapshot_missing_exception":
+                return
+            raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def list_snapshots(
+        self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
+    ) -> dict[Any, dict[str, Any]]:
+        """List all snapshots in the current repository.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type.
+
+        Returns:
+            dict: Snapshot information.
+        """
+        repo_name = repository_name(object_storage_type)
+        response = self.request(
+            "GET",
+            f"_snapshot/{repo_name}/_all",
+            alt_hosts=alt_hosts,
+            timeout=30,
+        )
+        snapshots = {
+            snapshot["snapshot"]: {
+                "state": snapshot["state"].lower(),
+                "indices": snapshot.get("indices", []),
+            }
+            for snapshot in response.get("snapshots", [])
+        }
+        return dict(sorted(snapshots.items(), reverse=True))
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def is_repository_created(
+        self,
+        object_storage_type: ObjectStorageType,
+        repository: str = None,
+        alt_hosts: list[str] | None = None,
+    ) -> bool:
+        """Check if a repository is created.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type.
+            repository (str): The name of the repository to check.
+
+        Returns:
+            True if repository is created else False
+        """
+        repo_name = repository or repository_name(object_storage_type)
+        try:
+            response = self.request("GET", f"_snapshot/{repo_name}", alt_hosts=alt_hosts)
+            return response.get(repo_name) is not None
+        except OpenSearchHttpError as e:
+            if e.response_body.get("error", {}).get("type") == "repository_missing_exception":
+                return False
+            raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def is_snapshot_in_progress(self, alt_hosts: list[str] | None = None) -> bool:
+        """Check if a backup is running.
+
+        Returns:
+            True if snapshot is running else False
+        """
+        response = self.request("GET", "_snapshot/_status", alt_hosts=alt_hosts)
+        return len(response.get("snapshots", [])) > 0
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def is_restore_in_progress(self, alt_hosts: list[str] | None = None) -> bool:
+        """Check if a restore operation is running.
+
+        Returns:
+            True if restore operation is running else False
+        """
+        response: list[dict[str, str]] = self.request(
+            "GET", "/_cat/recovery?format=json&h=type,stage", alt_hosts=alt_hosts
+        )
+        for operation in response:
+            if operation["type"] == "snapshot" and operation["stage"] == "open":
+                return True
+        return False
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def remove_repository(
+        self,
+        object_storage_type: ObjectStorageType,
+        name: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> None:
+        """Remove the snapshot repository with retries and optional health gating.
+
+        Args:
+            object_storage_type: Object storage type to use
+            name: Name of the repository to remove
+            alt_hosts: Optional list of alternative hosts to perform the operation on
+        """
+        repo_name = name or repository_name(object_storage_type)
+
+        try:
+            resp = self.request("DELETE", f"_snapshot/{repo_name}", alt_hosts=alt_hosts)
+            assert resp.get("acknowledged") is True
+        except OpenSearchHttpError as e:
+            body = e.response_body or {}
+            err_type = (
+                (body.get("error") or {}).get("type") if isinstance(body, dict) else str(body)
+            )
+            if "repository_missing_exception" in str(err_type):
+                return
+            raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def create_snapshot(
+        self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
+    ) -> str:
+        """Create an OpenSearch snapshot.
+
+        Args:
+            object_storage_type: Object storage type to use
+
+        Returns:
+            snapshot_id: Snapshot ID
+        """
+        repo_name = repository_name(object_storage_type)
+        snapshot_id = datetime.now().strftime(OPENSEARCH_BACKUP_ID_FORMAT).lower()
+        ignore = [f"-{idx}" for idx in SYSTEM_INDICES]
+        indices_clause = ",".join(["*"] + ignore)
+        logger.info("indices_clause: %s", indices_clause)
+        # create snapshot
+        response = self.request(
+            "PUT",
+            f"_snapshot/{repo_name}/{snapshot_id}?wait_for_completion=false",
+            payload={
+                "indices": indices_clause,
+                "ignore_unavailable": True,
+                "include_global_state": True,
+            },
+            alt_hosts=alt_hosts,
+            timeout=30,
+        )
+
+        logger.info(f"Snapshot request submitted with backup-id: {snapshot_id}")
+        logger.debug(f"Create snapshot request with id: {snapshot_id} - response: {response}")
+
+        # This should always pass and is set for documentation purposes
+        assert response.get("accepted") is True
+
+        return snapshot_id
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(3),
+        retry=retry_if_exception_type(OpenSearchHttpError),
+        reraise=True,
+    )
+    def restore_snapshot(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot: dict[str, Any],
+        alt_hosts: list[str] | None = None,
+    ) -> set[str]:
+        """Restore an OpenSearch snapshot.
+
+        Args:
+            object_storage_type: Object storage type to use
+            snapshot: Snapshot to restore
+
+        Returns:
+            Empty set if snapshot was restored else set includes not restored indices
+        """
+        repo_name = repository_name(object_storage_type)
+        snapshot_id = snapshot.get("snapshot")
+        ignore = [f"-{idx}" for idx in SYSTEM_INDICES]
+        indices_clause = ",".join(["*"] + ignore)
+
+        payload = {
+            "indices": indices_clause,
+            "ignore_unavailable": True,
+            "include_global_state": False,
+        }
+
+        restore_resp = self.request(
+            "POST",
+            f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
+            payload=payload,
+            alt_hosts=alt_hosts,
+            timeout=60,
+        )
+        logger.info("Restore of snapshot '%s' response: %s", snapshot_id, restore_resp)
+
+        # this only serves as documentation and should always be true if no previous HTTP error
+        snapshot_field = restore_resp.get("snapshot")
+        assert "accepted" in restore_resp or (
+            isinstance(snapshot_field, dict) and snapshot_field.get("snapshot") == snapshot_id
+        ), f"Unexpected restore response: {restore_resp}"
+
+        # sanity check on the restore success
+        recovery_resp: list[dict[str, str]] = self.request(
+            "GET", "_cat/recovery?format=json", alt_hosts=alt_hosts
+        )
+        snapshot_recoveries = [
+            recovery
+            for recovery in recovery_resp
+            if (
+                recovery["type"] == "snapshot"
+                and recovery["repository"] == repo_name
+                and recovery["snapshot"] == snapshot_id
+            )
+        ]
+        restored_indices = set(
+            [recovery["index"] for recovery in snapshot_recoveries if recovery["stage"] == "done"]
+        )
+        expected_indices = set(snapshot.get("indices", []))
+        return expected_indices - restored_indices
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def close_snapshot_indices_open_in_cluster(
+        self, snapshot: dict[str, Any], alt_hosts: list[str] | None = None
+    ) -> tuple[list[str] | None, dict[str, Any] | None]:
+        """Close the non-system indices included in a given snapshot.
+
+        Args:
+            snapshot (dict): Snapshot to close.
+
+        Returns:
+            Tuple: closed_indices, failed_to_closed_indices
+        """
+        if not (
+            indices_to_close := self._get_snapshot_indices_open_in_cluster(
+                snapshot, alt_hosts=alt_hosts
+            )
+        ):
+            logger.info("No indices to close.")
+            return None, None
+
+        logger.info("Attempting closing the indices: %s", indices_to_close)
+        response = self.request(
+            "POST", f"{','.join(indices_to_close)}/_close", alt_hosts=alt_hosts
+        )
+
+        # verify that the relevant indices are closed
+        if response["acknowledged"] and response["shards_acknowledged"]:
+            logger.info("Successfully closed all indices: %s.", indices_to_close)
+            return indices_to_close, None
+
+        indices_failed_to_close = {
+            index: payload
+            for index, payload in response["indices"].items()
+            if not payload["closed"]
+        }
+        closed_indices = [
+            index for index in indices_to_close if index not in indices_failed_to_close
+        ]
+
+        logger.error("Failed to close some indices: \n%s", indices_failed_to_close)
+        return closed_indices, indices_failed_to_close
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def _get_snapshot_indices_open_in_cluster(
+        self, snapshot: dict[str, Any], alt_hosts: list[str] | None = None
+    ) -> list[str]:
+        """Fetch the current open indices in the current cluster.
+
+        Args:
+            snapshot (dict): Snapshot information
+
+        Returns:
+            list[str] | None: List of indices which are open
+        """
+        current_indices = self.indices(self.charm.opensearch, alt_hosts=alt_hosts)
+        return sorted(
+            [
+                idx
+                for idx in snapshot.get("indices", [])
+                if idx in current_indices
+                and idx not in SYSTEM_INDICES
+                and current_indices[idx]["status"] == "open"
+            ]
+        )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def indices(
+        self,
+        host: str | None = None,
+        alt_hosts: list[str] | None = None,
+    ) -> dict[str, dict[str, str]]:
+        """Get all shards of all indexes in the cluster."""
+        # Get cluster state
+        cluster_state = self.request(
+            "GET", "/_cluster/state?filter_path=metadata.indices", host=host, alt_hosts=alt_hosts
+        )
+        indices_state = cluster_state["metadata"]["indices"]
+
+        # Get cluster health
+        cluster_health = self.request(
+            "GET", "/_cluster/health?level=indices", host=host, alt_hosts=alt_hosts
+        )
+        indices_health = cluster_health["indices"]
+
+        idx = {}
+        for index in indices_state.keys():
+            idx[index] = {
+                "health": indices_health[index]["status"],
+                "status": indices_state[index]["state"],
+            }
+        return idx
 
     def apply_no_replication_to_index(
         self,

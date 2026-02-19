@@ -204,6 +204,37 @@ class BaseWorkload(ABC):
         ) as e:
             raise OpenSearchFileOperationError(e)
 
+    def exists(self, path: pathops.PathProtocol) -> bool:
+        """Check if a file or directory exists on disk.
+
+        Args:
+            path (str): The file or directory path to check.
+
+        Returns:
+            bool: True if the file or directory exists, False otherwise.
+        """
+        try:
+            return path.exists()
+        except (PermissionError, pathops.PebbleConnectionError) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def unlink(self, path: pathops.PathProtocol, missing_ok: bool = False) -> None:
+        """Remove a file from disk.
+
+        Args:
+            path (str): The file path to remove.
+            missing_ok (bool): Whether to ignore the error if the file does not exist.
+        """
+        try:
+            path.unlink(missing_ok=missing_ok)
+        except (
+            FileNotFoundError,
+            IsADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
     @contextmanager
     def temp_file(
         self,

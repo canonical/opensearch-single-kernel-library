@@ -5,9 +5,11 @@
 
 """Collection of models used for the operation of the charm."""
 
-
+import base64
+import binascii
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime
 from hashlib import md5
@@ -18,7 +20,10 @@ from pydantic.utils import ROOT_KEY
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
+    AZURE_CREDENTIALS,
+    GCS_CREDENTIALS,
     MAX_HEAP_SIZE_IN_KB,
+    S3_CREDENTIALS,
     DeploymentType,
     Directive,
     PerformanceType,
@@ -376,6 +381,7 @@ class TestingProfile(OpenSearchProfile):
         )
 
 
+# --- Plugin related models ---
 class PluginConfigInfo(Model):
     """Model class for representing data needed to add or remove plugin configuration"""
 
@@ -390,3 +396,312 @@ class PluginConfigInfo(Model):
             for item in items:
                 if item not in current:
                     current.append(item)
+
+
+# --- Backup related models ---
+class S3RelDataCredentials(Model):
+    """Model class for credentials passed on the s3 relation."""
+
+    access_key: str = Field(alias="access-key", default=None)
+    secret_key: str = Field(alias="secret-key", default=None)
+    s3_tls_ca_chain: str | list[str] | None = Field(default=None, alias="s3-tls-ca-chain")
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+
+class S3RelData(Model):
+    """Model class for the S3 relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    bucket: str = Field(default="")
+    endpoint: str = Field(default="")
+    region: str = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    protocol: str | None = None
+    storage_class: str | None = Field(alias="storage-class", default=None)
+    tls_ca_chain: str | list[str] | None = Field(default=None, alias="tls-ca-chain")
+    credentials: S3RelDataCredentials = Field(alias=S3_CREDENTIALS)
+    path_style_access: bool = Field(alias="s3-uri-style", default=False)
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+    @root_validator
+    def validate_core_fields(cls, values):  # noqa: N805
+        """Validate the core fields of the S3 relation data."""
+        if (
+            not (s3_creds := values.get("credentials"))
+            or not s3_creds.access_key
+            or not s3_creds.secret_key
+        ):
+            raise ValueError("Missing fields: access_key, secret_key")
+
+        # NOTE: Both bucket and endpoint must be set. If none of them are set,
+        # but credentials were found, this likely means that we are validating for a
+        # non cluster_manager application, which only needs credentials.
+        if values.get("bucket") and not values.get("endpoint"):
+            raise ValueError("Missing field: endpoint")
+        if values.get("endpoint") and not values.get("bucket"):
+            raise ValueError("Missing field: bucket")
+        if not values.get("region"):
+            raise ValueError("Missing field: region")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := values.get("base_path"):
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        values["base_path"] = base_path or None
+
+        return values
+
+    @validator("tls_ca_chain", pre=True)
+    def _tls_chain(cls, v):  # noqa: N805
+        if v is None:
+            return None
+        if isinstance(v, (bytes, bytearray)):
+            v = v.decode()
+        if isinstance(v, list):
+            return "\n".join(s.strip() for s in v if s)
+        if isinstance(v, dict):
+            chain = v.get("chain")
+            if isinstance(chain, list):
+                return "\n".join(s.strip() for s in chain if s)
+
+            return json.dumps(v)
+        return str(v)
+
+    @validator("path_style_access", pre=True)
+    def change_path_style_type(cls, value) -> bool:  # noqa: N805
+        """Coerce a type change of the path_style_access into a bool."""
+        if isinstance(value, str):
+            return value.lower() == "path"
+        return bool(value)
+
+    @validator(S3_CREDENTIALS, check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | S3RelDataCredentials):  # noqa: N805
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf
+        if isinstance(conf, dict):
+            # We are
+            data = S3RelDataCredentials.from_dict(conf)
+
+        for value in data.dict().values():
+            if value.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {value} instead")
+        return data
+
+    @staticmethod
+    def get_endpoint_protocol(endpoint: str) -> str:
+        """Returns the protocol based on the endpoint."""
+        if not endpoint:
+            return "https"
+
+        if endpoint.startswith("http://"):
+            return "http"
+        return "https"
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested S3RelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return cls()
+
+        creds = S3RelDataCredentials(**input_dict)
+        protocol = S3RelData.get_endpoint_protocol(input_dict.get("endpoint"))
+        return cls.from_dict(
+            dict(input_dict) | {"protocol": protocol, S3_CREDENTIALS: creds.dict()}
+        )
+
+
+class AzureRelDataCredentials(Model):
+    """Model class for credentials passed on the Azure relation."""
+
+    storage_account: str = Field(alias="storage-account", default=None)
+    secret_key: str = Field(alias="secret-key", default=None)
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+
+class AzureRelData(Model):
+    """Model class for the Azure relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    storage_account: str = Field(alias="storage-account", default="")
+    container: str = Field(default="")
+    endpoint: str | None = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    connection_protocol: str | None = Field(alias="connection-protocol", default=None)
+    credentials: AzureRelDataCredentials = Field(
+        alias=AZURE_CREDENTIALS, default=AzureRelDataCredentials()
+    )
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+    @root_validator
+    def validate_core_fields(cls, values):  # noqa: N805
+        """Validate the core fields of the azure relation data."""
+        if (
+            not (creds := values.get("credentials"))
+            or not creds.storage_account
+            or not creds.secret_key
+        ):
+            raise ValueError("Missing fields: storage_account, secret_key")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := values.get("base_path"):
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        values["base_path"] = base_path or None
+
+        return values
+
+    @validator(AZURE_CREDENTIALS, check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | AzureRelDataCredentials):  # noqa: N805
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf
+        if isinstance(conf, dict):
+            data = AzureRelDataCredentials.from_dict(conf)
+
+        for value in data.dict().values():
+            if value.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {value} instead")
+        return data
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested AzureRelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return cls()
+
+        creds = AzureRelDataCredentials(**input_dict)
+        return cls.from_dict(dict(input_dict) | {AZURE_CREDENTIALS: creds.dict()})
+
+
+class GcsRelDataCredentials(Model):
+    """Model class for credentials passed on the gcs relation."""
+
+    secret_key: str | None = Field(alias="secret-key", default=None)
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+    @validator("secret_key", pre=True)
+    def _normalize_secret_key(cls, values):  # noqa: N805
+        """Accept either raw JSON or base64-encoded JSON"""
+        if values is None:
+            return None
+
+        content = values.decode() if isinstance(values, (bytes, bytearray)) else str(values)
+        if not (content := content.strip()):
+            return None
+
+        # already JSON
+        if content.startswith("{") and content.endswith("}"):
+            # validate JSON shape
+            json.loads(content)
+            return content
+
+        # base64 (urlsafe)
+        try:
+            decoded_bytes = base64.b64decode(content, altchars=b"-_", validate=True)
+            decoded_text = decoded_bytes.decode("utf-8").strip()
+            json.loads(decoded_text)
+            return decoded_text
+        except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError("secret-key is not valid JSON (raw or base64-encoded)") from e
+
+
+class GcsRelData(Model):
+    """Model class for the GCS relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    bucket: str = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    storage_class: str | None = Field(alias="storage-class", default=None)
+    credentials: GcsRelDataCredentials = Field(
+        alias=GCS_CREDENTIALS, default_factory=GcsRelDataCredentials
+    )
+
+    class Config:
+        """Model config of this pydantic model."""
+
+        allow_population_by_field_name = True
+
+    @root_validator
+    def validate_core_fields(cls, values):  # noqa: N805
+        """Validate the core fields of the gcs relation data."""
+        creds = values.get("credentials")
+        if not creds or not creds.secret_key:
+            raise ValueError("Missing fields: secret-key")
+
+        if not values.get("bucket"):
+            raise ValueError("Missing field: bucket")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := values.get("base_path"):
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        values["base_path"] = base_path or None
+
+        return values
+
+    @validator(GCS_CREDENTIALS, check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805):
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf if isinstance(conf, dict) else conf.dict(by_alias=True, exclude_none=True)
+        for v in data.values():
+            if isinstance(v, str) and v.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {v} instead")
+        return conf
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested GcsRelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return None
+        creds = GcsRelDataCredentials(**input_dict)
+        merged = {**input_dict}
+        merged[GCS_CREDENTIALS] = creds.dict(by_alias=True, exclude_none=True)
+        return cls.parse_obj(merged)
+
+
+class ObjectStorageConfig(Model):
+    """Model class for the object storage config - for all clouds."""
+
+    s3: S3RelData | None = None
+    azure: AzureRelData | None = None
+    gcs: GcsRelData | None = None

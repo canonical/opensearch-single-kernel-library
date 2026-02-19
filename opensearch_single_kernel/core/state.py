@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 from ops import Application, JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
+    AZURE_RELATION,
+    GCS_RELATION,
     GENERATED_ROLES,
     NODE_LOCK_RELATION,
     OPENSEARCH_HTTP_PORT,
@@ -20,7 +22,9 @@ from opensearch_single_kernel.common.constants import (
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
     PERFORMANCE_PROFILE,
+    S3_RELATION,
     TLS_RELATION,
+    ObjectStorageType,
     StartMode,
     Substrates,
 )
@@ -403,6 +407,21 @@ class ClusterState(Object):
         return self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION)
 
     @property
+    def s3_relation(self) -> Relation | None:
+        """Get S3 relation."""
+        return self.model.get_relation(S3_RELATION)
+
+    @property
+    def azure_relation(self) -> Relation | None:
+        """Get Azure relation."""
+        return self.model.get_relation(AZURE_RELATION)
+
+    @property
+    def gcs_relation(self) -> Relation | None:
+        """Get GCS relation."""
+        return self.model.get_relation(GCS_RELATION)
+
+    @property
     def peer_cluster_orchestrator(self) -> PeerCluster:
         """The State for the requirer side of the 'peer-cluster-orchestrator' relation.."""
         return PeerCluster(
@@ -610,6 +629,40 @@ class ClusterState(Object):
     def model_uuid(self):
         """UUID of the Charm Model."""
         return self.model.uuid
+
+    def get_storage_type(self) -> ObjectStorageType | None:  # noqa: C901
+        """Get the active object storage type from relations/peer-cluster.
+
+        Returns:
+            Optional[ObjectStorageType]: the active object storage type.
+        """
+        if not (deployment_desc := self.application.deployment_desc):
+            logger.debug("Deployment description missing; storage type unknown.")
+            return None
+
+        if deployment_desc.typ in {DeploymentType.MAIN_ORCHESTRATOR}:
+            active = [
+                r
+                for r in [
+                    self.s3_relation,
+                    self.azure_relation,
+                    self.gcs_relation,
+                ]
+                if r
+            ]
+            if len(active) == 0:
+                return None
+            if len(active) > 1:
+                return ObjectStorageType.CONFLICT
+            if self.s3_relation:
+                return ObjectStorageType.S3
+            if self.azure_relation:
+                return ObjectStorageType.AZURE
+            if self.gcs_relation:
+                return ObjectStorageType.GCS
+
+        # non-main orchestrator
+        # TODO: Handle once large deployments are implemented
 
     # TODO: Once we handle large deployment we will add a separate
     # state object for peer cluster and peer cluster orchestrator
