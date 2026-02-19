@@ -29,9 +29,7 @@ repos:
       - id: debug-statements
       - id: check-toml
       - id: detect-private-key
-        exclude: |
-          (?x)^(
-           )$
+        exclude: ^tests/integration/ha/test_backup.py
       - id: check-merge-conflict
       - id: end-of-file-fixer
         exclude: ^opensearch_single_kernel/lib/
