@@ -134,7 +134,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar, Iterable, Literal, TypeAlias
 
-from charms.data_platform_libs.v0.data_interfaces import (
+from .data_interfaces import (
     EventHandlers,
     ProviderData,
     RequirerData,
