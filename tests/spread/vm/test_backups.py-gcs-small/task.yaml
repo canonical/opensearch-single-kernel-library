@@ -1,6 +1,6 @@
 summary: test_backups.py
 environment:
-  TEST_MODULE: ha/test_backups.py
+  TEST_MODULE: ha/test_backup.py
 systems:
   - self-hosted-linux-amd64-noble-large
 execute: |
