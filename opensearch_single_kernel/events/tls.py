@@ -35,6 +35,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 )
 from opensearch_single_kernel.utils.certificates import OLD_CA_ALIAS
 from opensearch_single_kernel.utils.helpers import generate_password
+from opensearch_single_kernel.utils.secrets import password_key
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -401,7 +402,7 @@ class TLSEventsHandler(Object):
         password = event.params.get("password") or generate_password()
         try:
             self.charm.users_manager.put_or_update_internal_user_leader(user_name, password)
-            label = self.charm.state.secrets.password_key(user_name)
+            label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
             # TODO: Update relation of peer cluster provider
@@ -436,9 +437,7 @@ class TLSEventsHandler(Object):
             event.fail("TLS certificates not configured yet.")
             return
 
-        password = self.charm.state.secrets.get(
-            Scope.APP, self.charm.state.secrets.password_key(user_name)
-        )
+        password = self.charm.state.secrets.get(Scope.APP, password_key(user_name))
         cert = self.charm.state.secrets.get_object(
             Scope.APP, CertType.APP_ADMIN.val, peek=True
         )  # replace later with new user certs

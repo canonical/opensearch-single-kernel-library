@@ -30,7 +30,7 @@ from opensearch_single_kernel.common.constants import (
     COS_USER,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
-    OPENSEARCH_STORAGE_NAME,
+    OPENSEARCH_DATA_STORAGE_NAME,
     OPENSEARCH_SYSTEM_USERS,
     PEER_RELATION,
     CertType,
@@ -65,6 +65,12 @@ from opensearch_single_kernel.utils.certificates import (
     OLD_CA_ALIAS,
 )
 from opensearch_single_kernel.utils.helpers import format_unit_name
+from opensearch_single_kernel.utils.secrets import (
+    breakdown_label,
+    hash_key,
+    password_key,
+    user_from_hash_key,
+)
 from opensearch_single_kernel.utils.status import Status
 
 if TYPE_CHECKING:
@@ -104,7 +110,7 @@ class OpenSearchEventsHandler(Object):
         )
 
         self.framework.observe(
-            self.charm.on[OPENSEARCH_STORAGE_NAME].storage_detaching,
+            self.charm.on[OPENSEARCH_DATA_STORAGE_NAME].storage_detaching,
             self._on_opensearch_data_storage_detaching,
         )
 
@@ -284,9 +290,9 @@ class OpenSearchEventsHandler(Object):
 
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
-            # TODO:
+            # TODO: Add large deployments support
 
-            # we attempt to flush the translog to disk
+        # we attempt to flush the translog to disk
         self.charm.cluster_manager.flush_translog_to_disk()
 
         try:
@@ -299,14 +305,14 @@ class OpenSearchEventsHandler(Object):
             # safeguards in case planned_units > 0
             if self.charm.app.planned_units() > 0:
                 # check cluster status
-                if self.charm.cluster_manager.alt_hosts:
-                    health_color = self.charm.status.apply_health(
-                        wait_for_green_first=True, use_localhost=False, unit=False
-                    )
-                    if health_color == HealthColors.RED:
-                        raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_RED.value.message)
-                else:
+                if not self.charm.cluster_manager.alt_hosts:
                     raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_UNKNOWN.value.message)
+
+                health_color = self.charm.status.apply_health(
+                    wait_for_green_first=True, use_localhost=False, unit=False
+                )
+                if health_color == HealthColors.RED:
+                    raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_RED.value.message)
         finally:
             if self.charm.app.planned_units() > 1 and (
                 self.charm.cluster_manager.opensearch_client.is_node_up()
@@ -420,18 +426,15 @@ class OpenSearchEventsHandler(Object):
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
 
-        if self.charm.unit.is_leader():
-            if self.charm.cluster_manager.reconcile_cluster_config():
-                if (
-                    self.charm.state.application.deployment_desc.start
-                    == StartMode.WITH_GENERATED_ROLES
-                ):
-                    # trigger roles change on the leader, other units will have their
-                    # peer-rel-changed event triggered
-                    self.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
-                self.apply_status_from_deployment_desc(
-                    self.charm.state.application.deployment_desc
-                )
+        if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
+            if (
+                self.charm.state.application.deployment_desc.start
+                == StartMode.WITH_GENERATED_ROLES
+            ):
+                # trigger roles change on the leader, other units will have their
+                # peer-rel-changed event triggered
+                self.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
+            self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
 
             # TODO: Handle cluster change to main orchestrator
             # This case is when the user change roles on runtime of init_hold / roles.
@@ -690,7 +693,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.state.server.started:
-            self.charm.state.server.update({"started": None})
+            self.charm.state.server.update({"started": ""})
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -799,9 +802,8 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.config_manager.cleanup_initial_cluster_managers()
 
-        current_node = self.charm.config_manager.current_node
         self.charm.exclusions_manager.delete_current(
-            node=current_node,
+            node=self.charm.config_manager.current_node,
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
         )
 
@@ -883,9 +885,8 @@ class OpenSearchEventsHandler(Object):
                 # and reusing storage
                 if len(nodes) > 1:
                     # 1. Add current node to the voting + alloc exclusions
-                    current_node = self.charm.config_manager.current_node
                     self.charm.exclusions_manager.add_current(
-                        node=current_node,
+                        node=self.charm.config_manager.current_node,
                         scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
                         voting=True,
                         allocation=not restart,
@@ -1043,7 +1044,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
-            label_parts = self.charm.state.secrets.breakdown_label(event.secret.label)
+            label_parts = breakdown_label(event.secret.label)
         except ValueError:
             logging.info(f"Label {event.secret.label} was meaningless for us, returning")
             return
@@ -1061,12 +1062,10 @@ class OpenSearchEventsHandler(Object):
         #
         # On a separate note: Handling for JWT-config related secrets (e.g. signing-key) happens
         # in the `JwtHandler` class, as it is a secret that is provided from another application
-        system_user_hash_keys = [
-            self.charm.state.secrets.hash_key(user) for user in OPENSEARCH_SYSTEM_USERS
-        ]
+        system_user_hash_keys = [hash_key(user) for user in OPENSEARCH_SYSTEM_USERS]
         keys_to_process = system_user_hash_keys + [
             CertType.APP_ADMIN.val,
-            self.charm.state.secrets.password_key(KIBANA_SERVER_USER),
+            password_key(KIBANA_SERVER_USER),
         ]
         # Variables for better readability
         label_key = label_parts["key"]
@@ -1083,14 +1082,14 @@ class OpenSearchEventsHandler(Object):
 
         logger.debug("Secret change for %s", str(label_key))
 
-        if is_leader and label_key == self.charm.state.secrets.password_key(KIBANA_SERVER_USER):
+        if is_leader and label_key == password_key(KIBANA_SERVER_USER):
             pass
             # self.charm.opensearch_provider.update_dashboards_password()
 
         # Non-leader units need to maintain local users in internal_users.yml
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
-            if sys_user := self.charm.state.secrets._user_from_hash_key(label_key):
+            if sys_user := user_from_hash_key(label_key):
                 self.charm.users_manager.put_internal_user(sys_user, password)
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
@@ -1224,3 +1223,11 @@ class OpenSearchEventsHandler(Object):
         self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)
         self.charm.tls_manager.delete_stored_tls_resources()
         self.request_new_unit_certificates()
+        # since when an IP change happens, "_on_peer_relation_joined" won't be called,
+        # we need to alert the leader that it must recompute the node roles for any unit whose
+        # roles were changed while the current unit was cut-off from the rest of the network
+        self._on_peer_relation_joined(
+            RelationJoinedEvent(
+                event.handle, self.charm.state.peer_relation.name, self.charm.app, self.charm.unit
+            )
+        )

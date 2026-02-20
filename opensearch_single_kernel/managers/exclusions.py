@@ -30,7 +30,11 @@ class NodesExclusionsManager(BaseManager):
         self.name = "exclusions_manager"
 
     def _fetch_voting(self) -> set[str]:
-        """Fetch the registered voting exclusions."""
+        """Fetch the registered voting exclusions.
+
+        Returns:
+            A set of unit names that are currently in the voting exclusion list.
+        """
         try:
             return self.opensearch_client.fetch_voting_config_exclusions(alt_hosts=self.alt_hosts)
         except (OpenSearchHttpError, KeyError) as e:
@@ -42,6 +46,13 @@ class NodesExclusionsManager(BaseManager):
         """Remove all voting exclusions and then re-adds the subset that should stay.
 
         The API does not allow to remove a subset of the voting exclusions, at once.
+
+        Args:
+            exclusions: the set of unit names to remove from the voting exclusion list.
+            scope: the scope of the exclusions to delete (app or unit).
+
+        Returns:
+            True if the operation succeeded, False otherwise.
         """
         current_excl = self._fetch_voting()
         logger.debug("Current voting exclusions: %s", current_excl)
@@ -87,7 +98,16 @@ class NodesExclusionsManager(BaseManager):
             return False
 
     def _delete_allocations(self, node: Node, allocs: list[str] | None = None) -> bool:
-        """This removes the allocation exclusions if needed."""
+        """This removes the allocation exclusions if needed.
+
+        Args:
+            node: the node for which the allocation exclusion should be removed.
+            allocs: the list of allocations to remove. If None, it defaults to the node
+            name.
+
+        Returns:
+            True if the operation succeeded, False otherwise.
+        """
         try:
             existing = self.opensearch_client.fetch_allocations(alt_hosts=self.alt_hosts)
             to_remove = set(allocs if allocs is not None else [node.name])
@@ -153,6 +173,13 @@ class NodesExclusionsManager(BaseManager):
         """Deletes all units that have left the cluster via Juju.
 
         This method ensures we keep a small list of voting exclusions at all times.
+
+        Args:
+            removable: the list of unit names that are marked as removable.
+
+        Returns:
+            A set of unit names that should be removed from the voting exclusion list, or None
+            if there are no units to remove.
         """
         if not (deployment_desc := self.state.application.deployment_desc) or not removable:
             return set()
@@ -186,7 +213,7 @@ class NodesExclusionsManager(BaseManager):
         self._delete_voting(units_to_cleanup, scope)
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(node, allocations_to_cleanup):
-            state.update({"allocation-exclusions-to-delete": None})
+            state.update({"allocation-exclusions-to-delete": ""})
 
     def add_to_cleanup_list(self, unit_name: str, scope: Scope) -> None:
         """Add Voting and alloc exclusions for a target unit.
@@ -201,7 +228,17 @@ class NodesExclusionsManager(BaseManager):
             lst = lst.union({unit_name})
 
     def _add_voting(self, scope: Scope, node: Node, exclusions: set[str] | None = None) -> bool:
-        """Include the current node in the CMs voting exclusions list of nodes."""
+        """Include the current node in the CMs voting exclusions list of nodes.
+
+        Args:
+            scope: the scope of the exclusions to add (app or unit).
+            node: the node for which the voting exclusion should be added.
+            exclusions: the set of unit names to add to the voting exclusion list. If None, it
+            defaults to the current node name.
+
+        Returns:
+            True if the operation succeeded, False otherwise.
+        """
         try:
             to_add = exclusions or {node.name}
             result = self.opensearch_client.add_voting_exclusions(

@@ -314,7 +314,7 @@ class ClusterManager(BaseManager):
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
         if cleanup_application:
             self.state.application.update({"bootstrapped": "True"})
-        self.state.server.update({"bootstrap_contributor": None})
+        self.state.server.update({"bootstrap_contributor": ""})
 
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
@@ -584,13 +584,13 @@ class ClusterManager(BaseManager):
     def cleanup_on_last_unit_removal(self):
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
-            self.state.application.update({"bootstrap_contributors_count": None})
-            self.state.application.update({"nodes_config": None})
+            self.state.application.update({"bootstrap_contributors_count": ""})
+            self.state.application.update({"nodes_config": ""})
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
-                self.state.application.update({"is_security_index_initialised": None})
-                self.state.application.update({"bootstrapped": None})
+                self.state.application.update({"is_security_index_initialised": ""})
+                self.state.application.update({"bootstrapped": ""})
         # TODO: Large Deployment
         # if self.opensearch_peer_cm.is_provider():
         #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
@@ -651,7 +651,7 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        self.state.server.update({"started": None})
+        self.state.server.update({"started": ""})
 
     def apply_upstream_fixes(self):
         """This changes the replication factor of some core indices."""
@@ -664,7 +664,7 @@ class ClusterManager(BaseManager):
         ]
         for index in target_indices:
             try:
-                self.opensearch_client.apply_no_replication_to_index(index)
+                self.opensearch_client.apply_auto_replication_to_index(index)
             except OpenSearchHttpError as e:
                 if e.response_code != 404:
                     continue

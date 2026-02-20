@@ -44,11 +44,21 @@ class OpenSearchClient:
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def apply_no_replication_to_index(
+    def apply_auto_replication_to_index(
         self,
         index: str,
     ) -> None:
-        """Apply replication settings to an index."""
+        """Apply replication settings to an index.
+
+        This will set the auto_expand_replicas to 0-all, which means that OpenSearch
+        will automatically adjust the number of replicas for indexes based on the
+        number of data nodes in the cluster. In this case 0 is the minimum number
+        of replicas and "all" means the max limit which is the number of data nodes
+        minus one.
+
+        Args:
+            index: the name of the index to apply the settings to.
+        """
         self.request(
             method="PUT",
             endpoint=f"/{index}/_settings",
@@ -73,7 +83,9 @@ class OpenSearchClient:
             )
         )
 
-    def remove_exclusions(self, exclusions: set[str], alt_hosts: list[str] | None = None) -> bool:
+    def remove_voting_exclusions(
+        self, exclusions: set[str], alt_hosts: list[str] | None = None
+    ) -> bool:
         """Remove voting exclusions from OpenSearch cluster."""
         response = self.request(
             "DELETE",
@@ -108,17 +120,15 @@ class OpenSearchClient:
 
     def fetch_allocations(self, alt_hosts: list[str] | None = None) -> set[str]:
         """Fetch the registered allocation exclusions."""
-        allocation_exclusions = set()
         try:
             resp = self.request("GET", "/_cluster/settings", alt_hosts=alt_hosts)
-            exclusions = resp["persistent"]["cluster"]["routing"]["allocation"]["exclude"]["_name"]
-            if exclusions:
-                allocation_exclusions = set(exclusions.split(","))
+            if exclusions := resp["persistent"]["cluster"]["routing"]["allocation"]["exclude"][
+                "_name"
+            ]:
+                return set(exclusions.split(","))
         except KeyError:
             # no allocation exclusion set
-            pass
-        finally:
-            return allocation_exclusions
+            return set()
 
     def add_allocations(
         self,

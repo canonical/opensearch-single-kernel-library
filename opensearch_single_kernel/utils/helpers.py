@@ -9,23 +9,17 @@ import re
 import secrets
 import string
 from datetime import datetime
-from time import time_ns
-from typing import TYPE_CHECKING
 
 import bcrypt
 from cryptography import x509
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
-    PEER_RELATION,
     DeploymentType,
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
-
-if TYPE_CHECKING:
-    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 
 def format_unit_name(unit: Unit | str, app: App) -> str:
@@ -33,26 +27,6 @@ def format_unit_name(unit: Unit | str, app: App) -> str:
     if isinstance(unit, Unit):
         unit = unit.name
     return f"{unit.replace('/', '-')}.{app.short_id}"
-
-
-def trigger_peer_rel_changed(
-    charm: "OpenSearchBaseCharm",
-    only_by_leader: bool = False,
-    on_other_units: bool = True,
-    on_current_unit: bool = False,
-) -> None:
-    """Force trigger a peer rel changed event."""
-    if only_by_leader and not charm.unit.is_leader():
-        return
-
-    if on_other_units or not on_current_unit:
-        if only_by_leader:
-            charm.state.application.update_ts = time_ns()
-        else:
-            charm.state.server.update_ts = time_ns()
-
-    if on_current_unit:
-        charm.on[PEER_RELATION].relation_changed.emit(charm.state.peer_relation)
 
 
 def mask_sensitive_information(cmd: str) -> str:
