@@ -630,7 +630,8 @@ class ClusterState(Object):
         """UUID of the Charm Model."""
         return self.model.uuid
 
-    def get_storage_type(self) -> ObjectStorageType | None:  # noqa: C901
+    @property
+    def storage_type(self) -> ObjectStorageType | None:  # noqa: C901
         """Get the active object storage type from relations/peer-cluster.
 
         Returns:

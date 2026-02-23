@@ -21,6 +21,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCreateBackupError,
     OpenSearchHttpError,
     OpenSearchListBackupsError,
+    OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.core.models import (
@@ -84,10 +85,7 @@ class BackupManager(BaseManager):
         try:
             rel_data = data_model.from_relation(connection_info) if connection_info else None
         except ValidationError as e:
-            logger.warning(
-                "validation error while building payload for %s: %s", object_storage_type.val, e
-            )
-            rel_data = None
+            raise OpenSearchObjectStorageConfigValidationError(e) from e
         return (
             ObjectStorageConfig(**{object_storage_type.val.lower(): rel_data})
             if rel_data
@@ -335,7 +333,7 @@ class BackupManager(BaseManager):
         Returns:
             dict[str, str]: Snapshot ID and status.
         """
-        object_storage_type = self.state.get_storage_type()
+        object_storage_type = self.state.storage_type
         # Create a new snapshot
         try:
             snapshot_id = self.opensearch_client.create_snapshot(
@@ -372,7 +370,7 @@ class BackupManager(BaseManager):
             OpenSearchListBackupsError: If the snapshot listing fails.
         """
         try:
-            object_storage_type = self.state.get_storage_type()
+            object_storage_type = self.state.storage_type
             snapshots = self.opensearch_client.list_snapshots(
                 object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
             )
@@ -411,7 +409,7 @@ class BackupManager(BaseManager):
             OpenSearchRestoreBackupError: If the restore operation fails.
 
         """
-        object_storage_type = self.state.get_storage_type()
+        object_storage_type = self.state.storage_type
         # Fetch the snapshot with the corresponding ID
         try:
             if not (

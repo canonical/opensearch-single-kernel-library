@@ -8,6 +8,8 @@
 import json
 from typing import Optional
 
+from pydantic import ValidationError
+
 
 class OpenSearchError(Exception):
     """Base exception class for OpenSearch errors."""
@@ -90,6 +92,14 @@ class OpenSearchExclusionsException(OpenSearchError):
 
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
+
+
+class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
+    """Raise when relation data is present but fails validation."""
+
+    def __init__(self, error: ValidationError):
+        super().__init__(str(error))
+        self.error = error
 
 
 class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):

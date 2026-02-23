@@ -24,6 +24,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchListBackupsError,
+    OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
@@ -114,7 +115,7 @@ class BackupEventsHandler(Object):
         # block non-main orchestrators only when they are in a multi-app topology.
         # TODO: Handle once large deployments are implemented
 
-        object_storage_type = self.charm.state.get_storage_type()
+        object_storage_type = self.charm.state.storage_type
 
         if not object_storage_type:
             logger.warning("No object storage type could be determined.")
@@ -131,10 +132,25 @@ class BackupEventsHandler(Object):
 
         # Get connection info
         connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
+        if not connection_info:
+            if self.charm.unit.is_leader():
+                self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            return
         # Get config using the connection info
-        object_storage_config = self.charm.backup_manager.storage_config_from_connection_info(
-            object_storage_type, connection_info
-        )
+        try:
+            object_storage_config = self.charm.backup_manager.storage_config_from_connection_info(
+                object_storage_type, connection_info
+            )
+        except OpenSearchObjectStorageConfigValidationError as e:
+            logger.warning(
+                "%s object storage configuration is invalid: %s",
+                object_storage_type,
+                e.error,
+            )
+            if self.charm.unit.is_leader():
+                self.charm.status.clear(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+                self.charm.status.set(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
+            return
 
         # Validate storage config
         try:
@@ -258,7 +274,7 @@ class BackupEventsHandler(Object):
         self, event: VerifyBackupCredentialsEvent
     ) -> None:
         """Verify that stored backup credentials are still valid."""
-        object_storage_type = self.state.get_storage_type()
+        object_storage_type = self.charm.state.storage_type
         # Get connection info
         connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
         # Get config using the connection info
@@ -381,7 +397,7 @@ class BackupEventsHandler(Object):
         # if self.charm.upgrade_in_progress:
         #    return "Backup/Restore operations not supported while upgrade in-progress."
 
-        object_storage_type = self.charm.state.get_storage_type()
+        object_storage_type = self.charm.state.storage_type
 
         if not object_storage_type:
             if self.charm.unit.is_leader():
