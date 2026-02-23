@@ -115,19 +115,6 @@ class ClusterManager(BaseManager):
         #  + removing them from queue. We currently only apply the status.
         return True
 
-    def recompute_roles_if_needed(self):
-        """Recompute node roles:self-healing that didn't trigger leader related event occurred."""
-        try:
-            if not (nodes := self.get_nodes(self.opensearch_client.is_node_up())):
-                return
-
-            if len(nodes) < self.state.planned_units:
-                return
-
-            self.compute_and_broadcast_updated_topology(nodes)
-        except OpenSearchHttpError:
-            pass
-
     def _new_cluster_setup(self, config: PeerClusterConfig) -> DeploymentDescription:
         """Build deployment description of a new cluster."""
         logger.debug("New cluster setup")

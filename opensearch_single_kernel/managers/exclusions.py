@@ -37,7 +37,7 @@ class NodesExclusionsManager(BaseManager):
         """
         try:
             return self.opensearch_client.fetch_voting_config_exclusions(alt_hosts=self.alt_hosts)
-        except (OpenSearchHttpError, KeyError) as e:
+        except OpenSearchHttpError as e:
             logger.warning(f"Failed to fetch voting exclusions: {e}")
             # no voting exclusion set
             return {}
@@ -109,7 +109,7 @@ class NodesExclusionsManager(BaseManager):
             True if the operation succeeded, False otherwise.
         """
         try:
-            existing = self.opensearch_client.fetch_allocations(alt_hosts=self.alt_hosts)
+            existing = self.opensearch_client.fetch_allocation_exclusions(alt_hosts=self.alt_hosts)
             to_remove = set(allocs if allocs is not None else [node.name])
             res = self.opensearch_client.add_allocations(
                 node, allocations=existing - to_remove, override=True, alt_hosts=self.alt_hosts
@@ -134,10 +134,18 @@ class NodesExclusionsManager(BaseManager):
                     raise OpenSearchExclusionsException("Failed to add voting exclusion.")
 
         if allocation and node.is_data():
-            if not self.opensearch_client.add_allocations(node=node, alt_hosts=self.alt_hosts):
-                logger.error(f"Failed to add shard allocation exclusion: {node.name}.")
-                if raise_error:
-                    raise OpenSearchExclusionsException("Failed to add allocation exclusion.")
+            try:
+                success = self.opensearch_client.add_allocations(
+                    node=node, alt_hosts=self.alt_hosts
+                )
+            except OpenSearchHttpError as e:
+                logger.error(f"Failed to add shard allocation exclusion: {node.name}. Error: {e}")
+                success = False
+            finally:
+                if not success:
+                    logger.error(f"Failed to add shard allocation exclusion: {node.name}.")
+                    if raise_error:
+                        raise OpenSearchExclusionsException("Failed to add allocation exclusion.")
 
     def delete_current(
         self,

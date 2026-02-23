@@ -7,7 +7,6 @@
 import logging
 import time
 from datetime import datetime
-from time import time_ns
 from typing import TYPE_CHECKING
 
 from ops import (
@@ -144,7 +143,14 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent):  # noqa C901
         """Handle peer relation changes."""
-        if self.charm.cluster_manager.opensearch_client.is_node_up():
+        # check requirements
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not yet computed.")
+            return
+
+        is_node_up = self.charm.cluster_manager.opensearch_client.is_node_up()
+
+        if is_node_up:
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
             if self._is_peer_rel_changed_deferred:
                 # We already deferred this event during this Juju event. Retry on the next
@@ -173,8 +179,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.config_manager.add_cm_addresses_to_conf()
 
         if self.charm.unit.is_leader():
-            # Recompute the node roles in case self-healing didn't trigger leader related event
-            self.charm.cluster_manager.recompute_roles_if_needed()
+            pass
             # TODO: Handle once large deployments are implemented
             # if self.peers_data.get(Scope.APP, "missing_relations"):
             # for failover promotions: this flag indicates that the user needs
@@ -189,19 +194,15 @@ class OpenSearchEventsHandler(Object):
                 logger.debug("Restarting opensearch due to reconfiguring node roles")
                 self.charm.restart_opensearch_event.emit()
 
-        # check requirements
-        if self.charm.state.application.deployment_desc:
-            self.check_profile_missing_requirements()
+        self.check_profile_missing_requirements()
 
         if not (unit_data := event.relation.data.get(event.unit)):
             return
 
-        if self.charm.state.application.deployment_desc:
-            current_node = self.charm.config_manager.current_node
-            self.charm.exclusions_manager.cleanup(
-                Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
-                current_node,
-            )
+        self.charm.exclusions_manager.cleanup(
+            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
+            node=self.charm.config_manager.current_node,
+        )
 
         if self.charm.unit.is_leader() and unit_data.get("bootstrap_contributor"):
             contributor_count = self.charm.state.application.bootstrap_contributors_count
@@ -433,7 +434,7 @@ class OpenSearchEventsHandler(Object):
             ):
                 # trigger roles change on the leader, other units will have their
                 # peer-rel-changed event triggered
-                self.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
+                self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
             self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
 
             # TODO: Handle cluster change to main orchestrator
@@ -1118,25 +1119,6 @@ class OpenSearchEventsHandler(Object):
             )
         else:
             return self.is_cluster_healthy_to_start()
-
-    def trigger_peer_rel_changed(
-        self,
-        only_by_leader: bool = False,
-        on_other_units: bool = True,
-        on_current_unit: bool = False,
-    ) -> None:
-        """Force trigger a peer rel changed event."""
-        if only_by_leader and not self.charm.unit.is_leader():
-            return
-
-        if on_other_units or not on_current_unit:
-            if only_by_leader:
-                self.charm.state.application.update_ts = time_ns()
-            else:
-                self.charm.state.server.update_ts = time_ns()
-
-        if on_current_unit:
-            self.charm.on[PEER_RELATION].relation_changed.emit(self.charm.state.peer_relation)
 
     def post_start_ca_rotation(self) -> None:
         """Configure TLS CA rotation after OpenSearch is started."""

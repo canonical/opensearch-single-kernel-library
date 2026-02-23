@@ -67,21 +67,25 @@ class OpenSearchClient:
 
     def fetch_voting_config_exclusions(self, alt_hosts: list[str] | None = None) -> set[str]:
         """Fetch the voting exclusions config."""
-        resp = self.request(
-            "GET",
-            "/_cluster/state/metadata/voting_config_exclusions",
-            alt_hosts=alt_hosts,
-        )
-        return set(
-            sorted(
-                [
-                    node["node_name"]
-                    for node in resp["metadata"]["cluster_coordination"][
-                        "voting_config_exclusions"
-                    ]
-                ]
+        try:
+            resp = self.request(
+                "GET",
+                "/_cluster/state/metadata/voting_config_exclusions",
+                alt_hosts=alt_hosts,
             )
-        )
+            return set(
+                sorted(
+                    [
+                        node["node_name"]
+                        for node in resp["metadata"]["cluster_coordination"][
+                            "voting_config_exclusions"
+                        ]
+                    ]
+                )
+            )
+        except KeyError:
+            # no voting exclusions set
+            return set()
 
     def remove_voting_exclusions(
         self, exclusions: set[str], alt_hosts: list[str] | None = None
@@ -118,7 +122,7 @@ class OpenSearchClient:
         logger.debug("Added voting exclusions for:  %s", exclusions)
         return True
 
-    def fetch_allocations(self, alt_hosts: list[str] | None = None) -> set[str]:
+    def fetch_allocation_exclusions(self, alt_hosts: list[str] | None = None) -> set[str]:
         """Fetch the registered allocation exclusions."""
         try:
             resp = self.request("GET", "/_cluster/settings", alt_hosts=alt_hosts)
@@ -138,18 +142,15 @@ class OpenSearchClient:
         alt_hosts: list[str] | None = None,
     ) -> bool:
         """Register new allocation exclusions."""
-        try:
-            existing = set() if override else self.fetch_allocations(alt_hosts=alt_hosts)
-            all_allocs = existing.union(allocations if allocations is not None else {node.name})
-            response = self.request(
-                "PUT",
-                "/_cluster/settings",
-                {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_allocs)}},
-                alt_hosts=alt_hosts,
-            )
-            return "acknowledged" in response
-        except OpenSearchHttpError:
-            return False
+        existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
+        all_allocs = existing.union(allocations if allocations is not None else {node.name})
+        response = self.request(
+            "PUT",
+            "/_cluster/settings",
+            {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_allocs)}},
+            alt_hosts=alt_hosts,
+        )
+        return "acknowledged" in response
 
     def get_node_id(self, unit_name: str) -> str | None:
         """Get the OpenSearch node id corresponding to the unit.
@@ -165,6 +166,7 @@ class OpenSearchClient:
         for n_id, node in nodes.items():
             if node["name"] == unit_name:
                 return n_id
+        return None
 
     def get_current_node(self, node_id: str, unit_id: int, alt_hosts: list[str] | None) -> Node:
         """Get the current OpenSearch node information."""

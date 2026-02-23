@@ -5,11 +5,12 @@
 """OpenSearch Base Charm."""
 
 from abc import ABC, abstractmethod
+from time import time_ns
 
 import ops
 from ops import EventSource
 
-from opensearch_single_kernel.common.constants import Substrates
+from opensearch_single_kernel.common.constants import PEER_RELATION, Substrates
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
@@ -57,6 +58,25 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
+
+    def trigger_peer_rel_changed(
+        self,
+        only_by_leader: bool = False,
+        on_other_units: bool = True,
+        on_current_unit: bool = False,
+    ) -> None:
+        """Force trigger a peer rel changed event."""
+        if only_by_leader and not self.unit.is_leader():
+            return
+
+        if on_other_units or not on_current_unit:
+            if only_by_leader:
+                self.state.application.update_ts = time_ns()
+            else:
+                self.state.server.update_ts = time_ns()
+
+        if on_current_unit:
+            self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)
 
     @property
     @abstractmethod
