@@ -42,7 +42,7 @@ class ConfigManager(BaseManager):
         self.name = "config_manager"
 
     @property
-    def yaml_setter(self):
+    def yaml_setter(self) -> YamlConfigSetter:
         """Return the yaml_setter."""
         return YamlConfigSetter(self.workload)
 
@@ -318,7 +318,7 @@ class ConfigManager(BaseManager):
             regex=True,
         )
 
-    def add_cm_addresses_to_conf(self):
+    def add_cm_addresses_to_conf(self) -> None:
         """Add the new IP addresses of the current CM units."""
         try:
             # fetch nodes

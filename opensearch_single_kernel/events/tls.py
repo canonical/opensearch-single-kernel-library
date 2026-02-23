@@ -72,7 +72,7 @@ class TLSEventsHandler(Object):
         self.framework.observe(self.charm.on.set_password_action, self._on_set_password_action)
         self.framework.observe(self.charm.on.get_password_action, self._on_get_password_action)
 
-    def _on_set_private_key(self, event: ActionEvent):
+    def _on_set_private_key(self, event: ActionEvent) -> None:
         """Set the TLS private key, which will be used for requesting the certificate."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -320,7 +320,7 @@ class TLSEventsHandler(Object):
 
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
-    ):
+    ) -> None:
         """Called after certificate ready and stored on the corresponding scope databag.
 
         - Store the cert on the file system, on all nodes for APP certificates
@@ -378,7 +378,7 @@ class TLSEventsHandler(Object):
                 event.defer()
                 return
 
-    def _on_set_password_action(self, event: ActionEvent):
+    def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -418,7 +418,7 @@ class TLSEventsHandler(Object):
             # else:
             event.fail(f"Failed with unknown error: {e}")
 
-    def _on_get_password_action(self, event: ActionEvent):
+    def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")

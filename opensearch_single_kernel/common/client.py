@@ -44,6 +44,10 @@ class OpenSearchClient:
         self.workload = workload
         self.admin_secret = admin_secret
 
+    def flush_opensearch_translog(self) -> None:
+        """Flush the OpenSearch translog to ensure all operations are committed to disk."""
+        self.request("POST", "/_flush/synced")
+
     def apply_auto_replication_to_index(
         self,
         index: str,

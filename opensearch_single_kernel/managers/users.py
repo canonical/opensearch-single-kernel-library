@@ -90,7 +90,7 @@ class UsersManager(BaseManager):
         if user in OPENSEARCH_SYSTEM_USERS:
             self.put_internal_user(user, hashed_pwd)
 
-    def purge_initial_default_users(self):
+    def purge_initial_default_users(self) -> None:
         """Removes all users from internal_users yaml config.
 
         This is to be used when starting up the charm, to remove unnecessary default users.
@@ -105,7 +105,7 @@ class UsersManager(BaseManager):
             if user != "_meta":
                 self.yaml_setter.delete("opensearch-security/internal_users.yml", user)
 
-    def save_user_locally(self, user: str):
+    def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
         user_hash = hash_key(user)
         hashed_pwd = self.state.secrets.get(Scope.APP, user_hash)
@@ -357,7 +357,7 @@ class UsersManager(BaseManager):
         if resp.get("status") != "OK":
             raise OpenSearchUserMgmtError(f"removing role mapping {role} failed")
 
-    def update_user_password(self, username: str, hashed_pwd: str):
+    def update_user_password(self, username: str, hashed_pwd: str) -> None:
         """Change user hashed password."""
         resp = self.opensearch_client.request(
             "PATCH",
@@ -367,7 +367,7 @@ class UsersManager(BaseManager):
         if resp.get("status") != "OK":
             raise OpenSearchError(f"{resp}")
 
-    def put_internal_user(self, user: str, hashed_pwd: str):
+    def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users."""
         if user not in OPENSEARCH_USERS:
             raise OpenSearchError(f"User {user} is not an internal user.")

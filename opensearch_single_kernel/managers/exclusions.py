@@ -166,10 +166,7 @@ class NodesExclusionsManager(BaseManager):
             if not self._delete_allocations(node):
                 logger.error(f"Failed to delete shard allocation exclusion: {node.name}.")
                 # Load the content of the list, avoiding '' entries
-                if scope == Scope.APP:
-                    state = self.state.application
-                else:
-                    state = self.state.server
+                state = self.state.application if scope == Scope.APP else self.state.server
                 current_allocations = state.allocation_exclusions_to_delete
                 current_allocations.add(node.name)
                 state.allocation_exclusions_to_delete = current_allocations

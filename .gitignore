@@ -66,3 +66,4 @@ terraform.rc
 .env
 
 coverage.xml
+last_written_value

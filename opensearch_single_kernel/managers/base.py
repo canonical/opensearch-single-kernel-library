@@ -25,7 +25,7 @@ class BaseManager:
         self.workload = workload
 
     @property
-    def opensearch_client(self):
+    def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
         admin_field = password_key("admin")
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)

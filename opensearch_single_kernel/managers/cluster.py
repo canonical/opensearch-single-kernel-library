@@ -65,7 +65,7 @@ class ClusterManager(BaseManager):
         self.name = "cluster_manager"
         self.yaml_setter = YamlConfigSetter(self.workload)
 
-    def start(self, wait_until_http_200: bool = True):
+    def start(self, wait_until_http_200: bool = True) -> None:
         """Start the opensearch service."""
 
         def _is_connected():
@@ -237,7 +237,7 @@ class ClusterManager(BaseManager):
             ),
         )
 
-    def _pre_validate_roles_change(self, new_roles: list[str], prev_roles: list[str]):
+    def _pre_validate_roles_change(self, new_roles: list[str], prev_roles: list[str]) -> None:
         """Validate that the config changes of roles are allowed to happen."""
         if sorted(prev_roles) == sorted(new_roles):
             # nothing changed, leave
@@ -285,7 +285,7 @@ class ClusterManager(BaseManager):
         # if not other_clusters_data_nodes:
         # raise OpenSearchProvidedRolesException(DataRoleRemovalForbidden)
 
-    def _user_config(self):
+    def _user_config(self) -> PeerClusterConfig:
         """Build a user provided config object."""
         return PeerClusterConfig(
             cluster_name=self.state.config.get("cluster_name"),
@@ -297,7 +297,7 @@ class ClusterManager(BaseManager):
             ],
         )
 
-    def update_bootstrap_state(self, cleanup_application: bool = False):
+    def update_bootstrap_state(self, cleanup_application: bool = False) -> None:
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
         if cleanup_application:
             self.state.application.update({"bootstrapped": "True"})
@@ -310,7 +310,7 @@ class ClusterManager(BaseManager):
             or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         )
 
-    def wait_opensearch_part_of_cluster(self):
+    def wait_opensearch_part_of_cluster(self) -> None:
         """Wait for opensearch to become part of the cluster."""
         # Get online nodes
         try:
@@ -325,7 +325,7 @@ class ClusterManager(BaseManager):
         else:
             raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
 
-    def initialise_security_index(self):
+    def initialise_security_index(self) -> None:
         """Initialise security Index.
 
         This function is called after opensearch has started.
@@ -374,12 +374,12 @@ class ClusterManager(BaseManager):
             return True
         return False
 
-    def _put_security_index_initialised(self):
+    def _put_security_index_initialised(self) -> None:
         """Set the security index initialized flag."""
         # TODO: Add peer cluster updates here we need to update relations
         self.state.application.is_security_index_initialised = True
 
-    def wait_for_opensearch_up(self):
+    def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
         # it sometimes takes a few seconds before the node is fully "up" otherwise a 503 error
         # may be thrown when calling a node - we want to ensure this node is perfectly ready
@@ -434,7 +434,7 @@ class ClusterManager(BaseManager):
             return []
         return self._nodes(use_localhost, self.alt_hosts)
 
-    def clear_directive(self, directive: Directive):
+    def clear_directive(self, directive: Directive) -> None:
         """Remove directive after having applied it."""
         if not (deployment_desc := self.state.application.deployment_desc):
             return
@@ -568,7 +568,7 @@ class ClusterManager(BaseManager):
         )
         return nodes_by_name
 
-    def cleanup_on_last_unit_removal(self):
+    def cleanup_on_last_unit_removal(self) -> None:
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
             self.state.application.update({"bootstrap_contributors_count": ""})
@@ -592,7 +592,7 @@ class ClusterManager(BaseManager):
         """Flush OpenSearch translog to disk."""
         if self.opensearch_client.is_node_up():
             try:
-                self.opensearch_client.request("POST", "/_flush")
+                self.opensearch_client.flush_opensearch_translog()
             except OpenSearchHttpError:
                 # if it's a failed attempt we move on
                 pass
@@ -640,7 +640,7 @@ class ClusterManager(BaseManager):
 
         self.state.server.update({"started": ""})
 
-    def apply_upstream_fixes(self):
+    def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
         # Bug https://github.com/opensearch-project/OpenSearch/issues/8862
         # Introduced in: 2.9.0

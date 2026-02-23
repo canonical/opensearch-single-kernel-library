@@ -121,7 +121,7 @@ class OpenSearchEventsHandler(Object):
         # in the deferred event queue
         self._is_peer_rel_changed_deferred = False
 
-    def _on_peer_relation_created(self, event: RelationCreatedEvent):
+    def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
         pass
         # TODO: Handle upgrades
@@ -131,7 +131,7 @@ class OpenSearchEventsHandler(Object):
         #  unrecoverable state"
         # )
 
-    def _on_peer_relation_joined(self, event: RelationJoinedEvent):
+    def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Event received by all units when a new node joins the cluster."""
         pass
         # TODO: Handle upgrades
@@ -141,7 +141,7 @@ class OpenSearchEventsHandler(Object):
         #  unrecoverable state"
         #    )
 
-    def _on_peer_relation_changed(self, event: RelationChangedEvent):  # noqa C901
+    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa C901
         """Handle peer relation changes."""
         # check requirements
         if not self.charm.state.application.deployment_desc:
@@ -208,7 +208,7 @@ class OpenSearchEventsHandler(Object):
             contributor_count = self.charm.state.application.bootstrap_contributors_count
             self.charm.state.application.bootstrap_contributors_count = contributor_count + 1
 
-    def _on_peer_relation_departed(self, event: RelationDepartedEvent):
+    def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
         # TODO: Handle upgrades
         # if self.upgrade_in_progress:
@@ -256,7 +256,9 @@ class OpenSearchEventsHandler(Object):
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
         )
 
-    def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent):  # noqa: C901
+    def _on_opensearch_data_storage_detaching(
+        self, event: StorageDetachingEvent
+    ) -> None:  # noqa: C901
         """Triggered when removing unit, Prior to the storage being detached."""
         # TODO: Warning in case of upgrade in progress
 
@@ -322,7 +324,7 @@ class OpenSearchEventsHandler(Object):
                 # release lock
                 self.charm.lock_manager.release()
 
-    def _on_update_status(self, event: UpdateStatusEvent):  # noqa: C901
+    def _on_update_status(self, event: UpdateStatusEvent) -> None:  # noqa: C901
         """On update status event.
 
         We want to periodically check for the following:
@@ -949,7 +951,7 @@ class OpenSearchEventsHandler(Object):
 
         return missing_requirements
 
-    def set_profile_status(self, missing_requirements: list[str]):
+    def set_profile_status(self, missing_requirements: list[str]) -> None:
         """Set the charm status based on the missing requirements"""
         if missing_requirements:
             logger.error("Missing profile requirements: %s", missing_requirements)
