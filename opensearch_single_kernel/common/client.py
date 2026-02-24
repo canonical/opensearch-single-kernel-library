@@ -152,6 +152,8 @@ class OpenSearchClient:
             ]:
                 return set(exclusions.split(","))
         except KeyError:
+            pass
+        finally:
             # no allocation exclusion set
             return set()
 
