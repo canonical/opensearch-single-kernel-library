@@ -582,7 +582,7 @@ class ClusterManager(BaseManager):
                 for node in self.get_nodes(self.opensearch_client.is_node_up())
                 if node.name
                 != format_unit_name(
-                    self.charm.unit.name, app=self.charm.state.application.deployment_desc.app
+                    self.state.unit_name, app=self.state.application.deployment_desc.app
                 )
             ]
             self.compute_and_broadcast_updated_topology(remaining_nodes)

@@ -625,7 +625,7 @@ class OpenSearchEventsHandler(Object):
             )
             # TODO:
             # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
-            event.defer()
+            # event.defer()
             return
 
         logger.info("Emitting the start opensearch event")
