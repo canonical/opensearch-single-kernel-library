@@ -36,11 +36,11 @@ class NodesExclusionsManager(BaseManager):
             A set of unit names that are currently in the voting exclusion list.
         """
         try:
-            return self.opensearch_client.fetch_voting_config_exclusions(alt_hosts=self.alt_hosts)
+            return self.opensearch_client.fetch_voting_exclusions_config(alt_hosts=self.alt_hosts)
         except OpenSearchHttpError as e:
             logger.warning(f"Failed to fetch voting exclusions: {e}")
             # no voting exclusion set
-            return {}
+            return set()
 
     def _delete_voting(self, exclusions: set[str], scope: Scope) -> bool:
         """Remove all voting exclusions and then re-adds the subset that should stay.
@@ -69,7 +69,6 @@ class NodesExclusionsManager(BaseManager):
         # and allows any node to return to the voting config in the future
         try:
             if not self.opensearch_client.remove_exclusions(
-                exclusions=exclusions,
                 alt_hosts=self.alt_hosts,
             ):
                 return False
@@ -228,9 +227,10 @@ class NodesExclusionsManager(BaseManager):
         app-level peer data.
         """
         state = self.state.application if scope == Scope.APP else self.state.server
-        for lst in [state.allocation_exclusions_to_delete, state.delete_voting_exclusions]:
-            # Load the content of the list, avoiding '' entries
-            lst = lst.union({unit_name})
+        state.allocation_exclusions_to_delete = state.allocation_exclusions_to_delete.union(
+            {unit_name}
+        )
+        state.delete_voting_exclusions = state.delete_voting_exclusions.union({unit_name})
 
     def _add_voting(self, scope: Scope, node: Node, exclusions: set[str] | None = None) -> bool:
         """Include the current node in the CMs voting exclusions list of nodes.

@@ -117,10 +117,6 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
 
-        # Ensure that only one instance of the `_on_peer_relation_changed` handler exists
-        # in the deferred event queue
-        self._is_peer_rel_changed_deferred = False
-
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
         pass
@@ -152,17 +148,11 @@ class OpenSearchEventsHandler(Object):
 
         if is_node_up:
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
-            if self._is_peer_rel_changed_deferred:
-                # We already deferred this event during this Juju event. Retry on the next
-                # Juju event.
-                return
 
             if health in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]:
                 # we defer because we want the temporary status to be updated
                 logger.debug("Cluster health temp yellow or unknown. Deferring event.")
                 event.defer()
-                # If the handler is called again within this Juju hook, we will abandon the event
-                self._is_peer_rel_changed_deferred = True
 
         # we want to have the most up-to-date info broadcasted to related sub-clusters
         # if self.opensearch_peer_cm.is_provider():
@@ -179,7 +169,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.config_manager.add_cm_addresses_to_conf()
 
         if self.charm.unit.is_leader():
-            pass
+            self.charm.cluster_manager.compute_and_broadcast_updated_topology()
             # TODO: Handle once large deployments are implemented
             # if self.peers_data.get(Scope.APP, "missing_relations"):
             # for failover promotions: this flag indicates that the user needs
@@ -216,6 +206,9 @@ class OpenSearchEventsHandler(Object):
         #        "Removing units during an upgrade is not supported. The charm may be in a broken,
         #  unrecoverable state"
         #    )
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            # that happens in the very last stages of the application removal
+            return
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
@@ -226,12 +219,7 @@ class OpenSearchEventsHandler(Object):
 
         # Now, we register in the leader application the presence of departing unit's name
         # We need to save them as we have a count limit
-        if (
-            not (deployment_desc := self.charm.state.application.deployment_desc)
-            or not event.departing_unit
-        ):
-            # No deployment description present
-            # that happens in the very last stages of the application removal
+        if not event.departing_unit:
             return
 
         current_app = deployment_desc.app
@@ -261,36 +249,20 @@ class OpenSearchEventsHandler(Object):
     ) -> None:  # noqa: C901
         """Triggered when removing unit, Prior to the storage being detached."""
         # TODO: Warning in case of upgrade in progress
+        planned_units = self.charm.app.planned_units()
 
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
-        if self.charm.app.planned_units() > 1 and not self.charm.lock_manager.acquired:
+        if planned_units > 1 and not self.charm.lock_manager.acquired:
             # Raise uncaught exception to prevent Juju from removing unit
             raise Exception("Unable to acquire lock: Another unit is starting or stopping.")
 
         # if the leader is departing, and this hook fails "leader elected" won"t trigger,
         # so we want to re-balance the node roles from here
         if self.charm.unit.is_leader():
-            if self.charm.app.planned_units() <= 1 and (
-                self.charm.cluster_manager.opensearch_client.is_node_up()
-                or self.charm.cluster_manager.alt_hosts
-            ):
-                remaining_nodes = [
-                    node
-                    for node in self.charm.cluster_manager.get_nodes(
-                        self.charm.cluster_manager.opensearch_client.is_node_up()
-                    )
-                    if node.name
-                    != format_unit_name(
-                        self.charm.unit.name, app=self.charm.state.application.deployment_desc.app
-                    )
-                ]
-                self.charm.cluster_manager.compute_and_broadcast_updated_topology(remaining_nodes)
-            elif self.charm.app.planned_units() == 0:
-                # This is the last unit being removed
-                # We want to clean things up in case of a cold start later
-                self.charm.cluster_manager.cleanup_on_last_unit_removal()
-
+            self.charm.cluster_manager.reconcile_before_unit_removal(
+                is_last_unit=planned_units == 0
+            )
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
             # TODO: Add large deployments support
@@ -299,14 +271,14 @@ class OpenSearchEventsHandler(Object):
         self.charm.cluster_manager.flush_translog_to_disk()
 
         try:
-            self.stop_opensearch()
+            self.charm.stop_opensearch()
             if self.charm.cluster_manager.alt_hosts:
                 # There is enough peers available for us to try removing the unit
                 current_node = self.charm.config_manager.current_node
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
                 self.charm.exclusions_manager.delete_current(current_node, scope)
             # safeguards in case planned_units > 0
-            if self.charm.app.planned_units() > 0:
+            if planned_units > 0:
                 # check cluster status
                 if not self.charm.cluster_manager.alt_hosts:
                     raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_UNKNOWN.value.message)
@@ -317,7 +289,7 @@ class OpenSearchEventsHandler(Object):
                 if health_color == HealthColors.RED:
                     raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_RED.value.message)
         finally:
-            if self.charm.app.planned_units() > 1 and (
+            if planned_units > 1 and (
                 self.charm.cluster_manager.opensearch_client.is_node_up()
                 or self.charm.cluster_manager.alt_hosts
             ):
@@ -405,7 +377,7 @@ class OpenSearchEventsHandler(Object):
             # stop opensearch in case the Node-transport certificate expires.
             if certs.get(CertType.UNIT_TRANSPORT):
                 try:
-                    self.stop_opensearch()
+                    self.charm.stop_opensearch()
                 except OpenSearchStopError:
                     event.defer()
                     return
@@ -849,7 +821,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
-            self.stop_opensearch(restart=True)
+            self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
         except OpenSearchStopError as e:
             logger.info(f"Error while Restarting Opensearch: {e}")
@@ -875,34 +847,6 @@ class OpenSearchEventsHandler(Object):
         )
         logger.debug("Restarting OpenSearch with ignore_lock=%s", ignore_lock)
         self.charm.start_opensearch_event.emit(ignore_lock=ignore_lock)
-
-    def stop_opensearch(self, *, restart: bool = False) -> None:
-        """Stop OpenSearch service."""
-        self.charm.status.set(CharmStatuses.SERVICE_IS_STOPPING)
-
-        if self.charm.cluster_manager.opensearch_client.is_node_up():
-            try:
-                nodes = self.charm.cluster_manager.get_nodes(True)
-                # do not add exclusions if it's the last unit to stop
-                # otherwise cluster manager election will be blocked when starting up again
-                # and reusing storage
-                if len(nodes) > 1:
-                    # 1. Add current node to the voting + alloc exclusions
-                    self.charm.exclusions_manager.add_current(
-                        node=self.charm.config_manager.current_node,
-                        scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
-                        voting=True,
-                        allocation=not restart,
-                    )
-            except OpenSearchHttpError:
-                logger.debug("Failed to get online nodes, voting and alloc exclusions not added")
-
-        # block until all primary shards are moved away from the unit that is stopping
-        self.charm.health_manager.wait_for_shards_relocation()
-
-        # Stop the workload
-        self.charm.cluster_manager.stop_workload()
-        self.charm.status.set(CharmStatuses.SERVICE_STOPPED)
 
     def _on_node_lock_relation_changed(self, _=None) -> None:
         """Event handler for when the node-lock relation changed"""

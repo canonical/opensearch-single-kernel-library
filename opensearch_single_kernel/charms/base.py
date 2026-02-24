@@ -4,13 +4,16 @@
 
 """OpenSearch Base Charm."""
 
+import logging
 from abc import ABC, abstractmethod
 from time import time_ns
 
 import ops
 from ops import EventSource
 
-from opensearch_single_kernel.common.constants import PEER_RELATION, Substrates
+from opensearch_single_kernel.common.constants import PEER_RELATION, Scope, Substrates
+from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
@@ -28,6 +31,8 @@ from opensearch_single_kernel.managers.tls import TlsManager
 from opensearch_single_kernel.managers.users import UsersManager
 from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class OpenSearchBaseCharm(ops.CharmBase, ABC):
@@ -77,6 +82,34 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         if on_current_unit:
             self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)
+
+    def stop_opensearch(self, *, restart: bool = False) -> None:
+        """Stop OpenSearch service."""
+        self.status.set(CharmStatuses.SERVICE_IS_STOPPING)
+
+        if self.cluster_manager.opensearch_client.is_node_up():
+            try:
+                nodes = self.cluster_manager.get_nodes(True)
+                # do not add exclusions if it's the last unit to stop
+                # otherwise cluster manager election will be blocked when starting up again
+                # and reusing storage
+                if len(nodes) > 1:
+                    # 1. Add current node to the voting + alloc exclusions
+                    self.exclusions_manager.add_current(
+                        node=self.config_manager.current_node,
+                        scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
+                        voting=True,
+                        allocation=not restart,
+                    )
+            except OpenSearchHttpError:
+                logger.debug("Failed to get online nodes, voting and alloc exclusions not added")
+
+        # block until all primary shards are moved away from the unit that is stopping
+        self.health_manager.wait_for_shards_relocation()
+
+        # Stop the workload
+        self.cluster_manager.stop_workload()
+        self.status.set(CharmStatuses.SERVICE_STOPPED)
 
     @property
     @abstractmethod
