@@ -329,10 +329,10 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
-    pytest.skip("This test is skipped due to missing COS support")
     await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series)
     await ops_test.model.integrate(APP_NAME, COS_APP_NAME)
     await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
@@ -433,7 +433,6 @@ async def test_large_deployment_build_and_deploy(
 async def test_large_deployment_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
-    pytest.skip("This test is skipped due to missing COS support")
     # Check that the correct settings were successfully communicated to grafana-agent
     (await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series),)
     await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, COS_APP_NAME)
@@ -468,8 +467,8 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str):
-    pytest.skip("This test is skipped due to missing COS support")
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
@@ -491,8 +490,8 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str)
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
-    pytest.skip("This test is skipped due to missing COS support")
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
 
@@ -703,6 +702,7 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards
@@ -848,6 +848,7 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the ISM and job scheduler plugins are enabled and functional."""
     leader_unit_ip = await get_leader_unit_ip(ops_test)

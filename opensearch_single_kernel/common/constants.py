@@ -159,7 +159,7 @@ SYSTEM_INDICES = {
 OPENSEARCH_HTTP_PORT = 9200
 
 # OpenSearch storage name
-OPENSEARCH_STORAGE_NAME = "opensearch-data"
+OPENSEARCH_DATA_STORAGE_NAME = "opensearch-data"
 
 
 # Relations
@@ -211,6 +211,7 @@ PW_POSTFIX = "password"
 HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
+SECRETS_LABEL_SEPARATOR = ":"
 S3_CREDENTIALS = "s3-creds"
 S3_PEER_SECRET_KEYS = [
     "secret-key",
@@ -235,7 +236,7 @@ SMTP_SECRET_LABEL = "plugin-notifications"
 PEER_CLUSTER_NO_RELATION = "Cannot start. Waiting for peer cluster relation..."
 PEER_CLUSTER_WRONG_RELATION = "Cluster name doesn't match with related cluster. Remove relation."
 CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID = (
-    "cluster_manager and voting_only roles cannot be both set on the same nodes."
+    "cluster_manager and voting_only roles cannot be both set on the same node."
 )
 CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of cluster_manager role from deployment not allowed."

@@ -14,7 +14,6 @@ from opensearch_single_kernel.common.statuses import (
     CharmStatuses,
 )
 from opensearch_single_kernel.utils.enum import BaseStrEnum
-from opensearch_single_kernel.utils.helpers import trigger_peer_rel_changed
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -60,7 +59,7 @@ class Status:
     def _apply_health_for_app(self, status: str) -> None:
         """Cluster wide / app status."""
         if not self.charm.unit.is_leader():
-            trigger_peer_rel_changed(self.charm, on_other_units=True)
+            self.charm.trigger_peer_rel_changed(self.charm, on_other_units=True)
             return
 
         if status == HealthColors.GREEN:

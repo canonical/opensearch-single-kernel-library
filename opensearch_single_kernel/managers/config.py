@@ -42,7 +42,7 @@ class ConfigManager(BaseManager):
         self.name = "config_manager"
 
     @property
-    def yaml_setter(self):
+    def yaml_setter(self) -> YamlConfigSetter:
         """Return the yaml_setter."""
         return YamlConfigSetter(self.workload)
 
@@ -318,7 +318,7 @@ class ConfigManager(BaseManager):
             regex=True,
         )
 
-    def add_cm_addresses_to_conf(self):
+    def add_cm_addresses_to_conf(self) -> None:
         """Add the new IP addresses of the current CM units."""
         try:
             # fetch nodes
@@ -347,13 +347,12 @@ class ConfigManager(BaseManager):
             conf = self.yaml_setter.load(self.CONFIG_YML)
 
             # also, if possible we rely on the Deployment Description (databag)
-            deployment_desc = self.state.application.deployment_desc
 
             # Application Priority: Deployment Description
             # Reason: No reason to re-construct the App object
             #  - it's available 99% of scenarios
             #  - it's the same object as a re-constructed one (i.e. no dynamic changes on App)
-            if deployment_desc is None:
+            if not (deployment_desc := self.state.application.deployment_desc):
                 try:
                     app = App(id=conf.get("node.attr.app_id"))
                 except ValidationError:
