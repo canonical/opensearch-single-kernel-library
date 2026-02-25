@@ -411,7 +411,7 @@ class S3RelDataCredentials(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
 
 class S3RelData(Model):
@@ -433,7 +433,7 @@ class S3RelData(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
     @model_validator(mode="before")
     @classmethod
@@ -537,7 +537,7 @@ class AzureRelDataCredentials(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
 
 class AzureRelData(Model):
@@ -558,7 +558,7 @@ class AzureRelData(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
     @model_validator(mode="before")
     @classmethod
@@ -614,7 +614,7 @@ class GcsRelDataCredentials(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
     @validator("secret_key", pre=True)
     def _normalize_secret_key(cls, values):  # noqa: N805
@@ -658,7 +658,7 @@ class GcsRelData(Model):
     class Config:
         """Model config of this pydantic model."""
 
-        allow_population_by_field_name = True
+        validate_by_name = True
 
     @model_validator(mode="before")
     @classmethod
