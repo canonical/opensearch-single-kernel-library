@@ -70,10 +70,6 @@ storage:
     type: filesystem
     location: /var/log/opensearch
     description: Storage for OpenSearch log files
-  certificates:
-    type: filesystem
-    description: Persistent TLS certificates storage
-    minimum-size: 50M
 
 containers:
   opensearch:
@@ -83,11 +79,9 @@ containers:
         location: /var/lib/opensearch
       - storage: opensearch-logs
         location: /var/log/opensearch
-      - storage: certificates
-        location: /etc/opensearch/certificates
 
 resources:
   opensearch-image:
     type: oci-image
     description: OCI image for opensearch
-    upstream-source: ghcr.io/canonical/charmed-opensearch-rock:2.19.4
+    upstream-source: ghcr.io/canonical/opensearch:2.19.4-24.04_stable

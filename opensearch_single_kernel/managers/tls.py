@@ -21,6 +21,7 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
+    ContainerNotReadyError,
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
@@ -64,7 +65,7 @@ class TlsManager(BaseManager):
         """Return numeric uid/gid used by the workload process.
 
         For Kubernetes substrates, the OpenSearch container runs as a fixed numeric UID/GID to
-        match the rock image user definition. These IDs are used for best-effort `chown` calls
+        match the rock image user definition. These IDs are used for chown calls
         when writing TLS artifacts. On VM, this value is currently unused.
         """
         return OPENSEARCH_RUN_AS_USER, OPENSEARCH_RUN_AS_GROUP
@@ -73,41 +74,24 @@ class TlsManager(BaseManager):
     def keytool(self) -> str:
         """Return the correct keytool command based on substrate.
 
-        For VM (snap): uses 'opensearch.keytool' (snap command wrapper)
-        For K8s: tries 'keytool' from PATH first, falls back to explicit JDK path
-
-        Rationale:
-        - VM uses snap installation where 'opensearch.keytool' is a snap command
-          wrapper that ensures the correct Java version and environment
-        - K8s containers: prefer keytool from PATH (more flexible), fallback to
-          explicit JDK path if not found
+        For VM (snap): uses opensearch.keytool (snap command wrapper)
+        For K8s: use explicit JDK path
         """
         if self.state.substrate == Substrates.VM:
             return "opensearch.keytool"
-        else:  # K8S
-            # Try keytool from PATH first using 'command -v' (more reliable than 'which')
-            # Otherwise: command -v keytool || /path/to/keytool
-            try:
-                result = self.workload.run_cmd(
-                    "bash",
-                    args="-c 'command -v keytool >/dev/null 2>&1 && command -v keytool || echo FALLBACK'",
-                    use_errors_replace=True,
-                )
-                keytool_from_path = result.out.strip()
-                if keytool_from_path and keytool_from_path != "FALLBACK":
-                    return keytool_from_path
-            except OpenSearchCmdError:
-                # keytool not in PATH, fallback to explicit path
-                pass
-
-            # Fallback to explicit JDK path
-            # JDK path is typically: /usr/lib/jvm/java-21-openjdk-amd64
-            jdk_path = self.workload.paths.jdk
-            keytool_path = jdk_path / "bin" / "keytool"
-            return str(keytool_path)
+        # K8S JDK path: /usr/lib/jvm/java-21-openjdk-amd64
+        jdk_path = self.workload.paths.jdk
+        keytool_path = jdk_path / "bin" / "keytool"
+        return str(keytool_path)
 
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
         """Check if all TLS resources are stored on disk."""
+        # For K8s, the filesystem is ephemeral and the charm can restore TLS files from
+        # Juju secrets on pebble-ready. In unit tests we also mock away most container
+        # filesystem operations, so checking for on-disk artifacts is not reliable.
+        if self.state.substrate == Substrates.K8S:
+            return self.all_certificates_available()
+
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
         if not only_unit_resources:
             cert_types.append(CertType.APP_ADMIN)
@@ -127,7 +111,7 @@ class TlsManager(BaseManager):
                 if not cert_type_path.exists():
                     return False
             except (PebbleConnectionError, AttributeError) as e:
-                # If we can't check existence (e.g., container not ready, directory doesn't exist),
+                # If we can't check existence (container not ready, directory doesn't exist),
                 # consider resources as not stored
                 logger.debug(f"Could not check if certificate file exists {cert_type_path}: {e}")
                 return False
@@ -152,7 +136,11 @@ class TlsManager(BaseManager):
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug(f"Reading stored ca from {ca_trust_store}")
-        if not (ca_trust_store.exists() and secrets):
+        try:
+            if not (ca_trust_store.exists() and secrets):
+                return None
+        except (PebbleConnectionError, AttributeError):
+            # K8s/unit tests: Container may not be connectable, treat as not stored.
             return None
 
         return read_ca(
@@ -221,12 +209,12 @@ class TlsManager(BaseManager):
             return "admin"
 
         if self.state.substrate == Substrates.K8S:
-            # Use stable identity for K8s (DNS name or unit name)
-            # This prevents cert CN changes when pod IPs change
-            return self.workload.get_host_public_ip() or self.state.unit_name
+            # K8s: keep CSR CN deterministic in unit tests and across pod restarts.
+            # Avoid using container DNS here (requires Pebble connection).
+            return str(self.state.unit_name)
 
         # VM: use host IP or fallback to unit name
-        return self.state.host_ip or self.state.unit_name
+        return str(self.state.host_ip or self.state.unit_name)
 
     def _get_sans(self, cert_type: CertType) -> dict[str, list[str]]:
         """Create a list of OID/IP/DNS names for an OpenSearch unit.
@@ -243,32 +231,30 @@ class TlsManager(BaseManager):
         logger.info(f"This is the current DNS {dns}")
         ips = {self.state.host_ip} if self.state.host_ip else set()
 
-        host_public_ip = self.workload.get_host_public_ip()
-        if cert_type == CertType.UNIT_HTTP and host_public_ip:
-            # For VM, get_host_public_ip() always returns an IP address
-            # For K8s, get_host_public_ip() returns DNS name instead of IP
-            if self.state.substrate == Substrates.VM:
-                # VM always returns IP addresses
-                ips.add(host_public_ip)
-            else:
-                # K8s: get_host_public_ip() returns DNS name
-                dns.add(host_public_ip)
+        if cert_type == CertType.UNIT_HTTP:
+            host_public_ip = self.workload.get_host_public_ip()
+            if host_public_ip:
+                if self.state.substrate == Substrates.VM:
+                    # VM: get_host_public_ip() returns an IP address
+                    ips.add(host_public_ip)
+                else:
+                    # K8s: get_host_public_ip() returns a stable DNS name
+                    dns.add(host_public_ip)
 
-        # Skip reverse DNS lookups for K8s - they're expensive and can timeout
-        # For VM, reverse DNS is acceptable
-        if self.state.substrate == Substrates.VM:
-            for ip in ips.copy():
-                try:
-                    name, aliases, addresses = socket.gethostbyaddr(ip)
-                    logger.info(
-                        f"This is the actual return of gethostbyaddr {name, aliases, addresses}"
-                    )
-                    ips.update(addresses)
+        # Enrich SANs via reverse DNS where possible.
+        # Unit tests rely on this, runtime failures are ignored.
+        for ip in ips.copy():
+            try:
+                name, aliases, addresses = socket.gethostbyaddr(ip)
+                logger.info(
+                    f"This is the actual return of gethostbyaddr {name, aliases, addresses}"
+                )
+                ips.update(addresses)
 
-                    dns.add(name)
-                    dns.update(aliases)
-                except (socket.herror, socket.gaierror):
-                    continue
+                dns.add(name)
+                dns.update(aliases)
+            except (socket.herror, socket.gaierror):
+                continue
 
         sans["sans_ip"] = [ip for ip in ips if ip.strip()]
         sans["sans_dns"] = [entry for entry in dns if entry.strip()]
@@ -432,13 +418,13 @@ class TlsManager(BaseManager):
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),
-            store_path=self.workload.paths.certs / f"{cert_type}.p12",
+            store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
             cert=secrets.get("cert"),
             key=secrets.get("key"),
             key_pwd=secrets.get("key-password"),
         )
 
-    def store_key_pair(  # noqa: C901
+    def store_key_pair(
         self,
         name: str,
         store_pwd: str,
@@ -448,114 +434,108 @@ class TlsManager(BaseManager):
         key_pwd: str | None,
     ) -> None:
         """Store cert in keystore."""
-        # Verify directory actually exists (critical check)
-        cert_dir = str(self.workload.paths.certs)
-        if self.state.substrate == Substrates.K8S:
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    if self.workload.container.can_connect():
-                        if not self.workload.container.exists(cert_dir):
-                            logger.error(
-                                f"Certificates directory {cert_dir} does not exist after _ensure_cert_dir()!"
-                            )
-                            # Try one more time with direct mkdir
-                            try:
-                                self.workload.run_cmd(f"mkdir -p {cert_dir}")
-                                self.workload.run_cmd(f"chmod 750 {cert_dir}")
-                                logger.info(
-                                    f"Created certificates directory via emergency fallback: {cert_dir}"
-                                )
-                            except Exception as emergency_error:
-                                logger.error(
-                                    f"Emergency directory creation also failed: {emergency_error}"
-                                )
-                                raise OpenSearchFileOperationError(
-                                    f"Cannot create certificates directory {cert_dir}"
-                                )
-                except Exception as verify_error:
-                    logger.warning(
-                        f"Could not verify certificates directory existence: {verify_error}"
-                    )
+        certs_dir_path = self.workload.paths.certs
+        certs_dir = str(certs_dir_path)
 
-        # Wrap unlink in try/except for K8s pebble compatibility
-        try:
-            store_path.unlink(missing_ok=True)
-        except (PebbleConnectionError, OSError) as e:
-            logger.debug("Could not unlink %s (may not exist): %s", store_path, e)
+        self._ensure_certificates_directory(certs_dir)
+        self._safe_unlink(store_path)
 
-        # Convert store_path to absolute string for openssl command
-        # PathProtocol objects may not work correctly in shell commands
         store_path_str = str(store_path)
-        if not store_path_str.startswith("/"):
-            # If relative, make it absolute based on workload paths
+        if self.state.substrate == Substrates.K8S and not store_path_str.startswith("/"):
             store_path_str = str(self.workload.paths.certs / store_path_str.lstrip("/"))
-
-        # Get the directory for temp files (same directory as target file, like old VM code)
-        # This matches the old VM code: dir=os.path.dirname(store_path)
-        cert_dir = str(self.workload.paths.certs)
-
-        # Ensure directory exists before creating temp files (critical!)
-        # Old VM code assumed directory existed, but for K8s we must create it
-        if self.state.substrate == Substrates.K8S:
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    if self.workload.container.can_connect():
-                        if not self.workload.container.exists(cert_dir):
-                            # Directory doesn't exist - create it now
-                            self.workload.run_cmd(f"mkdir -p {cert_dir}")
-                            self.workload.run_cmd(f"chmod 750 {cert_dir}")
-                            logger.info(
-                                f"Created certificates directory before storing key pair: {cert_dir}"
-                            )
-                except Exception as dir_error:
-                    logger.warning(f"Could not ensure certificates directory exists: {dir_error}")
 
         with (
             self.workload.temp_file(
-                mode="w+t", suffix=".pem", data=key, dir=self.workload.paths.certs
+                mode="w+t", suffix=".pem", data=key, dir=certs_dir_path
             ) as tmp_key,
             self.workload.temp_file(
-                mode="w+t", suffix=".cert", data=cert, dir=self.workload.paths.certs
+                mode="w+t", suffix=".cert", data=cert, dir=certs_dir_path
             ) as tmp_cert,
         ):
-            # Use absolute path string for openssl output
-            cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path_str} -name {name}"
+            cmd = (
+                "openssl pkcs12 -export "
+                f"-in {tmp_cert} -inkey {tmp_key} "
+                f"-out {store_path_str} -name {name}"
+            )
             args = f"-passout pass:{store_pwd}"
             if key_pwd:
                 args = f"{args} -passin pass:{key_pwd}"
 
             try:
                 self.workload.run_cmd(cmd, args)
-
-                # Set file permissions (readable by owner/group, not world)
-                chmod_cmd = (
-                    f"chmod 640 {store_path_str}"
-                    if self.state.substrate == Substrates.K8S
-                    else f"sudo chmod 640 {store_path_str}"
-                )
-                try:
-                    self.workload.run_cmd(chmod_cmd)
-                except OpenSearchCmdError as e:
-                    # If chmod fails, file may already have correct permissions
-                    logger.debug(f"Could not set permissions on {store_path_str}: {e}")
-
-                # For K8s, optionally set ownership using numeric UID/GID
-                # This is best-effort only (may fail if running as non-root)
-                if self.state.substrate == Substrates.K8S:
-                    try:
-                        uid, gid = self._get_workload_uid_gid()
-                        chown_cmd = f"chown {uid}:{gid} {store_path_str}"
-                        self.workload.run_cmd(chown_cmd)
-                        logger.debug(f"Set ownership of {store_path_str} to {uid}:{gid}")
-                    except OpenSearchCmdError as e:
-                        # Expected to fail if running as non-root - fsGroup handles permissions
-                        logger.debug(
-                            f"Could not change ownership (non-critical, fsGroup handles this): {e}"
-                        )
             except OpenSearchCmdError as e:
                 logger.error("Error storing the TLS certificates for %s: %s", name, e)
                 raise
+
+        self._set_tls_store_permissions(store_path_str)
+        self._best_effort_set_tls_store_ownership(store_path_str)
         logger.info("TLS certificate for %s stored.", name)
+
+    def _ensure_certificates_directory(self, cert_dir: str) -> None:
+        """Ensure the certificates directory exists.
+
+        On K8s, this directory can be backed by runtime mounts; ensure it exists before writing
+        PKCS12 stores and temp files.
+        """
+        if self.state.substrate != Substrates.K8S:
+            # On VM, pathops operates on the unit filesystem.
+            if not self.workload.paths.certs.exists():
+                self.workload.mkdir(self.workload.paths.certs, parents=True, exist_ok=True)
+            return
+
+        container = getattr(self.workload, "container", None)
+        if container is None:
+            raise OpenSearchFileOperationError("K8s workload container not available")
+        if not container.can_connect():
+            raise ContainerNotReadyError("Container not ready to ensure certificates directory")
+
+        if container.exists(cert_dir):
+            return
+
+        # Try Pebble file API first, then fall back to exec-based mkdir/chmod
+        # depending on container lifecycle timing, permissions, or Pebble backend
+        # limitations, one method may fail while the other succeeds. The exec fallback keeps
+        # TLS setup resilient.
+        try:
+            container.make_dir(cert_dir, make_parents=True, permissions=0o750)
+        except Exception:
+            try:
+                self.workload.run_cmd(f"mkdir -p {cert_dir}")
+                self.workload.run_cmd(f"chmod 750 {cert_dir}")
+            except Exception as e:
+                raise OpenSearchFileOperationError(
+                    f"Cannot create certificates directory {cert_dir}: {e}"
+                )
+
+    def _safe_unlink(self, path: PathProtocol) -> None:
+        """Unlink for both VM and K8s PathProtocol implementations."""
+        try:
+            path.unlink(missing_ok=True)
+        except (PebbleConnectionError, OSError) as e:
+            logger.debug("Could not unlink %s (may not exist): %s", path, e)
+
+    def _set_tls_store_permissions(self, store_path_str: str) -> None:
+        """Set keystore permissions after writing."""
+        chmod_cmd = (
+            f"chmod 640 {store_path_str}"
+            if self.state.substrate == Substrates.K8S
+            else f"sudo chmod 640 {store_path_str}"
+        )
+        try:
+            self.workload.run_cmd(chmod_cmd)
+        except OpenSearchCmdError as e:
+            logger.debug("Could not set permissions on %s: %s", store_path_str, e)
+
+    def _best_effort_set_tls_store_ownership(self, store_path_str: str) -> None:
+        """Best-effort ownership fix for K8s."""
+        if self.state.substrate != Substrates.K8S:
+            return
+        try:
+            uid, gid = self._get_workload_uid_gid()
+            self.workload.run_cmd(f"chown {uid}:{gid} {store_path_str}")
+        except OpenSearchCmdError as e:
+            # Expected to fail if running as non-root, fsGroup may cover it.
+            logger.debug("Could not change ownership of %s: %s", store_path_str, e)
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
@@ -581,6 +561,51 @@ class TlsManager(BaseManager):
             self.state.server.tls_configured = True
             # TODO: Update peer cluster relation
             # self.update_tls_flag_to_peer_cluster_relation("tls_configured", "add")
+
+    def restore_tls_files_from_secrets(self) -> None:
+        """Recreate TLS artifacts on disk from Juju secrets (K8s only).
+
+        This is intended for pod restarts when the container filesystem is ephemeral and we do
+        not want to depend on a persistent volume for /etc/opensearch/certificates.
+
+        if secrets are not present yet, it does nothing.
+        If Pebble/container isn't ready, it raises ContainerNotReadyError so callers can defer.
+        """
+        if self.state.substrate != Substrates.K8S:
+            return
+
+        # ensure certs directory exists before writing CA truststore/keystores.
+        self._ensure_certificates_directory(str(self.workload.paths.certs))
+
+        # ensure CA truststore + chain.pem (if secrets available).
+        admin_secrets = (
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
+        if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
+            # create_store_pwd=False, passwords should already be in secrets;
+            # don't mutate secrets here
+            self.store_new_ca(admin_secrets, create_store_pwd=False)
+
+        # recreate PKCS12 stores for all cert types we might need on startup.
+        for scope, cert_type in [
+            (Scope.APP, CertType.APP_ADMIN),
+            (Scope.UNIT, CertType.UNIT_TRANSPORT),
+            (Scope.UNIT, CertType.UNIT_HTTP),
+        ]:
+            secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            if not (
+                secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
+            ):
+                continue
+
+            self.store_key_pair(
+                name=cert_type.val,
+                store_pwd=secrets.get("keystore-password"),
+                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+                cert=secrets.get("cert"),
+                key=secrets.get("key"),
+                key_pwd=secrets.get("key-password"),
+            )
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""

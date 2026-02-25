@@ -115,11 +115,6 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.state.tls_relation:
-            logger.debug("TLS relation created, no TLS relation state available.")
-            event.defer()
-            return
-
         try:
             admin_cert = (
                 self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
@@ -213,10 +208,6 @@ class TLSEventsHandler(Object):
 
             current_stored_ca = self.charm.tls_manager.read_stored_ca()
             if current_stored_ca != event.ca:
-                if not deployment_desc:
-                    logger.debug("Could not store new CA certificate.")
-                    event.defer()
-                    return
                 if not self.charm.tls_manager.store_new_ca(
                     self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
                     create_store_pwd=is_unit_leader and is_main_orchestrator,
@@ -359,7 +350,6 @@ class TLSEventsHandler(Object):
                 self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
                 or {}
             )
-
             if scope == Scope.UNIT:
                 if not (truststore_pwd := admin_secrets.get("truststore-password")):
                     event.defer()
@@ -395,13 +385,15 @@ class TLSEventsHandler(Object):
                         self.charm.restart_opensearch_event.emit()
                     else:
                         self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
-                        self.charm.state.reset_ca_rotation_state()
-                        # if all certs are stored and CA rotation is complete in the cluster
-                        # we delete the old ca and update the chain to only include the new one
-                        if (
+                        rotation_complete = (
                             self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
                             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-                        ):
+                        )
+                        # Clear local rotation flags after successful reload. If the CA rotation is
+                        # complete in the cluster, also remove the old CA and shrink the request
+                        # bundle to only include the new CA.
+                        self.charm.state.reset_ca_rotation_state()
+                        if rotation_complete:
                             logger.info(
                                 "on_tls_conf_set: Detected CA rotation complete in cluster"
                             )

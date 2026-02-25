@@ -28,9 +28,9 @@ class BaseManager:
         """Initialize an opensearch client"""
         admin_field = self.state.secrets.password_key("admin")
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)
-        return OpenSearchClient(
-            self.workload, self.state.host_ip, OPENSEARCH_HTTP_PORT, admin_secret
-        )
+        # prefer a stable address for TLS hostname verification (DNS on K8s, public-address on VM).
+        host = self.workload.get_host_public_ip() or self.state.host_ip
+        return OpenSearchClient(self.workload, host, OPENSEARCH_HTTP_PORT, admin_secret)
 
     @property
     def alt_hosts(self) -> Optional[List[str]]:

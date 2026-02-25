@@ -78,9 +78,27 @@ class Paths:
         return self.snap_common / OpenSearchPaths.DATA.val
 
     @property
+    def data_dir(self) -> PathProtocol:
+        """Return the directory OpenSearch should use for data.
+
+        By default (VM/snap), this is the same as data.
+        K8s workloads may override this if OpenSearch expects a subdirectory.
+        """
+        return self.data
+
+    @property
     def logs(self) -> PathProtocol:
         """Return path to the logs snap directory."""
         return self.snap_common / OpenSearchPaths.LOGS.val
+
+    @property
+    def logs_dir(self) -> PathProtocol:
+        """Return the directory OpenSearch should use for logs.
+
+        By default (VM/snap), this is the same as logs.
+        K8s workloads may override this if OpenSearch expects a subdirectory.
+        """
+        return self.logs
 
     @property
     def jdk(self) -> PathProtocol:
@@ -132,6 +150,14 @@ class BaseWorkload(ABC):
     def install(self) -> None:
         """Install the workload."""
         pass
+
+    def prepare_for_pebble_ready(self) -> None:
+        """Prepare workload when pebble-ready is emitted (K8s only).
+
+        K8s workloads should override this to perform container preparation (e.g,
+        permissions, and layer configuration) once Pebble is ready.
+        """
+        return None
 
     @property
     @abstractmethod

@@ -48,7 +48,7 @@ class ConfigManager(BaseManager):
         For VM, JDK path comes from workload.paths.jdk.
 
         Returns:
-            Full path to keytool executable
+            full path to keytool executable
         """
         java_home = str(self.workload.paths.jdk)
         return f"{java_home}/bin/keytool"
@@ -75,7 +75,7 @@ class ConfigManager(BaseManager):
                 # Get container hostname ("pod_name-0" in K8s pods)
                 node_name = socket.gethostname()
                 logger.info(
-                    f"K8s detected: Using container hostname '{node_name}' for node.name (unit_name was '{unit_name}')"
+                    f"K8s detected: Using container hostname {node_name} for node.name (unit_name was '{unit_name}')"
                 )
             except Exception as e:
                 logger.warning(f"Could not get hostname, falling back to unit_name: {e}")
@@ -124,7 +124,6 @@ class ConfigManager(BaseManager):
                 # if names don't match
                 # For VM, use cm_names as-is (unit_name matches hostname)
                 if self.state.substrate == Substrates.K8S:
-                    # For K8s, we need to use hostnames instead of unit_names for bootstrap
                     # Single-node case: use current node's hostname
                     # Multi-node case: each node should use its own hostname
                     # Since we're setting this on the current node, use current node's hostname
@@ -150,18 +149,10 @@ class ConfigManager(BaseManager):
                     "Cluster may fail to bootstrap."
                 )
 
-        # For K8s rock image, data and logs need subdirectories
-        # path.data should be /var/lib/opensearch/data (not just /var/lib/opensearch)
-        # path.logs should be /var/log/opensearch/logs (not just /var/log/opensearch)
-        data_path = str(self.workload.paths.data)
-        logs_path = str(self.workload.paths.logs)
-
-        # Check if we're on K8s (rock image), paths won't have snap structure
-        # For K8s, append /data and /logs subdirectories
-        if "/var/lib/opensearch" in data_path and not data_path.endswith("/data"):
-            data_path = f"{data_path}/data"
-        if "/var/log/opensearch" in logs_path and not logs_path.endswith("/logs"):
-            logs_path = f"{logs_path}/logs"
+        # The workload paths decide the concrete OpenSearch directories
+        # K8s uses /var/lib/opensearch/data, VM uses snap paths.
+        data_path = str(self.workload.paths.data_dir)
+        logs_path = str(self.workload.paths.logs_dir)
 
         self.yaml_setter.put(self.CONFIG_YML, "path.data", data_path)
         self.yaml_setter.put(self.CONFIG_YML, "path.logs", logs_path)
@@ -170,21 +161,19 @@ class ConfigManager(BaseManager):
         # This ensures consistency between OpenSearch logs and GC logs
         self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={logs_path}/")
 
-        self.yaml_setter.put(self.CONFIG_YML, "plugins.security.disabled", False, sep=".")
+        self.yaml_setter.put(self.CONFIG_YML, "plugins.security.disabled", False)
 
         # security plugin rest API access
         self.yaml_setter.put(
             self.CONFIG_YML,
             "plugins.security.restapi.roles_enabled",
             ["all_access", "security_rest_api_access"],
-            sep=".",  # we need to use sep as `.` as the default one is `/`.
         )
         # to use the PUT and PATCH methods of the security rest API
         self.yaml_setter.put(
             self.CONFIG_YML,
             "plugins.security.unsupported.restapi.allow_securityconfig_modification",
             True,
-            sep=".",
         )
 
         # enable hot reload of TLS certs (without restarting the node)
@@ -192,7 +181,6 @@ class ConfigManager(BaseManager):
             self.CONFIG_YML,
             "plugins.security.ssl_cert_reload_enabled",
             True,
-            sep=".",
         )
 
     def cleanup_initial_cluster_managers(self) -> None:
@@ -201,12 +189,10 @@ class ConfigManager(BaseManager):
 
     def set_client_auth(self) -> None:
         """Configure TLS and basic http for clients."""
-        # Set HTTP client auth mode to OPTIONAL to enable mTLS (mutual TLS) for HTTP layer
-        # OPTIONAL allows clients to present certificates (required for securityadmin.sh)
-        # but doesn't require all clients to use certs (more flexible than REQUIRE)
+        # The security plugin will accept TLS client certs if certs but doesn't require them
         # TODO this may be set to REQUIRED if we want to ensure certs provided by the client app
         self.yaml_setter.put(
-            self.CONFIG_YML, "plugins.security.ssl.http.clientauth_mode", "OPTIONAL", sep="."
+            self.CONFIG_YML, "plugins.security.ssl.http.clientauth_mode", "OPTIONAL"
         )
 
         self.yaml_setter.put(
@@ -300,7 +286,14 @@ class ConfigManager(BaseManager):
             [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
         )
 
-        if not (new_node_conf := nodes_config.get(self.state.unit_name)):
+        node_name = self.state.node_name
+        unit_name = (
+            self.state.unit_name if self.state.application.deployment_desc is not None else None
+        )
+        new_node_conf = (nodes_config.get(node_name) if node_name is not None else None) or (
+            nodes_config.get(unit_name) if unit_name is not None else None
+        )
+        if not new_node_conf:
             # the conf could not be computed / broadcast, because this node is
             # "starting" and is not online "yet" - either barely being configured (i.e. TLS)
             # or waiting to start.
@@ -399,7 +392,6 @@ class ConfigManager(BaseManager):
                 self.CONFIG_YML,
                 f"plugins.security.ssl.{layer}.{store_type}_type",
                 "PKCS12",
-                sep=".",
             )
 
             # Set store filepath
@@ -408,7 +400,6 @@ class ConfigManager(BaseManager):
                 self.CONFIG_YML,
                 f"plugins.security.ssl.{layer}.{store_type}_filepath",
                 f"{certs_dir}/{cert_filename}",
-                sep=".",
             )
 
     def _write_tls_passwords(self, layer: str, keystore_pwd: str, truststore_pwd: str) -> None:
@@ -424,7 +415,6 @@ class ConfigManager(BaseManager):
                 self.CONFIG_YML,
                 f"plugins.security.ssl.{layer}.{store_type}_password",
                 pwd,
-                sep=".",
             )
 
     def _write_tls_layer_specific_configs(self, layer: str) -> None:
@@ -438,7 +428,6 @@ class ConfigManager(BaseManager):
             self.CONFIG_YML,
             f"plugins.security.ssl.{layer}.enabled_protocols",
             "TLSv1.2",
-            sep=".",
         )
 
         # Enable layer-specific TLS
@@ -446,7 +435,6 @@ class ConfigManager(BaseManager):
             self.CONFIG_YML,
             f"plugins.security.ssl.{layer}.enabled",
             True,
-            sep=".",
         )
         logger.info(
             f"Enabled {layer} SSL after {layer} TLS configuration was written to opensearch.yml"
@@ -458,7 +446,6 @@ class ConfigManager(BaseManager):
                 self.CONFIG_YML,
                 "plugins.security.ssl.http.clientauth_mode",
                 "OPTIONAL",
-                sep=".",
             )
             logger.debug("Set HTTP clientauth_mode to OPTIONAL (mTLS enabled for HTTP layer)")
 
@@ -519,9 +506,9 @@ class ConfigManager(BaseManager):
         before OpenSearch can start with TLS enabled.
 
         Args:
-            cert_type: Either CertType.UNIT_HTTP or CertType.UNIT_TRANSPORT
-            truststore_pwd: Password for the CA truststore (ca.p12)
-            keystore_pwd: Password for the unit keystore (unit-http.p12 or unit-transport.p12)
+            cert_type: either CertType.UNIT_HTTP or CertType.UNIT_TRANSPORT
+            truststore_pwd: password for the CA truststore (ca.p12)
+            keystore_pwd: password for the unit keystore (unit-http.p12 or unit-transport.p12)
         """
         layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
         certs_dir = str(self.workload.paths.certs)
@@ -547,7 +534,7 @@ class ConfigManager(BaseManager):
 
         Args:
             layer: TLS layer name ("transport" or "http").
-            keystore_filename: Expected keystore filename (e.g., "unit-transport.p12").
+            keystore_filename: expected keystore filename such as "unit-transport.p12".
 
         Returns:
             True if all required config keys are present and certificate files exist.
@@ -597,89 +584,6 @@ class ConfigManager(BaseManager):
     def is_http_tls_configured(self) -> bool:
         """Check if HTTP TLS configuration is present in opensearch.yml and files exist."""
         return self._is_tls_layer_configured("http", "unit-http.p12")
-
-    def _repair_tls_config_if_needed(
-        self, cert_type: CertType, keystore_filename: str, layer: str
-    ) -> bool:
-        """Repair TLS configuration if certificate files exist but config is missing.
-
-        Args:
-            cert_type: Certificate type (UNIT_HTTP or UNIT_TRANSPORT).
-            keystore_filename: Expected keystore filename (e.g., "unit-http.p12").
-            layer: TLS layer name ("transport" or "http").
-
-        Returns:
-            True if config was written, False otherwise.
-        """
-        from opensearch_single_kernel.common.constants import Scope
-
-        keystore_path = self.workload.paths.certs / keystore_filename
-        truststore_path = self.workload.paths.certs / "ca.p12"
-
-        if not (keystore_path.exists() and truststore_path.exists()):
-            return False
-
-        # Check if config is already present
-        is_configured = (
-            self.is_transport_tls_configured()
-            if layer == "transport"
-            else self.is_http_tls_configured()
-        )
-        if is_configured:
-            return False
-
-        logger.info(
-            f"{layer.capitalize()} TLS certificate files exist but config is missing. "
-            f"Writing {layer} TLS configuration to opensearch.yml."
-        )
-
-        try:
-            admin_secrets = (
-                self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-            )
-            truststore_pwd = admin_secrets.get("truststore-password")
-
-            unit_secrets = (
-                self.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
-            )
-            keystore_pwd = unit_secrets.get("keystore-password")
-
-            if not (truststore_pwd and keystore_pwd):
-                logger.warning(
-                    f"{layer.capitalize()} TLS certificates exist but passwords are missing. "
-                    f"Cannot write {layer} TLS config."
-                )
-                return False
-
-            self.set_node_tls_conf(
-                cert_type, truststore_pwd=truststore_pwd, keystore_pwd=keystore_pwd
-            )
-            logger.info(f"Successfully wrote {layer} TLS configuration.")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to write {layer} TLS config: {e}")
-            return False
-
-    def ensure_tls_config_if_certificates_exist(self) -> bool:
-        """Ensure TLS configuration is written if certificate files exist but config is missing.
-
-        This is a repair function that handles cases where certificate files were stored
-        but the TLS configuration wasn't written to opensearch.yml (e.g., due to race
-        conditions or event ordering issues).
-
-        Returns:
-            bool: True if config was written or already exists, False if certificates don't exist
-        """
-        from opensearch_single_kernel.common.constants import CertType
-
-        written_transport = self._repair_tls_config_if_needed(
-            CertType.UNIT_TRANSPORT, "unit-transport.p12", "transport"
-        )
-        written_http = self._repair_tls_config_if_needed(
-            CertType.UNIT_HTTP, "unit-http.p12", "http"
-        )
-
-        return written_transport or written_http
 
     def set_admin_tls_conf(self, secrets: dict[str, Any]) -> None:
         """Configures the admin certificate."""

@@ -156,13 +156,13 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
 
-    # NOTE: bootstrap names differ by substrate:
+    # bootstrap names differ by substrate:
     # - VM: uses cm_names as-is
     # - K8s: uses hostname (node.name) because bootstrap must match runtime node name
     expected_bootstrap_names = ["cm1"] if substrate == "vm" else [expected_node_name]
     assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == expected_bootstrap_names
 
-    # Base security knobs set by set_node()
+    # Base security stuff set by set_node()
     assert get_nested_value(opensearch_conf, "plugins.security.disabled") is False
     assert get_nested_value(opensearch_conf, "plugins.security.ssl_cert_reload_enabled") is True
     assert get_nested_value(opensearch_conf, "plugins.security.restapi.roles_enabled") == [

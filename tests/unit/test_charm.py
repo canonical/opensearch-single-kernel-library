@@ -21,7 +21,11 @@ def test_on_install(harness, substrate):
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
     ) as install:
         harness.charm.on.install.emit()
-        install.assert_called_once()
+        # For K8s, install is not operational, container preparation is handled in pebble-ready.
+        if substrate == "vm":
+            install.assert_called_once()
+        else:
+            install.assert_not_called()
 
 
 def test_on_install_error(harness, substrate):
@@ -32,7 +36,11 @@ def test_on_install_error(harness, substrate):
     ) as install:
         install.side_effect = OpenSearchInstallError()
         harness.charm.on.install.emit()
-        assert isinstance(harness.model.unit.status, BlockedStatus)
+        # For K8s, install is not operational, container preparation is handled in pebble-ready.
+        if substrate == "vm":
+            assert isinstance(harness.model.unit.status, BlockedStatus)
+        else:
+            assert not isinstance(harness.model.unit.status, BlockedStatus)
 
 
 def test_on_leader_elected(harness, mocker):

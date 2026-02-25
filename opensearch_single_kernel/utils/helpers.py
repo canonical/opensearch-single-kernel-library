@@ -57,7 +57,7 @@ def trigger_peer_rel_changed(
 
 def mask_sensitive_information(cmd: str) -> str:
     """Replace passwords or secrets by 'xxx' and return the masked str."""
-    pattern = re.compile(r"(-tspass\s+|-kspass\s+|-storepass\s+|-new\s+|pass:)(\S+)")
+    pattern = re.compile(r"(-tspass\s+|-kspass\s+|-keypass\s+|-storepass\s+|-new\s+|pass:)(\S+)")
 
     return re.sub(pattern, r"\1" + "xxx", cmd)
 
@@ -205,9 +205,6 @@ def has_duplicate_env(env: list) -> bool:
 def convert_to_int(value: Any) -> int | None:
     """Convert value to int, return None if not convertible.
 
-    Safely converts a value to an integer. Returns None if the value
-    is None or cannot be converted to an integer.
-
     Args:
         value: The value to convert to integer. Can be any type.
 
@@ -227,7 +224,7 @@ def get_nested_value(config: dict, key_path: str) -> Any:
 
     Args:
         config: Dictionary to search in.
-        key_path: Dotted key path (e.g., "plugins.security.ssl.transport.keystore_filepath").
+        key_path: Dotted key path such as "plugins.security.ssl.transport.keystore_filepath".
 
     Returns:
         The value at the nested path, or None if not found.
@@ -238,13 +235,28 @@ def get_nested_value(config: dict, key_path: str) -> Any:
         get_nested_value(config, "plugins.security.ssl.transport.keystore_filepath")
         '/path/to/keystore'
     """
+    if not isinstance(config, dict):
+        return None
+
+    # Fast-path for "flat" YAMLs where the full dotted key exists as-is.
+    if key_path in config:
+        return config.get(key_path)
+
     keys = key_path.split(".")
-    value = config
-    for key in keys:
-        if isinstance(value, dict):
-            value = value.get(key)
-            if value is None:
-                return None
-        else:
+    value: Any = config
+
+    for idx, key in enumerate(keys):
+        if not isinstance(value, dict):
             return None
+
+        # Support mixed representations where a prefix is flattened:
+        # e.g. {"plugins.security.disabled": false}
+        remaining = ".".join(keys[idx:])
+        if remaining in value:
+            return value.get(remaining)
+
+        value = value.get(key)
+        if value is None:
+            return None
+
     return value

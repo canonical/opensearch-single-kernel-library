@@ -17,7 +17,7 @@ This document outlines the key differences between Kubernetes (K8s) and VM subst
 
 
 
-## Workload Implementation
+## 1. Workload Implementation
 
 ### K8s
 - Class: K8sWorkload (workload/k8s.py)
@@ -26,11 +26,6 @@ This document outlines the key differences between Kubernetes (K8s) and VM subst
 - Service: Pebble service (opensearch)
 - Image: Rock image (Ubuntu-based container image)
 
-Code Location:
-- Component: Workload Implementation
-- File: workload/k8s.py
-- Class: K8sWorkload
-- Methods: __init__, workload_present property, container property
 
 ### VM
 - Class: VMWorkload (workload/vm.py)
@@ -39,15 +34,10 @@ Code Location:
 - Service: Snap service (opensearch.daemon)
 - Package: Snap package (opensearch)
 
-Code Location:
-- Component: Workload Implementation
-- File: workload/vm.py
-- Class: VMWorkload
-- Methods: __init__, workload_present property
 
 
 
-## File System Paths
+## 2. File System Paths
 
 ### K8s Paths
 Uses standard Linux filesystem paths (rock image):
@@ -78,23 +68,8 @@ Uses snap-specific paths:
 | Certs | /var/snap/opensearch/common/opensearch/config/certificates | TLS certificates |
 
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: set_node
-- Logic: Checks for K8s paths and appends /data and /logs subdirectories
 
-Special Handling:
-- K8s requires /data and /logs subdirectories to be appended to paths
-- VM paths are already structured correctly via snap
-
-Path Implementation:
-- K8s: workload/k8s.py - K8sPaths class
-- VM: workload/base.py - Paths class
-
-
-
-## Node Configuration
+## 3. Node Configuration
 
 ### Node Name (node.name)
 
@@ -113,18 +88,13 @@ node_name = unit_name
 - Reason: Unit name matches hostname on VM
 - Example: opensearch/0, opensearch/1
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: set_node
-- Logic: Substrate check determines whether to use hostname (K8s) or unit_name (VM)
 
 ### Bootstrap Configuration (cluster.initial_cluster_manager_nodes)
 
 K8s:
 ```python
 # Uses hostname for bootstrap (matches node.name)
-bootstrap_cm_names = [node_name]  # e.g., ["opensearch-0"]
+bootstrap_cm_names = [node_name]  
 ```
 - Critical: Must use hostname, not unit_name
 - Failure: ClusterManagerNotDiscoveredException if names don't match
@@ -132,18 +102,12 @@ bootstrap_cm_names = [node_name]  # e.g., ["opensearch-0"]
 VM:
 ```python
 # Uses unit names as-is
-bootstrap_cm_names = cm_names  # e.g., ["opensearch/0"]
+bootstrap_cm_names = cm_names  
 ```
 - Reason: Unit name matches hostname on VM
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: set_node
-- Logic: Substrate check determines bootstrap names (hostname for K8s, unit names for VM)
 
-
-## Network Configuration
+## 4. Network Configuration
 
 ### Network Hosts
 
@@ -162,11 +126,6 @@ network.host: ["_site_", ...]
 - _site_: Binds to network interface
 - No _local_: Not needed for VM (no Pebble health checks)
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: set_node
-- Note: _local_ is always included in the list, but only relevant for K8s
 
 ### Publish Host (http.publish_host)
 
@@ -187,13 +146,6 @@ public_address = self.workload.get_host_public_ip()
 - Returns: IP address
 - Reason: VMs have stable IP addresses
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: set_node
-- Implementation: workload.get_host_public_ip returns DNS name for K8s, IP for VM
-  - K8s: workload/k8s.py - get_host_public_ip method
-  - VM: workload/vm.py - get_host_public_ip method
 
 ### Security Admin Host (securityadmin.sh -h)
 
@@ -209,13 +161,8 @@ VM:
 securityadmin_host = self.state.host_ip  
 ```
 
-Code Location:
-- Component: Cluster Manager
-- File: managers/cluster.py
-- Method: _initialize_security_index
-- Logic: Uses workload.get_host_public_ip for K8s (DNS), falls back to state.host_ip for VM (IP)
 
-## Service Management
+## 5. Service Management
 
 ### Service Start/Stop
 
@@ -238,10 +185,7 @@ snap.stop(["daemon"])
 - Service Name: opensearch.daemon
 - Management: Via snap API
 
-Code Location:
-- Component: Workload Implementation
-- K8s: workload/k8s.py - start_service_only method, stop method
-- VM: workload/vm.py - start_service_only method, stop method
+
 
 ### Service Status Check
 
@@ -259,13 +203,9 @@ service_running("snap.opensearch.daemon.service")
 pid = run_cmd("lsof", args="-ti:9200")
 ```
 
-Code Location:
-- Component: Workload Implementation
-- K8s: workload/k8s.py - is_service_started method
-- VM: workload/vm.py - is_service_started method
 
 
-## File Operations
+## 6. File Operations
 
 ### File Path Types
 
@@ -293,13 +233,6 @@ path.write_text(content)    # Direct filesystem write
 - Operations: Standard file I/O
 - Abstraction: pathops library handles local operations
 
-Code Location:
-- Component: Workload Implementation (Base Interface)
-- File: workload/base.py
-- Methods: write_text, read_text
-- Implementation: Polymorphic - pathops library handles substrate differences
-  - K8s: Uses ContainerPath (automatically pulls/pushes)
-  - VM: Uses LocalPath (direct filesystem access)
 
 ### Container Readiness Check
 
@@ -316,26 +249,13 @@ VM:
 # Direct filesystem access always available
 ```
 
-Code Location:
-- Component: Config Manager
-- File: managers/config.py
-- Method: update_host_if_needed
-- Logic: Only checks container readiness for K8s substrate
 
-## System Requirements
+## 7. System Requirements
 
 ### Kernel Parameters (sysctls)
 
 K8s:
-```python
-# Configured via StatefulSet patch (JSON Patch)
-# Applied during pod creation/update
-configure_pod_sysctls()  # Patches StatefulSet with sysctls
-```
-- Method: JSON Patch to StatefulSet spec
-- Location: charms/k8s.py - configure_pod_sysctls method
-- Parameters: vm.max_map_count, vm.swappiness, net.ipv4.tcp_retries2
-- Timing: During install, config-changed, and start events
+We expect that sysctls are arranged externally.
 
 VM:
 ```python
@@ -346,17 +266,8 @@ run_cmd(f"sysctl -w {system_requirement}={value}")
 - Parameters: Same as K8s
 - Timing: During system requirement checks
 
-Code Location:
-- Component: Charm (K8s) / Workload (VM)
-- K8s: charms/k8s.py - configure_pod_sysctls method
-- VM: workload/vm.py - _apply_system_requirement method
-- Event Handler: events/opensearch.py
-  - _on_install - calls configure_pod_sysctls for K8s
-  - _on_config_changed - calls configure_pod_sysctls for K8s
-  - _on_start - calls configure_pod_sysctls for K8s
 
-
-## Container/Workload Readiness
+## 8. Container/Workload Readiness
 
 ### Workload Present Check
 
@@ -387,10 +298,6 @@ def workload_present(self) -> bool:
 - Checks: Snap installation status
 - Required: Before service operations
 
-Code Location:
-- Component: Workload Implementation
-- K8s: workload/k8s.py - workload_present property
-- VM: workload/vm.py - workload_present property
 
 ### Event Deferral
 
@@ -410,13 +317,8 @@ VM:
 # Events proceed normally
 ```
 
-Code Location:
-- Component: Event Handler
-- File: events/opensearch.py
-- Method: _on_config_changed
-- Logic: Only defers events for K8s if container not ready
 
-## Certificate Handling
+## 9. Certificate Handling
 
 ### Certificate Path Access
 
@@ -453,11 +355,6 @@ def _get_chain_pem_path(self) -> str:
 - Access: Direct filesystem read
 - No Caching: Not needed
 
-Code Location:
-- Component: Common Client
-- File: common/client.py
-- Method: _get_chain_pem_path
-- Logic: Substrate detection via try-except AttributeError to check for container attribute
 
 ### Certificate File Operations
 
@@ -477,13 +374,8 @@ chain_content = chain_path.read_text()  # Direct read
 ```
 - Operation: Standard file read
 
-Code Location:
-- Component: Common Client
-- File: common/client.py
-- Method: _pull_and_cache_chain_pem
-- Implementation: Uses pathops abstraction - ContainerPath.read_text for K8s, LocalPath.read_text for VM
 
-## Event Handling
+## 10. Event Handling
 
 ### Install Event
 
@@ -530,14 +422,6 @@ VM:
 # Proceed with config updates
 ```
 
-Code Location:
-- Component: Event Handler
-- File: events/opensearch.py
-- Method: _on_config_changed
-- K8s Logic: Checks container readiness, configures sysctls
-- VM Logic: Proceeds directly with config updates
-- Config Manager: Calls config_manager.update_host_if_needed
-
 ### Start Event
 
 K8s:
@@ -556,15 +440,8 @@ if self.charm.state.substrate == Substrates.VM:
         # Restart service after host reboot
 ```
 
-Code Location:
-- Component: Event Handler
-- File: events/opensearch.py
-- Method: _on_start
-- K8s Logic: Ensures pod sysctls configured
-- VM Logic: Handles host reboot scenario (pods don't have host reboots)
 
-
-## Component Reference
+## 11. Component Reference
 
 ### Config Manager (managers/config.py)
 

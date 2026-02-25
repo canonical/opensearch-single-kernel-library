@@ -395,6 +395,24 @@ class ClusterState(Object):
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
     @property
+    def node_name(self) -> str | None:
+        """Opensearch node.name for the current unit.
+
+        On K8s, OpenSearch defaults to using the container hostname as node name and the charm
+        configures node.name accordingly.
+        On VM, we keep using the formatted Juju unit name.
+        """
+        if self.substrate == Substrates.K8S:
+            return socket.gethostname()
+
+        # VM substrate: unit_name depends on deployment_desc being available.
+        # If it isn't ready yet, return None so callers can defer/retry.
+        if self.application.deployment_desc is None:
+            return None
+
+        return self.unit_name
+
+    @property
     def planned_units(self) -> int:
         """Return the planned units for the charm."""
         return self.model.app.planned_units()
@@ -547,10 +565,13 @@ class ClusterState(Object):
     # TODO: Once we handle large deployment we will add a separate
     # state object for peer cluster and peer cluster orchestrator
     @property
-    def current_peer_cluster_app(self) -> PeerClusterApp:
+    def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
         deployment_desc = self.application.deployment_desc
-        logger.info(f"Current deployment desc {deployment_desc}")
+        # during early lifecycle (e.g. first pebble-ready), the deployment description may not
+        #  be computed yet, callers should handle None.
+        if deployment_desc is None:
+            return None
         return PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.planned_units,

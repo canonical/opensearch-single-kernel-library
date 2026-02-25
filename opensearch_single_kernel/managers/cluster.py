@@ -43,7 +43,10 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type
+from opensearch_single_kernel.utils.helpers import (
+    deployment_type,
+    mask_sensitive_information,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -197,11 +200,18 @@ class ClusterManager(BaseManager):
             logger.info("Failed to get online nodes")
             raise e
 
+        expected_name = self.state.node_name
+        if expected_name is None:
+            raise OpenSearchNotFullyReadyError(
+                "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
+            )
         for node in nodes:
-            if node.name == self.state.unit_name:
+            if node.name == expected_name:
                 break
         else:
-            raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
+            raise OpenSearchNotFullyReadyError(
+                "Node online but not in cluster (expected node.name=%s)." % expected_name
+            )
 
     def initialise_security_index(self):
         """Initialise security Index.
@@ -251,7 +261,10 @@ class ClusterManager(BaseManager):
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
-        logger.info("Executing securityadmin.sh with args: %s", " ".join(args))
+        logger.info(
+            "Executing securityadmin.sh with args: %s",
+            mask_sensitive_information(" ".join(args)),
+        )
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
@@ -405,7 +418,17 @@ class ClusterManager(BaseManager):
         """
         contribute_to_bootstrap = False
         if "cluster_manager" in computed_roles:
-            cm_names.append(self.state.unit_name)
+            node_name = self.state.node_name
+            if node_name is None:
+                # Should not happen in normal flows (bootstrap config is
+                # computed from deployment_desc) but we need  to handle it
+                # for early lifecycle / partial state.
+                logger.debug(
+                    "Cannot add node to bootstrap contributors yet, node_name unavailable."
+                )
+                return False
+
+            cm_names.append(node_name)
             cm_ips.append(self.state.host_ip)
 
             if (
@@ -436,7 +459,10 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
-            return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
+            node_name = self.state.node_name
+            if node_name is None:
+                return self.yaml_setter.load("opensearch.yml")["node.roles"]
+            return self.opensearch_client.get_roles(node_name, self.alt_hosts)
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 

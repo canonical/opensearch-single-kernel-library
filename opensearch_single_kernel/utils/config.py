@@ -189,7 +189,7 @@ class YamlConfigSetter(ConfigSetter):
         """
         parent = path.parent
 
-        # Try workload.ensure_dir() if available
+        # try workload.ensure_dir() if available
         try:
             if hasattr(self.workload, "ensure_dir"):
                 self.workload.ensure_dir(parent)
@@ -197,7 +197,7 @@ class YamlConfigSetter(ConfigSetter):
         except AttributeError:
             pass
 
-        # Try container.make_dir() for K8s if container is available
+        # try container.make_dir() for K8s if container is available
         try:
             if hasattr(self.workload, "container") and self.workload.container:
                 try:
@@ -206,7 +206,7 @@ class YamlConfigSetter(ConfigSetter):
                     )
                     return
                 except (PebbleError, FileExistsError):
-                    # Directory might already exist, which is fine
+                    # directory might already exist, which is fine
                     return
         except AttributeError:
             pass
@@ -227,7 +227,7 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
-        # Wrap exists() check to handle PebbleConnectionError
+        # wrap exists() check to handle PebbleConnectionError
         try:
             if not path.exists():
                 raise FileNotFoundError(f"{path} not found.")
@@ -389,12 +389,12 @@ class YamlConfigSetter(ConfigSetter):
         # ensure parent directory exists before writing
         self._ensure_parent_dir(path)
 
-        # Check if file exists before reading
+        # check if file exists before reading
         # If it doesn't exist, create it with just the text to append
         try:
             file_exists = path.exists()
         except PebbleConnectionError as e:
-            # If exists() check failed raise ContainerNotReadyError
+            # if exists() check failed raise ContainerNotReadyError
             raise ContainerNotReadyError(f"Container not ready to check {path}: {e}")
 
         if file_exists:
@@ -402,10 +402,10 @@ class YamlConfigSetter(ConfigSetter):
                 data = self.workload.read_text(path)
                 data = data + "\n" + text_to_append
             except PebbleConnectionError as e:
-                # If read failed due to container not ready, raise ContainerNotReadyError
+                # if read failed due to container not ready, raise ContainerNotReadyError
                 raise ContainerNotReadyError(f"Container not ready to read {path}: {e}")
             except (FileNotFoundError, OSError) as e:
-                # If read failed for other reasons, create new file with the text to append
+                # if read failed for other reasons, create new file with the text to append
                 logger.debug(f"Could not read {path}, creating new file: {e}")
                 data = text_to_append
         else:
@@ -422,7 +422,7 @@ class YamlConfigSetter(ConfigSetter):
         """Write the YAML data on the corresponding "output_type" stream.
 
         Always writes YAML even if data is empty ({}), to ensure file exists
-        and prevent "file does not exist yet" loops.
+        and prevent file does not exist yet loops.
         """
         if output_type in [OutputType.console, OutputType.all]:
             self.yaml.dump(data, sys.stdout)

@@ -193,10 +193,14 @@ CONTAINER_NAME = "opensearch"
 OPENSEARCH_SERVICE_NAME = "opensearch"
 
 # File permissions as octal
-DIR_PERMISSIONS_READONLY = 0o755  # standard directory permissions
-DIR_PERMISSIONS_WRITABLE = 0o777  # writable directory permissions (logs)
-DIR_PERMISSIONS_CERTIFICATES = 0o750  # certificates directory permissions
-DIR_PERMISSIONS_SECURE = 0o775  # secure directory permissions (after chown)
+# standard directory permissions
+DIR_PERMISSIONS_READONLY = 0o755
+# writable directory permissions (logs)
+DIR_PERMISSIONS_WRITABLE = 0o777
+# certificates directory permissions
+DIR_PERMISSIONS_CERTIFICATES = 0o750
+# secure directory permissions
+DIR_PERMISSIONS_SECURE = 0o775
 
 # File permissions as decimal for chmod commands
 CHMOD_READONLY = "755"
@@ -207,18 +211,6 @@ CHMOD_SECURE = "775"
 # Sysctl configuration
 SYSCTL_TCP_RETRIES2_NAME = "net.ipv4.tcp_retries2"
 SYSCTL_TCP_RETRIES2_VALUE = "5"
-
-# Kubernetes init container configuration
-INIT_CONTAINER_NAME = "fix-permissions"
-INIT_CONTAINER_IMAGE = "ubuntu:24.04"
-INIT_CONTAINER_ROOT_UID = 0
-INIT_CONTAINER_ROOT_GID = 0
-
-# Kubernetes security context
-FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
-
-# Kubernetes annotation for pod restart
-POD_RESTART_ANNOTATION_KEY = "opensearch-charm-restart-timestamp"
 
 # K8s volume mount paths
 K8S_DATA_MOUNT_PATH = "/var/lib/opensearch"

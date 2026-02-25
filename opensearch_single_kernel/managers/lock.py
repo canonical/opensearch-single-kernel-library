@@ -226,6 +226,13 @@ class LockManager(PeerLockManager):
         self.name = "lock_manager"
         super().__init__(state, workload)
 
+    def _local_opensearch_host(self) -> str | None:
+        """Get host to reach OpenSearch on this unit.
+
+        A stable address for TLS hostname verification (DNS on K8s, public-address on VM).
+        """
+        return self.workload.get_host_public_ip() or self.state.host_ip
+
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
@@ -278,7 +285,8 @@ class LockManager(PeerLockManager):
         Returns:
             Whether lock was acquired
         """
-        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
+        local_host = self._local_opensearch_host()
+        host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] 1+ opensearch nodes online")
@@ -391,7 +399,7 @@ class LockManager(PeerLockManager):
         # - OR, unit is leader & lock granted in this Juju event
         return super().acquired
 
-    def release(self):
+    def release(self):  # noqa: C901
         """Release lock.
 
         Limitation: if lock acquired via OpenSearch document and all units offline, OpenSearch
@@ -402,7 +410,8 @@ class LockManager(PeerLockManager):
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
 
-        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
+        local_host = self._local_opensearch_host()
+        host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] Checking which unit has opensearch lock")
@@ -410,7 +419,14 @@ class LockManager(PeerLockManager):
             # or if there is a stale lock from a unit no longer existing
             # for large deployments the MAIN/FAILOVER orchestrators should broadcast info
             # over non-online units in the relation. This info should be considered here as well.
-            unit_with_lock = self.unit_with_lock(host)
+            try:
+                unit_with_lock = self.unit_with_lock(host)
+            except OpenSearchHttpError as e:
+                # Do not crash a Juju hook if OpenSearch isn't reachable at the moment.
+                # This can happen transiently on K8s (pod IP changes, DNS not ready).
+                logger.warning("[Node lock] Could not check lock holder: %s", e)
+                super().release()
+                return
             current_app_units = [
                 format_unit_name(unit, app=current_app) for unit in self.state.all_units
             ]
@@ -446,7 +462,7 @@ class LockManager(PeerLockManager):
                     )
                 except OpenSearchHttpError as e:
                     if e.response_code != 404:
-                        raise
+                        logger.warning("[Node lock] Could not release opensearch lock: %s", e)
                 logger.debug("[Node lock] Released opensearch lock")
         super().release()
         logger.debug("[Node lock] Released peer lock (if held)")

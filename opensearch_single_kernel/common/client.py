@@ -45,7 +45,7 @@ class OpenSearchClient:
         self.admin_secret = admin_secret
         self._chain_pem_cache_path: str | None = None
 
-    def _get_chain_pem_path(self) -> str:
+    def _get_chain_pem_path(self) -> str | bool:
         """Get the path to chain.pem file for certificate verification.
 
         For VM substrates: returns the direct filesystem path to chain.pem.
@@ -53,16 +53,8 @@ class OpenSearchClient:
         it in the charm container's temporary directory for use by requests library.
 
         Returns:
-            str: Path to chain.pem file accessible from the charm container.
-                For VM: direct filesystem path.
-                For K8s: cached path in /tmp/opensearch-certs/chain.pem.
-
-        Raises:
-            RuntimeError: If container is not connected (K8s only) and cached file
-                is not available.
-            OSError: If file operations fail.
-            PermissionError: If file permissions prevent access.
-            FileNotFoundError: If chain.pem does not exist in workload container.
+            str | bool: Path to chain.pem file accessible from the charm container, or
+            False to disable TLS verification when the CA chain is not available yet.
         """
         chain_path = self.workload.paths.certs / "chain.pem"
         chain_path_str = str(chain_path)
@@ -72,8 +64,11 @@ class OpenSearchClient:
         try:
             container = self.workload.container
         except AttributeError:
-            # VM substrate, no container attribute, return direct filesystem path
-            return chain_path_str
+            # VM substrate, no container attribute.
+            if os.path.exists(chain_path_str):
+                return chain_path_str
+            logger.warning("chain.pem not found at %s; disabling TLS verification", chain_path_str)
+            return False
 
         # For K8s substrates, check cache first
         if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
@@ -83,22 +78,15 @@ class OpenSearchClient:
         if not container.can_connect():
             logger.warning(
                 "Container not connected, cannot pull chain.pem. "
-                "Certificate verification may fail if cached file is unavailable."
+                "Disabling TLS verification until chain.pem becomes available."
             )
-            # If we have a cached path but file doesn't exist, raise error
-            if self._chain_pem_cache_path:
-                raise RuntimeError(
-                    "Container not connected and cached chain.pem not found at %s"
-                    % self._chain_pem_cache_path
-                )
-            # no cached path available and container not connected
-            raise RuntimeError(
-                "Container not connected and no cached chain.pem available. "
-                "Cannot retrieve certificate for verification."
-            )
+            return False
 
         # Pull chain.pem from workload container and cache it
-        return self._pull_and_cache_chain_pem(chain_path_str)
+        try:
+            return self._pull_and_cache_chain_pem(chain_path_str)
+        except (OSError, PermissionError, FileNotFoundError):
+            return False
 
     def _pull_and_cache_chain_pem(self, container_path: str) -> str:
         """Pull chain.pem from workload container and cache it in charm container.

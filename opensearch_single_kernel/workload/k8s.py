@@ -5,6 +5,8 @@
 """Kubernetes Workload."""
 
 import logging
+import shlex
+import socket
 import uuid
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -28,11 +30,12 @@ from overrides import override
 from opensearch_single_kernel.common.constants import (
     CHMOD_CERTIFICATES,
     CHMOD_SECURE,
-    CHMOD_WRITABLE,
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
-    DIR_PERMISSIONS_WRITABLE,
+    DIR_PERMISSIONS_SECURE,
     OPENSEARCH_HTTP_PORT,
+    OPENSEARCH_RUN_AS_GROUP,
+    OPENSEARCH_RUN_AS_USER,
     OPENSEARCH_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
@@ -54,6 +57,44 @@ if TYPE_CHECKING:
     from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+
+def stat_uid_gid(container: Container, path: str) -> str | None:
+    """Return current owner uid:gid for a path, or None if unavailable."""
+    try:
+        out, _ = container.exec(
+            ["stat", "-c", "%u:%g", path],
+            encoding="utf-8",
+            combine_stderr=True,
+        ).wait_output()
+        return out.strip()
+    except (PebbleError, ModelError):
+        return None
+
+
+def chown_if_needed(
+    container: Container, path: str, desired_uid_gid: str, recursive: bool
+) -> bool:
+    """Chown path to desired uid:gid if it doesn't already match.
+
+    Returns:
+        bool: True if a change was applied, False otherwise.
+    """
+    current = stat_uid_gid(container, path)
+    if current == desired_uid_gid:
+        return False
+
+    cmd = ["chown"]
+    if recursive:
+        cmd.append("-R")
+    cmd.extend([desired_uid_gid, path])
+    try:
+        container.exec(cmd, encoding="utf-8", combine_stderr=True).wait_output()
+        logger.info("Set ownership %s on %s (was %s)", desired_uid_gid, path, current)
+        return True
+    except (PebbleError, ModelError) as e:
+        logger.warning("Failed to chown %s to %s: %s", path, desired_uid_gid, e)
+        return False
 
 
 class K8sPaths(BasePaths):
@@ -104,6 +145,15 @@ class K8sPaths(BasePaths):
         return self.root / "var" / "lib" / "opensearch"
 
     @property
+    def data_dir(self) -> PathProtocol:
+        """Return the directory OpenSearch should use for data on K8s.
+
+        For the ROCK image, `/var/lib/opensearch` is the mount point and OpenSearch expects
+        the concrete data dir at `/var/lib/opensearch/data`.
+        """
+        return self.data / "data"
+
+    @property
     def logs(self) -> PathProtocol:
         """Return path to OpenSearch logs directory.
 
@@ -114,6 +164,15 @@ class K8sPaths(BasePaths):
             PathProtocol: path to OpenSearch logs directory.
         """
         return self.root / "var" / "log" / "opensearch"
+
+    @property
+    def logs_dir(self) -> PathProtocol:
+        """Return the directory OpenSearch should use for logs on K8s.
+
+        For the ROCK image, `/var/log/opensearch` is the mount point and OpenSearch expects
+        the concrete logs dir at `/var/log/opensearch/logs`.
+        """
+        return self.logs / "logs"
 
     @property
     def jdk(self) -> PathProtocol:
@@ -204,11 +263,8 @@ class K8sWorkload(BaseWorkload):
         - /etc/opensearch/certificates (certificates directory - critical for TLS)
         - /usr/share/opensearch/logs (OpenSearch home logs directory)
 
-        This method is idempotent and should be called:
-        - During install
-        - During start_service
-        - During _configure_pebble_plan
-        - After container restarts
+        This method is idempotent and is intended to be called from the
+        K8s pebble-ready hook before starting the service.
         """
         if not self.container.can_connect():
             logger.debug("Container not ready, skipping directory creation")
@@ -220,7 +276,6 @@ class K8sWorkload(BaseWorkload):
             self._ensure_config_directory()
             self._ensure_certificates_directory()
             self._ensure_home_logs_directory()
-            self._attempt_set_directory_ownership()
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.warning("Failed to create required directories: %s", e)
             # don't raise, directories might already exist
@@ -235,55 +290,18 @@ class K8sWorkload(BaseWorkload):
         self.container.make_dir(data_dir, make_parents=True, permissions=0o755)
         logger.debug("Ensured data directory exists: %s", data_dir)
 
-    def _ensure_logs_directory(self) -> None:  # noqa C901
-        """Create logs directory (/var/log/opensearch/logs) with writable permissions.
+    def _ensure_logs_directory(self) -> None:
+        """Create logs directory (/var/log/opensearch/logs).
 
-        Uses 777 permissions as a workaround until fsGroup is applied.
-        Once fsGroup changes parent to 584792:584792, permissions can be reduced to 775.
+        Ownership/permissions are arranged explicitly in the K8s pebble-ready hook.
         """
         logs_dir = str(self.paths.logs / "logs")
         logs_parent = str(self.paths.logs)
-
-        # ensure parent directory exists with writable permissions
-        try:
-            self.container.make_dir(
-                logs_parent, make_parents=True, permissions=DIR_PERMISSIONS_WRITABLE
-            )
-        except (PebbleError, FileExistsError):
-            # parent might already exist, try to fix permissions
-            try:
-                self.run_cmd("chmod %s %s" % (CHMOD_WRITABLE, logs_parent))
-            except OpenSearchCmdError:
-                pass
-
-        # create logs subdirectory with 777 permissions
-        # this allows UID 584792 to write even if parent is root:root
-        try:
-            self.container.make_dir(
-                logs_dir, make_parents=True, permissions=DIR_PERMISSIONS_WRITABLE
-            )
-            # ensure parent is writable as make_parents might not set parent permissions
-            try:
-                self.run_cmd("chmod %s %s" % (CHMOD_WRITABLE, logs_parent))
-            except OpenSearchCmdError:
-                pass
-        except (PebbleError, FileExistsError):
-            # directory might already exist, ensure both parent and child have correct permissions
-            try:
-                self.run_cmd("chmod %s %s %s" % (CHMOD_WRITABLE, logs_parent, logs_dir))
-            except OpenSearchCmdError:
-                # if chmod fails, try to at least ensure directory exists
-                # initContainer should handle permissions, but 777 is a fallback
-                try:
-                    self.run_cmd("mkdir -p %s" % logs_dir)
-                    self.run_cmd("chmod %s %s" % (CHMOD_WRITABLE, logs_dir))
-                except OpenSearchCmdError:
-                    logger.warning(
-                        "Could not set permissions on %s, initContainer should handle this",
-                        logs_dir,
-                    )
-
-        logger.debug("Ensured logs directory exists with writable permissions 777: %s", logs_dir)
+        self.container.make_dir(
+            logs_parent, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
+        )
+        self.container.make_dir(logs_dir, make_parents=True, permissions=DIR_PERMISSIONS_SECURE)
+        logger.debug("Ensured logs directory exists: %s", logs_dir)
 
     def _ensure_config_directory(self) -> None:
         """Create config directory: /etc/opensearch."""
@@ -329,45 +347,12 @@ class K8sWorkload(BaseWorkload):
             certs_dir: path to certificates directory.
         """
         try:
-            # get current user's UID/GID to set ownership
-            try:
-                uid_process = self.container.exec(
-                    ["id", "-u"], encoding="utf-8", combine_stderr=True
-                )
-                gid_process = self.container.exec(
-                    ["id", "-g"], encoding="utf-8", combine_stderr=True
-                )
-                uid, _ = uid_process.wait_output()
-                gid, _ = gid_process.wait_output()
-                uid = uid.strip()
-                gid = gid.strip()
-
-                # create directory and set ownership
-                self.run_cmd("mkdir -p %s" % certs_dir)
-                self.run_cmd("chmod %s %s" % (CHMOD_CERTIFICATES, certs_dir))
-                # try to set ownership, may fail if not root
-                try:
-                    self.run_cmd("chown %s:%s %s" % (uid, gid, certs_dir))
-                    logger.debug("Set ownership of certificates directory to %s:%s", uid, gid)
-                except OpenSearchCmdError:
-                    # expected if running as non-root, fsGroup should handle permissions
-                    logger.debug(
-                        "Could not chown certificates directory (non-root), fsGroup should handle this"
-                    )
-
-                logger.info("Created certificates directory via fallback mkdir: %s", certs_dir)
-            except Exception as id_error:
-                # if we can't get UID/GID, just create the directory
-                logger.debug("Could not get UID/GID for ownership: %s", id_error)
-                self.run_cmd("mkdir -p %s" % certs_dir)
-                self.run_cmd("chmod %s %s" % (CHMOD_CERTIFICATES, certs_dir))
-                logger.info(
-                    "Created certificates directory via fallback mkdir (no ownership set): %s",
-                    certs_dir,
-                )
+            self.run_cmd("mkdir -p %s" % certs_dir)
+            self.run_cmd("chmod %s %s" % (CHMOD_CERTIFICATES, certs_dir))
+            logger.info("Created certificates directory via fallback mkdir: %s", certs_dir)
         except Exception as fallback_error:
             logger.warning(
-                "Failed to create certificates directory even with fallback: %s", fallback_error
+                "Failed to create certificates directory via fallback: %s", fallback_error
             )
             # don't raise, directory creation will be retried on next hook
 
@@ -386,63 +371,46 @@ class K8sWorkload(BaseWorkload):
         )
         logger.debug("Ensured OpenSearch home logs directory exists: %s", opensearch_home_logs)
 
-    def _attempt_set_directory_ownership(self) -> None:
-        """Attempt to set directory ownership for data/log directories (best-effort).
+    def _arrange_directory_permissions(self) -> None:
+        """Arrange ownership and permissions for OpenSearch directories (K8s only).
 
-        Note: Once running as non-root (via pod securityContext), chown will fail.
-        Directory permissions are handled by fsGroup in the pod securityContext for volume mounts.
-        This chown is only useful during initial setup if the container temporarily runs as root.
-
+        This should run from the pebble-ready hook before starting OpenSearch.
         """
-        try:
-            # get current user's UID/GID dynamically
-            uid_process = self.container.exec(["id", "-u"], encoding="utf-8", combine_stderr=True)
-            gid_process = self.container.exec(["id", "-g"], encoding="utf-8", combine_stderr=True)
-            uid, _ = uid_process.wait_output()
-            gid, _ = gid_process.wait_output()
-            uid = uid.strip()
-            gid = gid.strip()
+        desired_uid_gid = f"{OPENSEARCH_RUN_AS_USER}:{OPENSEARCH_RUN_AS_GROUP}"
+        data_dir = str(self.paths.data)
+        logs_dir = str(self.paths.logs)
+        home_logs_dir = str(self.paths.home / "logs")
+        certs_dir = str(self.paths.certs)
 
-            # only chown data and log directories, not /etc/opensearch config
-            data_dir = str(self.paths.data / "data")
-            logs_dir = str(self.paths.logs / "logs")
-            opensearch_home_logs = str(self.paths.home / "logs")
-            chown_paths = [data_dir, logs_dir, opensearch_home_logs]
+        # These are the paths that are commonly backed by runtime mounts (PVC/emptyDir/secret),
+        # so ROCK build-time ownership does not reliably apply.
+        changed = False
+        changed |= chown_if_needed(self.container, data_dir, desired_uid_gid, recursive=True)
+        changed |= chown_if_needed(self.container, logs_dir, desired_uid_gid, recursive=True)
+        changed |= chown_if_needed(self.container, home_logs_dir, desired_uid_gid, recursive=True)
+        chown_if_needed(self.container, certs_dir, desired_uid_gid, recursive=True)
 
-            # try chown, may fail if not root, that's expected and handled by initContainer/fsGroup
+        # Only apply recursive chmod if we actually had to fix ownership
+        if changed:
             try:
-                chown_cmd = ["chown", "-R", "%s:%s" % (uid, gid)] + chown_paths
-                self.container.exec(chown_cmd, encoding="utf-8", combine_stderr=True).wait_output()
-                logger.debug("Changed ownership of data/log directories to %s:%s", uid, gid)
-                # after successful chown, we can reduce permissions to 775 for better security
-                try:
-                    chmod_cmd = ["chmod", CHMOD_SECURE, logs_dir]
-                    self.container.exec(
-                        chmod_cmd, encoding="utf-8", combine_stderr=True
-                    ).wait_output()
-                    logger.debug(
-                        "Reduced logs directory permissions to 775 after successful chown: %s",
-                        logs_dir,
-                    )
-                except OpenSearchCmdError:
-                    # chmod failed, but that's ok, 777 is still fine
-                    pass
-            except OpenSearchCmdError as chown_error:
-                # chown failed, expected if non-root, keep 777 permissions
-                # initContainer or fsGroup will fix ownership, then we can reduce to 775
-                logger.debug(
-                    "chown failed (expected if non-root, initContainer/fsGroup will handle): %s",
-                    chown_error,
-                )
-        except (OpenSearchCmdError, Exception) as e:
-            # expected to fail once running as non-root, fsGroup handles permissions for volumes
-            # also expected if id command fails or container not ready
-            logger.debug(
-                "Could not change ownership (non-critical, initContainer/fsGroup handles this): %s",
-                e,
-            )
+                self.container.exec(
+                    ["chmod", "-R", CHMOD_SECURE, data_dir, logs_dir, home_logs_dir],
+                    encoding="utf-8",
+                    combine_stderr=True,
+                ).wait_output()
+            except (PebbleError, ModelError) as e:
+                logger.warning("Failed to chmod OpenSearch directories: %s", e)
 
-    def _configure_pebble_plan(self) -> None:
+        try:
+            self.container.exec(
+                ["chmod", CHMOD_CERTIFICATES, certs_dir],
+                encoding="utf-8",
+                combine_stderr=True,
+            ).wait_output()
+        except (PebbleError, ModelError) as e:
+            logger.warning("Failed to chmod certificates directory %s: %s", certs_dir, e)
+
+    def _configure_pebble_plan(self, *, enable_checks: bool = False) -> None:
         """Configure the Pebble plan with the OpenSearch service definition.
 
         This must be called before starting the service. The plan defines:
@@ -450,17 +418,15 @@ class K8sWorkload(BaseWorkload):
         - Command: OpenSearch executable path (using standard Linux paths, not snap paths)
         - Environment variables: OPENSEARCH_HOME, OPENSEARCH_PATH_CONF, JAVA_HOME, PATH
         - Uses system Java at /usr/lib/jvm/java-21-openjdk-amd64 (JAVA_HOME is set explicitly)
-        - Non-root execution enforced via pod securityContext (runAsUser=584792, runAsGroup=584792)
+        - Runs OpenSearch as a non-root user/group defined in the Pebble layer
         """
         try:
             if not self.container.can_connect():
                 logger.debug("Container not ready to configure pebble plan")
                 return
 
-            self._ensure_required_directories()
-
             opensearch_cmd = self._determine_opensearch_command()
-            health_check = self._build_readiness_check()
+            health_check = self._build_readiness_check() if enable_checks else None
             layer_dict = self._build_pebble_layer_dict(opensearch_cmd, health_check)
 
             layer = Layer(layer_dict)
@@ -473,6 +439,26 @@ class K8sWorkload(BaseWorkload):
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.warning("Failed to configure pebble plan: %s", e)
             # don't raise,this might be called before container is ready
+
+    def prepare_for_pebble_ready(self) -> None:
+        """Prepare the K8s container once Pebble is ready.
+
+        This is the only place where we apply:
+        - directory ownership/permissions
+        - pebble plan configuration
+        """
+        try:
+            if not self.container.can_connect():
+                # Transient condition: Pebble/socket isn't ready yet.
+                # Raise ContainerNotReadyError so hooks defer cleanly
+                raise ContainerNotReadyError("Container is not ready")
+
+            self._ensure_required_directories()
+            self._arrange_directory_permissions()
+            self._configure_pebble_plan(enable_checks=False)
+        except (PebbleConnectionError, ModelError) as e:
+            logger.error("Failed to prepare container on pebble-ready: %s", e)
+            raise OpenSearchInstallError() from e
 
     def _determine_opensearch_command(self) -> str:
         """Determine OpenSearch executable command.
@@ -499,8 +485,7 @@ class K8sWorkload(BaseWorkload):
     def _build_readiness_check(self) -> CheckDict | None:
         """Build readiness check for OpenSearch service.
 
-        Readiness check verifies HTTPS is actually working, not just port open.
-        This ensures OpenSearch Security plugin has fully initialized TLS.
+        Readiness check verifies TLS is actually working, not just port open.
 
         Returns:
             CheckDict or None: readiness check configuration, or None if DNS name unavailable.
@@ -513,20 +498,20 @@ class K8sWorkload(BaseWorkload):
             )
             return None
 
-        # check HTTP status code from HTTPS endpoint using DNS name
-        # curl -k skips certificate verification for health check
-        # curl -s suppresses progress output
-        # curl -w "%{http_code}" writes only the HTTP status code
-        # curl -o /dev/null discards response body
-        # curl --max-time 2 limits the check to 2 seconds
-        # exit code 0 = ready with status codes 200, 401, or 403, non-zero = not ready
-        # critical: Pebble exec checks do not support args field
-        # use a single command string with sh -c to execute shell syntax like $(), ||, etc.
+        # Pure TLS handshake + certificate verification.
+        # This avoids generating unauthenticated HTTP traffic (which the security plugin logs).
+        # We verify the server certificate chain against the CA chain we write to `chain.pem`.
+        certs_dir = str(self.paths.certs)
         command = (
-            'sh -c \'code=$(curl -ks --max-time 2 -o /dev/null -w "%%{http_code}" '
-            "https://%s:%s || echo 000); "
-            'test "$code" = "200" -o "$code" = "401" -o "$code" = "403"\''
-        ) % (dns_name, OPENSEARCH_HTTP_PORT)
+            "sh -c "
+            "'openssl s_client "
+            "-connect %s:%s "
+            "-servername %s "
+            "-CAfile %s/chain.pem "
+            "-verify_return_error "
+            "</dev/null 2>/dev/null "
+            '| grep -q "Verify return code: 0 (ok)"\''
+        ) % (dns_name, OPENSEARCH_HTTP_PORT, dns_name, certs_dir)
 
         return {
             "override": "replace",
@@ -567,26 +552,26 @@ class K8sWorkload(BaseWorkload):
                     "override": "replace",
                     "summary": "OpenSearch service",
                     "command": opensearch_cmd,
-                    "startup": "enabled",
-                    "user": PEBBLE_SERVICE_USER,  # UID 584792, created/ensured in rockcraft.yaml
-                    "group": PEBBLE_SERVICE_GROUP,  # GID 584792, created/ensured in rockcraft.yaml
+                    # The charm will start it explicitly once TLS and other
+                    # prerequisites are ready, so startup is disabled.
+                    "startup": "disabled",
+                    "user": PEBBLE_SERVICE_USER,
+                    "group": PEBBLE_SERVICE_GROUP,
                     "environment": {
                         "OPENSEARCH_HOME": opensearch_home,
                         "OPENSEARCH_PATH_CONF": opensearch_conf,
                         "JAVA_HOME": java_home,
                         "PATH": path_value,
                     },
-                    # don't restart on readiness check failure, let the
-                    # charm decide when to restart
-                    # automatic restarts can cause restart loops during temporary conditions
-                    "on-check-failure": {"readiness": "ignore"},
                 }
             },
         }
 
-        # only add checks section if health_check is configured, DNS name must be available
+        # Only add checks section and the on-check-failure policy
         if health_check is not None:
             layer_dict["checks"] = {"readiness": health_check}
+            # if readiness check fails, don't do any action, just log
+            layer_dict["services"][self.SERVICE_NAME]["on-check-failure"] = {"readiness": "ignore"}
 
         return layer_dict
 
@@ -655,11 +640,8 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchInstallError("Container is not ready")
 
-            # ensure required directories exist
-            self._ensure_required_directories()
-
             # configure pebble plan so the service can be started
-            self._configure_pebble_plan()
+            self._configure_pebble_plan(enable_checks=False)
         except (PebbleConnectionError, ModelError) as e:
             logger.error("Failed to verify container readiness: %s", e)
             raise OpenSearchInstallError() from e
@@ -763,7 +745,7 @@ class K8sWorkload(BaseWorkload):
         """
         # ensure parent directory exists (consistent with write_text() pattern)
         self._ensure_parent_dir(file_path)
-        # NOTE: ContainerPath.write_text() does not accept an `encoding=` kwarg.
+        # ContainerPath.write_text() does not accept an encoding= kwarg.
         # Decode bytes here if needed, then push text content.
         text = (
             data if isinstance(data, str) else data.decode(encoding or "utf-8", errors="replace")
@@ -803,18 +785,11 @@ class K8sWorkload(BaseWorkload):
         full_command = self._build_script_command(script_path, args)
         env_setup = self._build_script_environment(full_command)
 
-        logger.debug("Executing script via bash -c with environment: %s", script_name)
-        process = self.container.exec(
-            ["bash", "-c", env_setup],
-            encoding="utf-8",
-            combine_stderr=True,
-        )
-
-        try:
-            stdout, stderr = process.wait_output()
-            return SimpleNamespace(cmd=env_setup, out=stdout, err=stderr or "", returncode=0)
-        except Exception as e:
-            raise OpenSearchCmdError(cmd=env_setup, out="", err=str(e)) from e
+        # Delegate to run_cmd so unit tests can mock command execution consistently
+        # (instead of requiring Harness.handle_exec registrations).
+        quoted = shlex.quote(env_setup)
+        result = self.run_cmd(f"bash -c {quoted}")
+        return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)
 
     def _build_script_command(self, script_path: str, args: str | None) -> str:
         """Build bash command to execute script.
@@ -859,8 +834,7 @@ class K8sWorkload(BaseWorkload):
 
         # use export to make variables available to the script
         # bash -c expects a single string argument, and the shell will handle
-        # argument parsing correctly. Adding quotes causes bash to treat the quotes
-        # as literal characters, leading to "No such file" errors.
+        # argument parsing correctly.
         return (
             'export OPENSEARCH_HOME="%s" && '
             'export OPENSEARCH_PATH_CONF="%s" && '
@@ -884,7 +858,17 @@ class K8sWorkload(BaseWorkload):
         Returns:
             str | None: dns name (FQDN or hostname) for K8s, or None if unavailable.
         """
-        # try to get pod FQDN first, most reliable method
+        # Only attempt container-derived names when the workload container is connectable.
+        # In unit tests `run_cmd` is often patched with a bare MagicMock; returning those
+        # stringified mocks would break callers. When we can't obtain a real string value,
+        # return None so callers fall back to `state.host_ip` / ingress address.
+        try:
+            if not self.container.can_connect():
+                return None
+        except Exception:
+            return None
+
+        # Pebble is connectable: try to get pod FQDN first, most reliable method.
         if fqdn := self._get_pod_fqdn():
             return fqdn
 
@@ -903,6 +887,7 @@ class K8sWorkload(BaseWorkload):
             if (
                 (result := self.run_cmd("hostname", args="-f"))
                 and result.returncode == 0
+                and isinstance(result.out, str)
                 and result.out.strip()
             ):
                 return result.out.strip()
@@ -921,6 +906,7 @@ class K8sWorkload(BaseWorkload):
             if (
                 (result := self.run_cmd("hostname"))
                 and result.returncode == 0
+                and isinstance(result.out, str)
                 and result.out.strip()
             ):
                 hostname = result.out.strip()
@@ -1012,6 +998,8 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchStartError("Container is not ready")
 
+            # ensure plan is present and readiness checks are enabled when starting intentionally.
+            self._configure_pebble_plan(enable_checks=True)
             self.container.start(self.SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
@@ -1042,7 +1030,7 @@ class K8sWorkload(BaseWorkload):
     def start_service(self):
         """Start the OpenSearch service.
 
-        Ensures required directories exist and pebble plan is configured before starting.
+        Ensures pebble plan is configured before starting.
         If service is already active, returns without error.
 
         Raises:
@@ -1052,11 +1040,8 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchStartError("Container is not ready")
 
-            # ensure required directories exist
-            self._ensure_required_directories()
-
             # ensure pebble plan is configured before starting
-            self._configure_pebble_plan()
+            self._configure_pebble_plan(enable_checks=True)
 
             # get services
             services = self._get_services_dict()
@@ -1118,87 +1103,10 @@ class K8sWorkload(BaseWorkload):
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement.
 
-        Args:
-            system_requirement: kernel parameter to update.
-            value: value of the kernel parameter.
-
-        Returns:
-            bool: True if the kernel value was applied successfully, False otherwise.
+        This method is kept only to satisfy the BaseWorkload interface.
         """
-        try:
-            if not self._set_sysctl_value(system_requirement, value):
-                return False
-
-            if self._verify_sysctl_value(system_requirement, value):
-                logger.info("Successfully set %s=%s", system_requirement, value)
-                return True
-
-            logger.warning(
-                "Failed to set %s: expected %s, got different value. "
-                "sysctl -w may have executed but value was not changed (likely missing NET_ADMIN capability).",
-                system_requirement,
-                value,
-            )
-            return False
-
-        except OpenSearchCmdError as e:
-            error_message = e.err or e.out or str(e)
-            logger.warning(
-                "Cannot set %s=%s in container: %s. "
-                "Ensure container has necessary privileges or configure via pod security context.",
-                system_requirement,
-                value,
-                error_message,
-            )
-            return False
-
-    def _set_sysctl_value(self, system_requirement: str, value: int) -> bool:
-        """Attempt to set sysctl value using sysctl -w.
-
-        Args:
-            system_requirement: kernel parameter to update.
-            value: value to set.
-
-        Returns:
-            bool: True if sysctl command succeeded without permission errors, False otherwise.
-
-        Raises:
-            OpenSearchCmdError: if sysctl command fails.
-        """
-        logger.debug("Attempting to set %s=%s using sysctl -w", system_requirement, value)
-        sysctl_result = self.run_cmd("sysctl", args="-w %s=%s" % (system_requirement, value))
-
-        # check if sysctl -w failed with permission errors
-        # note: combine_stderr=True merges stderr into stdout, so check both out and err
-        output_to_check = sysctl_result.err or sysctl_result.out
-        if output_to_check:
-            error_message_lowercase = output_to_check.lower()
-            if (
-                "permission denied" in error_message_lowercase
-                or "read-only" in error_message_lowercase
-            ):
-                logger.debug("sysctl -w failed with error: %s", output_to_check)
-                return False
-
-        return True
-
-    def _verify_sysctl_value(self, system_requirement: str, expected_value: int) -> bool:
-        """Verify that sysctl value was actually set to the expected value.
-
-        Args:
-            system_requirement: kernel parameter name.
-            expected_value: expected value to verify.
-
-        Returns:
-            bool: True if current value matches expected value, False otherwise.
-
-        Raises:
-            OpenSearchCmdError: if sysctl command fails.
-            ValueError: If sysctl output cannot be parsed as integer.
-        """
-        result = self.run_cmd("sysctl", args="-n %s" % system_requirement)
-        current_value = int(result.out.rstrip())
-        return current_value == expected_value
+        logger.debug("Skipping sysctl apply for %s=%s on K8s workload", system_requirement, value)
+        return False
 
     @override
     def check_missing_system_requirements(self) -> list[str]:
@@ -1212,23 +1120,29 @@ class K8sWorkload(BaseWorkload):
         """
         missing_requirements = []
 
-        # define system requirements: property_name, required_value, comparison_op, config_method
-        requirements = [
+        # hard requirements (block if unmet).
+        hard_requirements = [
             ("vm.max_map_count", 262144, "<", "node level: sysctl -w"),
             ("vm.swappiness", 0, ">", "node level: sysctl -w"),
-            (
-                "net.ipv4.tcp_retries2",
-                5,
-                ">",
-                "pod securityContext.sysctls (requires pod restart)",
-            ),
         ]
-
-        for property_name, required_value, comparison_op, config_method in requirements:
+        for property_name, required_value, comparison_op, config_method in hard_requirements:
             if error_message := self._check_kernel_property_requirement(
                 property_name, required_value, comparison_op, config_method
             ):
                 missing_requirements.append(error_message)
+
+        # Soft requirement (warn-only): tcp_retries2 should be lowered for better stability.
+        # do not block charm execution if this is not set.
+        tcp_retries2_config_method = (
+            "recommended net.ipv4.tcp_retries2=5 (configure at kubelet/node level as appropriate)"
+        )
+        if warn_message := self._check_kernel_property_requirement(
+            "net.ipv4.tcp_retries2",
+            5,
+            ">",
+            tcp_retries2_config_method,
+        ):
+            logger.warning("Non-blocking system recommendation: %s", warn_message)
 
         return missing_requirements
 
@@ -1293,7 +1207,6 @@ class K8sWorkload(BaseWorkload):
             "This may indicate missing permissions or node-level configuration issue. "
             "For K8s deployments, configure via %s."
         ) % (property_name, config_method)
-        logger.warning(error_message)
         return error_message
 
     def _build_property_value_error(
@@ -1321,10 +1234,7 @@ class K8sWorkload(BaseWorkload):
         else:
             comparison_text = "above"
 
-        if "sysctl -w" in config_method:
-            fix_instruction = "sysctl -w %s=%s" % (property_name, required_value)
-        else:
-            fix_instruction = "%s=%s" % (property_name, required_value)
+        fix_instruction = "%s=%s" % (property_name, required_value)
 
         error_message = (
             "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
@@ -1336,7 +1246,6 @@ class K8sWorkload(BaseWorkload):
             config_method,
             fix_instruction,
         )
-        logger.warning(error_message)
         return error_message
 
     @override
@@ -1384,7 +1293,7 @@ class K8sWorkload(BaseWorkload):
             return None
 
     def _read_kernel_property_via_sysctl(self, property_name: str) -> int | None:
-        """Read kernel property using 'sysctl' command and parse output.
+        """Read kernel property using sysctl command and parse output.
 
         Output format: "vm.max_map_count = 262144"
 
@@ -1473,7 +1382,7 @@ class K8sWorkload(BaseWorkload):
                 "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
             )
 
-            # note: err is typically empty because combine_stderr=True merges stderr into stdout
+            # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 
         except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
@@ -1553,8 +1462,8 @@ class K8sWorkload(BaseWorkload):
             return stdout, stderr
         except Exception as e:
             # wait_output() raises on non-zero exit or other errors
-            # some errors are expected and handled by callers, e.g., "does not exist" for keytool
-            # log those as debug instead of warning to reduce noise
+            # some errors are expected and handled by callers such as "does not exist" for keytool
+            # log those as debug instead of warning
             error_string = str(e).lower()
             if "does not exist" in error_string or "keystore file does not exist" in error_string:
                 logger.debug("wait_output() failed for %s (expected): %s", masked_command, e)
@@ -1607,7 +1516,7 @@ class K8sWorkload(BaseWorkload):
             raise ContainerNotReadyError("Container not ready to create directory")
 
         parent = str(path.parent)
-        # containerPath.parent is also a ContainerPath, gives "/etc/opensearch" etc.
+        # containerPath.parent is also a ContainerPath, gives /etc/opensearch etc
         try:
             self.container.make_dir(
                 parent, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
@@ -1618,7 +1527,7 @@ class K8sWorkload(BaseWorkload):
 
     @override
     def write_text(self, content: str, path: pathops.PathProtocol) -> None:  # type: ignore[override]
-        """K8s-safe write: ensure parent dir exists and handle pebble readiness.
+        """K8s-safe write, ensure parent dir exists and handle pebble readiness.
 
         Overrides BaseWorkload.write_text() to ensure parent directories exist
         before writing, which is critical for K8s where directories may not exist

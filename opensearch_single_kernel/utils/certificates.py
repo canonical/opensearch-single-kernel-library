@@ -239,15 +239,23 @@ def remove_ca(
         store_path: Path to the trust store.
         keytool_cmd: command to run the keytool command.
     """
-    if not store_path.exists():
-        logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
-        return
+    def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
+        msg = (exc.out or "") + (exc.err or "")
+        # keytool messages vary a bit between JDKs; keep this intentionally loose.
+        return (
+            "Keystore file does not exist" in msg
+            or ("FileNotFoundException" in msg and keystore_path in msg)
+            or ("No such file or directory" in msg and keystore_path in msg)
+        )
 
     list_cmd = f"{keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
     list_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(list_cmd, list_args)
     except OpenSearchCmdError as e:
+        if _is_keystore_missing_error(e, str(store_path)):
+            logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
+            return
         if is_alias_missing_error(e, alias):
             logger.debug(
                 "Alias %s not found in %s when listing before delete, ignoring.",
