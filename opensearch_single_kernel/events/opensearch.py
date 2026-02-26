@@ -148,9 +148,7 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
-        is_node_up = self.charm.cluster_manager.opensearch_client.is_node_up()
-
-        if is_node_up:
+        if is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up():
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
 
             if health in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]:
@@ -693,7 +691,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         if not self.unit_allowed_to_start(event):
-            logger.info("The unit is not allowed to wait, the event need to be retried later.")
+            logger.info("The unit is not allowed to start, the event need to be retried later.")
             event.defer()
             return
 

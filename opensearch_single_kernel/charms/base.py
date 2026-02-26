@@ -12,7 +12,10 @@ import ops
 from ops import EventSource
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, Scope, Substrates
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchExclusionsException,
+    OpenSearchHttpError,
+)
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.backup import BackupEventsHandler
@@ -120,7 +123,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                         voting=True,
                         allocation=not restart,
                     )
-            except OpenSearchHttpError:
+            except (OpenSearchHttpError, OpenSearchExclusionsException):
                 logger.debug("Failed to get online nodes, voting and alloc exclusions not added")
 
         # block until all primary shards are moved away from the unit that is stopping

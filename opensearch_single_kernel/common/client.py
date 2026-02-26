@@ -490,7 +490,7 @@ class OpenSearchClient:
             }
         return idx
 
-    def flush_opensearch_translog(self, alt_hosts: list[str] | None = None) -> None:
+    def flush_translog(self, alt_hosts: list[str] | None = None) -> None:
         """Flush the OpenSearch translog to ensure all operations are committed to disk."""
         self.request(
             "POST",
@@ -547,7 +547,7 @@ class OpenSearchClient:
             # no voting exclusions set
             return set()
 
-    def remove_exclusions(self, alt_hosts: list[str] | None = None) -> bool:
+    def remove_voting_exclusions(self, alt_hosts: list[str] | None = None) -> bool:
         """Remove voting exclusions from OpenSearch cluster."""
         response = self.request(
             "DELETE",
@@ -602,7 +602,7 @@ class OpenSearchClient:
 
         return set()
 
-    def add_allocations(
+    def add_allocation_exclusions(
         self,
         node: Node,
         allocations: set[str] | None = None,
@@ -611,11 +611,11 @@ class OpenSearchClient:
     ) -> bool:
         """Register new allocation exclusions."""
         existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        all_allocs = existing.union(allocations if allocations is not None else {node.name})
+        all_exclusions = existing.union(allocations or {node.name})
         response = self.request(
             "PUT",
             "/_cluster/settings",
-            {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_allocs)}},
+            {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_exclusions)}},
             alt_hosts=alt_hosts,
             retries=3,
             wait_strategy=wait_exponential(min=2),
