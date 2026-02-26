@@ -13,7 +13,7 @@ from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
-from pydantic import BaseModel, Field, RootModel, model_validator, validator
+from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
@@ -127,7 +127,7 @@ class Node(Model):
     temperature: str | None = None
 
     @classmethod
-    @validator("roles")
+    @field_validator("roles")
     def roles_set(cls, v):
         """Returns deduplicated list of roles."""
         return list(set(v))

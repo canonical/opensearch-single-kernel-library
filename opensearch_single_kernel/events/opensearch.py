@@ -247,9 +247,7 @@ class OpenSearchEventsHandler(Object):
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
         )
 
-    def _on_opensearch_data_storage_detaching(
-        self, event: StorageDetachingEvent
-    ) -> None:  # noqa: C901
+    def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
         # TODO: Warning in case of upgrade in progress
         planned_units = self.charm.app.planned_units()
@@ -260,7 +258,7 @@ class OpenSearchEventsHandler(Object):
             # Raise uncaught exception to prevent Juju from removing unit
             raise Exception("Unable to acquire lock: Another unit is starting or stopping.")
 
-        # if the leader is departing, and this hook fails "leader elected" won"t trigger,
+        # if the leader is departing, and this hook fails "leader elected" won't trigger,
         # so we want to re-balance the node roles from here
         if self.charm.unit.is_leader():
             self.charm.cluster_manager.reconcile_before_unit_removal(
