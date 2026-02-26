@@ -235,6 +235,8 @@ PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
 CLIENT_RELATION = "opensearch-client"
 COS_RELATION = "cos-agent"
+JWT_CONFIG_RELATION = "jwt-configuration"
+OAUTH_RELATION = "oauth"
 
 
 # Paths

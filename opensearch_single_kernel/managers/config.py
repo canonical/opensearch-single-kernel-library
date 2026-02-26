@@ -43,8 +43,8 @@ class ConfigManager(BaseManager):
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
-        Updates opensearch.yml & unicast_hosts.txt config files and assures
-        jvm.options & opensearch-security/config.yml are populated with right static options.
+        Updates opensearch.yml & unicast_hosts.txt & opensearch-security/config.yml config files
+        and assures jvm.options is populated with right static options.
 
         Args:
             roles: override node roles got from nodes_config.
@@ -52,7 +52,7 @@ class ConfigManager(BaseManager):
             cm_ips: override seed_hosts got from nodes_config.
 
         Returns:
-            whether the opensearch.yml config was changed.
+            whether the config was changed.
         """
         if roles is None:
             roles = self._opensearch_roles
@@ -69,7 +69,8 @@ class ConfigManager(BaseManager):
         )
 
         self._update_static_jvm_options()
-        self._update_static_security_options()
+
+        self.update_security_config()
 
         if cm_ips:
             self._update_seeds_file(cm_ips)
@@ -80,6 +81,31 @@ class ConfigManager(BaseManager):
 
         res = self.yaml_setter.rewrite(self.CONFIG_YML, config)
         return res
+
+    def update_security_config(self) -> bool:
+        """Reconcile whole Opensearch security config using values from application state.
+
+        Updates opensearch-security/config.yml config file.
+
+        Returns:
+            whether the config was changed.
+        """
+        config = {
+            "_meta": {
+                "type": "config",
+                "config_version": 2,
+            },
+            "config": {
+                "dynamic": {
+                    "authc": self._security_authc_static_config()
+                    | self._security_authc_jwt_config()
+                    | self._security_authc_oauth_config(),
+                    "authz": self._security_authz_static_config(),
+                },
+            },
+        }
+
+        return self.yaml_setter.rewrite(self.SECURITY_CONFIG_YML, config)
 
     @staticmethod
     def _opensearch_static_config() -> dict[str, Any]:
@@ -242,27 +268,207 @@ class ConfigManager(BaseManager):
             "-Djdk.tls.client.protocols=TLSv1.2",
         )
 
-    def _update_static_security_options(self) -> None:
-        """Update Opensearch security config file with the right static options.
+    @staticmethod
+    def _security_authc_static_config() -> dict[str, Any]:
+        """Get set of static config options for the Opensearch security.
 
-        Configures TLS and basic http for clients.
-        Intended for opensearch-security/config.yml file.
+        Intended for authc category in opensearch-security/config.yml config file.
         """
-        self.yaml_setter.put(
-            self.SECURITY_CONFIG_YML,
-            "config/dynamic/authc/basic_internal_auth_domain/http_enabled",
-            True,
+        return {
+            "basic_internal_auth_domain": {
+                "description": "Authenticate via HTTP Basic against internal users database",
+                "http_enabled": True,
+                "transport_enabled": True,
+                "order": 4,
+                "http_authenticator": {
+                    "type": "basic",
+                    "challenge": True,
+                },
+                "authentication_backend": {
+                    "type": "intern",
+                },
+            },
+            "clientcert_auth_domain": {
+                "description": "Authenticate via SSL client certificates",
+                "http_enabled": True,
+                "transport_enabled": True,
+                "order": 2,
+                "http_authenticator": {
+                    "type": "clientcert",
+                    "challenge": False,
+                    "config": {"username_attribute": "cn"},
+                },
+                "authentication_backend": {"type": "noop"},
+            },
+            "kerberos_auth_domain": {
+                "http_enabled": False,
+                "transport_enabled": False,
+                "order": 6,
+                "http_authenticator": {
+                    "type": "kerberos",
+                    "challenge": True,
+                    "config": {"krb_debug": False, "strip_realm_from_principal": True},
+                },
+                "authentication_backend": {"type": "noop"},
+            },
+            "proxy_auth_domain": {
+                "description": "Authenticate via proxy",
+                "http_enabled": False,
+                "transport_enabled": False,
+                "order": 3,
+                "http_authenticator": {
+                    "type": "proxy",
+                    "challenge": False,
+                    "config": {
+                        "user_header": "x-proxy-user",
+                        "roles_header": "x-proxy-roles",
+                    },
+                },
+                "authentication_backend": {"type": "noop"},
+            },
+            "ldap": {
+                "description": "Authenticate via LDAP or Active Directory",
+                "http_enabled": False,
+                "transport_enabled": False,
+                "order": 5,
+                "http_authenticator": {
+                    "type": "basic",
+                    "challenge": False,
+                },
+                "authentication_backend": {
+                    "type": "ldap",
+                    "config": {
+                        "enable_ssl": False,
+                        "enable_start_tls": False,
+                        "enable_ssl_client_auth": False,
+                        "verify_hostnames": True,
+                        "hosts": ["localhost:8389"],
+                        "bind_dn": None,
+                        "password": None,
+                        "userbase": "ou=people,dc=example,dc=com",
+                        "usersearch": "(sAMAccountName={0})",
+                        "username_attribute": None,
+                    },
+                },
+            },
+        }
+
+    def _security_authc_jwt_config(self) -> dict[str, Any]:
+        """Get set of JWT auth config options for the Opensearch security.
+
+        Intended for authc category in opensearch-security/config.yml config file.
+        """
+        jwt_config = self.state.server.jwt_auth_configuration
+        return {
+            "jwt_auth_domain": {
+                "description": "Authenticate via Json Web Token",
+                "http_enabled": bool(jwt_config),
+                "transport_enabled": bool(jwt_config),
+                "order": 0,
+                "http_authenticator": {
+                    "type": "jwt",
+                    "challenge": False,
+                    "config": (
+                        {
+                            "signing_key": jwt_config.signing_key,
+                            "jwt_header": jwt_config.jwt_header,
+                            "jwt_url_parameter": jwt_config.jwt_url_parameter,
+                            "roles_key": jwt_config.roles_key,
+                            "subject_key": jwt_config.subject_key,
+                            "required_audience": jwt_config.required_audience,
+                            "required_issuer": jwt_config.required_issuer,
+                            "jwt_clock_skew_tolerance_seconds": jwt_config.jwt_clock_skew_tolerance_seconds,
+                        }
+                        if jwt_config
+                        else {
+                            "signing_key": "base64 encoded HMAC key or public RSA/ECDSA pem key",
+                            "jwt_header": "Authorization",
+                            "jwt_url_parameter": None,
+                            "roles_key": None,
+                            "subject_key": None,
+                            "jwt_clock_skew_tolerance_seconds": 30,
+                        }
+                    ),
+                },
+                "authentication_backend": {"type": "noop"},
+            }
+        }
+
+    def _security_authc_oauth_config(self) -> dict[str, Any]:
+        """Get set of OAuth config options for the Opensearch security.
+
+        Intended for authc category in opensearch-security/config.yml config file.
+        """
+        return (
+            {
+                "openid_auth_domain": {
+                    "http_enabled": True,
+                    "transport_enabled": True,
+                    # NOTE: Order value needs to be lower than basic_internal_auth_domain section,
+                    # which is set to 4 by default. Only available number is 1, if we want a
+                    # different number, all other numbers need to be reshuffled.
+                    "order": 1,
+                    "http_authenticator": {
+                        "type": "openid",
+                        "challenge": False,
+                        "config": {
+                            "subject_key": "sub",
+                            "openid_connect_url": self.state.server.oauth_openid_connect_url,
+                            "openid_connect_idp": {
+                                "enable_ssl": True,
+                                "verify_hostnames": False,
+                                # NOTE: this assumes Hydra and Opensearch
+                                # are using the same certificates relation.
+                                "pemtrustedcas_filepath": self.workload.paths.certs_chain.as_posix(),
+                            },
+                        },
+                    },
+                    "authentication_backend": {"type": "noop"},
+                }
+            }
+            if self.state.server.oauth_openid_connect_url
+            else {}
         )
-        self.yaml_setter.put(
-            self.SECURITY_CONFIG_YML,
-            "config/dynamic/authc/clientcert_auth_domain/http_enabled",
-            True,
-        )
-        self.yaml_setter.put(
-            self.SECURITY_CONFIG_YML,
-            "config/dynamic/authc/clientcert_auth_domain/transport_enabled",
-            True,
-        )
+
+    @staticmethod
+    def _security_authz_static_config() -> dict[str, Any]:
+        """Get set of static config options for the Opensearch security.
+
+        Intended for authz category in opensearch-security/config.yml config file.
+        """
+        return {
+            "roles_from_myldap": {
+                "description": "Authorize via LDAP or Active Directory",
+                "http_enabled": False,
+                "transport_enabled": False,
+                "authorization_backend": {
+                    "type": "ldap",
+                    "config": {
+                        "enable_ssl": False,
+                        "enable_start_tls": False,
+                        "enable_ssl_client_auth": False,
+                        "verify_hostnames": True,
+                        "hosts": ["localhost:8389"],
+                        "bind_dn": None,
+                        "password": None,
+                        "rolebase": "ou=groups,dc=example,dc=com",
+                        "rolesearch": "(member={0})",
+                        "userroleattribute": None,
+                        "userrolename": "disabled",
+                        "rolename": "cn",
+                        "resolve_nested_roles": True,
+                        "userbase": "ou=people,dc=example,dc=com",
+                        "usersearch": "(uid={0})",
+                    },
+                },
+            },
+            "roles_from_another_ldap": {
+                "description": "Authorize via another Active Directory",
+                "http_enabled": False,
+                "transport_enabled": False,
+                "authorization_backend": {"type": "ldap"},
+            },
+        }
 
     def update_seeds_config(self) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using values from nodes_config."""
