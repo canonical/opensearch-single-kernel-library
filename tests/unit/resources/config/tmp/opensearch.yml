@@ -124,4 +124,3 @@ plugins.security.restapi.roles_enabled:
 plugins.security.unsupported.restapi.allow_securityconfig_modification: true
 
 plugins.security.ssl_cert_reload_enabled: true
-
