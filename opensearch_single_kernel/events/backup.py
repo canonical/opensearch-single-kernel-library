@@ -243,7 +243,7 @@ class BackupEventsHandler(Object):
                 pattern=Status.CheckPattern.Interpolated,
             )
 
-        if not self.charm.backup_manager.cleanup(
+        if not self.cleanup(
             object_storage_type=object_storage_type,
             remove_repository=True,
         ):
@@ -499,7 +499,7 @@ class BackupEventsHandler(Object):
         try:
             # If the storage type is gcs, also remove the service account json file
             if object_storage_type == ObjectStorageType.GCS or str(object_storage_type) == "gcs":
-                self.remove_gcs_service_account_json()
+                self.charm.backup_manager.remove_gcs_service_account_json()
         except OpenSearchFileOperationError as e:
             logger.warning("Failed to remove GCS service account JSON file during cleanup: %s", e)
             # Not critical, continue with cleanup
