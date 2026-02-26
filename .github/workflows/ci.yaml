@@ -25,6 +25,11 @@ jobs:
         with:
           python-version: "3.10"
           cache: "poetry"
+      - name: Ensure setuptools/pkg_resources available
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pkg-resources
+          python -m pip install -U pip setuptools wheel
       - name: Install pre-commit
         run: |
           poetry install
@@ -86,6 +91,11 @@ jobs:
         with:
           python-version: "3.10"
           cache: "poetry"
+      - name: Ensure setuptools/pkg_resources available
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pkg-resources
+          python -m pip install -U pip setuptools wheel
       - name: Run linters
         run: tox run -e lint
 
@@ -111,6 +121,11 @@ jobs:
         with:
           python-version: "3.10"
           cache: "poetry"
+      - name: Ensure setuptools/pkg_resources available
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pkg-resources
+          python -m pip install -U pip setuptools wheel
       - name: Run tests
         run: tox run -e unit-${{ matrix.env }}
 
@@ -154,6 +169,11 @@ jobs:
         with:
           python-version: "3.10"
           cache: 'poetry'
+      - name: Ensure setuptools/pkg_resources available
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pkg-resources
+          python -m pip install -U pip setuptools wheel
       - name: Update lib and build charm
         shell: bash
         run: |
