@@ -80,7 +80,7 @@ def test_set_client_auth(harness, mocker, substrate):
 
 
 def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
-    """Test setting the core config of a node (base config only)."""
+    """Test setting the core config of a node (base config)."""
     yaml_conf_setter = YamlConfigSetter(harness.charm.workload)
     yaml_conf_setter.base_path = config_path / "tmp"
 
@@ -157,7 +157,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     assert opensearch_conf["discovery.seed_providers"] == "file"
 
     # bootstrap names differ by substrate:
-    # - VM: uses cm_names as-is
+    # - VM: uses cm_names
     # - K8s: uses hostname (node.name) because bootstrap must match runtime node name
     expected_bootstrap_names = ["cm1"] if substrate == "vm" else [expected_node_name]
     assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == expected_bootstrap_names

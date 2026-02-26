@@ -239,9 +239,10 @@ def remove_ca(
         store_path: Path to the trust store.
         keytool_cmd: command to run the keytool command.
     """
+
     def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
         msg = (exc.out or "") + (exc.err or "")
-        # keytool messages vary a bit between JDKs; keep this intentionally loose.
+        # keytool messages vary a bit between JDKs, keep this intentionally loose.
         return (
             "Keystore file does not exist" in msg
             or ("FileNotFoundException" in msg and keystore_path in msg)

@@ -4,16 +4,17 @@ This document outlines the key differences between Kubernetes (K8s) and VM subst
 
 ## Contents
 
-1. Workload Implementation
-2. File System Paths
-3. Node Configuration
-4. Network Configuration
-5. Service Management
-6. File Operations
-7. System Requirements
-8. Container/Workload Readiness
-9. Certificate Handling
-10. Event Handling
+1. [Workload Implementation](#1-workload-implementation)
+2. [File System Paths](#2-file-system-paths)
+3. [Node Configuration](#3-node-configuration)
+4. [Network Configuration](#4-network-configuration)
+5. [Service Management](#5-service-management)
+6. [File Operations](#6-file-operations)
+7. [System Requirements](#7-system-requirements)
+8. [Container/Workload Readiness](#8-containerworkload-readiness)
+9. [Certificate Handling](#9-certificate-handling)
+10. [Event Handling](#10-event-handling)
+11. [Changes in Managers and Event Handlers (code map)](#11-changes-in-managers-and-event-handlers)
 
 
 
@@ -46,9 +47,11 @@ Uses standard Linux filesystem paths (rock image):
 |-----------|----------|-------|
 | Home | /usr/share/opensearch | OpenSearch installation directory |
 | Config | /etc/opensearch | Configuration files |
-| Data | /var/lib/opensearch | Data directory (actual: /var/lib/opensearch/data) |
-| Logs | /var/log/opensearch | Logs directory (actual: /var/log/opensearch/logs) |
-| JDK | /usr/lib/jvm/java-21-openjdk-amd64 | Hardcoded JDK path |
+| Data (mount) | /var/lib/opensearch | K8s volume mount point |
+| Data (used) | /var/lib/opensearch/data | OpenSearch `path.data` on K8s |
+| Logs (mount) | /var/log/opensearch | K8s volume mount point |
+| Logs (used) | /var/log/opensearch/logs | OpenSearch `path.logs` on K8s |
+| JDK | /usr/lib/jvm/java-21-openjdk-amd64 | Image-provided JDK path (via `K8sPaths.jdk`) |
 | Tmp | /tmp | Temporary directory |
 | Bin | /usr/share/opensearch/bin | Executables |
 | Certs | /etc/opensearch/certificates | TLS certificates |
@@ -58,14 +61,14 @@ Uses snap-specific paths:
 
 | Path Type | VM Path | Notes |
 |-----------|--------|-------|
-| Home | /var/snap/opensearch/common/opensearch | Snap common data |
-| Config | /var/snap/opensearch/common/opensearch/config | Configuration files |
-| Data | /var/snap/opensearch/common/opensearch/data | Data directory |
-| Logs | /var/snap/opensearch/common/opensearch/logs | Logs directory |
-| JDK | /snap/opensearch/current/jdk | Snap revision-based |
-| Tmp | /var/snap/opensearch/common/tmp | Temporary directory |
-| Bin | /snap/opensearch/current/bin | Executables |
-| Certs | /var/snap/opensearch/common/opensearch/config/certificates | TLS certificates |
+| Home | /var/snap/opensearch/current/usr/share/opensearch | Snap data (`/var/snap/opensearch/current`) + `usr/share/opensearch` |
+| Config | /var/snap/opensearch/current/etc/opensearch | Snap data + `etc/opensearch` |
+| Data | /var/snap/opensearch/common/var/lib/opensearch | Snap common (`/var/snap/opensearch/common`) + `var/lib/opensearch` |
+| Logs | /var/snap/opensearch/common/var/log/opensearch | Snap common + `var/log/opensearch` |
+| JDK | /snap/opensearch/current/usr/lib/jvm/java-21-openjdk-amd64 | From `workload.paths.jdk` |
+| Tmp | /var/snap/opensearch/common/usr/share/tmp | From `workload.paths.tmp` |
+| Bin | /snap/opensearch/current/usr/share/opensearch/bin | From `workload.paths.bin` |
+| Certs | /var/snap/opensearch/current/etc/opensearch/certificates | `workload.paths.certs` |
 
 
 
@@ -77,16 +80,17 @@ K8s:
 ```python
 node_name = socket.gethostname()
 ```
-- Reason: OpenSearch uses hostname by default in containers
-- Critical: Must match container hostname or bootstrap fails
-- Example: opensearch-0, opensearch-1
+- Reason: OpenSearch uses the container hostname by default, using the same value avoids bootstrap mismatches.
+- Critical: Must match what the node reports as its name at runtime or bootstrap can fail.
+- Example: `opensearch-0`, `opensearch-1`
 
 VM:
 ```python
 node_name = unit_name
 ```
-- Reason: Unit name matches hostname on VM
-- Example: opensearch/0, opensearch/1
+- Reason: On VM, the charm uses Juju unit name as a stable identifier for `node.name`.
+- Note: Unlike K8s, OpenSearch does not require `node.name` to equal the OS hostname, it just needs to be consistent within the cluster.
+- Example: `opensearch/0`, `opensearch/1`
 
 
 ### Bootstrap Configuration (cluster.initial_cluster_manager_nodes)
@@ -96,7 +100,7 @@ K8s:
 # Uses hostname for bootstrap (matches node.name)
 bootstrap_cm_names = [node_name]  
 ```
-- Critical: Must use hostname, not unit_name
+- Critical: Must use the same naming scheme as `node.name` (hostname on K8s), not Juju unit name.
 - Failure: ClusterManagerNotDiscoveredException if names don't match
 
 VM:
@@ -104,61 +108,56 @@ VM:
 # Uses unit names as-is
 bootstrap_cm_names = cm_names  
 ```
-- Reason: Unit name matches hostname on VM
+- Reason: Uses Juju unit names (same scheme as VM `node.name` in this charm).
 
 
 ## 4. Network Configuration
 
 ### Network Hosts
 
-K8s:
+K8s (initial node config):
 ```yaml
 network.host: ["_site_", "_local_", ...]
 ```
-- _site_: Binds to pod IP (for external access via Kubernetes Service)
-- _local_: Binds to localhost (for Pebble health checks and internal monitoring)
+- _site_: Binds to pod IP for external access via Kubernetes Service
+- _local_: Binds to localhost for Pebble health checks and internal monitoring
 - Both required: Pod IP for external access, localhost for health checks
 
 VM:
 ```yaml
-network.host: ["_site_", ...]
+network.host: ["_site_", "_local_", ...]
 ```
 - _site_: Binds to network interface
-- No _local_: Not needed for VM (no Pebble health checks)
+- Note: The charm's initial `set_node()` currently prepends `["_site_", "_local_"]` even on VM, but subsequent `update_host_if_needed()` may rewrite the value without `_local_`.
 
 
 ### Publish Host (http.publish_host)
 
 K8s:
 ```python
-# Returns DNS name (stable, matches cert SANs)
-public_address = self.workload.get_host_public_ip()  # e.g., "opensearch-0.opensearch-endpoints"
+# Prefer a stable name when available, fall back if container is not connectable yet
+public_address = self.workload.get_host_public_ip() or self.state.network_ingress_address
 ```
-- Returns: DNS name (e.g., opensearch-0.opensearch-endpoints)
-- Reason: Pod IPs are ephemeral, DNS names are stable
-- Matches: Certificate SANs (Subject Alternative Names)
+- Returns: Typically a pod DNS name when the container is connectable, otherwise falls back to an ingress/known address.
+- Reason: Pod IPs are ephemeral, a stable name is better for TLS SANs and clients.
 
 VM:
 ```python
-# Returns IP address
-public_address = self.workload.get_host_public_ip()
+public_address = self.workload.get_host_public_ip() or self.state.network_ingress_address
 ```
-- Returns: IP address
-- Reason: VMs have stable IP addresses
+- Returns: Usually an IP address, with a fallback to ingress/known address.
 
 
 ### Security Admin Host (securityadmin.sh -h)
 
 K8s:
 ```python
-# Uses DNS name (matches cert SANs)
-securityadmin_host = self.workload.get_host_public_ip()
+securityadmin_host = self.workload.get_host_public_ip() or self.state.host_ip
 ```
 
 VM:
 ```python
-# Uses IP address
-securityadmin_host = self.state.host_ip  
+securityadmin_host = self.workload.get_host_public_ip() or self.state.host_ip
 ```
 
 
@@ -186,7 +185,6 @@ snap.stop(["daemon"])
 - Management: Via snap API
 
 
-
 ### Service Status Check
 
 K8s:
@@ -202,7 +200,6 @@ service_running("snap.opensearch.daemon.service")
 # Also checks JVM process via lsof
 pid = run_cmd("lsof", args="-ti:9200")
 ```
-
 
 
 ## 6. File Operations
@@ -225,7 +222,7 @@ VM:
 ```python
 # Uses LocalPath (pathops library)
 from charmlibs.pathops import LocalPath
-path = LocalPath("/var/snap/opensearch/common/opensearch/config/opensearch.yml")
+path = LocalPath("/var/snap/opensearch/current/etc/opensearch/opensearch.yml")
 content = path.read_text()  # Direct filesystem read
 path.write_text(content)    # Direct filesystem write
 ```
@@ -255,7 +252,9 @@ VM:
 ### Kernel Parameters (sysctls)
 
 K8s:
-We expect that sysctls are arranged externally.
+```python
+# we expect that sysctls are arranged externally.
+```
 
 VM:
 ```python
@@ -326,7 +325,7 @@ K8s:
 ```python
 # May need to pull certificates from container
 # Cache certificates in charm container for verification
-def _get_chain_pem_path(self) -> str:
+def _get_chain_pem_path(self) -> str | bool:
     try:
         container = self.workload.container
     except AttributeError:
@@ -337,23 +336,23 @@ def _get_chain_pem_path(self) -> str:
     if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
         return self._chain_pem_cache_path
 
-    # Pull from container and cache
+    # Pull from container and cache (or return False if not available yet)
     return self._pull_and_cache_chain_pem(chain_path_str)
 ```
 - Challenge: Charm container needs certificates from workload container
 - Solution: Pull and cache certificates in charm container
-- Cache Location: `/tmp/chain.pem` in charm container
+- Cache Location: `/tmp/opensearch-certs/chain.pem` in charm container
+- Failure mode: returns `False` to temporarily disable TLS verification until `chain.pem` is available
 
 VM:
 ```python
 # Direct filesystem access
 # No caching needed
-def _get_chain_pem_path(self) -> str:
+def _get_chain_pem_path(self) -> str | bool:
     # VM substrate, return direct filesystem path
     return chain_path_str
 ```
-- Access: Direct filesystem read
-- No Caching: Not needed
+- Access: Direct filesystem read when present, returns `False` (disable verification) if missing.
 
 
 ### Certificate File Operations
@@ -381,25 +380,17 @@ chain_content = chain_path.read_text()  # Direct read
 
 K8s:
 ```python
-# Configure pod sysctls via StatefulSet patch
+# K8s: container preparation is handled in pebble-ready.
 if self.charm.state.substrate == Substrates.K8S:
-    if hasattr(self.charm, 'configure_pod_sysctls'):
-        self.charm.configure_pod_sysctls()
+    return
 ```
 
 VM:
 ```python
 # Install snap package
-self.opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
+self.charm.workload.install()
 ```
 
-Code Location:
-- Component: Event Handler
-- File: events/opensearch.py
-- Method: _on_install
-- K8s Logic: Calls configure_pod_sysctls if charm has the method
-- VM Logic: Handled by workload.install method
-  - VM: workload/vm.py - install method
 
 ### Config Changed Event
 
@@ -410,10 +401,6 @@ if self.state.substrate == Substrates.K8S:
     if not self.workload.workload_present:
         event.defer()
         return
-
-    # Configure sysctls
-    if hasattr(self.charm, 'configure_pod_sysctls'):
-        self.charm.configure_pod_sysctls()
 ```
 
 VM:
@@ -426,10 +413,7 @@ VM:
 
 K8s:
 ```python
-# Ensure pod sysctls configured
-if self.charm.state.substrate == Substrates.K8S:
-    if hasattr(self.charm, 'configure_pod_sysctls'):
-        self.charm.configure_pod_sysctls()
+# K8s: start may defer until pebble-ready + container preparation complete.
 ```
 
 VM:
@@ -441,7 +425,7 @@ if self.charm.state.substrate == Substrates.VM:
 ```
 
 
-## 11. Component Reference
+## 11. Changes in Managers and Event Handlers
 
 ### Config Manager (managers/config.py)
 
@@ -462,8 +446,24 @@ Handles OpenSearch configuration file management:
 Handles cluster operations and security initialization:
 
 - _initialize_security_index
-  - Security admin host selection (K8s: DNS name, VM: IP address)
-  - Uses workload.get_host_public_ip for K8s (DNS), falls back to state.host_ip for VM (IP)
+  - Security admin host selection: `workload.get_host_public_ip() or state.host_ip`
+
+### TLS Manager (managers/tls.py)
+
+Handles TLS artifacts (keys/certs/PKCS12), permissions, and CA rotation.
+
+- Keytool command selection
+  - K8s: uses the image JDK path (via `workload.paths.jdk`, which is `/usr/lib/jvm/java-21-openjdk-amd64`) for deterministic `keytool` usage.
+  - VM: uses the snap JDK path (`/snap/opensearch/current/usr/lib/jvm/java-21-openjdk-amd64/bin/keytool` via `workload.paths.jdk`).
+
+- Certificates directory creation (`_ensure_certificates_directory`)
+  - K8s: uses Pebble file API (`container.exists` / `container.make_dir`) and falls back to exec (`mkdir/chmod`) if needed, guarded by `container.can_connect()`.
+  - VM: uses local filesystem `mkdir` via pathops (no Pebble container).
+
+- Permissions / ownership
+  - K8s: runs `chmod 640 ...` (no sudo) and may chown to the rock image UID/GID.
+  - VM: runs `sudo chmod 640 ...` (and other sudo-based ops where needed).
+
 
 ### Common Client (common/client.py)
 
@@ -482,17 +482,17 @@ Handles HTTP client operations and certificate access:
 Handle Juju events with substrate-specific logic:
 
 - _on_install
-  - K8s: Configures pod sysctls via configure_pod_sysctls
-  - VM: Installs snap via workload.install
+  - K8s: no-op (container preparation happens in `pebble-ready`)
+  - VM: installs via `workload.install()`
 
 - _on_config_changed
-  - K8s: Container readiness check and sysctl configuration
+  - K8s: container readiness check (defers if not connectable yet)
   - VM: Direct config updates
   - Calls config_manager.update_host_if_needed
 
 - _on_start
-  - K8s: Ensures pod sysctls configured
-  - VM: Handles host reboot scenario
+  - K8s: may defer (via underlying managers) until container is ready
+  - VM: handles host reboot scenario (if applicable)
 
 ### Workload Implementations
 
@@ -528,5 +528,7 @@ Handle Juju events with substrate-specific logic:
 
 K8s-specific charm logic:
 
-- configure_pod_sysctls method: StatefulSet JSON Patch for sysctls
-- Called from event handlers: _on_install, _on_config_changed, _on_start
+- Creates `K8sWorkload` with a `container_getter` so managers can check readiness (`workload_present`)
+- Defers container preparation to the `pebble-ready` event via `workload.prepare_for_pebble_ready()`
+
+

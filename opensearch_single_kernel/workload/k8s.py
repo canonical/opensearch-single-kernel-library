@@ -6,7 +6,6 @@
 
 import logging
 import shlex
-import socket
 import uuid
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -438,7 +437,7 @@ class K8sWorkload(BaseWorkload):
 
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.warning("Failed to configure pebble plan: %s", e)
-            # don't raise,this might be called before container is ready
+            # this might be called before container is ready
 
     def prepare_for_pebble_ready(self) -> None:
         """Prepare the K8s container once Pebble is ready.
@@ -449,7 +448,7 @@ class K8sWorkload(BaseWorkload):
         """
         try:
             if not self.container.can_connect():
-                # Transient condition: Pebble/socket isn't ready yet.
+                # transient condition: Pebble/socket isn't ready yet.
                 # Raise ContainerNotReadyError so hooks defer cleanly
                 raise ContainerNotReadyError("Container is not ready")
 
@@ -498,9 +497,9 @@ class K8sWorkload(BaseWorkload):
             )
             return None
 
-        # Pure TLS handshake + certificate verification.
-        # This avoids generating unauthenticated HTTP traffic (which the security plugin logs).
-        # We verify the server certificate chain against the CA chain we write to `chain.pem`.
+        # pure TLS handshake + certificate verification.
+        # this avoids generating unauthenticated HTTP traffic
+        # we verify the server certificate chain against the CA chain we write to chain.pem.
         certs_dir = str(self.paths.certs)
         command = (
             "sh -c "
@@ -567,7 +566,7 @@ class K8sWorkload(BaseWorkload):
             },
         }
 
-        # Only add checks section and the on-check-failure policy
+        # only add checks section and the on-check-failure policy
         if health_check is not None:
             layer_dict["checks"] = {"readiness": health_check}
             # if readiness check fails, don't do any action, just log
@@ -746,7 +745,7 @@ class K8sWorkload(BaseWorkload):
         # ensure parent directory exists (consistent with write_text() pattern)
         self._ensure_parent_dir(file_path)
         # ContainerPath.write_text() does not accept an encoding= kwarg.
-        # Decode bytes here if needed, then push text content.
+        # Decode bytes and then push text content.
         text = (
             data if isinstance(data, str) else data.decode(encoding or "utf-8", errors="replace")
         )
@@ -785,8 +784,8 @@ class K8sWorkload(BaseWorkload):
         full_command = self._build_script_command(script_path, args)
         env_setup = self._build_script_environment(full_command)
 
-        # Delegate to run_cmd so unit tests can mock command execution consistently
-        # (instead of requiring Harness.handle_exec registrations).
+        # Use run_cmd so unit tests can mock command execution consistently
+        # instead of requiring Harness.handle_exec registrations.
         quoted = shlex.quote(env_setup)
         result = self.run_cmd(f"bash -c {quoted}")
         return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)
@@ -859,9 +858,9 @@ class K8sWorkload(BaseWorkload):
             str | None: dns name (FQDN or hostname) for K8s, or None if unavailable.
         """
         # Only attempt container-derived names when the workload container is connectable.
-        # In unit tests `run_cmd` is often patched with a bare MagicMock; returning those
-        # stringified mocks would break callers. When we can't obtain a real string value,
-        # return None so callers fall back to `state.host_ip` / ingress address.
+        # In unit tests run_cmd is patched with a bare MagicMock.
+        # When we can't obtain a real string value,
+        # return None so callers fall back to state.host_ip / ingress address.
         try:
             if not self.container.can_connect():
                 return None
@@ -1446,9 +1445,9 @@ class K8sWorkload(BaseWorkload):
         """Wait for process to complete and return output.
 
         Args:
-            process: Process object from container.exec()
-            masked_command: Command string with sensitive info masked for logging
-            original_command: Original command string for error messages
+            process: process object from container.exec()
+            masked_command: command string with sensitive info masked for logging
+            original_command: original command string for error messages
 
         Returns:
             tuple[str, str]: (stdout, stderr) - stderr is

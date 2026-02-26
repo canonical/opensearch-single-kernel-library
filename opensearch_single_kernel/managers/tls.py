@@ -210,7 +210,7 @@ class TlsManager(BaseManager):
 
         if self.state.substrate == Substrates.K8S:
             # K8s: keep CSR CN deterministic in unit tests and across pod restarts.
-            # Avoid using container DNS here (requires Pebble connection).
+            # Avoid using container DNS here as it requires Pebble connection
             return str(self.state.unit_name)
 
         # VM: use host IP or fallback to unit name
@@ -474,7 +474,7 @@ class TlsManager(BaseManager):
     def _ensure_certificates_directory(self, cert_dir: str) -> None:
         """Ensure the certificates directory exists.
 
-        On K8s, this directory can be backed by runtime mounts; ensure it exists before writing
+        On K8s, this directory can be backed by runtime mounts, ensure it exists before writing
         PKCS12 stores and temp files.
         """
         if self.state.substrate != Substrates.K8S:
@@ -492,7 +492,7 @@ class TlsManager(BaseManager):
         if container.exists(cert_dir):
             return
 
-        # Try Pebble file API first, then fall back to exec-based mkdir/chmod
+        # try Pebble file API first, then fall back to exec-based mkdir/chmod
         # depending on container lifecycle timing, permissions, or Pebble backend
         # limitations, one method may fail while the other succeeds. The exec fallback keeps
         # TLS setup resilient.

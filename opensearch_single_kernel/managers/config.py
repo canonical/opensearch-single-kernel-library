@@ -75,7 +75,7 @@ class ConfigManager(BaseManager):
                 # Get container hostname ("pod_name-0" in K8s pods)
                 node_name = socket.gethostname()
                 logger.info(
-                    f"K8s detected: Using container hostname {node_name} for node.name (unit_name was '{unit_name}')"
+                    f"K8s detected: Using container hostname {node_name} for node.name (unit_name was {unit_name})"
                 )
             except Exception as e:
                 logger.warning(f"Could not get hostname, falling back to unit_name: {e}")

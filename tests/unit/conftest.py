@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -21,12 +22,27 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
+
+        # unit tests should not depend on a running snapd daemon.
+        fake_snap = MagicMock()
+        fake_snap.present = True
+        fake_snap.held = True
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.snap.SnapCache",
+            return_value={"opensearch": fake_snap},
+        )
+        # Unit tests should not shell out to Juju CLI (such as `unit-get public-address`).
+        # VM workload callers can fall back to `state.host_ip` populated by `harness.add_network`.
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.get_host_public_ip",
+            return_value=None,
+        )
     else:
         from tests.charms.opensearch_k8s_test_charm.src.charm import (
             OpenSearchK8sCharm as TestCharm,
         )
 
-    # In real K8s, the container hostname is the Pod name (e.g. "opensearch-0").
+    # In K8s, the container hostname is the Pod name (e.g. "opensearch-0").
     # When running unit tests on a local machine, socket.gethostname() would
     # return the host machine name which breaks node.name-dependent logic.
     if substrate != "vm":
@@ -55,8 +71,23 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
 @pytest.fixture
 def mock_fs_interactions(mocker, substrate: Substrate) -> None:
     """Mock Filesystem interactions."""
+    # Mock the workload FS helpers to avoid touching the real filesystem in unit tests.
+    mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.mkdir")
     mocker.patch("charmlibs.pathops.PathProtocol.read_text")
     mocker.patch("charmlibs.pathops.PathProtocol.write_text")
     mocker.patch("charmlibs.pathops.PathProtocol.mkdir")
     mocker.patch("charmlibs.pathops.PathProtocol.unlink")
     mocker.patch("charmlibs.pathops.PathProtocol.exists", return_value=True)
+    # VM workload paths are LocalPath,
+    # patch those too to avoid touching `/var/snap/...` on dev machines.
+    mocker.patch("charmlibs.pathops.LocalPath.exists", return_value=True)
+    mocker.patch("charmlibs.pathops.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops.LocalPath.unlink")
+    # Some code paths instantiate LocalPath from the implementation module directly.
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.exists", return_value=True)
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.unlink")

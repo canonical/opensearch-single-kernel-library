@@ -247,7 +247,8 @@ class OpenSearchEventsHandler(Object):
     def _on_pebble_ready(self, event) -> None:
         """Handle pebble-ready for K8s workload container.
 
-        We do the K8s container preparation (filesystem permissions, pebble plan, restore tls files from Juju secret).
+        We do the K8s container preparation:
+            filesystem permissions, pebble plan, restore tls files from Juju secret.
         """
         try:
             self.charm.workload.prepare_for_pebble_ready()
@@ -405,9 +406,11 @@ class OpenSearchEventsHandler(Object):
             ):
                 # K8s: after pod recreation, TLS secrets can be present while files are not yet
                 # restored on disk. Although we restore them when pebble_ready hook run,
-                # sometimes opensearch tries to start before pebble-ready hook finishes its execution.
+                # sometimes opensearch tries to start before pebble-ready
+                # hook finishes its execution.
                 # For those cases, we perform another check just starting service and
-                # if the tls files are not restored yet _on_start_opensearch will restore them from Juju secrets
+                # if the tls files are not restored yet _on_start_opensearch will
+                # restore them from Juju secrets
                 # https://documentation.ubuntu.com/juju/3.6/reference/hook/#container-pebble-ready
                 if (
                     self.charm.state.substrate == Substrates.K8S
@@ -486,10 +489,10 @@ class OpenSearchEventsHandler(Object):
                 )
                 # TODO:
                 # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
-                # Workaround for the moment to reduce startup delays:
+                # Temporary workaround for the moment to reduce startup delays:
                 logger.info("Emitting the start opensearch event (ignoring lock)")
                 # do not defer, otherwise we may only retry on the next hook
-                # often update-status, causing an unnecessary multi-minute startup delay.
+                # often update-status, causing an unnecessary several mimnutes startup delay.
                 self.charm.start_opensearch_event.emit(ignore_lock=True)
                 return
 
@@ -774,7 +777,6 @@ class OpenSearchEventsHandler(Object):
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()
-            self.charm.status.set(CharmStatuses.SERVICE_IS_STOPPING)
             return
 
         # Ignore the lock if you are the only data node and restarting

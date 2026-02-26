@@ -250,7 +250,7 @@ def get_nested_value(config: dict, key_path: str) -> Any:
             return None
 
         # Support mixed representations where a prefix is flattened:
-        # e.g. {"plugins.security.disabled": false}
+        # such as {"plugins.security.disabled": false}
         remaining = ".".join(keys[idx:])
         if remaining in value:
             return value.get(remaining)

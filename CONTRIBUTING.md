@@ -21,7 +21,9 @@ poetry install
 ```shell
 tox run -e format        # update your code according to linting rules
 tox run -e lint          # code style
-tox run -e unit          # unit tests
+tox run -e unit          # unit tests (defaults to VM substrate)
+tox run -e unit-vm       # unit tests (VM substrate)
+tox run -e unit-k8s      # unit tests (K8s substrate)
 tox run -e integration   # integration tests
 tox                      # runs 'lint' and 'unit' environments
 ```
