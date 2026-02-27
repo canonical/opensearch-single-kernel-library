@@ -257,9 +257,8 @@ class NodesExclusionsManager(BaseManager):
         try:
             existing = self.opensearch_client.fetch_allocation_exclusions(alt_hosts=self.alt_hosts)
             to_remove = set(allocs if allocs is not None else [node.name])
-            allocations = to_remove if not existing else existing - to_remove
             res = self.opensearch_client.add_allocation_exclusions(
-                node, allocations=allocations, override=True, alt_hosts=self.alt_hosts
+                node, allocations=existing - to_remove, override=True, alt_hosts=self.alt_hosts
             )
             return res
         except OpenSearchHttpError:

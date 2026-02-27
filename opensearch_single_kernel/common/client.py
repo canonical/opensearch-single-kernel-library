@@ -165,7 +165,7 @@ class OpenSearchClient:
     ) -> bool:
         """Register new allocation exclusions."""
         existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        all_exclusions = existing.union(allocations or {node.name})
+        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
         response = self.request(
             "PUT",
             "/_cluster/settings",
