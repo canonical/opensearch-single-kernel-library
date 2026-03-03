@@ -155,6 +155,7 @@ class OpenSearchEventsHandler(Object):
                 # we defer because we want the temporary status to be updated
                 logger.debug("Cluster health temp yellow or unknown. Deferring event.")
                 event.defer()
+                return
 
         # we want to have the most up-to-date info broadcasted to related sub-clusters
         # if self.opensearch_peer_cm.is_provider():

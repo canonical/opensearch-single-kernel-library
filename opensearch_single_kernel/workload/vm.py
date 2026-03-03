@@ -122,13 +122,6 @@ class VMWorkload(BaseWorkload):
 
         return output.out.strip()
 
-    def is_started(self) -> bool:
-        """Check if OpenSearch is started."""
-        if not (reachable := self.is_reachable(self.host, self.port)):
-            logger.debug("Cannot connect to the OpenSearch server...")
-
-        return reachable
-
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
@@ -169,7 +162,6 @@ class VMWorkload(BaseWorkload):
             return True
 
         # We do not check reachability of the service
-        # If that is needed, then use the `is_started` method.
         return stat[2] not in ["Z", "T", "X"]
 
     @override

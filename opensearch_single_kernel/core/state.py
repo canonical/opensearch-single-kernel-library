@@ -292,6 +292,11 @@ class OpenSearchApplication(RelationState):
             return None
         return DeploymentDescription.from_dict(current_deployment_desc)
 
+    @deployment_desc.setter
+    def deployment_desc(self, deployment_desc: DeploymentDescription):
+        """Set the deployment description."""
+        self.put_object("deployment-description", deployment_desc.to_dict())
+
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
