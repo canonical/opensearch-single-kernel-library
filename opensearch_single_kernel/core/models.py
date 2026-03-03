@@ -17,11 +17,11 @@ from typing import Any, Iterator, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     RootModel,
     field_validator,
     model_validator,
-    validator,
 )
 
 from opensearch_single_kernel.common.constants import (
@@ -434,35 +434,35 @@ class S3RelData(Model):
 
         validate_by_name = True
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_core_fields(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def validate_core_fields(self):
         """Validate the core fields of the S3 relation data."""
         if (
-            not (s3_creds := values.get("credentials"))
-            or not s3_creds.access_key
-            or not s3_creds.secret_key
+            not (self.credentials)
+            or not self.credentials.access_key
+            or not self.credentials.secret_key
         ):
             raise ValueError("Missing fields: access_key, secret_key")
 
         # NOTE: Both bucket and endpoint must be set. If none of them are set,
         # but credentials were found, this likely means that we are validating for a
         # non cluster_manager application, which only needs credentials.
-        if values.get("bucket") and not values.get("endpoint"):
+        if self.bucket and not self.endpoint:
             raise ValueError("Missing field: endpoint")
-        if values.get("endpoint") and not values.get("bucket"):
+        if self.endpoint and not self.bucket:
             raise ValueError("Missing field: bucket")
-        if not values.get("region"):
+        if not self.region:
             raise ValueError("Missing field: region")
 
         # remove any duplicate, prefix or trailing "/" characters
-        if base_path := values.get("base_path"):
+        if base_path := self.base_path:
             base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
-        values["base_path"] = base_path or None
+        self.base_path = base_path or None
 
-        return values
+        return self
 
-    @validator("tls_ca_chain", pre=True)
+    @field_validator("tls_ca_chain", mode="before", check_fields=False)
+    @classmethod
     def _tls_chain(cls, v):  # noqa: N805
         if v is None:
             return None
@@ -478,14 +478,14 @@ class S3RelData(Model):
             return json.dumps(v)
         return str(v)
 
-    @validator("path_style_access", pre=True)
+    @field_validator("path_style_access", mode="before")
     def change_path_style_type(cls, value) -> bool:  # noqa: N805
         """Coerce a type change of the path_style_access into a bool."""
         if isinstance(value, str):
             return value.lower() == "path"
         return bool(value)
 
-    @validator(S3_CREDENTIALS, check_fields=False)
+    @field_validator(S3_CREDENTIALS, mode="before", check_fields=False)
     def ensure_secret_content(cls, conf: dict[str, str] | S3RelDataCredentials):  # noqa: N805
         """Ensure the secret content is set."""
         if not conf:
@@ -554,30 +554,26 @@ class AzureRelData(Model):
         alias=AZURE_CREDENTIALS, default=AzureRelDataCredentials()
     )
 
-    class Config:
-        """Model config of this pydantic model."""
+    model_config = ConfigDict(populate_by_name=True)
 
-        validate_by_name = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_core_fields(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def validate_core_fields(self):  # noqa: N805
         """Validate the core fields of the azure relation data."""
         if (
-            not (creds := values.get("credentials"))
-            or not creds.storage_account
-            or not creds.secret_key
+            not (self.credentials)
+            or not self.credentials.storage_account
+            or not self.credentials.secret_key
         ):
             raise ValueError("Missing fields: storage_account, secret_key")
 
         # remove any duplicate, prefix or trailing "/" characters
-        if base_path := values.get("base_path"):
+        if base_path := self.base_path:
             base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
-        values["base_path"] = base_path or None
+        self.base_path = base_path or None
 
-        return values
+        return self
 
-    @validator(AZURE_CREDENTIALS, check_fields=False)
+    @field_validator(AZURE_CREDENTIALS, mode="before", check_fields=False)
     def ensure_secret_content(cls, conf: dict[str, str] | AzureRelDataCredentials):  # noqa: N805
         """Ensure the secret content is set."""
         if not conf:
@@ -609,13 +605,9 @@ class GcsRelDataCredentials(Model):
     """Model class for credentials passed on the gcs relation."""
 
     secret_key: str | None = Field(alias="secret-key", default=None)
+    model_config = ConfigDict(populate_by_name=True)
 
-    class Config:
-        """Model config of this pydantic model."""
-
-        validate_by_name = True
-
-    @validator("secret_key", pre=True)
+    @field_validator("secret_key", mode="before")
     def _normalize_secret_key(cls, values):  # noqa: N805
         """Accept either raw JSON or base64-encoded JSON"""
         if values is None:
@@ -653,31 +645,25 @@ class GcsRelData(Model):
     credentials: GcsRelDataCredentials = Field(
         alias=GCS_CREDENTIALS, default_factory=GcsRelDataCredentials
     )
+    model_config = ConfigDict(populate_by_name=True)
 
-    class Config:
-        """Model config of this pydantic model."""
-
-        validate_by_name = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_core_fields(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def validate_core_fields(self):
         """Validate the core fields of the gcs relation data."""
-        creds = values.get("credentials")
-        if not creds or not creds.secret_key:
+        if not self.credentials or not self.credentials.secret_key:
             raise ValueError("Missing fields: secret-key")
 
-        if not values.get("bucket"):
+        if not self.bucket:
             raise ValueError("Missing field: bucket")
 
         # remove any duplicate, prefix or trailing "/" characters
-        if base_path := values.get("base_path"):
+        if base_path := self.base_path:
             base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
-        values["base_path"] = base_path or None
+        self.base_path = base_path or None
 
-        return values
+        return self
 
-    @validator(GCS_CREDENTIALS, check_fields=False)
+    @field_validator(GCS_CREDENTIALS, mode="before", check_fields=False)
     def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805):
         """Ensure the secret content is set."""
         if not conf:
