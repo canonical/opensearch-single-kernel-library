@@ -162,7 +162,6 @@ class VMWorkload(BaseWorkload):
             return True
 
         # We do not check reachability of the service
-        # If that is needed, then use the `is_started` method.
         return stat[2] not in ["Z", "T", "X"]
 
     @override
@@ -306,7 +305,7 @@ class VMWorkload(BaseWorkload):
                 cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
             )
         except (TimeoutError, subprocess.TimeoutExpired):
-            raise OpenSearchCmdError
+            raise OpenSearchCmdError(cmd=command)
 
     @override
     def stop(self) -> None:

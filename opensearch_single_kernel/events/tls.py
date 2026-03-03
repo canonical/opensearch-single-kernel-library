@@ -35,6 +35,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 )
 from opensearch_single_kernel.utils.certificates import OLD_CA_ALIAS
 from opensearch_single_kernel.utils.helpers import generate_password
+from opensearch_single_kernel.utils.secrets import password_key
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -71,7 +72,7 @@ class TLSEventsHandler(Object):
         self.framework.observe(self.charm.on.set_password_action, self._on_set_password_action)
         self.framework.observe(self.charm.on.get_password_action, self._on_get_password_action)
 
-    def _on_set_private_key(self, event: ActionEvent):
+    def _on_set_private_key(self, event: ActionEvent) -> None:
         """Set the TLS private key, which will be used for requesting the certificate."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -221,7 +222,6 @@ class TLSEventsHandler(Object):
                 return
 
         # store the certificates and keys in a key store
-
         self.charm.tls_manager.store_new_tls_resources(
             cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
         )
@@ -320,7 +320,7 @@ class TLSEventsHandler(Object):
 
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
-    ):
+    ) -> None:
         """Called after certificate ready and stored on the corresponding scope databag.
 
         - Store the cert on the file system, on all nodes for APP certificates
@@ -378,7 +378,7 @@ class TLSEventsHandler(Object):
                 event.defer()
                 return
 
-    def _on_set_password_action(self, event: ActionEvent):
+    def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -402,7 +402,7 @@ class TLSEventsHandler(Object):
         password = event.params.get("password") or generate_password()
         try:
             self.charm.users_manager.put_or_update_internal_user_leader(user_name, password)
-            label = self.charm.state.secrets.password_key(user_name)
+            label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
             # TODO: Update relation of peer cluster provider
@@ -418,7 +418,7 @@ class TLSEventsHandler(Object):
             # else:
             event.fail(f"Failed with unknown error: {e}")
 
-    def _on_get_password_action(self, event: ActionEvent):
+    def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -437,9 +437,7 @@ class TLSEventsHandler(Object):
             event.fail("TLS certificates not configured yet.")
             return
 
-        password = self.charm.state.secrets.get(
-            Scope.APP, self.charm.state.secrets.password_key(user_name)
-        )
+        password = self.charm.state.secrets.get(Scope.APP, password_key(user_name))
         cert = self.charm.state.secrets.get_object(
             Scope.APP, CertType.APP_ADMIN.val, peek=True
         )  # replace later with new user certs

@@ -15,14 +15,10 @@ from ops import Relation, Secret, SecretNotFoundError
 from ops.framework import Object
 from overrides import override
 
-from opensearch_single_kernel.common.constants import (
-    HASH_POSTFIX,
-    OPENSEARCH_SYSTEM_USERS,
-    PW_POSTFIX,
-    Scope,
-)
+from opensearch_single_kernel.common.constants import SECRETS_LABEL_SEPARATOR, Scope
 from opensearch_single_kernel.common.exceptions import OpenSearchSecretInsertionError
 from opensearch_single_kernel.core.relations import RelationDataStore
+from opensearch_single_kernel.utils.secrets import safe_obj_data
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -34,8 +30,6 @@ logger = logging.getLogger(__name__)
 class OpenSearchSecrets(Object, RelationDataStore):
     """Encapsulating Juju3 secrets handling."""
 
-    LABEL_SEPARATOR = ":"
-
     def __init__(self, charm: "OpenSearchBaseCharm", peer_relation: str):
         Object.__init__(self, charm, peer_relation)
         RelationDataStore.__init__(self, charm, peer_relation)
@@ -43,55 +37,13 @@ class OpenSearchSecrets(Object, RelationDataStore):
         self.cached_secrets = SecretCache()
         self.charm = charm
 
-    def _user_from_hash_key(self, key):
-        """Which user is referred to by key?"""
-        for user in OPENSEARCH_SYSTEM_USERS:
-            if key == self.hash_key(user):
-                return user
-
-    def password_key(self, username: str) -> str:
-        """Unified key to store password secrets specific to a user."""
-        return f"{username}-{PW_POSTFIX}"
-
-    def hash_key(self, username: str) -> str:
-        """Unified key to store password secrets specific to a user."""
-        return f"{username}-{HASH_POSTFIX}"
-
     def label(self, scope: Scope, key: str) -> str:
         """Generated keys to be used within relation data to refer to secret IDs."""
         components = [self.charm.app.name, scope.val]
         if scope == Scope.UNIT:
             components.append(str(self.charm.state.server.unit_id))
         components.append(key)
-        return self.LABEL_SEPARATOR.join(components)
-
-    def breakdown_label(self, label: str) -> dict[str, Any]:
-        """Return meaningful components resolved from a secret label."""
-        components = label.split(self.LABEL_SEPARATOR)
-        if len(components) < 3 or len(components) > 4:
-            raise ValueError(f"Invalid label {label}")
-
-        scope = Scope[components[1].upper()]
-
-        if scope == Scope.APP:
-            key = components[2]
-            unit_id = None
-        else:
-            key = components[3]
-            unit_id = int(components[2])
-
-        return {
-            "application_name": components[0],
-            "scope": scope,
-            "unit_id": unit_id,
-            "key": key,
-        }
-
-    @staticmethod
-    def _safe_obj_data(indict: dict) -> dict[str, Any]:
-        return {
-            key: str(val) for key, val in indict.items() if val is not None and str(val).strip()
-        }
+        return SECRETS_LABEL_SEPARATOR.join(components)
 
     def _get_juju_secret(self, scope: Scope, key: str) -> Secret | None:
         label = self.label(scope, key)
@@ -127,7 +79,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         return content
 
     def _add_juju_secret(self, scope: Scope, key: str, value: dict[str, str]) -> Secret | None:
-        safe_value = self._safe_obj_data(value)
+        safe_value = safe_obj_data(value)
 
         if not safe_value:
             return None
@@ -165,7 +117,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             content = self._get_juju_secret_content(scope, key)
 
         content.update(value)
-        safe_content = self._safe_obj_data(content)
+        safe_content = safe_obj_data(content)
 
         if not safe_content:
             return self._remove_juju_secret(scope, key)
@@ -268,7 +220,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             return super().put_object(scope, key, value, merge)
 
         # todo: remove when secret-changed not triggered for same content update
-        if self.get_object(scope, key) == self._safe_obj_data(value):
+        if self.get_object(scope, key) == safe_obj_data(value):
             return
 
         self._add_or_update_juju_secret(scope, key, value, merge)

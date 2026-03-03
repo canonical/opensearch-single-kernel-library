@@ -15,14 +15,15 @@ import urllib3
 from tenacity import (
     RetryCallState,
     Retrying,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
     wait_fixed,
 )
+from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,138 @@ class OpenSearchClient:
         self.workload = workload
         self.admin_secret = admin_secret
 
+    def flush_translog(self, alt_hosts: list[str] | None = None) -> None:
+        """Flush the OpenSearch translog to ensure all operations are committed to disk."""
+        self.request(
+            "POST",
+            "/_flush/synced",
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
+        )
+
+    def apply_auto_replication_to_index(
+        self,
+        index: str,
+    ) -> None:
+        """Apply replication settings to an index.
+
+        This will set the auto_expand_replicas to 0-all, which means that OpenSearch
+        will automatically adjust the number of replicas for indexes based on the
+        number of data nodes in the cluster. In this case 0 is the minimum number
+        of replicas and "all" means the max limit which is the number of data nodes
+        minus one.
+
+        Args:
+            index: the name of the index to apply the settings to.
+        """
+        self.request(
+            method="PUT",
+            endpoint=f"/{index}/_settings",
+            payload={"index": {"auto_expand_replicas": "0-all"}},
+            retries=2,
+            wait_strategy=wait_exponential(min=2),
+        )
+
+    def fetch_voting_exclusions_config(self, alt_hosts: list[str] | None = None) -> set[str]:
+        """Fetch the voting exclusions config."""
+        try:
+            resp = self.request(
+                "GET",
+                "/_cluster/state/metadata/voting_config_exclusions",
+                alt_hosts=alt_hosts,
+                retries=3,
+                wait_strategy=wait_exponential(min=2),
+            )
+            return set(
+                sorted(
+                    [
+                        node["node_name"]
+                        for node in resp["metadata"]["cluster_coordination"][
+                            "voting_config_exclusions"
+                        ]
+                    ]
+                )
+            )
+        except KeyError:
+            # no voting exclusions set
+            return set()
+
+    def remove_voting_exclusions(self, alt_hosts: list[str] | None = None) -> bool:
+        """Remove voting exclusions from OpenSearch cluster."""
+        response = self.request(
+            "DELETE",
+            "/_cluster/voting_config_exclusions?wait_for_removal=false",
+            alt_hosts=alt_hosts,
+            resp_status_code=True,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
+        )
+        if response >= 400:
+            logger.debug("Failed to remove voting exclusions, response %s", response)
+            return False
+
+        logger.debug("Removed voting exclusions.")
+        return True
+
+    def add_voting_exclusions(
+        self, exclusions: set[str], alt_hosts: list[str] | None = None
+    ) -> bool:
+        """Add voting exclusions to OpenSearch cluster."""
+        response = self.request(
+            "POST",
+            f"/_cluster/voting_config_exclusions?node_names={','.join(sorted(exclusions))}&timeout=1m",
+            alt_hosts=alt_hosts,
+            resp_status_code=True,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
+        )
+        if response >= 400:
+            logger.debug("Failed to add voting exclusions, response %s", response)
+            return False
+
+        logger.debug("Added voting exclusions for:  %s", exclusions)
+        return True
+
+    def fetch_allocation_exclusions(self, alt_hosts: list[str] | None = None) -> set[str]:
+        """Fetch the registered allocation exclusions."""
+        try:
+            resp = self.request(
+                "GET",
+                "/_cluster/settings",
+                alt_hosts=alt_hosts,
+                retries=3,
+                wait_strategy=wait_exponential(min=2),
+            )
+            if exclusions := resp["persistent"]["cluster"]["routing"]["allocation"]["exclude"][
+                "_name"
+            ]:
+                return set(exclusions.split(","))
+        except KeyError:
+            pass
+
+        return set()
+
+    def add_allocation_exclusions(
+        self,
+        node: Node,
+        allocations: set[str] | None = None,
+        override: bool = False,
+        alt_hosts: list[str] | None = None,
+    ) -> bool:
+        """Register new allocation exclusions."""
+        existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
+        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
+        response = self.request(
+            "PUT",
+            "/_cluster/settings",
+            {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_exclusions)}},
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
+        )
+        return "acknowledged" in response
+
     def get_node_id(self, unit_name: str) -> str | None:
         """Get the OpenSearch node id corresponding to the unit.
 
@@ -52,11 +185,30 @@ class OpenSearchClient:
         Returns:
             node_id (Optional[str]): The opensearch unit id.
         """
-        nodes = self.request("GET", "/_nodes").get("nodes")
+        nodes = self.request(
+            "GET",
+            "/_nodes",
+            retries=3,
+        ).get("nodes")
 
         for n_id, node in nodes.items():
             if node["name"] == unit_name:
                 return n_id
+        return None
+
+    def get_current_node(self, node_id: str, unit_id: int, alt_hosts: list[str] | None) -> Node:
+        """Get the current OpenSearch node information."""
+        nodes = self.request("GET", f"/_nodes/{node_id}", retries=3, alt_hosts=alt_hosts)
+
+        current_node = nodes["nodes"][node_id]
+        return Node(
+            name=current_node["name"],
+            roles=current_node["roles"],
+            ip=current_node["ip"],
+            app=App(id=current_node["attributes"]["app_id"]),
+            unit_number=unit_id,
+            temperature=current_node.get("attributes", {}).get("temp"),
+        )
 
     def get_roles(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
         """Get the list of the roles assigned to this node.
@@ -71,14 +223,15 @@ class OpenSearchClient:
         node_id = self.get_node_id(unit_name)
         if not node_id:
             return []
-        nodes = self.request("GET", f"/_nodes/{node_id}", alt_hosts=alt_hosts)
+        nodes = self.request(
+            "GET",
+            f"/_nodes/{node_id}",
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
+            alt_hosts=alt_hosts,
+        )
         return nodes["nodes"][node_id]["roles"]
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        reraise=True,
-    )
     def get_shards(
         self,
         host: str | None = None,
@@ -87,7 +240,12 @@ class OpenSearchClient:
     ) -> list[dict[str, str]]:
         """Get all shards of all indexes in the cluster."""
         cluster_state = self.request(
-            "GET", "_cluster/state/routing_table,metadata,nodes", host=host, alt_hosts=alt_hosts
+            "GET",
+            "_cluster/state/routing_table,metadata,nodes",
+            host=host,
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
         )
 
         nodes = cluster_state["nodes"]
@@ -164,11 +322,6 @@ class OpenSearchClient:
             logger.error(f"Error reloading TLS certificates via API: {e}")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        reraise=True,
-    )
     def get_allocation_explain(
         self,
         host: str | None = None,
@@ -180,6 +333,8 @@ class OpenSearchClient:
             "/_cluster/allocation/explain?include_disk_info=true&include_yes_decisions=true",
             host=host,
             alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
         )
 
     def get_health(
@@ -201,15 +356,11 @@ class OpenSearchClient:
                 alt_hosts=alt_hosts,
                 timeout=timeout,
                 retries=3,
+                wait_strategy=wait_exponential(min=2),
             )
         except OpenSearchHttpError:
             return None
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        reraise=True,
-    )
     def get_indices(
         self,
         host: str | None = None,
@@ -220,13 +371,23 @@ class OpenSearchClient:
             host = self.host
         # Get cluster state
         cluster_state = self.request(
-            "GET", "/_cluster/state?filter_path=metadata.indices", host=host, alt_hosts=alt_hosts
+            "GET",
+            "/_cluster/state?filter_path=metadata.indices",
+            host=host,
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
         )
         indices_state = cluster_state["metadata"]["indices"]
 
         # Get cluster health
         cluster_health = self.request(
-            "GET", "/_cluster/health?level=indices", host=host, alt_hosts=alt_hosts
+            "GET",
+            "/_cluster/health?level=indices",
+            host=host,
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_exponential(min=2),
         )
         indices_health = cluster_health["indices"]
 
@@ -247,6 +408,7 @@ class OpenSearchClient:
 
         This assumes OpenSearch is Running. Defaults to this unit
         """
+        # This function needs to give us a quick response
         host = host or self.host
         if not self.workload.is_reachable(host, self.port):
             return False
@@ -275,6 +437,7 @@ class OpenSearchClient:
         check_hosts_reach: bool = True,
         resp_status_code: bool = False,
         retries: int = 1,
+        wait_strategy: WaitBaseT = wait_fixed(1),
         ignore_retry_on: list | None = None,
         timeout: int = 5,
         cert_files: tuple[str, str] | None = None,
@@ -307,7 +470,7 @@ class OpenSearchClient:
                 retry=retry_if_exception_type(requests.RequestException)
                 | retry_if_exception_type(urllib3.exceptions.HTTPError),
                 stop=stop_after_attempt(retries),
-                wait=wait_fixed(1),
+                wait=wait_strategy,
                 before_sleep=self.get_log_error_http_retry(retries, method, urls, payload),
                 reraise=True,
             ):

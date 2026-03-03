@@ -165,6 +165,36 @@ class OpenSearchServer(RelationState):
         """Update the value of 'certs_exp_checked_at'"""
         self.update({"certs_exp_checked_at": value})
 
+    @property
+    def allocation_exclusions_to_delete(self) -> set[str]:
+        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+            )
+        )
+
+    @allocation_exclusions_to_delete.setter
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
+        self.update({"allocation-exclusions-to-delete": ",".join(value)})
+
+    @property
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("delete-voting-exclusions", "").split(","),
+            )
+        )
+
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in application databag."""
+        self.update({"delete-voting-exclusions": ",".join(value)})
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -262,6 +292,11 @@ class OpenSearchApplication(RelationState):
             return None
         return DeploymentDescription.from_dict(current_deployment_desc)
 
+    @deployment_desc.setter
+    def deployment_desc(self, deployment_desc: DeploymentDescription):
+        """Set the deployment description."""
+        self.put_object("deployment-description", deployment_desc.to_dict())
+
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
@@ -287,6 +322,37 @@ class OpenSearchApplication(RelationState):
         """Update the value of 'update-ts' in the application databag."""
         self.update({"update-ts": str(timestamp)})
 
+    @property
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("delete-voting-exclusions", "").split(","),
+            )
+        )
+
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in application databag."""
+        self.update({"delete-voting-exclusions": ",".join(value)})
+
+    @property
+    def allocation_exclusions_to_delete(self) -> set[str]:
+        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+            )
+        )
+
+    @allocation_exclusions_to_delete.setter
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
+        self.update({"allocation-exclusions-to-delete": ",".join(value)})
+
+    @property
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
         data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
