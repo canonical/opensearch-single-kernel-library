@@ -363,7 +363,7 @@ class BackupEventsHandler(Object):
         self.charm.status.set(CharmStatuses.RESTORE_IN_PROGRESS)
         try:
             try:
-                self.restore_snapshot(snapshot_id)
+                self.charm.backup_manager.restore_snapshot(snapshot_id)
             except OpenSearchRestoreBackupError as e:
                 event.fail(str(e))
                 return
@@ -399,7 +399,7 @@ class BackupEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return "Backup/Restore related actions must be run on the juju leader unit."
 
-        if not self.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_desc:
             return "Deployment not ready."
         # TODO: Handle upgrades
         # if self.charm.upgrade_in_progress:

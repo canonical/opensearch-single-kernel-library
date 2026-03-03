@@ -443,7 +443,7 @@ class OpenSearchClient:
         Returns:
             list[str] | None: List of indices which are open
         """
-        current_indices = self.indices(self.charm.opensearch, alt_hosts=alt_hosts)
+        current_indices = self.indices(alt_hosts=alt_hosts)
         return sorted(
             [
                 idx

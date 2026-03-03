@@ -178,7 +178,7 @@ class BackupManager(BaseManager):
         Args:
             s3_tls_ca_chain: S3 TLS CA chain to remove
         """
-        store_path = self.opensearch.paths.certs / "cacerts.p12"
+        store_path = self.workload.paths.certs / "cacerts.p12"
         # Drop the CA entirely
         remove_ca(
             workload=self.workload,
@@ -195,7 +195,7 @@ class BackupManager(BaseManager):
 
         If there is s3_tls_ca_chain, the old CA will be removed.
         """
-        store_path = self.opensearch.paths.certs / "cacerts.p12"
+        store_path = self.workload.paths.certs / "cacerts.p12"
 
         # If we already have the same CA, skip re-import
         if self.is_custom_s3_ca_stored(s3_tls_ca_chain):

@@ -304,7 +304,17 @@ class VMWorkload(BaseWorkload):
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
 
-            logger.debug(f"{command}:\n{output.stdout}")
+            # if the output is very long (e.g., list_cas with many CAs).
+
+            if len(output.stdout) > 1000:
+                logger.debug(
+                    f"{command} output is too long to display ({len(output.stdout)} characters)"
+                )
+                logger.debug(
+                    f"{command} output (truncated to 1000 chars):\n{output.stdout[:1000]}"
+                )
+            else:
+                logger.debug(f"{command}:\n{output.stdout}")
 
             if output.returncode != 0:
                 logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
