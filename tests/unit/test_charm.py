@@ -177,7 +177,7 @@ def test_on_start(harness, mocker):
 
     # test when setup not complete
     is_node_up.return_value = False
-    harness.charm.state.application.update({"security_index_initialised": None})
+    harness.charm.state.application.update({"security_index_initialised": ""})
     is_fully_configured.return_value = False
     is_admin_user_initialized.return_value = False
     harness.charm.on.start.emit()
@@ -207,7 +207,7 @@ def test_on_start(harness, mocker):
     # initialisation of the security index
     get_nodes.reset_mock()
     _set_node_conf.reset_mock()
-    harness.charm.state.application.update({"security_index_initialised": None})
+    harness.charm.state.application.update({"security_index_initialised": ""})
     can_service_start.return_value = True
     check_profile_missing_requirements.return_value = False
     harness.set_leader(True)
