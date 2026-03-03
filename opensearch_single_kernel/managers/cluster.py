@@ -188,7 +188,7 @@ class ClusterManager(BaseManager):
             prev_deployment_desc,
         )
         # avoid mutating the previous deployment description in state
-        directives = prev_deployment_desc.pending_directives
+        directives = list(prev_deployment_desc.pending_directives)
         deployment_state = prev_deployment_desc.state
         try:
             self._pre_validate_roles_change(

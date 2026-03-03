@@ -124,7 +124,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                         allocation=not restart,
                     )
             except (OpenSearchHttpError, OpenSearchExclusionsException):
-                logger.debug("Failed to get online nodes, voting and alloc exclusions not added")
+                logger.error("Failed to get online nodes, voting and alloc exclusions not added")
 
         # block until all primary shards are moved away from the unit that is stopping
         self.health_manager.wait_for_shards_relocation()
