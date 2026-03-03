@@ -155,7 +155,7 @@ class BackupEventsHandler(Object):
         # Validate storage config
         try:
             self.charm.backup_manager.validate_storage_config(
-                object_storage_type, object_storage_config
+                object_storage_config, object_storage_type
             )
         except OpenSearchBackupRelationDataIncompleteError:
             logger.warning("No %s object storage configuration.", object_storage_type)
@@ -189,6 +189,14 @@ class BackupEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
+        if (
+            not self.charm.backup_manager.opensearch_client.is_node_up()
+            and not self.charm.backup_manager.alt_hosts
+        ):
+            logger.warning("OpenSearch service is not reachable.")
+            event.defer()
+            return
+
         try:
             if self.charm.backup_manager.ensure_repository(
                 object_storage_type, object_storage_config
@@ -205,7 +213,7 @@ class BackupEventsHandler(Object):
             self.charm.status.set(
                 CharmStatuses.BACKUP_REPOSITORY_MISCONFIGURED,
                 dynamic_params={
-                    "object_storage_type": object_storage_type.value,
+                    "storage_type": object_storage_type.value,
                     "integrator": f"{object_storage_type.value} integrator",
                 },
                 app=True,
@@ -292,7 +300,7 @@ class BackupEventsHandler(Object):
             self.charm.status.set(
                 CharmStatuses.BACKUP_REPOSITORY_MISCONFIGURED,
                 dynamic_params={
-                    "object_storage_type": object_storage_type.value,
+                    "storage_type": object_storage_type.value,
                     "integrator": f"{object_storage_type.value} integrator",
                 },
                 app=True,

@@ -407,10 +407,7 @@ class S3RelDataCredentials(Model):
     secret_key: str = Field(alias="secret-key", default=None)
     s3_tls_ca_chain: str | list[str] | None = Field(default=None, alias="s3-tls-ca-chain")
 
-    class Config:
-        """Model config of this pydantic model."""
-
-        validate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class S3RelData(Model):
@@ -429,10 +426,7 @@ class S3RelData(Model):
     credentials: S3RelDataCredentials = Field(alias=S3_CREDENTIALS)
     path_style_access: bool = Field(alias="s3-uri-style", default=False)
 
-    class Config:
-        """Model config of this pydantic model."""
-
-        validate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="after")
     def validate_core_fields(self):
@@ -533,10 +527,7 @@ class AzureRelDataCredentials(Model):
     storage_account: str = Field(alias="storage-account", default=None)
     secret_key: str = Field(alias="secret-key", default=None)
 
-    class Config:
-        """Model config of this pydantic model."""
-
-        validate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class AzureRelData(Model):

@@ -109,7 +109,7 @@ class BackupManager(BaseManager):
         if (
             not config
             or (
-                storage_type == ObjectStorageType.S3
+                storage_type == ObjectStorageType.S3.val
                 and (not config.s3 or not config.s3.credentials)
             )
             or (
@@ -163,7 +163,7 @@ class BackupManager(BaseManager):
         stored_cacerts = list_cas(
             self.workload,
             store_pwd=STORE_PASSWORD,
-            store_path=f"{self.opensearch.paths.certs}/cacerts.p12",
+            store_path=self.workload.paths.certs / "cacerts.p12",
         )
 
         if not stored_cacerts:
@@ -178,7 +178,7 @@ class BackupManager(BaseManager):
         Args:
             s3_tls_ca_chain: S3 TLS CA chain to remove
         """
-        store_path = f"{self.opensearch.paths.certs}/cacerts.p12"
+        store_path = self.opensearch.paths.certs / "cacerts.p12"
         # Drop the CA entirely
         remove_ca(
             workload=self.workload,
@@ -195,7 +195,7 @@ class BackupManager(BaseManager):
 
         If there is s3_tls_ca_chain, the old CA will be removed.
         """
-        store_path = f"{self.opensearch.paths.certs}/cacerts.p12"
+        store_path = self.opensearch.paths.certs / "cacerts.p12"
 
         # If we already have the same CA, skip re-import
         if self.is_custom_s3_ca_stored(s3_tls_ca_chain):
@@ -205,6 +205,7 @@ class BackupManager(BaseManager):
         # Chain changed: ensure we remove the old alias family first
         # to avoid keytool already exists error
         remove_ca(
+            workload=self.workload,
             alias=S3_CA_ALIAS,
             store_pwd=STORE_PASSWORD,
             store_path=store_path,
