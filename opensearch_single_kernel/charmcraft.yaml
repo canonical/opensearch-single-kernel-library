@@ -14,3 +14,7 @@ bases:
     run-on:
       - name: "ubuntu"
         channel: "22.04"
+
+charm-libs:
+  - lib: grafana_agent.cos_agent
+    version: "0"

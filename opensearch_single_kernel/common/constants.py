@@ -152,6 +152,7 @@ GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
 # OpenSearch default port
 OPENSEARCH_HTTP_PORT = 9200
+COS_PORT = "9200"
 
 # OpenSearch storage name
 OPENSEARCH_DATA_STORAGE_NAME = "opensearch-data"
@@ -163,6 +164,7 @@ TLS_RELATION = "certificates"
 NODE_LOCK_RELATION = "node-lock-fallback"
 PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
+COS_RELATION = "cos-agent"
 
 
 # Paths
