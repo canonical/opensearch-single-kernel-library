@@ -15,12 +15,12 @@ from typing import Any, Dict, List
 
 from charmlibs.pathops import PathProtocol
 from ops.pebble import ConnectionError as PebbleConnectionError
-from ops.pebble import Error as PebbleError
 from overrides import override
 from ruamel.yaml import YAML, CommentedSeq
 from ruamel.yaml.comments import CommentedSet
 
 from opensearch_single_kernel.common.exceptions import ContainerNotReadyError
+from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class ConfigSetter(ABC):
             raise ValueError("base_path cannot be None")
 
         # posix_path is a string representation of the path using posix-style forward slashes (/)
-        posix_path = base_path.as_posix()
+        posix_path = path_as_posix(base_path)
 
         if not posix_path.endswith("/"):
             base_path = base_path / ""
@@ -178,45 +178,6 @@ class YamlConfigSetter(ConfigSetter):
         self.workload = workload
         self.yaml = YAML()
 
-    def _ensure_parent_dir(self, path: PathProtocol) -> None:  # noqa: C901
-        """Ensure parent directory exists using workload/container abstraction.
-
-        Args:
-            path: PathProtocol object whose parent directory should be created
-
-        Raises:
-            ContainerNotReadyError: If container is not ready (for K8s)
-        """
-        parent = path.parent
-
-        # try workload.ensure_dir() if available
-        try:
-            if hasattr(self.workload, "ensure_dir"):
-                self.workload.ensure_dir(parent)
-                return
-        except AttributeError:
-            pass
-
-        # try container.make_dir() for K8s if container is available
-        try:
-            if hasattr(self.workload, "container") and self.workload.container:
-                try:
-                    self.workload.container.make_dir(
-                        str(parent), make_parents=True, permissions=0o755
-                    )
-                    return
-                except (PebbleError, FileExistsError):
-                    # directory might already exist, which is fine
-                    return
-        except AttributeError:
-            pass
-
-        # fallback: use run_cmd to create directory
-        try:
-            self.workload.run_cmd(f"mkdir -p {parent}")
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to create dir {parent}: {e}")
-
     @override
     def load(self, config_file: str) -> Dict[str, Any]:
         """Load the content of a YAML file.
@@ -227,18 +188,14 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
-        # wrap exists() check to handle PebbleConnectionError
         try:
             if not path.exists():
                 raise FileNotFoundError(f"{path} not found.")
+            contents = path.read_text()
         except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to check {path}: {e}")
+            raise ContainerNotReadyError(f"Container not ready to read {path}: {e}") from e
 
-        # wrap read_text() to handle PebbleConnectionError
-        try:
-            lines = self.workload.read_text(path).split("\n")
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to read {path}: {e}")
+        lines = contents.split("\n")
 
         # We are adding a random key:value to the end of the yaml
         # To make sure that the yaml reader will be able to read the file
@@ -269,21 +226,18 @@ class YamlConfigSetter(ConfigSetter):
         output_file: str = None,
     ) -> Dict[str, Any]:
         """Add or update the value of a key (or content of array at index / key) if it exists."""
-        # If file doesn't exist, start with empty dict
         path = self.base_path / config_file
-
-        # wrap exists() check to handle PebbleConnectionError
         try:
-            file_exists = path.exists()
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to check {path}: {e}")
-
-        if not file_exists:
-            # ensure parent directory exists using workload/container abstraction
-            self._ensure_parent_dir(path)
-            data = {}
-        else:
             data = self.load(config_file)
+        except FileNotFoundError:
+            # If file doesn't exist, start with empty dict (and ensure parent dir exists).
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except PebbleConnectionError as e:
+                raise ContainerNotReadyError(
+                    f"Container not ready to create dir {path.parent}: {e}"
+                ) from e
+            data = {}
 
         self.__deep_update(data, key_path.split(sep), val)
 
@@ -321,7 +275,7 @@ class YamlConfigSetter(ConfigSetter):
         return data
 
     @override
-    def replace(
+    def replace(  # noqa: C901
         self,
         config_file: str,
         old_val: str,
@@ -344,15 +298,12 @@ class YamlConfigSetter(ConfigSetter):
             output_file: Target file for the result config, by default same as config_file
         """
         path = self.base_path / config_file
-
-        # wrap exists() check to handle PebbleConnectionError
         try:
-            if not path.exists():
-                raise FileNotFoundError(f"{path} not found.")
+            data = path.read_text()
+        except FileNotFoundError:
+            raise
         except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to check {path}: {e}")
-
-        data = self.workload.read_text(path)
+            raise ContainerNotReadyError(f"Container not ready to read {path}: {e}") from e
 
         if regex and old_val and re.compile(old_val, re.MULTILINE).findall(data):
             data = re.sub(r"{}".format(old_val), f"{new_val}", data)
@@ -365,9 +316,15 @@ class YamlConfigSetter(ConfigSetter):
             logger.info(data)
 
         if output_file is None:
-            output_file = path
+            output_path = path
+        else:
+            output_path = output_file
 
-        self.workload.write_text(data, output_file)
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(data)
+        except PebbleConnectionError as e:
+            raise ContainerNotReadyError(f"Container not ready to write {output_path}: {e}") from e
 
     @override
     def append(
@@ -386,37 +343,22 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
-        # ensure parent directory exists before writing
-        self._ensure_parent_dir(path)
-
-        # check if file exists before reading
-        # If it doesn't exist, create it with just the text to append
         try:
-            file_exists = path.exists()
-        except PebbleConnectionError as e:
-            # if exists() check failed raise ContainerNotReadyError
-            raise ContainerNotReadyError(f"Container not ready to check {path}: {e}")
-
-        if file_exists:
-            try:
-                data = self.workload.read_text(path)
-                data = data + "\n" + text_to_append
-            except PebbleConnectionError as e:
-                # if read failed due to container not ready, raise ContainerNotReadyError
-                raise ContainerNotReadyError(f"Container not ready to read {path}: {e}")
-            except (FileNotFoundError, OSError) as e:
-                # if read failed for other reasons, create new file with the text to append
-                logger.debug(f"Could not read {path}, creating new file: {e}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                try:
+                    existing = path.read_text()
+                    data = f"{existing.rstrip()}\n{text_to_append}"
+                except (FileNotFoundError, OSError) as e:
+                    # If read failed for other reasons, create new file with the text to append.
+                    logger.debug("Could not read %s, creating new file: %s", path, e)
+                    data = text_to_append
+            else:
                 data = text_to_append
-        else:
-            # file doesn't exist, create it with the text to append
-            data = text_to_append
-            logger.debug(f"File {path} does not exist, creating it with content: {text_to_append}")
-
-        try:
-            self.workload.write_text(data, path)
+                logger.debug("File %s does not exist, creating it.", path)
+            path.write_text(data)
         except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to write {path}: {e}")
+            raise ContainerNotReadyError(f"Container not ready to update {path}: {e}") from e
 
     def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream.
@@ -431,7 +373,12 @@ class YamlConfigSetter(ConfigSetter):
             target_path = self.base_path / target_file
 
             # ensure parent directory exists before writing
-            self._ensure_parent_dir(target_path)
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+            except PebbleConnectionError as e:
+                raise ContainerNotReadyError(
+                    f"Container not ready to create dir {target_path.parent}: {e}"
+                ) from e
 
             # Dump to StringIO buffer first, then write using workload.write_text()
             # This is necessary because ruamel.yaml.dump() expects a file-like object,
@@ -439,11 +386,12 @@ class YamlConfigSetter(ConfigSetter):
             buffer = StringIO()
             self.yaml.dump(data, buffer)
             yaml_content = buffer.getvalue()
-
             try:
-                self.workload.write_text(yaml_content, target_path)
+                target_path.write_text(yaml_content)
             except PebbleConnectionError as e:
-                raise ContainerNotReadyError(f"Container not ready to write {target_path}: {e}")
+                raise ContainerNotReadyError(
+                    f"Container not ready to write {target_path}: {e}"
+                ) from e
 
     def __deep_update(self, source, node_keys: List[str], val: Any):
         """Recursively traverses the tree of nodes, and writes the value accordingly.

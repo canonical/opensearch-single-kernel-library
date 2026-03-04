@@ -43,6 +43,7 @@ from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
     generate_password,
     parse_tls_file,
+    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -82,7 +83,7 @@ class TlsManager(BaseManager):
         # K8S JDK path: /usr/lib/jvm/java-21-openjdk-amd64
         jdk_path = self.workload.paths.jdk
         keytool_path = jdk_path / "bin" / "keytool"
-        return str(keytool_path)
+        return path_as_posix(keytool_path)
 
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
         """Check if all TLS resources are stored on disk."""
@@ -209,7 +210,7 @@ class TlsManager(BaseManager):
             return "admin"
 
         if self.state.substrate == Substrates.K8S:
-            # K8s: keep CSR CN deterministic in unit tests and across pod restarts.
+            # K8s: keep CSR CN deterministic across pod restarts and unit tests.
             # Avoid using container DNS here as it requires Pebble connection
             return str(self.state.unit_name)
 
@@ -435,14 +436,12 @@ class TlsManager(BaseManager):
     ) -> None:
         """Store cert in keystore."""
         certs_dir_path = self.workload.paths.certs
-        certs_dir = str(certs_dir_path)
-
-        self._ensure_certificates_directory(certs_dir)
+        self._ensure_certificates_directory(certs_dir_path)
         self._safe_unlink(store_path)
 
-        store_path_str = str(store_path)
+        store_path_str = path_as_posix(store_path)
         if self.state.substrate == Substrates.K8S and not store_path_str.startswith("/"):
-            store_path_str = str(self.workload.paths.certs / store_path_str.lstrip("/"))
+            store_path_str = path_as_posix(self.workload.paths.certs / store_path_str.lstrip("/"))
 
         with (
             self.workload.temp_file(
@@ -452,9 +451,11 @@ class TlsManager(BaseManager):
                 mode="w+t", suffix=".cert", data=cert, dir=certs_dir_path
             ) as tmp_cert,
         ):
+            tmp_key_path = path_as_posix(tmp_key)
+            tmp_cert_path = path_as_posix(tmp_cert)
             cmd = (
                 "openssl pkcs12 -export "
-                f"-in {tmp_cert} -inkey {tmp_key} "
+                f"-in {tmp_cert_path} -inkey {tmp_key_path} "
                 f"-out {store_path_str} -name {name}"
             )
             args = f"-passout pass:{store_pwd}"
@@ -471,41 +472,44 @@ class TlsManager(BaseManager):
         self._best_effort_set_tls_store_ownership(store_path_str)
         logger.info("TLS certificate for %s stored.", name)
 
-    def _ensure_certificates_directory(self, cert_dir: str) -> None:
+    def _ensure_certificates_directory(self, cert_dir_path: PathProtocol) -> None:
         """Ensure the certificates directory exists.
 
         On K8s, this directory can be backed by runtime mounts, ensure it exists before writing
         PKCS12 stores and temp files.
         """
-        if self.state.substrate != Substrates.K8S:
-            # On VM, pathops operates on the unit filesystem.
-            if not self.workload.paths.certs.exists():
-                self.workload.mkdir(self.workload.paths.certs, parents=True, exist_ok=True)
-            return
-
-        container = getattr(self.workload, "container", None)
-        if container is None:
-            raise OpenSearchFileOperationError("K8s workload container not available")
-        if not container.can_connect():
+        if self.state.substrate == Substrates.K8S and not self.workload.workload_present:
             raise ContainerNotReadyError("Container not ready to ensure certificates directory")
 
-        if container.exists(cert_dir):
-            return
-
-        # try Pebble file API first, then fall back to exec-based mkdir/chmod
-        # depending on container lifecycle timing, permissions, or Pebble backend
-        # limitations, one method may fail while the other succeeds. The exec fallback keeps
-        # TLS setup resilient.
         try:
-            container.make_dir(cert_dir, make_parents=True, permissions=0o750)
-        except Exception:
-            try:
-                self.workload.run_cmd(f"mkdir -p {cert_dir}")
-                self.workload.run_cmd(f"chmod 750 {cert_dir}")
-            except Exception as e:
-                raise OpenSearchFileOperationError(
-                    f"Cannot create certificates directory {cert_dir}: {e}"
+            if self.state.substrate == Substrates.K8S:
+                # ContainerPath.mkdir uses Pebble file API and will raise PebbleConnectionError
+                # when the container isn't reachable.
+                cert_dir_path.mkdir(
+                    mode=0o750,
+                    parents=True,
+                    exist_ok=True,
+                    user=str(OPENSEARCH_RUN_AS_USER),
+                    group=str(OPENSEARCH_RUN_AS_GROUP),
                 )
+            else:
+                # On VM, pathops operates on the unit filesystem. Keep default ownership
+                # semantics and only ensure the directory exists.
+                cert_dir_path.mkdir(parents=True, exist_ok=True)
+        except PebbleConnectionError as e:
+            raise ContainerNotReadyError(
+                f"Container not ready to ensure certificates directory: {e}"
+            ) from e
+        except (
+            FileExistsError,
+            FileNotFoundError,
+            LookupError,
+            NotADirectoryError,
+            PermissionError,
+            OSError,
+            ValueError,
+        ) as e:
+            raise OpenSearchFileOperationError(e) from e
 
     def _safe_unlink(self, path: PathProtocol) -> None:
         """Unlink for both VM and K8s PathProtocol implementations."""
@@ -575,14 +579,14 @@ class TlsManager(BaseManager):
             return
 
         # ensure certs directory exists before writing CA truststore/keystores.
-        self._ensure_certificates_directory(str(self.workload.paths.certs))
+        self._ensure_certificates_directory(self.workload.paths.certs)
 
         # ensure CA truststore + chain.pem (if secrets available).
         admin_secrets = (
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            # create_store_pwd=False, passwords should already be in secrets;
+            # create_store_pwd=False, passwords should already be in secrets
             # don't mutate secrets here
             self.store_new_ca(admin_secrets, create_store_pwd=False)
 
@@ -623,7 +627,7 @@ class TlsManager(BaseManager):
         """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
         try:
             return self.workload.run_cmd(
-                f"openssl pkcs12 -in {store_path}",
+                f"openssl pkcs12 -in {path_as_posix(store_path)}",
                 f"""-nodes \
                 -passin pass:{store_pwd} \
                 | openssl x509 -noout -issuer
@@ -648,7 +652,7 @@ class TlsManager(BaseManager):
         ):
 
             self.opensearch_client.reload_tls_certificates(
-                cert_files=(str(tmp_cert), str(tmp_key))
+                cert_files=(path_as_posix(tmp_cert), path_as_posix(tmp_key))
             )
 
     def finalize_ca_certs_rotation(self) -> None:

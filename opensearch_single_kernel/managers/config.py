@@ -10,7 +10,10 @@ from collections import namedtuple
 from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType, Substrates
-from opensearch_single_kernel.common.exceptions import ContainerNotReadyError
+from opensearch_single_kernel.common.exceptions import (
+    ContainerNotReadyError,
+    OpenSearchError,
+)
 from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -18,6 +21,7 @@ from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     get_nested_value,
     normalized_tls_subject,
+    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -50,7 +54,7 @@ class ConfigManager(BaseManager):
         Returns:
             full path to keytool executable
         """
-        java_home = str(self.workload.paths.jdk)
+        java_home = path_as_posix(self.workload.paths.jdk)
         return f"{java_home}/bin/keytool"
 
     def set_node(  # noqa: C901
@@ -149,10 +153,9 @@ class ConfigManager(BaseManager):
                     "Cluster may fail to bootstrap."
                 )
 
-        # The workload paths decide the concrete OpenSearch directories
         # K8s uses /var/lib/opensearch/data, VM uses snap paths.
-        data_path = str(self.workload.paths.data_dir)
-        logs_path = str(self.workload.paths.logs_dir)
+        data_path = path_as_posix(self.workload.paths.data_dir)
+        logs_path = path_as_posix(self.workload.paths.logs_dir)
 
         self.yaml_setter.put(self.CONFIG_YML, "path.data", data_path)
         self.yaml_setter.put(self.CONFIG_YML, "path.logs", logs_path)
@@ -287,11 +290,9 @@ class ConfigManager(BaseManager):
         )
 
         node_name = self.state.node_name
-        unit_name = (
-            self.state.unit_name if self.state.application.deployment_desc is not None else None
-        )
-        new_node_conf = (nodes_config.get(node_name) if node_name is not None else None) or (
-            nodes_config.get(unit_name) if unit_name is not None else None
+        unit_name = self.state.unit_name if self.state.application.deployment_desc else None
+        new_node_conf = (nodes_config.get(node_name) if node_name else None) or (
+            nodes_config.get(unit_name) if unit_name else None
         )
         if not new_node_conf:
             # the conf could not be computed / broadcast, because this node is
@@ -334,31 +335,6 @@ class ConfigManager(BaseManager):
         if cm_ips_set:
             lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
             self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
-
-    def _validate_tls_config_inputs(
-        self, layer: str, certs_dir: str, truststore_pwd: str, keystore_pwd: str
-    ) -> None:
-        """Validate inputs for TLS configuration.
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-            certs_dir: Directory path for certificates.
-            truststore_pwd: Truststore password.
-            keystore_pwd: Keystore password.
-
-        Raises:
-            RuntimeError: If any input is invalid.
-        """
-        if not certs_dir or not certs_dir.strip():
-            raise RuntimeError(f"Cannot write {layer} TLS config: certs_dir is empty or None")
-        if not certs_dir.startswith("/"):
-            raise RuntimeError(
-                f"Cannot write {layer} TLS config: certs_dir must be absolute path, got: {certs_dir}"
-            )
-        if not truststore_pwd or not truststore_pwd.strip():
-            raise RuntimeError(f"Cannot write {layer} TLS config: truststore_pwd is empty or None")
-        if not keystore_pwd or not keystore_pwd.strip():
-            raise RuntimeError(f"Cannot write {layer} TLS config: keystore_pwd is empty or None")
 
     def _get_cert_filename(self, cert_type: CertType, store_type: str) -> str:
         """Get certificate filename for a given cert type and store type.
@@ -456,7 +432,7 @@ class ConfigManager(BaseManager):
             layer: TLS layer name ("transport" or "http").
 
         Raises:
-            RuntimeError: If required keys are missing or empty.
+            OpenSearchError: If required keys are missing or empty.
         """
         try:
             written_config = self.yaml_setter.load(self.CONFIG_YML)
@@ -487,13 +463,13 @@ class ConfigManager(BaseManager):
                     f"Present keys: {present_keys}"
                 )
                 logger.error(error_msg)
-                raise RuntimeError(error_msg)
+                raise OpenSearchError(error_msg)
 
             logger.info(
                 f"Successfully wrote {layer} TLS configuration. "
                 f"All required keys present and non-empty: {present_keys}"
             )
-        except RuntimeError:
+        except OpenSearchError:
             raise
         except Exception as e:
             logger.warning(f"Could not verify {layer} TLS config after write: {e}")
@@ -511,9 +487,7 @@ class ConfigManager(BaseManager):
             keystore_pwd: password for the unit keystore (unit-http.p12 or unit-transport.p12)
         """
         layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
-        certs_dir = str(self.workload.paths.certs)
-
-        self._validate_tls_config_inputs(layer, certs_dir, truststore_pwd, keystore_pwd)
+        certs_dir = path_as_posix(self.workload.paths.certs)
 
         config_path = self.yaml_setter.base_path / self.CONFIG_YML
         logger.info(

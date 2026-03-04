@@ -46,6 +46,7 @@ from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     deployment_type,
     mask_sensitive_information,
+    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -200,8 +201,7 @@ class ClusterManager(BaseManager):
             logger.info("Failed to get online nodes")
             raise e
 
-        expected_name = self.state.node_name
-        if expected_name is None:
+        if not (expected_name := self.state.node_name):
             raise OpenSearchNotFullyReadyError(
                 "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
             )
@@ -222,11 +222,14 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
-        admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        if not admin_secrets:
+        if not (
+            admin_secrets := self.state.secrets.get_object(
+                Scope.APP, CertType.APP_ADMIN.val, peek=True
+            )
+        ):
             raise OpenSearchError("Cannot initialize security index: admin secrets not found")
 
-        keystore_path = str(self.workload.paths.certs / f"{CertType.APP_ADMIN.val}.p12")
+        keystore_path = path_as_posix(self.workload.paths.certs / f"{CertType.APP_ADMIN.val}.p12")
         keystore_password = admin_secrets.get("keystore-password")
         truststore_password = admin_secrets.get("truststore-password")
         alias = CertType.APP_ADMIN.val
@@ -418,15 +421,12 @@ class ClusterManager(BaseManager):
         """
         contribute_to_bootstrap = False
         if "cluster_manager" in computed_roles:
-            node_name = self.state.node_name
-            if node_name is None:
-                # Should not happen in normal flows (bootstrap config is
-                # computed from deployment_desc) but we need  to handle it
-                # for early lifecycle / partial state.
-                logger.debug(
-                    "Cannot add node to bootstrap contributors yet, node_name unavailable."
+            if (node_name := self.state.node_name) is None:
+                # If we can't determine the expected OpenSearch node.name, we can't correctly
+                # contribute to cluster.initial_cluster_manager_nodes.
+                raise OpenSearchNotFullyReadyError(
+                    "Cannot configure bootstrap contributors yet (node_name unavailable)."
                 )
-                return False
 
             cm_names.append(node_name)
             cm_ips.append(self.state.host_ip)
@@ -459,8 +459,7 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
-            node_name = self.state.node_name
-            if node_name is None:
+            if (node_name := self.state.node_name) is None:
                 return self.yaml_setter.load("opensearch.yml")["node.roles"]
             return self.opensearch_client.get_roles(node_name, self.alt_hosts)
         except OpenSearchHttpError:

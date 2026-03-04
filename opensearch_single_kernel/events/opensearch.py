@@ -36,6 +36,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     ContainerNotReadyError,
     OpenSearchCmdError,
+    OpenSearchError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInstallError,
@@ -82,12 +83,11 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
         self.framework.observe(self.charm.on.update_status, self._on_update_status)
 
-        # For K8s, perform container preparation only once pebble is ready.
-        if self.charm.state.substrate == Substrates.K8S:
-            self.framework.observe(
-                getattr(self.charm.on, f"{CONTAINER_NAME}_pebble_ready"),
-                self._on_pebble_ready,
-            )
+        # Perform container preparation when pebble is ready (K8s workload container).
+        # Workload pebble hooks only exist for K8s charms, on VM charms the event won't exist.
+        pebble_ready = getattr(self.charm.on, f"{CONTAINER_NAME}_pebble_ready", None)
+        if pebble_ready is not None:
+            self.framework.observe(pebble_ready, self._on_pebble_ready)
 
         # --- OpenSearch Custom events ---
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
@@ -250,6 +250,9 @@ class OpenSearchEventsHandler(Object):
         We do the K8s container preparation:
             filesystem permissions, pebble plan, restore tls files from Juju secret.
         """
+        if self.charm.state.substrate != Substrates.K8S:
+            return
+
         try:
             self.charm.workload.prepare_for_pebble_ready()
         except ContainerNotReadyError as e:
@@ -284,9 +287,17 @@ class OpenSearchEventsHandler(Object):
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
+        # K8s: defer leader-elected until we can talk to the workload container.
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.workload.workload_present
+        ):
+            logger.info("Container not ready for leader election, deferring")
+            event.defer()
+            return
 
-        try:
-            if self.charm.state.application.is_security_index_initialised:
+        if self.charm.state.application.is_security_index_initialised:
+            try:
                 # Leader election event happening after a previous leader got killed
                 if not self.charm.cluster_manager.opensearch_client.is_node_up():
                     event.defer()
@@ -306,398 +317,423 @@ class OpenSearchEventsHandler(Object):
                         self.charm.status.set(CharmStatuses.WAITING_TO_START)
                         logger.debug("Restarting opensearch due to reconfiguring node roles")
                         self.charm.restart_opensearch_event.emit()
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready for leader election: %s", e)
+                event.defer()
+            return
 
-                return
+        # TODO: check if cluster can start independently
 
-            # TODO: check if cluster can start independently
-
-            # User config is currently in a default state, which contains multiple insecure default
-            # users. Purge the user list before initialising the users the charm requires.
+        # User config is currently in a default state, which contains multiple insecure default
+        # users. Purge the user list before initialising the users the charm requires.
+        try:
             self.charm.users_manager.purge_initial_default_users()
-
-            if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-                return
-
-            if not self.charm.state.application.is_admin_user_initialized:
-                self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
-
-            # Restore purged system users in local `internal_users.yml`
-            # with corresponding credentials
-            if self.charm.unit.is_leader():
-                for user in OPENSEARCH_SYSTEM_USERS:
-                    self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
-
-            self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
         except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for leader election: {e}")
+            logger.info("Container not ready for leader election: %s", e)
             event.defer()
             return
+
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        if not self.charm.state.application.is_admin_user_initialized:
+            self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
+
+        # Restore purged system users in local `internal_users.yml`
+        # with corresponding credentials
+        if self.charm.unit.is_leader():
+            try:
+                for user in OPENSEARCH_SYSTEM_USERS:
+                    self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready for leader election: %s", e)
+                event.defer()
+                return
+
+        self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
-        try:
-            # K8s: start might fire before pebble-ready. Defer until we can talk to the container
-            # and apply the pebble plan/permissions in pebble-ready.
+        # K8s: start might fire before pebble-ready. Defer until we can talk to the container
+        # and apply the pebble plan/permissions in pebble-ready.
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.workload.workload_present
+        ):
+            logger.info("Container not ready for start event, deferring")
+            event.defer()
+            return
+
+        if self.charm.cluster_manager.opensearch_client.is_node_up():
+            self.cleanup_start_state()
+            return
+
+        # VM-specific: Handle host reboot scenario where service should be up but isn't
+        # This doesn't apply to K8s as pods are ephemeral and don't have host reboots
+        if (
+            self.charm.state.substrate == Substrates.VM
+            and self.charm.cluster_manager.needs_start_after_host_reboot
+        ):
+            # This logic will only be triggered if the service has started (i.e. "started")
+            # if we had a "start" hook (i.e. the actual machine has rebooted)
+            # and we are a cluster_manager with the service down
+            # After these conditions are met, then we can simply restart the service.
+            logger.debug(
+                "Start hook: snap already installed and service should be up, but it is not. Restarting it..."
+            )
+
+            # We had a reboot in this node.
+            # We execute the same logic as above:
+            self.cleanup_start_state()
+
+            # Now, reissue a restart: we should not have stopped in the first place
+            # as "started" flag is still set to True.
+            # We do not wait for the 200 return, as maybe more than one unit is coming back
+            # Note: start_service_only() is polymorphic, for VM it starts snap service,
+            # for K8s it starts Pebble service.
+            try:
+                self.charm.workload.start_service_only()
+                # We're done here, we can return
+                return
+            except OpenSearchStartError as e:
+                logger.warning("Machine restart detected but error at service start with: %s", e)
+                # Defer and retry later
+                event.defer()
+                return
+            except OpenSearchMissingError:
+                # This is unlike to happen, unless the snap has been manually removed
+                logger.error("Service previously started but now misses the snap.")
+                return
+
+        # apply the directives computed and emitted by the peer cluster manager
+        if not self.charm.cluster_manager.check_if_can_start():
+            logger.info(
+                "Cannot start OpenSearch: blocking directives present or nodes unreachable"
+            )
+            event.defer()
+            return
+
+        if self.charm.unit.is_leader():
+            self.apply_status_from_deployment_desc(
+                self.charm.state.application.deployment_desc, show_status_only_once=False
+            )
+
+        if (
+            not self.charm.state.application.is_admin_user_initialized
+            or not self.charm.tls_manager.is_fully_configured()
+        ):
+            # K8s: after pod recreation, TLS secrets can be present while files are not yet
+            # restored on disk. Although we restore them when pebble_ready hook run,
+            # sometimes opensearch tries to start before pebble-ready
+            # hook finishes its execution.
+            # For those cases, we perform another check just starting service and
+            # if the tls files are not restored yet _on_start_opensearch will
+            # restore them from Juju secrets
+            # https://documentation.ubuntu.com/juju/3.6/reference/hook/#container-pebble-ready
             if (
                 self.charm.state.substrate == Substrates.K8S
-                and not self.charm.workload.workload_present
+                and self.charm.state.application.is_admin_user_initialized
+                and self.charm.state.tls_relation
+                and self.charm.tls_manager.all_certificates_available()
             ):
-                logger.info("Container not ready for start event, deferring")
-                event.defer()
-                return
-
-            if self.charm.cluster_manager.opensearch_client.is_node_up():
-                self.cleanup_start_state()
-                return
-
-            # VM-specific: Handle host reboot scenario where service should be up but isn't
-            # This doesn't apply to K8s as pods are ephemeral and don't have host reboots
-            if (
-                self.charm.state.substrate == Substrates.VM
-                and self.charm.cluster_manager.needs_start_after_host_reboot
-            ):
-                # This logic will only be triggered if the service has started (i.e. "started")
-                # if we had a "start" hook (i.e. the actual machine has rebooted)
-                # and we are a cluster_manager with the service down
-                # After these conditions are met, then we can simply restart the service.
-                logger.debug(
-                    "Start hook: snap already installed and service should be up, but it is not. Restarting it..."
-                )
-
-                # We had a reboot in this node.
-                # We execute the same logic as above:
-                self.cleanup_start_state()
-
-                # Now, reissue a restart: we should not have stopped in the first place
-                # as "started" flag is still set to True.
-                # We do not wait for the 200 return, as maybe more than one unit is coming back
-                # Note: start_service_only() is polymorphic, for VM it starts snap service,
-                # for K8s it starts Pebble service.
-                try:
-                    self.charm.workload.start_service_only()
-                    # We're done here, we can return
-                    return
-                except OpenSearchStartError as e:
-                    logger.warning(
-                        "Machine restart detected but error at service start with: %s", e
-                    )
-                    # Defer and retry later
-                    event.defer()
-                    return
-                except OpenSearchMissingError:
-                    # This is unlike to happen, unless the snap has been manually removed
-                    logger.error("Service previously started but now misses the snap.")
-                    return
-            # apply the directives computed and emitted by the peer cluster manager
-            if not self.charm.cluster_manager.check_if_can_start():
-                logger.info(
-                    "Cannot start OpenSearch: blocking directives present or nodes unreachable"
-                )
-                event.defer()
-                return
-
-            if self.charm.unit.is_leader():
-                self.apply_status_from_deployment_desc(
-                    self.charm.state.application.deployment_desc, show_status_only_once=False
-                )
-            if (
-                not self.charm.state.application.is_admin_user_initialized
-                or not self.charm.tls_manager.is_fully_configured()
-            ):
-                # K8s: after pod recreation, TLS secrets can be present while files are not yet
-                # restored on disk. Although we restore them when pebble_ready hook run,
-                # sometimes opensearch tries to start before pebble-ready
-                # hook finishes its execution.
-                # For those cases, we perform another check just starting service and
-                # if the tls files are not restored yet _on_start_opensearch will
-                # restore them from Juju secrets
-                # https://documentation.ubuntu.com/juju/3.6/reference/hook/#container-pebble-ready
-                if (
-                    self.charm.state.substrate == Substrates.K8S
-                    and self.charm.state.application.is_admin_user_initialized
-                    and self.charm.state.tls_relation
-                    and self.charm.tls_manager.all_certificates_available()
-                ):
-                    pass
+                pass
+            else:
+                if not self.charm.state.tls_relation:
+                    status = CharmStatuses.TLS_RELATION_MISSING
                 else:
-                    if not self.charm.state.tls_relation:
-                        status = CharmStatuses.TLS_RELATION_MISSING
+                    if not self.charm.state.application.is_admin_user_initialized:
+                        status = CharmStatuses.ADMIN_USER_NOT_CONFIGURED
                     else:
-                        if not self.charm.state.application.is_admin_user_initialized:
-                            status = CharmStatuses.ADMIN_USER_NOT_CONFIGURED
-                        else:
-                            status = CharmStatuses.TLS_NOT_FULLY_CONFIGURED
-                    self.charm.status.set(status)
-                    event.defer()
-                    return
+                        status = CharmStatuses.TLS_NOT_FULLY_CONFIGURED
+                self.charm.status.set(status)
+                event.defer()
+                return
 
-            self.charm.status.clear(CharmStatuses.ADMIN_USER_NOT_CONFIGURED)
-            self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
-            self.charm.status.clear(CharmStatuses.TLS_RELATION_MISSING)
+        self.charm.status.clear(CharmStatuses.ADMIN_USER_NOT_CONFIGURED)
+        self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
+        self.charm.status.clear(CharmStatuses.TLS_RELATION_MISSING)
 
-            if self.charm.unit.is_leader():
-                self.charm.status.clear(CharmStatuses.PEER_CLUSTER_NO_RELATION, app=True)
+        if self.charm.unit.is_leader():
+            self.charm.status.clear(CharmStatuses.PEER_CLUSTER_NO_RELATION, app=True)
 
-            # Configure OpenSearch Users
-            if not self.charm.unit.is_leader():
+        # Configure OpenSearch Users
+        if not self.charm.unit.is_leader():
+            try:
                 self.charm.users_manager.purge_initial_default_users()
                 for user in OPENSEARCH_SYSTEM_USERS:
                     self.charm.users_manager.save_user_locally(user)
-
-            # Configure Client Authentication
-            try:
-                self.charm.config_manager.set_client_auth()
-            except OpenSearchFileOperationError as e:
-                logger.debug(f"Error while setting client auth: {e}")
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready to configure users on start: %s", e)
                 event.defer()
                 return
 
-            deployment_desc = self.charm.state.application.deployment_desc
-            # only start the main orchestrator if a data node is available
-            # this allows for "cluster-manager-only" nodes in large deployments
-            # workflow documentation:
-            # no "data" role in deployment desc -> start gets deferred
-            # when "data" node joins -> start cluster-manager via _on_peer_cluster_relation_changed
-            # cluster-manager notifies "data" node via refresh of peer cluster relation data
-            # "data" node starts and initializes security index
-            if (
-                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-                and "data" not in deployment_desc.config.roles
-                and not self.charm.state.application.is_security_index_initialised
-            ):
-                self.charm.status.set(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
-                event.defer()
-                return
-            # We are requesting start of openSearch
-            self.charm.status.set(CharmStatuses.REQUEST_LOCK_ON_START)
-
-            # In large deployments one data node needs to start to initialize the security index
-            # this first node ignores the lock
-            # if there are multiple data apps in the cluster
-            # we synchronize the start of the first data node through peer cluster relation
-            # all leader data units request to start as first data node
-            #   ->(app databag key: first_data_node on data app)
-            # main orchestrator will choose which node to start first
-            #   ->(app databag key: first_data_node on main orchestrator app)
-
-            # TODO: Add checks on whether we should ignore lock. Since we are not
-            # adding large deployment yet, we always ignore
-            if self.charm.lock_manager.should_ignore_lock(deployment_desc):
-                logger.debug(
-                    f"Requesting start as first data node without lock: {self.charm.state.unit_name}"
-                )
-                # TODO:
-                # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
-                # Temporary workaround for the moment to reduce startup delays:
-                logger.info("Emitting the start opensearch event (ignoring lock)")
-                # do not defer, otherwise we may only retry on the next hook
-                # often update-status, causing an unnecessary several mimnutes startup delay.
-                self.charm.start_opensearch_event.emit(ignore_lock=True)
-                return
-
-            logger.info("Emitting the start opensearch event")
-
-            self.charm.start_opensearch_event.emit()
+        # Configure Client Authentication
+        try:
+            self.charm.config_manager.set_client_auth()
         except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for start: {e}")
+            logger.info("Container not ready to set client auth on start: %s", e)
             event.defer()
             return
+        except OpenSearchFileOperationError as e:
+            logger.debug("Error while setting client auth: %s", e)
+            event.defer()
+            return
+
+        deployment_desc = self.charm.state.application.deployment_desc
+        # only start the main orchestrator if a data node is available
+        # this allows for "cluster-manager-only" nodes in large deployments
+        # workflow documentation:
+        # no "data" role in deployment desc -> start gets deferred
+        # when "data" node joins -> start cluster-manager via _on_peer_cluster_relation_changed
+        # cluster-manager notifies "data" node via refresh of peer cluster relation data
+        # "data" node starts and initializes security index
+        if (
+            deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.charm.state.application.is_security_index_initialised
+        ):
+            self.charm.status.set(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
+            event.defer()
+            return
+
+        # We are requesting start of openSearch
+        self.charm.status.set(CharmStatuses.REQUEST_LOCK_ON_START)
+
+        # In large deployments one data node needs to start to initialize the security index
+        # this first node ignores the lock
+        # if there are multiple data apps in the cluster
+        # we synchronize the start of the first data node through peer cluster relation
+        # all leader data units request to start as first data node
+        #   ->(app databag key: first_data_node on data app)
+        # main orchestrator will choose which node to start first
+        #   ->(app databag key: first_data_node on main orchestrator app)
+
+        # TODO: Add checks on whether we should ignore lock. Since we are not
+        # adding large deployment yet, we always ignore
+        if self.charm.lock_manager.should_ignore_lock(deployment_desc):
+            logger.debug(
+                "Requesting start as first data node without lock: %s", self.charm.state.unit_name
+            )
+            # TODO:
+            # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
+            # Temporary workaround for the moment to reduce startup delays:
+            logger.info("Emitting the start opensearch event (ignoring lock)")
+            # do not defer, otherwise we may only retry on the next hook
+            # often update-status, causing an unnecessary several minutes startup delay.
+            self.charm.start_opensearch_event.emit(ignore_lock=True)
+            return
+
+        logger.info("Emitting the start opensearch event")
+
+        self.charm.start_opensearch_event.emit()
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
-        try:
-            if (
-                self.charm.cluster_manager.is_opensearch_started
-                and not self.charm.workload.is_failed()
-            ):
-                try:
-                    self._post_start_init(event)
-                except (
-                    OpenSearchHttpError,
-                    OpenSearchNotFullyReadyError,
-                ):
-                    # check if cluster should have started but is blocked
-                    logger.debug("OpenSearch already started, but post-start init failed.")
-                    if (
-                        self.charm.state.application.is_data_role_in_cluster_fleet_apps
-                        and self.charm.state.application.bootstrapped
-                        # and self.opensearch_peer_cm.is_provider(typ="main")
-                    ):
-                        # In large deployments with cluster-manager-only-nodes,
-                        # the startup might fail if the cluster was bootstrapped earlier
-                        # and the cluster-manager node lost its data
-                        logger.warning(
-                            "Node is not ready to start, but data node exists and"
-                            " the cluster was previously bootstrapped."
-                        )
-                        self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
-
-                    event.defer()
-                except OpenSearchUserMgmtError as e:
-                    # Either generic start failure or cluster is not read
-                    # to create the internal users
-                    logger.warning(e)
-                    self.charm.lock_manager.release()
-                    self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
-                    event.defer()
-                # finally:
-                # if self.opensearch_peer_cm.is_provider(typ="main"):
-                # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
-                return
-
-            self.charm.state.server.update({"started": None})
-
-            # K8s: start / custom start events can run before pebble-ready
-            # after an agent restart.Ensure the container is prepared and TLS files are
-            # restored from Juju secrets before attempting to start OpenSearch,
-            # otherwise the security plugin can crash-loop due to
-            # missing keystores/truststores.
-            if self.charm.state.substrate == Substrates.K8S:
-                try:
-                    self.charm.workload.prepare_for_pebble_ready()
-                    self.charm.tls_manager.restore_tls_files_from_secrets()
-
-                    # Pod deletes mean /etc/opensearch/opensearch.yml is recreated
-                    # from the image. Ensure TLS config is rewritten from Juju secrets before
-                    # starting OpenSearch, otherwise the security plugin will fail at bootstrap.
-                    admin_secrets = (
-                        self.charm.state.secrets.get_object(
-                            Scope.APP, CertType.APP_ADMIN.val, peek=True
-                        )
-                        or {}
-                    )
-                    transport_secrets = (
-                        self.charm.state.secrets.get_object(
-                            Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-                        )
-                        or {}
-                    )
-                    http_secrets = (
-                        self.charm.state.secrets.get_object(
-                            Scope.UNIT, CertType.UNIT_HTTP.val, peek=True
-                        )
-                        or {}
-                    )
-
-                    truststore_pwd = admin_secrets.get("truststore-password")
-                    transport_keystore_pwd = transport_secrets.get("keystore-password")
-                    http_keystore_pwd = http_secrets.get("keystore-password")
-
-                    if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
-                        # Only rewrite if TLS config is missing. /etc/opensearch comes from the
-                        # image, but any runtime writes can be lost on container recreation.
-                        if not (
-                            self.charm.config_manager.is_transport_tls_configured()
-                            and self.charm.config_manager.is_http_tls_configured()
-                        ):
-                            self.charm.config_manager.set_admin_tls_conf(admin_secrets)
-                            self.charm.config_manager.set_node_tls_conf(
-                                CertType.UNIT_TRANSPORT,
-                                truststore_pwd=truststore_pwd,
-                                keystore_pwd=transport_keystore_pwd,
-                            )
-                            self.charm.config_manager.set_node_tls_conf(
-                                CertType.UNIT_HTTP,
-                                truststore_pwd=truststore_pwd,
-                                keystore_pwd=http_keystore_pwd,
-                            )
-                except ContainerNotReadyError as e:
-                    logger.info("Container not ready to prepare/restore TLS for start: %s", e)
-                    event.defer()
-                    return
-                except (OpenSearchInstallError, OpenSearchFileOperationError) as e:
-                    logger.warning("Failed to prepare/restore TLS for start: %s", e)
-                    event.defer()
-                    return
-
-            # Check if we can start. This means we will check
-            # - profiles requirements
-            # - blocking directives
-            # - admin user and security index configured/initialised
-            # - cluster health
-            if not all(
-                [
-                    not self.check_profile_missing_requirements(),
-                    self.charm.cluster_manager.can_service_start(),
-                ]
-            ):
-                logger.info("Conditions not met to start opensearch. Will retry next event.")
-                event.defer()
-                return
-
-            if not self.unit_allowed_to_start(event):
-                logger.info("The unit is not allowed to wait, the event need to be retried later.")
-                event.defer()
-                return
-
-            if event.ignore_lock:
-                # Only used for force upgrades and starting 1 data node on a large deployment
-                # where the main orchestrator has cluster-manager only nodes
-                logger.debug("Starting without lock")
-            elif not self.charm.lock_manager.acquired:
-                logger.debug("Lock to start opensearch not acquired. Will retry next event")
-                event.defer()
-                return
-
-            if self.charm.workload.is_failed():
-                self.charm.lock_manager.release()
-                self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
-                event.defer()
-                return
-            self.charm.status.set(CharmStatuses.WAITING_TO_START)
-
-            try:
-                # Retrieve the nodes of the cluster, needed to configure this node
-                nodes = self.charm.cluster_manager.get_nodes(False)
-
-                # Set the configuration of the node
-                # This calls set_node() which writes base config to opensearch.yml
-                self._set_node_conf(nodes)
-            except OpenSearchHttpError as e:
-                logger.debug(f"error getting the nodes: {e}")
-                self.charm.lock_manager.release()
-                event.defer()
-                return
-
-            try:
-                self.charm.cluster_manager.start(
-                    wait_until_http_200=(
-                        not self.charm.unit.is_leader()
-                        or self.charm.state.application.is_security_index_initialised
-                    )
-                )
-                self._post_start_init(event)
-            except (
-                OpenSearchHttpError,
-                OpenSearchStartTimeoutError,
-                OpenSearchStartError,
-                OpenSearchUserMgmtError,
-                OpenSearchCmdError,
-                OpenSearchFileOperationError,
-            ) as e:
-                logger.debug("error of type: %s", type(e).__name__)
-                self.charm.lock_manager.release()
-                logger.warning(e)
-                self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
-                event.defer()
-            except OpenSearchNotFullyReadyError as e:
-                self.charm.lock_manager.release()
-                logger.debug("Node started but not fully ready: %s", e)
-                event.defer()
-            finally:
-                # In large deployments with cluster-manager-only-nodes, the startup might fail
-                # for the cluster-manager if a joining data node did not yet initialize the
-                # security index. We still want to update and broadcast the latest relation data.
-                # TODO:
-                # if self.opensearch_peer_cm.is_provider(typ="main"):
-                #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
-                pass
-        except ContainerNotReadyError as e:
-            logger.info(f"Container not ready for start opensearch: {e}")
+        # K8s: this event can be emitted before pebble-ready after agent restart/pod recreation.
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.workload.workload_present
+        ):
+            logger.info("Container not ready for start opensearch, deferring")
             event.defer()
             return
+
+        if (
+            self.charm.cluster_manager.is_opensearch_started
+            and not self.charm.workload.is_failed()
+        ):
+            try:
+                self._post_start_init(event)
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready for post-start init: %s", e)
+                event.defer()
+            except (OpenSearchHttpError, OpenSearchNotFullyReadyError):
+                # check if cluster should have started but is blocked
+                logger.debug("OpenSearch already started, but post-start init failed.")
+                if (
+                    self.charm.state.application.is_data_role_in_cluster_fleet_apps
+                    and self.charm.state.application.bootstrapped
+                    # and self.opensearch_peer_cm.is_provider(typ="main")
+                ):
+                    # In large deployments with cluster-manager-only-nodes,
+                    # the startup might fail if the cluster was bootstrapped earlier
+                    # and the cluster-manager node lost its data
+                    logger.warning(
+                        "Node is not ready to start, but data node exists and"
+                        " the cluster was previously bootstrapped."
+                    )
+                    self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
+
+                event.defer()
+            except OpenSearchUserMgmtError as e:
+                # Either generic start failure or cluster is not read
+                # to create the internal users
+                logger.warning(e)
+                self.charm.lock_manager.release()
+                self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
+                event.defer()
+            # finally:
+            # if self.opensearch_peer_cm.is_provider(typ="main"):
+            # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+            return
+
+        self.charm.state.server.update({"started": None})
+
+        # K8s: start / custom start events can run before pebble-ready
+        # after an agent restart. Ensure the container is prepared and TLS files are
+        # restored from Juju secrets before attempting to start OpenSearch,
+        # otherwise the security plugin can crash-loop due to
+        # missing keystores/truststores.
+        if self.charm.state.substrate == Substrates.K8S:
+            try:
+                self.charm.workload.prepare_for_pebble_ready()
+                self.charm.tls_manager.restore_tls_files_from_secrets()
+
+                # Pod deletes mean /etc/opensearch/opensearch.yml is recreated
+                # from the image. Ensure TLS config is rewritten from Juju secrets before
+                # starting OpenSearch, otherwise the security plugin will fail at bootstrap.
+                admin_secrets = (
+                    self.charm.state.secrets.get_object(
+                        Scope.APP, CertType.APP_ADMIN.val, peek=True
+                    )
+                    or {}
+                )
+                transport_secrets = (
+                    self.charm.state.secrets.get_object(
+                        Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
+                    )
+                    or {}
+                )
+                http_secrets = (
+                    self.charm.state.secrets.get_object(
+                        Scope.UNIT, CertType.UNIT_HTTP.val, peek=True
+                    )
+                    or {}
+                )
+
+                truststore_pwd = admin_secrets.get("truststore-password")
+                transport_keystore_pwd = transport_secrets.get("keystore-password")
+                http_keystore_pwd = http_secrets.get("keystore-password")
+
+                if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
+                    # Only rewrite if TLS config is missing. /etc/opensearch comes from the
+                    # image, but any runtime writes can be lost on container recreation.
+                    if not (
+                        self.charm.config_manager.is_transport_tls_configured()
+                        and self.charm.config_manager.is_http_tls_configured()
+                    ):
+                        self.charm.config_manager.set_admin_tls_conf(admin_secrets)
+                        self.charm.config_manager.set_node_tls_conf(
+                            CertType.UNIT_TRANSPORT,
+                            truststore_pwd=truststore_pwd,
+                            keystore_pwd=transport_keystore_pwd,
+                        )
+                        self.charm.config_manager.set_node_tls_conf(
+                            CertType.UNIT_HTTP,
+                            truststore_pwd=truststore_pwd,
+                            keystore_pwd=http_keystore_pwd,
+                        )
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready to prepare/restore TLS for start: %s", e)
+                event.defer()
+                return
+            except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
+                logger.warning("Failed to prepare/restore TLS for start: %s", e)
+                event.defer()
+                return
+
+        # Check if we can start. This means we will check
+        # - profiles requirements
+        # - blocking directives
+        # - admin user and security index configured/initialised
+        # - cluster health
+        if not all(
+            [
+                not self.check_profile_missing_requirements(),
+                self.charm.cluster_manager.can_service_start(),
+            ]
+        ):
+            logger.info("Conditions not met to start opensearch. Will retry next event.")
+            event.defer()
+            return
+
+        if not self.unit_allowed_to_start(event):
+            logger.info("The unit is not allowed to wait, the event need to be retried later.")
+            event.defer()
+            return
+
+        if event.ignore_lock:
+            # Only used for force upgrades and starting 1 data node on a large deployment
+            # where the main orchestrator has cluster-manager only nodes
+            logger.debug("Starting without lock")
+        elif not self.charm.lock_manager.acquired:
+            logger.debug("Lock to start opensearch not acquired. Will retry next event")
+            event.defer()
+            return
+
+        if self.charm.workload.is_failed():
+            self.charm.lock_manager.release()
+            self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
+            event.defer()
+            return
+
+        self.charm.status.set(CharmStatuses.WAITING_TO_START)
+
+        try:
+            # Retrieve the nodes of the cluster, needed to configure this node
+            nodes = self.charm.cluster_manager.get_nodes(False)
+
+            # Set the configuration of the node
+            # This calls set_node() which writes base config to opensearch.yml
+            self._set_node_conf(nodes)
+        except ContainerNotReadyError as e:
+            logger.info("Container not ready to configure node before start: %s", e)
+            event.defer()
+            return
+        except OpenSearchHttpError as e:
+            logger.debug("error getting the nodes: %s", e)
+            self.charm.lock_manager.release()
+            event.defer()
+            return
+
+        try:
+            self.charm.cluster_manager.start(
+                wait_until_http_200=(
+                    not self.charm.unit.is_leader()
+                    or self.charm.state.application.is_security_index_initialised
+                )
+            )
+            self._post_start_init(event)
+        except ContainerNotReadyError as e:
+            logger.info("Container not ready for start opensearch: %s", e)
+            event.defer()
+        except (
+            OpenSearchHttpError,
+            OpenSearchStartTimeoutError,
+            OpenSearchStartError,
+            OpenSearchUserMgmtError,
+            OpenSearchCmdError,
+            OpenSearchFileOperationError,
+        ) as e:
+            logger.debug("error of type: %s", type(e).__name__)
+            self.charm.lock_manager.release()
+            logger.warning(e)
+            self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
+            event.defer()
+        except OpenSearchNotFullyReadyError as e:
+            self.charm.lock_manager.release()
+            logger.debug("Node started but not fully ready: %s", e)
+            event.defer()
+        finally:
+            # In large deployments with cluster-manager-only-nodes, the startup might fail
+            # for the cluster-manager if a joining data node did not yet initialize the
+            # security index. We still want to update and broadcast the latest relation data.
+            # TODO:
+            # if self.opensearch_peer_cm.is_provider(typ="main"):
+            #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+            pass
 
     def _post_start_init(self, event: StartOpenSearch) -> None:
         """Initialisation post OpenSearch start"""
@@ -766,7 +802,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
-            self.stop_opensearch(restart=True)
+            self.stop_opensearch()
             logger.info("Restarting OpenSearch.")
         except ContainerNotReadyError as e:
             logger.info("Container not ready for restart: %s", e)
@@ -797,7 +833,7 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Restarting OpenSearch with ignore_lock=%s", ignore_lock)
         self.charm.start_opensearch_event.emit(ignore_lock=ignore_lock)
 
-    def stop_opensearch(self, *, restart: bool = False) -> None:
+    def stop_opensearch(self) -> None:
         """Stop OpenSearch service."""
         try:
             self.charm.status.set(CharmStatuses.SERVICE_IS_STOPPING)
@@ -811,7 +847,7 @@ class OpenSearchEventsHandler(Object):
                     if len(nodes) > 1:
                         pass
                     # 1. Add current node to the voting + alloc exclusions
-                    # self.opensearch_exclusions.add_current(voting=True, allocation=not restart)
+                    # self.opensearch_exclusions.add_current(voting=True, allocation=True)
                 except OpenSearchHttpError:
                     logger.debug(
                         "Failed to get online nodes, voting and alloc exclusions not added"

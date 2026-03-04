@@ -7,12 +7,12 @@
 
 import json
 import logging
-import os
 import random
 from typing import Any
 
 import requests
 import urllib3
+from charmlibs import pathops
 from tenacity import (
     RetryCallState,
     Retrying,
@@ -23,7 +23,12 @@ from tenacity import (
     wait_fixed,
 )
 
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    ContainerNotReadyError,
+    OpenSearchFileOperationError,
+    OpenSearchHttpError,
+)
+from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -33,7 +38,11 @@ class OpenSearchClient:
     """Handle OpenSearch Interaction with Server."""
 
     def __init__(
-        self, workload: BaseWorkload, host: str, port: int, admin_secret: str | None = None
+        self,
+        workload: BaseWorkload,
+        host: str,
+        port: int,
+        admin_secret: str | None = None,
     ):
         """Initialise the client.
 
@@ -43,105 +52,59 @@ class OpenSearchClient:
         self.port = port
         self.workload = workload
         self.admin_secret = admin_secret
-        self._chain_pem_cache_path: str | None = None
 
-    def _get_chain_pem_path(self) -> str | bool:
+    def _get_chain_pem_path(self) -> str | bool:  # noqa: C901
         """Get the path to chain.pem file for certificate verification.
 
-        For VM substrates: returns the direct filesystem path to chain.pem.
-        For K8s substrates: pulls chain.pem from the workload container and caches
-        it in the charm container's temporary directory for use by requests library.
+        For both VM and K8s, requests runs in the charm container, so we stage a copy of the
+        CA chain into the charm container filesystem.
+
+        Source of truth is the workload filesystem (workload.paths.certs/chain.pem). When the
+        workload container is temporarily unreachable, we fall back to the last
+        staged copy in the charm container.
 
         Returns:
             str | bool: Path to chain.pem file accessible from the charm container, or
-            False to disable TLS verification when the CA chain is not available yet.
+            False / raises when the CA chain is not available yet.
         """
+        staged_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        staged_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        staged_path = staged_dir / "chain.pem"
+
         chain_path = self.workload.paths.certs / "chain.pem"
-        chain_path_str = str(chain_path)
+        chain_path_str = path_as_posix(chain_path)
 
-        # For VM substrates, return the direct path
-        # Check if container attribute exists (VM workloads don't have container)
-        try:
-            container = self.workload.container
-        except AttributeError:
-            # VM substrate, no container attribute.
-            if os.path.exists(chain_path_str):
-                return chain_path_str
-            logger.warning("chain.pem not found at %s; disabling TLS verification", chain_path_str)
-            return False
-
-        # For K8s substrates, check cache first
-        if self._chain_pem_cache_path and os.path.exists(self._chain_pem_cache_path):
-            return self._chain_pem_cache_path
-
-        # ensure container is connected before attempting to pull
-        if not container.can_connect():
-            logger.warning(
-                "Container not connected, cannot pull chain.pem. "
-                "Disabling TLS verification until chain.pem becomes available."
-            )
-            return False
-
-        # Pull chain.pem from workload container and cache it
-        try:
-            return self._pull_and_cache_chain_pem(chain_path_str)
-        except (OSError, PermissionError, FileNotFoundError):
-            return False
-
-    def _pull_and_cache_chain_pem(self, container_path: str) -> str:
-        """Pull chain.pem from workload container and cache it in charm container.
-
-        Args:
-            container_path: Path to chain.pem inside the workload container.
-
-        Returns:
-            str: Path to cached chain.pem file in charm container.
-
-        Raises:
-            OSError: If file operations fail.
-            PermissionError: If file permissions prevent access.
-            FileNotFoundError: If chain.pem does not exist in workload container.
-        """
-        try:
-            # Use pathops ContainerPath.read_text() which handles pull internally
-            chain_path = self.workload.paths.certs / "chain.pem"
-            chain_content = chain_path.read_text()
-
-            # Write to temporary file in charm container
-            cache_dir = "/tmp/opensearch-certs"
-            os.makedirs(cache_dir, mode=0o755, exist_ok=True)
-            cache_path = os.path.join(cache_dir, "chain.pem")
-
-            with open(cache_path, "w", encoding="utf-8") as f:
-                f.write(chain_content)
-            os.chmod(cache_path, 0o644)
-
-            self._chain_pem_cache_path = cache_path
-            logger.debug("Successfully cached chain.pem from workload container to %s", cache_path)
-            return cache_path
-
-        except (OSError, PermissionError, FileNotFoundError) as e:
-            logger.warning(
-                "Failed to pull chain.pem from container: %s. "
-                "Certificate verification may fail.",
-                e,
-            )
-            raise
-
-    def invalidate_chain_pem_cache(self) -> None:
-        """Invalidate the cached chain.pem file.
-
-        This is called when chain.pem is updated in the workload container.
-        """
-        if self._chain_pem_cache_path:
+        if self.workload.workload_present:
             try:
-                if os.path.exists(self._chain_pem_cache_path):
-                    os.remove(self._chain_pem_cache_path)
-            except (OSError, PermissionError) as e:
+                if chain_path.exists():
+                    chain_content = self.workload.read_text(chain_path)
+                    if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
+                        staged_path.write_text(chain_content)
+                        staged_path.chmod(0o644)
+                        return path_as_posix(staged_path)
+            except (ContainerNotReadyError, OpenSearchFileOperationError) as e:
                 logger.warning(
-                    f"Failed to remove cached chain.pem file: {self._chain_pem_cache_path}. Error: {e}"
+                    "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
+                    chain_path_str,
+                    e,
                 )
-            self._chain_pem_cache_path = None
+
+        # workload not ready/unreachable or chain.pem missing, fall back to last staged copy.
+        if staged_path.exists():
+            try:
+                cached = staged_path.read_text()
+            except OSError:
+                cached = ""
+            if "BEGIN CERTIFICATE" in cached:
+                return path_as_posix(staged_path)
+
+        # wait until workload becomes available again.
+        if not self.workload.workload_present:
+            raise OpenSearchHttpError(
+                response_text="Workload not ready and no staged chain.pem available yet"
+            )
+
+        return False
 
     def get_node_id(self, unit_name: str) -> str | None:
         """Get the OpenSearch node id corresponding to the unit.

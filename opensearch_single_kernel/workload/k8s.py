@@ -15,9 +15,6 @@ from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container
 from ops.model import ModelError
-from ops.pebble import (
-    CheckDict,
-)
 from ops.pebble import ConnectionError as PebbleConnectionError
 from ops.pebble import Error as PebbleError
 from ops.pebble import (
@@ -27,12 +24,9 @@ from ops.pebble import (
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
-    CHMOD_CERTIFICATES,
-    CHMOD_SECURE,
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
     DIR_PERMISSIONS_SECURE,
-    OPENSEARCH_HTTP_PORT,
     OPENSEARCH_RUN_AS_GROUP,
     OPENSEARCH_RUN_AS_USER,
     OPENSEARCH_SERVICE_NAME,
@@ -48,7 +42,10 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStartError,
     OpenSearchStopError,
 )
-from opensearch_single_kernel.utils.helpers import mask_sensitive_information
+from opensearch_single_kernel.utils.helpers import (
+    mask_sensitive_information,
+    path_as_posix,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 from opensearch_single_kernel.workload.base import Paths as BasePaths
 
@@ -56,44 +53,6 @@ if TYPE_CHECKING:
     from typing import Callable
 
 logger = logging.getLogger(__name__)
-
-
-def stat_uid_gid(container: Container, path: str) -> str | None:
-    """Return current owner uid:gid for a path, or None if unavailable."""
-    try:
-        out, _ = container.exec(
-            ["stat", "-c", "%u:%g", path],
-            encoding="utf-8",
-            combine_stderr=True,
-        ).wait_output()
-        return out.strip()
-    except (PebbleError, ModelError):
-        return None
-
-
-def chown_if_needed(
-    container: Container, path: str, desired_uid_gid: str, recursive: bool
-) -> bool:
-    """Chown path to desired uid:gid if it doesn't already match.
-
-    Returns:
-        bool: True if a change was applied, False otherwise.
-    """
-    current = stat_uid_gid(container, path)
-    if current == desired_uid_gid:
-        return False
-
-    cmd = ["chown"]
-    if recursive:
-        cmd.append("-R")
-    cmd.extend([desired_uid_gid, path])
-    try:
-        container.exec(cmd, encoding="utf-8", combine_stderr=True).wait_output()
-        logger.info("Set ownership %s on %s (was %s)", desired_uid_gid, path, current)
-        return True
-    except (PebbleError, ModelError) as e:
-        logger.warning("Failed to chown %s to %s: %s", path, desired_uid_gid, e)
-        return False
 
 
 class K8sPaths(BasePaths):
@@ -255,159 +214,26 @@ class K8sWorkload(BaseWorkload):
     def _ensure_required_directories(self) -> None:
         """Ensure required directories exist for OpenSearch to run.
 
-        Creates:
-        - /var/lib/opensearch/data (data directory)
-        - /var/log/opensearch/logs (logs directory)
-        - /etc/opensearch (config directory, if not exists)
-        - /etc/opensearch/certificates (certificates directory - critical for TLS)
-        - /usr/share/opensearch/logs (OpenSearch home logs directory)
-
         This method is idempotent and is intended to be called from the
         K8s pebble-ready hook before starting the service.
         """
-        if not self.container.can_connect():
-            logger.debug("Container not ready, skipping directory creation")
-            return
+        user = str(OPENSEARCH_RUN_AS_USER)
+        group = str(OPENSEARCH_RUN_AS_GROUP)
+        required_dirs: list[tuple[PathProtocol, int]] = [
+            (self.paths.data, DIR_PERMISSIONS_SECURE),
+            (self.paths.data_dir, DIR_PERMISSIONS_SECURE),
+            (self.paths.logs, DIR_PERMISSIONS_READONLY),
+            (self.paths.logs_dir, DIR_PERMISSIONS_SECURE),
+            (self.paths.conf, DIR_PERMISSIONS_READONLY),
+            (self.paths.certs, DIR_PERMISSIONS_CERTIFICATES),
+            (self.paths.home / "logs", DIR_PERMISSIONS_READONLY),
+        ]
 
-        try:
-            self._ensure_data_directory()
-            self._ensure_logs_directory()
-            self._ensure_config_directory()
-            self._ensure_certificates_directory()
-            self._ensure_home_logs_directory()
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.warning("Failed to create required directories: %s", e)
-            # don't raise, directories might already exist
-
-    def _ensure_data_directory(self) -> None:
-        """Create data directory: /var/lib/opensearch/data.
-
-        Raises:
-            PebbleError: if directory creation fails.
-        """
-        data_dir = str(self.paths.data / "data")
-        self.container.make_dir(data_dir, make_parents=True, permissions=0o755)
-        logger.debug("Ensured data directory exists: %s", data_dir)
-
-    def _ensure_logs_directory(self) -> None:
-        """Create logs directory (/var/log/opensearch/logs).
-
-        Ownership/permissions are arranged explicitly in the K8s pebble-ready hook.
-        """
-        logs_dir = str(self.paths.logs / "logs")
-        logs_parent = str(self.paths.logs)
-        self.container.make_dir(
-            logs_parent, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
-        )
-        self.container.make_dir(logs_dir, make_parents=True, permissions=DIR_PERMISSIONS_SECURE)
-        logger.debug("Ensured logs directory exists: %s", logs_dir)
-
-    def _ensure_config_directory(self) -> None:
-        """Create config directory: /etc/opensearch."""
-        conf_dir = str(self.paths.conf)
-        self.container.make_dir(conf_dir, make_parents=True, permissions=DIR_PERMISSIONS_READONLY)
-        logger.debug("Ensured config directory exists: %s", conf_dir)
-
-    def _ensure_certificates_directory(self) -> None:
-        """Create certificates directory: /etc/opensearch/certificates.
-
-        TLS manager writes *.p12 and chain.pem files here.
-        This is important for TLS certificate storage.
-
-        """
-        certs_dir = str(self.paths.certs)
-
-        # try using container.make_dir first
-        try:
-            self.container.make_dir(
-                certs_dir, make_parents=True, permissions=DIR_PERMISSIONS_CERTIFICATES
-            )
-            logger.debug("Created certificates directory via make_dir: %s", certs_dir)
-            return
-        except (PebbleError, FileExistsError) as e:
-            # directory might already exist, verify it
+        for dir_path, mode in required_dirs:
             try:
-                if self.container.exists(certs_dir):
-                    logger.debug("Certificates directory already exists: %s", certs_dir)
-                    return
-                logger.debug("make_dir failed and directory doesn't exist, trying fallback: %s", e)
-            except Exception as check_error:
-                logger.debug(
-                    "Could not verify directory existence, trying fallback: %s", check_error
-                )
-
-        # fallback: use mkdir command if make_dir failed
-        self._create_certificates_directory_fallback(certs_dir)
-
-    def _create_certificates_directory_fallback(self, certs_dir: str) -> None:
-        """Create certificates directory using mkdir command as fallback.
-
-        Args:
-            certs_dir: path to certificates directory.
-        """
-        try:
-            self.run_cmd("mkdir -p %s" % certs_dir)
-            self.run_cmd("chmod %s %s" % (CHMOD_CERTIFICATES, certs_dir))
-            logger.info("Created certificates directory via fallback mkdir: %s", certs_dir)
-        except Exception as fallback_error:
-            logger.warning(
-                "Failed to create certificates directory via fallback: %s", fallback_error
-            )
-            # don't raise, directory creation will be retried on next hook
-
-    def _ensure_home_logs_directory(self) -> None:
-        """Create OpenSearch home logs directory: /usr/share/opensearch/logs.
-
-        OpenSearch JVM options reference logs/gc.log relative to OPENSEARCH_HOME.
-        This directory must exist and be writable for GC logging to work.
-
-        Raises:
-            PebbleError: if directory creation fails.
-        """
-        opensearch_home_logs = str(self.paths.home / "logs")
-        self.container.make_dir(
-            opensearch_home_logs, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
-        )
-        logger.debug("Ensured OpenSearch home logs directory exists: %s", opensearch_home_logs)
-
-    def _arrange_directory_permissions(self) -> None:
-        """Arrange ownership and permissions for OpenSearch directories (K8s only).
-
-        This should run from the pebble-ready hook before starting OpenSearch.
-        """
-        desired_uid_gid = f"{OPENSEARCH_RUN_AS_USER}:{OPENSEARCH_RUN_AS_GROUP}"
-        data_dir = str(self.paths.data)
-        logs_dir = str(self.paths.logs)
-        home_logs_dir = str(self.paths.home / "logs")
-        certs_dir = str(self.paths.certs)
-
-        # These are the paths that are commonly backed by runtime mounts (PVC/emptyDir/secret),
-        # so ROCK build-time ownership does not reliably apply.
-        changed = False
-        changed |= chown_if_needed(self.container, data_dir, desired_uid_gid, recursive=True)
-        changed |= chown_if_needed(self.container, logs_dir, desired_uid_gid, recursive=True)
-        changed |= chown_if_needed(self.container, home_logs_dir, desired_uid_gid, recursive=True)
-        chown_if_needed(self.container, certs_dir, desired_uid_gid, recursive=True)
-
-        # Only apply recursive chmod if we actually had to fix ownership
-        if changed:
-            try:
-                self.container.exec(
-                    ["chmod", "-R", CHMOD_SECURE, data_dir, logs_dir, home_logs_dir],
-                    encoding="utf-8",
-                    combine_stderr=True,
-                ).wait_output()
-            except (PebbleError, ModelError) as e:
-                logger.warning("Failed to chmod OpenSearch directories: %s", e)
-
-        try:
-            self.container.exec(
-                ["chmod", CHMOD_CERTIFICATES, certs_dir],
-                encoding="utf-8",
-                combine_stderr=True,
-            ).wait_output()
-        except (PebbleError, ModelError) as e:
-            logger.warning("Failed to chmod certificates directory %s: %s", certs_dir, e)
+                dir_path.mkdir(mode=mode, parents=True, exist_ok=True, user=user, group=group)
+            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
+                logger.warning("Failed to ensure directory %s exists: %s", dir_path, e)
 
     def _configure_pebble_plan(self, *, enable_checks: bool = False) -> None:
         """Configure the Pebble plan with the OpenSearch service definition.
@@ -420,18 +246,11 @@ class K8sWorkload(BaseWorkload):
         - Runs OpenSearch as a non-root user/group defined in the Pebble layer
         """
         try:
-            if not self.container.can_connect():
-                logger.debug("Container not ready to configure pebble plan")
-                return
-
             opensearch_cmd = self._determine_opensearch_command()
-            health_check = self._build_readiness_check() if enable_checks else None
-            layer_dict = self._build_pebble_layer_dict(opensearch_cmd, health_check)
+            layer_dict = self._build_pebble_layer_dict(opensearch_cmd)
 
             layer = Layer(layer_dict)
             self.container.add_layer(self.SERVICE_NAME, layer, combine=True)
-
-            self._verify_certificates_directory_after_plan_update()
 
             logger.info("Configured pebble plan for %s service", self.SERVICE_NAME)
 
@@ -449,11 +268,10 @@ class K8sWorkload(BaseWorkload):
         try:
             if not self.container.can_connect():
                 # transient condition: Pebble/socket isn't ready yet.
-                # Raise ContainerNotReadyError so hooks defer cleanly
+                # raise ContainerNotReadyError so hooks defer cleanly
                 raise ContainerNotReadyError("Container is not ready")
 
             self._ensure_required_directories()
-            self._arrange_directory_permissions()
             self._configure_pebble_plan(enable_checks=False)
         except (PebbleConnectionError, ModelError) as e:
             logger.error("Failed to prepare container on pebble-ready: %s", e)
@@ -468,74 +286,35 @@ class K8sWorkload(BaseWorkload):
             str: command string to execute OpenSearch.
 
         Raises:
-            PebbleError: if container.exists() check fails.
+            OpenSearchFileOperationError: if filesystem checks fail.
         """
-        opensearch_bin = str(self.paths.bin)
-        opensearch_script = "%s/opensearch.sh" % opensearch_bin
+        opensearch_bin = self.paths.bin
+        opensearch_script = opensearch_bin / "opensearch.sh"
 
-        if self.container.exists(opensearch_script):
-            return "bash %s" % opensearch_script
+        try:
+            if opensearch_script.exists():
+                return "bash %s" % path_as_posix(opensearch_script)
+        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
+            raise OpenSearchFileOperationError(e) from e
 
         # fallback to direct opensearch binary if script doesn't exist
-        opensearch_cmd = "%s/opensearch" % opensearch_bin
-        logger.debug("opensearch.sh not found, using direct binary: %s", opensearch_cmd)
-        return opensearch_cmd
+        opensearch_cmd = opensearch_bin / "opensearch"
+        opensearch_cmd_str = path_as_posix(opensearch_cmd)
+        logger.debug("opensearch.sh not found, using direct binary: %s", opensearch_cmd_str)
+        return opensearch_cmd_str
 
-    def _build_readiness_check(self) -> CheckDict | None:
-        """Build readiness check for OpenSearch service.
-
-        Readiness check verifies TLS is actually working, not just port open.
-
-        Returns:
-            CheckDict or None: readiness check configuration, or None if DNS name unavailable.
-
-        """
-        dns_name = self.get_host_public_ip()
-        if not dns_name:
-            logger.warning(
-                "Could not get DNS name for readiness check, skipping health check configuration"
-            )
-            return None
-
-        # pure TLS handshake + certificate verification.
-        # this avoids generating unauthenticated HTTP traffic
-        # we verify the server certificate chain against the CA chain we write to chain.pem.
-        certs_dir = str(self.paths.certs)
-        command = (
-            "sh -c "
-            "'openssl s_client "
-            "-connect %s:%s "
-            "-servername %s "
-            "-CAfile %s/chain.pem "
-            "-verify_return_error "
-            "</dev/null 2>/dev/null "
-            '| grep -q "Verify return code: 0 (ok)"\''
-        ) % (dns_name, OPENSEARCH_HTTP_PORT, dns_name, certs_dir)
-
-        return {
-            "override": "replace",
-            "level": "ready",
-            "exec": {
-                "command": command,
-                "service-context": OPENSEARCH_SERVICE_NAME,
-            },
-        }
-
-    def _build_pebble_layer_dict(
-        self, opensearch_cmd: str, health_check: CheckDict | None
-    ) -> dict:
+    def _build_pebble_layer_dict(self, opensearch_cmd: str) -> dict:
         """Build Pebble layer dictionary with OpenSearch service configuration.
 
         Args:
             opensearch_cmd: command to execute OpenSearch.
-            health_check: Optional readiness check configuration.
 
         Returns:
             dict: pebble layer dictionary ready for Layer() constructor.
         """
-        opensearch_home = str(self.paths.home)
-        opensearch_conf = str(self.paths.conf)
-        java_home = str(self.paths.jdk)
+        opensearch_home = path_as_posix(self.paths.home)
+        opensearch_conf = path_as_posix(self.paths.conf)
+        java_home = path_as_posix(self.paths.jdk)
 
         # build PATH with Java bin, OpenSearch bin, and system paths
         path_value = (
@@ -566,63 +345,7 @@ class K8sWorkload(BaseWorkload):
             },
         }
 
-        # only add checks section and the on-check-failure policy
-        if health_check is not None:
-            layer_dict["checks"] = {"readiness": health_check}
-            # if readiness check fails, don't do any action, just log
-            layer_dict["services"][self.SERVICE_NAME]["on-check-failure"] = {"readiness": "ignore"}
-
         return layer_dict
-
-    def _verify_certificates_directory_after_plan_update(self) -> None:
-        """Verify certificates directory exists after pebble plan update.
-
-        Container restarts can cause directories to disappear, so we re-check.
-        This is especially important for /etc/opensearch/certificates which is created dynamically.
-        """
-        certs_dir = str(self.paths.certs)
-        try:
-            if not self.container.exists(certs_dir):
-                logger.warning(
-                    "Certificates directory %s missing after pebble plan update, recreating.",
-                    certs_dir,
-                )
-                if self._recreate_certificates_directory(certs_dir):
-                    logger.info(
-                        "Recreated certificates directory after pebble plan update: %s", certs_dir
-                    )
-        except Exception as verify_error:
-            logger.debug(
-                "Could not verify certificates directory after pebble plan update: %s",
-                verify_error,
-            )
-
-    def _recreate_certificates_directory(self, certs_dir: str) -> bool:
-        """Recreate certificates directory using multiple fallback methods.
-
-        Args:
-            certs_dir: path to certificates directory.
-
-        Returns:
-            bool: True if directory was successfully created, False otherwise.
-
-        """
-        # try container.make_dir first
-        try:
-            self.container.make_dir(
-                certs_dir, make_parents=True, permissions=DIR_PERMISSIONS_CERTIFICATES
-            )
-            return True
-        except (PebbleError, FileExistsError):
-            pass
-
-        # fallback: use mkdir command
-        try:
-            self.run_cmd("mkdir -p %s" % certs_dir)
-            self.run_cmd("chmod %s %s" % (CHMOD_CERTIFICATES, certs_dir))
-            return True
-        except Exception:
-            return False
 
     @override
     def install(self) -> None:
@@ -674,94 +397,38 @@ class K8sWorkload(BaseWorkload):
         Raises:
             PebbleError: if file operations fail.
         """
-        temp_dir = self._get_temp_directory(dir)
-        self._ensure_temp_directory_exists(temp_dir)
+        # PathProtocol exposes text operations.
+        temp_dir_path = dir or self.paths.tmp
+        try:
+            temp_dir_path.mkdir(
+                mode=DIR_PERMISSIONS_READONLY,
+                parents=True,
+                exist_ok=True,
+            )
+        except PebbleConnectionError as e:
+            raise ContainerNotReadyError(
+                f"Container not ready to create temp dir {temp_dir_path}: {e}"
+            ) from e
+        except (PebbleError, ModelError, OSError, ValueError) as e:
+            raise OpenSearchFileOperationError(e) from e
 
-        file_path_str, file_path = self._build_temp_file_path(temp_dir, suffix)
+        temp_filename = "temp_%s%s" % (uuid.uuid4().hex, suffix or "")
+        file_path = temp_dir_path / temp_filename
 
         try:
-            if data:
-                self._write_temp_file_data(file_path, data, encoding)
-            # temp_file yields the PathProtocol object so callers can use it within the with block,
-            # and cleanup happens automatically when the block exits.
+            if data is not None:
+                file_path.write_text(data)
             yield file_path
         finally:
             if delete:
-                self._cleanup_temp_file(file_path_str)
-
-    def _get_temp_directory(self, dir: PathProtocol | None) -> str:
-        """Get temporary directory path.
-
-        Args:
-            dir: Optional directory path. If None, uses default tmp directory.
-
-        Returns:
-            str: temporary directory path as string.
-        """
-        if dir is None:
-            return str(self.paths.tmp)
-        return str(dir)
-
-    def _ensure_temp_directory_exists(self, temp_dir: str) -> None:
-        """Ensure temporary directory exists in container.
-
-        Args:
-            temp_dir: directory path to ensure exists.
-        """
-        try:
-            self.container.make_dir(
-                temp_dir, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
-            )
-        except (PebbleError, FileExistsError) as e:
-            logger.debug("Directory might already exist (ignored): %s. Error: %s", temp_dir, e)
-
-    def _build_temp_file_path(self, temp_dir: str, suffix: str | None) -> tuple[str, PathProtocol]:
-        """Build temporary file path.
-
-        Args:
-            temp_dir: directory path for temporary file.
-            suffix: Optional suffix to append to filename.
-
-        Returns:
-            tuple[str, PathProtocol]: (file_path_str, file_path) tuple.
-        """
-        temp_filename = "temp_%s%s" % (uuid.uuid4().hex, suffix or "")
-        file_path_str = "%s/%s" % (temp_dir, temp_filename)
-        file_path = self.root / file_path_str.lstrip("/")
-        return file_path_str, file_path
-
-    def _write_temp_file_data(
-        self, file_path: PathProtocol, data: str | bytes, encoding: str | None
-    ) -> None:
-        """Write data to temporary file in container.
-
-        Uses pathops ContainerPath.write_text() which handles push internally.
-
-        Args:
-            file_path: PathProtocol object representing the file path.
-            data: string/bytes data to write.
-            encoding: optional encoding for bytes decoding (defaults to utf-8).
-        """
-        # ensure parent directory exists (consistent with write_text() pattern)
-        self._ensure_parent_dir(file_path)
-        # ContainerPath.write_text() does not accept an encoding= kwarg.
-        # Decode bytes and then push text content.
-        text = (
-            data if isinstance(data, str) else data.decode(encoding or "utf-8", errors="replace")
-        )
-        file_path.write_text(text)
-
-    def _cleanup_temp_file(self, file_path_str: str) -> None:
-        """Delete temporary file from container.
-
-        Args:
-            file_path_str: file path as string.
-
-        """
-        try:
-            self.container.remove_path(file_path_str, recursive=True)
-        except (PebbleError, ModelError, FileNotFoundError) as e:
-            logger.warning("Failed to delete temp file %s: %s", file_path_str, e)
+                try:
+                    file_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except PebbleConnectionError as e:
+                    logger.warning("Failed to delete temp file %s: %s", file_path, e)
+                except (PebbleError, ModelError, OSError, ValueError) as e:
+                    logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
     def run_script(self, script_name: str, args: str = None):
@@ -777,9 +444,6 @@ class K8sWorkload(BaseWorkload):
         Raises:
             OpenSearchCmdError: if container is not connected or script execution fails.
         """
-        if not self.container.can_connect():
-            raise OpenSearchCmdError(cmd=script_name, out="", err="Container not connected")
-
         script_path = "%s/%s" % (self.paths.home, script_name)
         full_command = self._build_script_command(script_path, args)
         env_setup = self._build_script_environment(full_command)
@@ -820,10 +484,10 @@ class K8sWorkload(BaseWorkload):
         Returns:
             str: environment setup string with exports and command.
         """
-        java_home = str(self.paths.jdk)
-        opensearch_home = str(self.paths.home)
-        opensearch_bin = str(self.paths.bin)
-        opensearch_conf = str(self.paths.conf)
+        java_home = path_as_posix(self.paths.jdk)
+        opensearch_home = path_as_posix(self.paths.home)
+        opensearch_bin = path_as_posix(self.paths.bin)
+        opensearch_conf = path_as_posix(self.paths.conf)
 
         # build PATH with Java bin, OpenSearch bin, and system paths
         path_value = "%s/bin:%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" % (
@@ -936,28 +600,6 @@ class K8sWorkload(BaseWorkload):
             logger.debug("Failed to get FQDN via 'getent hosts', using hostname. Error: %s", e)
             return False
 
-    def _get_services_dict(self) -> dict:
-        """Get services as a dictionary handling different return types from get_services().
-
-        Returns:
-            dict: dictionary mapping service names to ServiceInfo objects.
-        """
-        all_services = self.container.get_services()
-        services = {}
-        for svc in all_services:
-            if hasattr(svc, "name"):
-                # normal case: service is a ServiceInfo object
-                services[svc.name] = svc
-            elif isinstance(svc, str):
-                # fallback:if it is a string, try to get the service by name
-                try:
-                    svc_info = self.container.get_services([svc])
-                    if svc_info and len(svc_info) > 0:
-                        services[svc] = svc_info[0]
-                except Exception:
-                    continue
-        return services
-
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the OpenSearch service is running in the container.
@@ -972,9 +614,10 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            services = self._get_services_dict()
-            if (service := services.get(self.SERVICE_NAME)) is None:
+            services = self.container.get_services([self.SERVICE_NAME])
+            if not services:
                 return False
+            service = services[0]
 
             if service.current == ServiceStatus.ACTIVE:
                 return True
@@ -1015,10 +658,10 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            # get services dict
-            services = self._get_services_dict()
-            if (service := services.get(self.SERVICE_NAME)) is None:
+            services = self.container.get_services([self.SERVICE_NAME])
+            if not services:
                 return False
+            service = services[0]
 
             return service.current == ServiceStatus.ERROR
         except (PebbleConnectionError, PebbleError, ModelError, KeyError) as e:
@@ -1042,11 +685,8 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            # get services
-            services = self._get_services_dict()
-            if (
-                service := services.get(self.SERVICE_NAME)
-            ) and service.current == ServiceStatus.ACTIVE:
+            services = self.container.get_services([self.SERVICE_NAME])
+            if services and services[0].current == ServiceStatus.ACTIVE:
                 logger.info("The %s service is already started.", self.SERVICE_NAME)
                 return
 
@@ -1180,7 +820,7 @@ class K8sWorkload(BaseWorkload):
         Args:
             current_value: Current property value.
             required_value: Required property value.
-            comparison_op: Comparison operator ("<" or ">").
+            comparison_op: Comparison operator (< or >).
 
         Returns:
             bool: True if requirement is violated, False otherwise.
@@ -1502,28 +1142,6 @@ class K8sWorkload(BaseWorkload):
             self._paths = K8sPaths(root_path)
         return self._paths
 
-    def _ensure_parent_dir(self, path: PathProtocol) -> None:
-        """Ensure parent directory exists for a file path inside the container.
-
-        Args:
-            path: PathProtocol object whose parent directory should be created
-
-        Raises:
-            ContainerNotReadyError: If container is not ready
-        """
-        if not self.container.can_connect():
-            raise ContainerNotReadyError("Container not ready to create directory")
-
-        parent = str(path.parent)
-        # containerPath.parent is also a ContainerPath, gives /etc/opensearch etc
-        try:
-            self.container.make_dir(
-                parent, make_parents=True, permissions=DIR_PERMISSIONS_READONLY
-            )
-        except (PebbleError, FileExistsError):
-            # directory might already exist, which is fine
-            pass
-
     @override
     def write_text(self, content: str, path: pathops.PathProtocol) -> None:  # type: ignore[override]
         """K8s-safe write, ensure parent dir exists and handle pebble readiness.
@@ -1541,12 +1159,12 @@ class K8sWorkload(BaseWorkload):
             OpenSearchFileOperationError: For other file operation errors
         """
         try:
-            if not self.container.can_connect():
-                raise ContainerNotReadyError("Container not ready for write_text")
-
             # ensure parent directory exists before writing
-            self._ensure_parent_dir(path)
-
+            path.parent.mkdir(
+                mode=DIR_PERMISSIONS_READONLY,
+                parents=True,
+                exist_ok=True,
+            )
             # use ContainerPath API to write the file
             path.write_text(content)
         except PebbleConnectionError as e:

@@ -398,8 +398,8 @@ class ClusterState(Object):
     def node_name(self) -> str | None:
         """Opensearch node.name for the current unit.
 
-        On K8s, OpenSearch defaults to using the container hostname as node name and the charm
-        configures node.name accordingly.
+        On K8s, OpenSearch defaults to using the container hostname
+        as node name and the charm configures node.name accordingly.
         On VM, we keep using the formatted Juju unit name.
         """
         if self.substrate == Substrates.K8S:

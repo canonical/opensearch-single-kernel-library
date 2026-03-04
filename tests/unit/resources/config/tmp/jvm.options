@@ -78,5 +78,4 @@
 
 # Explicitly allow security manager (https://bugs.openjdk.java.net/browse/JDK-8270380)
 18-:-Djava.security.manager=allow
-
 -Djdk.tls.client.protocols=TLSv1.2

@@ -13,6 +13,7 @@ from time import time_ns
 from typing import TYPE_CHECKING, Any
 
 import bcrypt
+from charmlibs.pathops import PathProtocol
 from cryptography import x509
 from ops import Unit
 
@@ -26,6 +27,16 @@ from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+
+def path_as_posix(path: PathProtocol) -> str:
+    """Convert a PathProtocol to a POSIX path string.
+
+    `PathProtocol` implementations aren't guaranteed to be `pathlib.Path`, so prefer `.as_posix()`
+    when available and fall back to `str()` otherwise.
+    """
+    as_posix = getattr(path, "as_posix", None)
+    return as_posix() if callable(as_posix) else str(path)
 
 
 def format_unit_name(unit: Unit | str, app: App) -> str:

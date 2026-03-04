@@ -86,7 +86,7 @@
 # Require explicit names when deleting indices:
 #
 #action.destructive_requires_name: true
-node.attr.app_id: 211cc649-0649-4f93-9f5a-be8d6c0eba90/opensearch
+node.attr.app_id: add7c33d-5fde-48e7-a38f-5f278b66923a/opensearch
 node.attr.temp: hot
 node.roles:
 - cluster_manager
@@ -124,3 +124,4 @@ plugins.security.restapi.roles_enabled:
 plugins.security.unsupported.restapi.allow_securityconfig_modification: true
 
 plugins.security.ssl_cert_reload_enabled: true
+

@@ -30,7 +30,13 @@ class BaseManager:
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)
         # use a stable address for TLS hostname verification (DNS on K8s, public-address on VM).
         host = self.workload.get_host_public_ip() or self.state.host_ip
-        return OpenSearchClient(self.workload, host, OPENSEARCH_HTTP_PORT, admin_secret)
+
+        return OpenSearchClient(
+            self.workload,
+            host,
+            OPENSEARCH_HTTP_PORT,
+            admin_secret,
+        )
 
     @property
     def alt_hosts(self) -> Optional[List[str]]:
