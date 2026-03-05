@@ -40,7 +40,7 @@ class BaseManager:
         all_hosts = list(all_units_ips.values())
 
         if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([Node.from_dict(node).ip for node in nodes_conf.values()])
+            all_hosts.extend([node.ip for node in nodes_conf.values()])
 
         # TODO: Add getting relation data form state
         # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():

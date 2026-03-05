@@ -149,7 +149,7 @@ class TlsManager(BaseManager):
                 merge=True,
             )
 
-    def _get_subject(self, cert_type: CertType) -> str:
+    def _get_certificate_subject(self, cert_type: CertType) -> str:
         """Get subject of the certificate."""
         if cert_type == CertType.APP_ADMIN:
             cn = "admin"
@@ -221,7 +221,7 @@ class TlsManager(BaseManager):
         if password is not None:
             password = password.encode("utf-8")
 
-        subject = self._get_subject(cert_type)
+        subject = self._get_certificate_subject(cert_type)
         organization = self.state.application.deployment_desc.config.cluster_name
         csr = generate_csr(
             add_unique_id_to_subject_name=False,
