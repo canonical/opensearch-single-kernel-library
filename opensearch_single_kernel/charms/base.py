@@ -75,7 +75,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.health_manager = HealthManager(self.state, self.workload)
         self.config_manager = ConfigManager(self.state, self.workload)
         self.keystore_manager = KeystoreManager(self.state, self.workload)
-        self.plugin_manager = PluginManager(self.state)
+        self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
         self.backup_manager = BackupManager(self.state, self.workload)
 
