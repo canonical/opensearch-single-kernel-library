@@ -431,7 +431,34 @@ class BackupEventsHandler(Object):
             f"[snapshots] precheck: type={object_storage_type} repo={repo_name} alt_hosts={self.charm.backup_manager.alt_hosts}"
         )
 
-        # TODO: Handle large deployments
+        pcluster_types = {
+            ObjectStorageType.S3_PCLUSTER,
+            ObjectStorageType.AZURE_PCLUSTER,
+            ObjectStorageType.GCS_PCLUSTER,
+        }
+        if object_storage_type not in pcluster_types:
+            try:
+                if (
+                    not (storage_type := self.charm.state.storage_type)
+                    or not (
+                        conn_inf := self.get_storage_connection_info_from_relation(storage_type)
+                    )
+                    or not self.charm.backup_manager.storage_config_from_connection_info(
+                        storage_type, conn_inf
+                    )
+                ):
+                    return "Object storage configuration not ready."
+                if not self.charm.backup_manager.opensearch_client.is_repository_created(
+                    object_storage_type
+                ):
+                    return "The opensearch repository could not be created yet."
+            except OpenSearchObjectStorageConfigValidationError:
+                if self.charm.unit.is_leader():
+                    self.charm.status.set(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
+                return "Object storage credentials are invalid."
+            except OpenSearchHttpError as e:
+                return f"Action failed with: {str(e)}."
+
         if not report_running_operations:
             return
 
