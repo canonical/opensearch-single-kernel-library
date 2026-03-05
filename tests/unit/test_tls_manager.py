@@ -747,9 +747,6 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
 
-    update_request_ca_bundle = mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle"
-    )
     split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.run_cmd"
@@ -796,8 +793,6 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     split_ca_chain.return_value = ["new_ca"]
     harness.charm.tls_events._on_certificate_available(event_mock)
-
-    update_request_ca_bundle.assert_called_once()
 
     # Old CA cert is saved with corresponding alias, new CA cert added to keystore
     assert run_cmd.call_count == 3
@@ -1423,7 +1418,6 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     remove_ca_from_request_bundle = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager._remove_ca_from_request_bundle"
     )
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )
@@ -1594,7 +1588,6 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
     mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{substrate.upper()}Workload.temp_file"
     )

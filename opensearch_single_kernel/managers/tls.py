@@ -306,25 +306,6 @@ class TlsManager(BaseManager):
 
         return None
 
-    def update_request_ca_bundle(self, ca_chain: str | None = None) -> None:
-        """Create a new chain.pem file for requests module"""
-        logger.debug("Updating requests TLS CA bundle")
-        if ca_chain is None:
-            admin_secret = self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
-            ca_chain = admin_secret.get("chain")
-
-        # we store the pem format to make it easier for the python requests lib
-        chain_path = self.workload.paths.certs / "chain.pem"
-        if parent_dir_path := chain_path.parent:
-            self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
-
-        # if the chain.pem already contains the current CA chain, we can skip rewriting it
-        bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
-        if ca_chain not in bundle_content:
-            self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
-
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
         bundle_path = self.workload.paths.certs / "chain.pem"
@@ -469,12 +450,6 @@ class TlsManager(BaseManager):
                 cert_files=(str(tmp_cert), str(tmp_key))
             )
 
-    def finalize_ca_certs_rotation(self) -> None:
-        """Handle the completion of CA rotation."""
-        logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
-        self.remove_old_ca()
-        self.update_request_ca_bundle()
-
     def get_unit_certificates(self) -> dict[CertType, str]:
         """Retrieve the list of certificates for this unit."""
         certs = {}
@@ -559,7 +534,5 @@ class TlsManager(BaseManager):
             keep_previous=True,
         ):
             return False
-
-        self.update_request_ca_bundle(secrets.get("chain"))
 
         return True

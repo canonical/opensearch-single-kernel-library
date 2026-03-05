@@ -24,7 +24,7 @@ from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import App, Node
-from opensearch_single_kernel.workload.base import BaseWorkload
+from opensearch_single_kernel.utils.requests import SSLStringAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class OpenSearchClient:
     """Handle OpenSearch Interaction with Server."""
 
     def __init__(
-        self, workload: BaseWorkload, host: str, port: int, admin_secret: str | None = None
+        self, host: str, port: int, admin_secret: str | None = None, ca_chain: str | None = None
     ):
         """Initialise the client.
 
@@ -41,8 +41,8 @@ class OpenSearchClient:
         """
         self.host = host
         self.port = port
-        self.workload = workload
         self.admin_secret = admin_secret
+        self.ca_chain = ca_chain
 
     def flush_translog(self, alt_hosts: list[str] | None = None) -> None:
         """Flush the OpenSearch translog to ensure all operations are committed to disk."""
@@ -403,16 +403,11 @@ class OpenSearchClient:
         """Call the /_nodes API endpoint of opensearch"""
         return self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
 
-    def is_node_up(self, host: str | None = None) -> bool:
-        """Get status of node.
+    def is_opensearch_api_up(self, host: str) -> bool:
+        """Get status of OpenSearch API
 
-        This assumes OpenSearch is Running. Defaults to this unit
+        This assumes OpenSearch is Reachable. Defaults to this unit
         """
-        # This function needs to give us a quick response
-        host = host or self.host
-        if not self.workload.is_reachable(host, self.port):
-            return False
-
         try:
             resp_code = self.request(
                 "GET",
@@ -480,11 +475,13 @@ class OpenSearchClient:
                         s.cert = cert_files
                     else:
                         s.auth = ("admin", self.admin_secret)
-                    # TODO: Handle this when implementing the k8s version of start workflow.
+
+                    if self.ca_chain:
+                        s.mount(url, SSLStringAdapter(self.ca_chain))
+
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,
-                        "verify": f"{self.workload.paths.certs}/chain.pem",
                         "headers": {
                             "Accept": "application/json",
                             "Content-Type": "application/json",
@@ -519,7 +516,7 @@ class OpenSearchClient:
 
         urls = []
         for host_candidate in (host or self.host, *(alt_hosts or [])):
-            if check_hosts_reach and not self.is_node_up(host_candidate):
+            if check_hosts_reach and not self.is_opensearch_api_up(host_candidate):
                 continue
             urls.append(f"https://{host_candidate}:{self.port}/{endpoint}")
         if not urls:

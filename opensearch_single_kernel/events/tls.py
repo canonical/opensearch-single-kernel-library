@@ -228,19 +228,9 @@ class TLSEventsHandler(Object):
             self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
         )
 
-        # apply the chain.pem file for API requests, only if the CA cert has not been updated
         admin_secrets = (
             self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
-        if admin_secrets.get("chain") and not self.charm.tls_manager.read_stored_ca(
-            alias=OLD_CA_ALIAS
-        ):
-            try:
-                self.charm.tls_manager.update_request_ca_bundle()
-            except OpenSearchFileOperationError as e:
-                logger.debug(f"Error while updating request CA bundle: {e}")
-                event.defer()
-                return
 
         # store the admin certificates in non-leader units
         # if admin cert not available we need to defer, otherwise it will never be stored
@@ -364,7 +354,7 @@ class TLSEventsHandler(Object):
                         and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
                     ):
                         logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                        self.charm.tls_manager.finalize_ca_certs_rotation()
+                        self.charm.tls_manager.remove_old_ca()
             else:
                 logger.debug("TLS not fully configured yet, deferring event.")
                 event.defer()

@@ -90,7 +90,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         """Stop OpenSearch service."""
         self.status.set(CharmStatuses.SERVICE_IS_STOPPING)
 
-        if self.cluster_manager.opensearch_client.is_node_up():
+        if self.cluster_manager.is_node_up():
             try:
                 nodes = self.cluster_manager.get_nodes(True)
                 # do not add exclusions if it's the last unit to stop

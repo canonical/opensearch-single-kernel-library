@@ -69,11 +69,7 @@ class ClusterManager(BaseManager):
         """Start the opensearch service."""
 
         def _is_connected():
-            return (
-                self.opensearch_client.is_node_up()
-                if wait_until_http_200
-                else self.is_opensearch_started
-            )
+            return self.is_node_up() if wait_until_http_200 else self.is_opensearch_started
 
         if self.is_opensearch_started:
             return
@@ -315,7 +311,7 @@ class ClusterManager(BaseManager):
         """Wait for opensearch to become part of the cluster."""
         # Get online nodes
         try:
-            nodes = self.get_nodes(use_localhost=self.opensearch_client.is_node_up())
+            nodes = self.get_nodes(use_localhost=self.is_node_up())
         except OpenSearchHttpError as e:
             logger.info("Failed to get online nodes")
             raise e
@@ -391,7 +387,7 @@ class ClusterManager(BaseManager):
             reraise=True,
         ):
             with attempt:
-                if not self.opensearch_client.is_node_up():
+                if not self.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
     def check_blocking_directives(
@@ -569,10 +565,10 @@ class ClusterManager(BaseManager):
 
         This is only run on leader unit before a unit is removed.
         """
-        if not is_last_unit and (self.opensearch_client.is_node_up() or self.alt_hosts):
+        if not is_last_unit and (self.is_node_up() or self.alt_hosts):
             remaining_nodes = [
                 node
-                for node in self.get_nodes(self.opensearch_client.is_node_up())
+                for node in self.get_nodes(self.is_node_up())
                 if node.name
                 != format_unit_name(
                     self.state.unit_name, app=self.state.application.deployment_desc.app
@@ -612,7 +608,7 @@ class ClusterManager(BaseManager):
 
     def flush_translog_to_disk(self) -> None:
         """Flush OpenSearch translog to disk."""
-        if self.opensearch_client.is_node_up():
+        if self.is_node_up():
             try:
                 self.opensearch_client.flush_translog(self.alt_hosts)
             except OpenSearchHttpError:

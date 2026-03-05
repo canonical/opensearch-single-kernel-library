@@ -153,7 +153,7 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        if is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up():
+        if is_node_up := self.charm.cluster_manager.is_node_up():
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
 
             if health in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]:
@@ -219,7 +219,7 @@ class OpenSearchEventsHandler(Object):
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
-        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+        if not self.charm.cluster_manager.is_node_up():
             logger.debug("Node is not up. Deferring event.")
             event.defer()
             return
@@ -294,8 +294,7 @@ class OpenSearchEventsHandler(Object):
                     raise OpenSearchHAError(CharmStatuses.CLUSTER_HEALTH_RED.value.message)
         finally:
             if planned_units > 1 and (
-                self.charm.cluster_manager.opensearch_client.is_node_up()
-                or self.charm.cluster_manager.alt_hosts
+                self.charm.cluster_manager.is_node_up() or self.charm.cluster_manager.alt_hosts
             ):
                 # release lock
                 self.charm.lock_manager.release()
@@ -319,7 +318,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         # if node already shutdown - leave
-        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+        if not self.charm.cluster_manager.is_node_up():
             return
 
         # review available CMs
@@ -365,7 +364,7 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            self.charm.tls_manager.remove_old_ca()
         # If relation not broken - leave
         if self.charm.state.tls_relation:
             return
@@ -467,7 +466,7 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
-            if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            if not self.charm.cluster_manager.is_node_up():
                 event.defer()
                 return
 
@@ -510,7 +509,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
-        if self.charm.cluster_manager.opensearch_client.is_node_up():
+        if self.charm.cluster_manager.is_node_up():
             self.cleanup_start_state()
             return
 
@@ -1074,7 +1073,7 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            self.charm.tls_manager.remove_old_ca()
 
         # TODO: Handle case of peer cluster manager
         # if self.peers_data.get(Scope.UNIT, "cluster_manager_removed", default=False):

@@ -7,7 +7,11 @@ import random
 from typing import List, Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+    CertType,
+    Scope,
+)
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.utils.secrets import password_key
@@ -28,9 +32,15 @@ class BaseManager:
     def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
         admin_field = password_key("admin")
-        admin_secret = self.state.secrets.get(Scope.APP, admin_field)
+        admin_password = self.state.secrets.get(Scope.APP, admin_field)
+        # Get chain.pem from secrets and pass it to client
+        admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        ca_chain = admin_secret.get("chain")
         return OpenSearchClient(
-            self.workload, self.state.host_ip, OPENSEARCH_HTTP_PORT, admin_secret
+            self.state.host_ip,
+            OPENSEARCH_HTTP_PORT,
+            admin_password,
+            ca_chain=ca_chain,
         )
 
     @property
@@ -51,11 +61,7 @@ class BaseManager:
         if not all_hosts:
             return None
 
-        client = self.opensearch_client
-
-        return [
-            host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
-        ]
+        return [host for host in all_hosts if host != self.state.host_ip and self.is_node_up(host)]
 
     def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
@@ -74,6 +80,13 @@ class BaseManager:
                 result.append(node.name)
 
         return result
+
+    def is_node_up(self, host: str | None = None) -> bool:
+        """Check if a node is up."""
+        host = host or self.state.host_ip
+        if not self.workload.is_reachable(host, OPENSEARCH_HTTP_PORT):
+            return False
+        return self.opensearch_client.is_opensearch_api_up(host)
 
     def _nodes(
         self,

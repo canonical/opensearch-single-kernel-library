@@ -160,7 +160,9 @@ def test_on_start(harness, mocker):
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler._post_start_init"
     )
 
-    is_node_up = mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.is_node_up")
+    is_node_up = mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.is_node_up"
+    )
     mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_service_started")
 
     # test when setup complete
