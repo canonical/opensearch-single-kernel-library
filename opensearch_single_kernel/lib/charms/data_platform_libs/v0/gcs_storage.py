@@ -134,12 +134,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar, Iterable, Literal, TypeAlias
 
-from .data_interfaces import (
-    EventHandlers,
-    ProviderData,
-    RequirerData,
-    RequirerEventHandlers,
-)
 from ops import Model, model
 from ops.charm import (
     CharmBase,
@@ -152,6 +146,13 @@ from ops.charm import (
 )
 from ops.framework import EventSource, Handle
 from ops.model import Relation
+
+from .data_interfaces import (
+    EventHandlers,
+    ProviderData,
+    RequirerData,
+    RequirerEventHandlers,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "a5cd08394d024dba9dbaad10166b6176"

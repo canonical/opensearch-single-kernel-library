@@ -6,12 +6,6 @@ import logging
 from collections import namedtuple
 from typing import Dict, List, Optional
 
-from .data_interfaces import (
-    EventHandlers,
-    ProviderData,
-    RequirerData,
-    RequirerEventHandlers,
-)
 from ops import Model
 from ops.charm import (
     CharmBase,
@@ -24,6 +18,13 @@ from ops.charm import (
 )
 from ops.framework import EventSource, ObjectEvents
 from ops.model import Relation
+
+from .data_interfaces import (
+    EventHandlers,
+    ProviderData,
+    RequirerData,
+    RequirerEventHandlers,
+)
 
 # The unique Charmhub library identifier, never change it
 LIBID = "fca396f6254246c9bfa5650000000000"
