@@ -24,6 +24,7 @@ import logging
 import os
 
 import ops
+from ops import Relation
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
@@ -98,7 +99,7 @@ class PeerLockManager(BaseManager):
         logger.debug("[Node lock] Acquired via peer databag")
         return True
 
-    def release(self):
+    def release(self) -> None:
         """Release lock for this unit."""
         if not self._relation:
             return
@@ -109,7 +110,7 @@ class PeerLockManager(BaseManager):
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
-    def _unit_requested_lock(self, unit: ops.Unit):
+    def _unit_requested_lock(self, unit: ops.Unit) -> bool:
         """Whether unit requested lock."""
         assert self._relation
         if not (value := self._relation.data.get(unit, {}).get("lock-requested")):
@@ -128,7 +129,7 @@ class PeerLockManager(BaseManager):
             return self._relation.data[self.state.application.app].get("unit-with-lock")
 
     @_unit_with_lock.setter
-    def _unit_with_lock(self, value: str):
+    def _unit_with_lock(self, value: str) -> None:
         """Set the unit that has lock."""
         assert self._relation
         assert self._unit_with_lock != value
@@ -151,7 +152,7 @@ class PeerLockManager(BaseManager):
         self._relation.data[self.state.application.app]["unit-with-lock"] = value
 
     @_unit_with_lock.deleter
-    def _unit_with_lock(self):
+    def _unit_with_lock(self) -> None:
         """Remove the lock."""
         assert self._relation
         self._relation.data[self.state.application.app].pop("unit-with-lock", None)
@@ -160,13 +161,13 @@ class PeerLockManager(BaseManager):
         )
 
     @property
-    def _relation(self):
+    def _relation(self) -> Relation | None:
         """Get the lock relation"""
         # Use property instead of `self._relation =` in `__init__()` because of ops Harness unit
         # tests
         return self.state.node_lock_relation
 
-    def refresh_lock(self):
+    def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
         assert self._relation
 
@@ -291,7 +292,7 @@ class LockManager(PeerLockManager):
         if host or alt_hosts:
             logger.debug("[Node lock] 1+ opensearch nodes online")
             try:
-                online_nodes = len(self.nodes(use_localhost=host is not None, hosts=alt_hosts))
+                online_nodes = len(self._nodes(use_localhost=host is not None, hosts=alt_hosts))
             except OpenSearchHttpError:
                 logger.exception("Error getting OpenSearch nodes")
                 return False
@@ -399,7 +400,7 @@ class LockManager(PeerLockManager):
         # - OR, unit is leader & lock granted in this Juju event
         return super().acquired
 
-    def release(self):  # noqa: C901
+    def release(self) -> None:  # noqa: C901
         """Release lock.
 
         Limitation: if lock acquired via OpenSearch document and all units offline, OpenSearch

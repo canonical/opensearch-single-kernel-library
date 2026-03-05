@@ -27,6 +27,7 @@ class CharmStatuses(Enum):
     TLS_CERTS_EXPIRATION_ERROR = BlockedStatus(
         "The certificates: {certificates} need to be refreshed."
     )
+    TLS_NEW_CERTS_REQUESTED = MaintenanceStatus("Requesting new TLS certificates...")
 
     # Profiles
     INVALID_PROFILE_CONFIG_OPTION = BlockedStatus(

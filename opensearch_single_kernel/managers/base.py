@@ -10,6 +10,7 @@ from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -24,9 +25,9 @@ class BaseManager:
         self.workload = workload
 
     @property
-    def opensearch_client(self):
+    def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
-        admin_field = self.state.secrets.password_key("admin")
+        admin_field = password_key("admin")
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)
         # use a stable address for TLS hostname verification (DNS on K8s, public-address on VM).
         host = self.workload.get_host_public_ip() or self.state.host_ip
@@ -45,7 +46,7 @@ class BaseManager:
         all_hosts = list(all_units_ips.values())
 
         if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([Node.from_dict(node).ip for node in nodes_conf.values()])
+            all_hosts.extend([node.ip for node in nodes_conf.values()])
 
         # TODO: Add getting relation data form state
         # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
@@ -80,7 +81,7 @@ class BaseManager:
 
         return result
 
-    def nodes(
+    def _nodes(
         self,
         use_localhost: bool,
         hosts: list[str] | None = None,

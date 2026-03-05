@@ -6,15 +6,11 @@
 
 import logging
 import socket
-from collections import namedtuple
 from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType, Substrates
-from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
-    OpenSearchError,
-)
-from opensearch_single_kernel.core.models import App, Node, OpenSearchProfile
+from opensearch_single_kernel.common.exceptions import ContainerNotReadyError, OpenSearchError
+from opensearch_single_kernel.core.models import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -40,285 +36,280 @@ class ConfigManager(BaseManager):
         self.name = "config_manager"
 
     @property
-    def yaml_setter(self):
+    def yaml_setter(self) -> YamlConfigSetter:
         """Return the yaml_setter."""
         return YamlConfigSetter(self.workload)
 
-    def _get_keytool_path(self) -> str:
-        """Get the full path to keytool executable.
-
-        keytool is part of the JDK and should be available at {JAVA_HOME}/bin/keytool.
-        For K8s, JDK is at /usr/lib/jvm/java-21-openjdk-amd64.
-        For VM, JDK path comes from workload.paths.jdk.
-
-        Returns:
-            full path to keytool executable
-        """
-        java_home = path_as_posix(self.workload.paths.jdk)
-        return f"{java_home}/bin/keytool"
-
-    def set_node(  # noqa: C901
+    def update_opensearch_config(
         self,
-        app: App,
-        cluster_name: str,
-        unit_name: str,
-        roles: list[str],
-        cm_names: list[str],
-        cm_ips: list[str],
-        contribute_to_bootstrap: bool,
-        node_temperature: str | None = None,
-    ) -> None:
-        """Set base config for each node in the cluster."""
-        self.yaml_setter.put(self.CONFIG_YML, "cluster.name", cluster_name)
+        roles: list[str] | None = None,
+        cm_names: list[str] | None = None,
+        cm_ips: list[str] | None = None,
+    ) -> bool:
+        """Reconcile whole OpenSearch config using values from application state.
 
-        # For K8s, use container hostname for node.name to match OpenSearch runtime
-        # OpenSearch uses hostname by default, so node.name must match or bootstrap fails
-        # For VM, continue using unit_name (Juju unit name)
+        Updates opensearch.yml & unicast_hosts.txt config files and ensures
+        jvm.options & opensearch-security/config.yml are populated with correct static options.
+        """
+        if roles is None:
+            roles = self._opensearch_roles
+
+        config = (
+            self._opensearch_static_config()
+            | self._opensearch_general_config(roles)
+            | self._opensearch_host_config()
+            | self._opensearch_temperature_config()
+            | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
+            | self._opensearch_admin_tls_config()
+            | self._opensearch_tls_config(CertType.UNIT_HTTP)
+            | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
+        )
+
+        self._update_static_jvm_options()
+        self._update_static_security_options()
+
+        if cm_ips:
+            self._update_seeds_file(cm_ips)
+        else:
+            self.update_seeds_config()
+
+        self.state.server.last_host_ip = self.state.host_ip
+        changed = self.yaml_setter.rewrite(self.CONFIG_YML, config)
+
+        # Ensure bootstrap-only settings do not linger after bootstrap.
+        if (
+            not cm_names
+            or "cluster_manager" not in roles
+            or not self.state.server.is_bootstrap_contributor
+        ):
+            existing = self.yaml_setter.load(self.CONFIG_YML)
+            if "cluster.initial_cluster_manager_nodes" in existing:
+                self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
+                changed = True
+
+        return changed
+
+    @staticmethod
+    def _opensearch_static_config() -> dict[str, Any]:
+        """Static OpenSearch settings written to opensearch.yml."""
+        return {
+            # This allows the new CMs to be discovered automatically
+            # (hot reload of unicast_hosts.txt)
+            "discovery.seed_providers": "file",
+            "plugins.security.disabled": False,
+            "plugins.security.ssl.http.enabled": True,
+            "plugins.security.ssl.transport.enforce_hostname_verification": True,
+            # enable hot reload of TLS certs (without restarting the node)
+            "plugins.security.ssl_cert_reload_enabled": True,
+            # to use the PUT and PATCH methods of the security rest API
+            "plugins.security.unsupported.restapi.allow_securityconfig_modification": True,
+            # security plugin rest API access
+            "plugins.security.restapi.roles_enabled": [
+                "all_access",
+                "security_rest_api_access",
+            ],
+            # The security plugin will accept TLS client certs if certs but doesn't require them
+            "plugins.security.ssl.http.clientauth_mode": "OPTIONAL",
+            "prometheus.metric_name.prefix": "opensearch_",
+            "prometheus.indices": "false",
+            "prometheus.cluster.settings": "false",
+            "prometheus.nodes.filter": "_local",
+        }
+
+    def _network_hosts(self) -> list[str]:
+        """Compute network.host entries for opensearch.yml."""
+        # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
+        # Historical behavior also included _local_ for both substrates.
+        return ["_site_", "_local_", *sorted(self.state.network_hosts)]
+
+    def _node_name(self) -> str:
+        """Compute node.name for opensearch.yml."""
         if self.state.substrate == Substrates.K8S:
-            try:
-                # Get container hostname ("pod_name-0" in K8s pods)
-                node_name = socket.gethostname()
-                logger.info(
-                    f"K8s detected: Using container hostname {node_name} for node.name (unit_name was {unit_name})"
-                )
-            except Exception as e:
-                logger.warning(f"Could not get hostname, falling back to unit_name: {e}")
-                node_name = unit_name
+            # In K8s, OpenSearch defaults to using container hostname.
+            # state.node_name already returns socket.gethostname() for K8s.
+            return self.state.node_name or socket.gethostname()
+        return self.state.unit_name
+
+    def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
+        """General OpenSearch settings written to opensearch.yml."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return {}
+
+        return {
+            "cluster.name": deployment_desc.config.cluster_name,
+            "node.name": self._node_name(),
+            "network.host": self._network_hosts(),
+            "http.publish_host": self.workload.get_host_public_ip()
+            or self.state.network_ingress_address,
+            "node.roles": sorted(roles),
+            "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
+            "path.data": path_as_posix(self.workload.paths.data_dir),
+            "path.logs": path_as_posix(self.workload.paths.logs_dir),
+            "path.home": path_as_posix(self.workload.paths.home),
+        }
+
+    def _opensearch_host_config(self) -> dict[str, Any]:
+        """Network publish host settings written to opensearch.yml."""
+        return {"network.publish_host": self.state.host_ip} if self.state.host_ip else {}
+
+    def _opensearch_temperature_config(self) -> dict[str, Any]:
+        """Optional data temperature settings written to opensearch.yml."""
+        return (
+            {"node.attr.temp": self._opensearch_data_temperature}
+            if self._opensearch_data_temperature
+            else {}
+        )
+
+    @staticmethod
+    def _normalize_k8s_bootstrap_name(value: str) -> str:
+        """Normalize bootstrap names to match K8s container hostnames."""
+        # Typical inputs:
+        # - "app-0.c67" (formatted unit name)
+        # - "app-0" (pod hostname)
+        # - "app-0.namespace.svc.cluster.local" (DNS)
+        return (value or "").split(".", 1)[0]
+
+    def _opensearch_cluster_manager_config(
+        self,
+        roles: list[str],
+        cm_names: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Initial cluster-manager settings written to opensearch.yml."""
+        if (
+            not cm_names
+            or "cluster_manager" not in roles
+            or not self.state.server.is_bootstrap_contributor
+        ):
+            return {}
+
+        if self.state.substrate == Substrates.K8S:
+            # K8s bootstrap names must match OpenSearch runtime node.name (hostname).
+            # Each unit writes its own hostname here.
+            names = [self._node_name()]
         else:
-            # VM: use unit_name (Juju unit name)
-            node_name = unit_name
+            names = sorted(cm_names)
 
-        self.yaml_setter.put(self.CONFIG_YML, "node.name", node_name)
-        #  Include _local_ (localhost) in network.host for K8s readiness checks
-        # _site_ binds to pod IP (for external access via Kubernetes Service)
-        # _local_ binds to localhost (for Pebble health checks and internal monitoring)
-        # Both are needed: pod IP for external access, localhost for health checks
-        network_hosts = ["_site_", "_local_"] + self.state.network_hosts
-        self.yaml_setter.put(self.CONFIG_YML, "network.host", network_hosts)
-        if self.state.host_ip:
-            self.yaml_setter.put(self.CONFIG_YML, "network.publish_host", self.state.host_ip)
-        # For K8s, get_host_public_ip() returns DNS name which never changes
-        # For VM, returns IP address
-        # DNS names are preferred for K8s as pod IPs are ephemeral.
-        public_address = self.workload.get_host_public_ip() or self.state.network_ingress_address
-        self.yaml_setter.put(self.CONFIG_YML, "http.publish_host", public_address)
+        return {"cluster.initial_cluster_manager_nodes": names} if names else {}
 
-        self.yaml_setter.put(self.CONFIG_YML, "node.roles", roles, inline_array=len(roles) == 0)
-        if node_temperature:
-            self.yaml_setter.put(self.CONFIG_YML, "node.attr.temp", node_temperature)
-        else:
-            self.yaml_setter.delete(self.CONFIG_YML, "node.attr.temp")
+    def _opensearch_admin_tls_config(self) -> dict[str, Any]:
+        """Admin DN settings written to opensearch.yml."""
+        return (
+            {"plugins.security.authcz.admin_dn": [tls_subject]}
+            if (tls_subject := self.state.tls_subject)
+            else {}
+        )
 
-        # Set the current app full id
-        self.yaml_setter.put(self.CONFIG_YML, "node.attr.app_id", app.id)
+    def _opensearch_tls_config(self, cert_type: CertType) -> dict[str, Any]:
+        """TLS store settings written to opensearch.yml (paths + passwords)."""
+        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+        truststore_pwd = self.state.tls_truststore_password
+        keystore_pwd = self.state.get_tls_keystore_password(cert_type)
+        if not truststore_pwd or not keystore_pwd:
+            return {}
 
-        # Use file-based discovery for hot reload of unicast_hosts.txt
-        # This allows new CMs to be discovered automatically without restart
-        self.yaml_setter.put(self.CONFIG_YML, "discovery.seed_providers", "file")
-        self.add_seed_hosts(cm_ips)
+        return {
+            f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
+            f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
+            f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
+            f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
+            f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
+            f"plugins.security.ssl.{layer}.truststore_password": truststore_pwd,
+            f"plugins.security.ssl.{layer}.enabled_protocols": "TLSv1.2",
+        }
 
-        # Set initial cluster manager nodes for bootstrap
-        # This is critical for brand-new clusters to elect a cluster-manager
-        # Only set if this node is CM-eligible and will contribute to bootstrap
-        if "cluster_manager" in roles:
-            if contribute_to_bootstrap:
-                # Set initial cluster manager nodes for bootstrap
-                # For K8s, bootstrap names must match node.name (hostname), not unit_name
-                # OpenSearch will fail with ClusterManagerNotDiscoveredException
-                # if names don't match
-                # For VM, use cm_names as-is (unit_name matches hostname)
-                if self.state.substrate == Substrates.K8S:
-                    # Single-node case: use current node's hostname
-                    # Multi-node case: each node should use its own hostname
-                    # Since we're setting this on the current node, use current node's hostname
-                    # Other nodes will set their own hostnames when they bootstrap
-                    bootstrap_cm_names = [node_name]
-                    logger.info(
-                        f"K8s bootstrap: Using hostname '{node_name}' for cluster.initial_cluster_manager_nodes "
-                        f"(unit_name was '{unit_name}', cm_names was {cm_names})"
-                    )
-                else:
-                    bootstrap_cm_names = cm_names
+    @property
+    def _opensearch_data_temperature(self) -> str | None:
+        """Node temperature from nodes_config or deployment_desc."""
+        if node := self.state.node_config:
+            return node.temperature
+        return (
+            deployment_desc.config.data_temperature
+            if (deployment_desc := self.state.application.deployment_desc)
+            else None
+        )
 
-                self.yaml_setter.put(
-                    self.CONFIG_YML, "cluster.initial_cluster_manager_nodes", bootstrap_cm_names
-                )
-                logger.info(
-                    f"Setting bootstrap config: cluster.initial_cluster_manager_nodes={bootstrap_cm_names}"
-                )
-            elif not cm_names:
-                # if no CM names provided but we are CM-eligible, log warning
-                logger.warning(
-                    "CM-eligible node but no CM names provided for bootstrap. "
-                    "Cluster may fail to bootstrap."
-                )
+    @property
+    def _opensearch_roles(self) -> list[str]:
+        """Node roles from nodes_config or deployment_desc."""
+        if node := self.state.node_config:
+            return node.roles
+        if self.state.application.deployment_desc:
+            return self.state.computed_roles()
+        return []
 
-        # K8s uses /var/lib/opensearch/data, VM uses snap paths.
-        data_path = path_as_posix(self.workload.paths.data_dir)
+    def load_node(self) -> dict[str, Any]:
+        """Load the opensearch.yml config of the node."""
+        return self.yaml_setter.load(self.CONFIG_YML)
+
+    def _update_static_jvm_options(self) -> None:
+        """Update Opensearch JVM config file with the right static options."""
         logs_path = path_as_posix(self.workload.paths.logs_dir)
-
-        self.yaml_setter.put(self.CONFIG_YML, "path.data", data_path)
-        self.yaml_setter.put(self.CONFIG_YML, "path.logs", logs_path)
-
-        # Use the computed logs_path (with /logs subdirectory) for JVM options
-        # This ensures consistency between OpenSearch logs and GC logs
         self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={logs_path}/")
+        self.yaml_setter.append(self.JVM_OPTIONS, "-Djdk.tls.client.protocols=TLSv1.2")
 
-        self.yaml_setter.put(self.CONFIG_YML, "plugins.security.disabled", False)
-
-        # security plugin rest API access
-        self.yaml_setter.put(
-            self.CONFIG_YML,
-            "plugins.security.restapi.roles_enabled",
-            ["all_access", "security_rest_api_access"],
-        )
-        # to use the PUT and PATCH methods of the security rest API
-        self.yaml_setter.put(
-            self.CONFIG_YML,
-            "plugins.security.unsupported.restapi.allow_securityconfig_modification",
-            True,
-        )
-
-        # enable hot reload of TLS certs (without restarting the node)
-        self.yaml_setter.put(
-            self.CONFIG_YML,
-            "plugins.security.ssl_cert_reload_enabled",
-            True,
-        )
-
-    def cleanup_initial_cluster_managers(self) -> None:
-        """Update the opensearch.yaml by deleting initiali_cluster_manager_nodes."""
-        self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
-
-    def set_client_auth(self) -> None:
-        """Configure TLS and basic http for clients."""
-        # The security plugin will accept TLS client certs if certs but doesn't require them
-        # TODO this may be set to REQUIRED if we want to ensure certs provided by the client app
-        self.yaml_setter.put(
-            self.CONFIG_YML, "plugins.security.ssl.http.clientauth_mode", "OPTIONAL"
-        )
-
+    def _update_static_security_options(self) -> None:
+        """Update OpenSearch security config file with static options."""
         self.yaml_setter.put(
             self.SECURITY_CONFIG_YML,
             "config/dynamic/authc/basic_internal_auth_domain/http_enabled",
             True,
         )
-
         self.yaml_setter.put(
             self.SECURITY_CONFIG_YML,
             "config/dynamic/authc/clientcert_auth_domain/http_enabled",
             True,
         )
-
         self.yaml_setter.put(
             self.SECURITY_CONFIG_YML,
             "config/dynamic/authc/clientcert_auth_domain/transport_enabled",
             True,
         )
 
-        self.yaml_setter.append(
-            self.JVM_OPTIONS,
-            "-Djdk.tls.client.protocols=TLSv1.2",
-        )
+    def update_seeds_config(self) -> None:
+        """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config."""
+        if nodes_config := self.state.application.nodes_config:
+            self._update_seeds_file(
+                [node.ip for node in nodes_config.values() if node.is_cm_eligible()]
+            )
 
-    def update_host_if_needed(self) -> bool:
-        """Update network host configuration if needed.
+    def _update_seeds_file(self, cm_ips: list[str] | None) -> None:
+        """Reconcile OpenSearch unicast_hosts.txt using provided values."""
+        if not cm_ips:
+            return
+        cm_ips_set = {ip.strip() for ip in cm_ips if ip and ip.strip()}
+        if not cm_ips_set:
+            return
+        lines = "\n".join(sorted(cm_ips_set))
+        self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
 
-        Returns:
-            bool: True if config was updated, False otherwise
-
-        Raises:
-            ContainerNotReadyError: If container is not ready (for K8s)
-        """
-        # For K8s, check container readiness before filesystem operations
+    def reconfigure_unit(self) -> bool:
+        """Reconfigure this unit based on nodes_config (roles/temperature)."""
         if self.state.substrate == Substrates.K8S and not self.workload.workload_present:
             raise ContainerNotReadyError("Container is not ready for filesystem operations")
 
-        NetworkHost = namedtuple("NetworkHost", ["entry", "old", "new"])
-
-        # Check if config file exists before trying to load it
-        config_path = self.yaml_setter.base_path / self.CONFIG_YML
-        if not config_path.exists():
-            logger.debug(f"Config file {config_path} does not exist yet. Skipping host update.")
+        if not (nodes_config := self.state.application.nodes_config):
             return False
 
-        node = self.yaml_setter.load(self.CONFIG_YML)
-        result = False
-        for host in [
-            NetworkHost(
-                "network.host",
-                set(node.get("network.host", [])),
-                set(["_site_"] + self.state.network_hosts),
-            ),
-            NetworkHost(
-                "network.publish_host",
-                node.get("network.publish_host"),
-                self.state.host_ip,
-            ),
-            NetworkHost(
-                "http.publish_host",
-                node.get("http.publish_host"),
-                # For K8s, get_host_public_ip() returns DNS name and for VM, it returns IP address
-                self.workload.get_host_public_ip() or self.state.network_ingress_address,
-            ),
-        ]:
-            if not host.old:
-                # Unit not configured yet
-                continue
+        # Always refresh seed hosts when topology changes.
+        self._update_seeds_file([n.ip for n in nodes_config.values() if n.is_cm_eligible()])
 
-            if host.old != host.new:
-                logger.info(f"Updating {host.entry} from: {host.old} - to: {host.new}")
-                self.yaml_setter.put(self.CONFIG_YML, host.entry, host.new)
-                result = True
-
-        return result
-
-    def reconfigure_unit(self) -> bool:
-        """Reconfigure unit based on the nodes_config.
-
-        Actually applies configuration changes (roles, temperature) and updates seed hosts.
-        Returns True if opensearch.yml was reconfigured, in which case a restart will be required.
-        """
-        if not (nodes_config := self.state.application.get_object("nodes_config")):
+        node_conf = nodes_config.get(self.state.unit_name)
+        if node_conf is None:
             return False
 
-        nodes_config = {name: Node.from_dict(node) for name, node in nodes_config.items()}
+        config = self.yaml_setter.load(self.CONFIG_YML)
+        stored_roles = sorted(config.get("node.roles") or [])
+        new_roles = sorted(node_conf.roles or [])
+        stored_temp = config.get("node.attr.temp")
+        new_temp = node_conf.temperature
 
-        # update (append) CM IPs
-        self.add_seed_hosts(
-            [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
-        )
-
-        node_name = self.state.node_name
-        unit_name = self.state.unit_name if self.state.application.deployment_desc else None
-        new_node_conf = (nodes_config.get(node_name) if node_name else None) or (
-            nodes_config.get(unit_name) if unit_name else None
-        )
-        if not new_node_conf:
-            # the conf could not be computed / broadcast, because this node is
-            # "starting" and is not online "yet" - either barely being configured (i.e. TLS)
-            # or waiting to start.
+        if stored_roles == new_roles and stored_temp == new_temp:
             return False
 
-        current_conf = self.yaml_setter.load(self.CONFIG_YML)
-        stored_roles = current_conf.get("node.roles") or []
-        new_conf_roles = new_node_conf.roles or []
-
-        stored_temp = current_conf.get("node.attr.temp")
-        new_temp = new_node_conf.temperature
-
-        # Check if configuration actually changed
-        if sorted(stored_roles) == sorted(new_conf_roles) and stored_temp == new_temp:
-            # no conf change
-            return False
-
-        # Apply the configuration changes
-        if sorted(stored_roles) != sorted(new_conf_roles):
-            if new_conf_roles:
-                self.yaml_setter.put(self.CONFIG_YML, "node.roles", new_conf_roles)
-            else:
-                self.yaml_setter.put(self.CONFIG_YML, "node.roles", [])
-
+        if stored_roles != new_roles:
+            self.yaml_setter.put(self.CONFIG_YML, "node.roles", new_roles)
         if stored_temp != new_temp:
             if new_temp:
                 self.yaml_setter.put(self.CONFIG_YML, "node.attr.temp", new_temp)
@@ -327,192 +318,94 @@ class ConfigManager(BaseManager):
 
         return True
 
-    def add_seed_hosts(self, cm_ips: list[str]) -> None:
-        """Add CM nodes ips / host names to the seed host list of this unit."""
-        cm_ips_set = set(cm_ips)
+    def update_profile_configuration(self, profile: OpenSearchProfile) -> bool:
+        """Update JVM heap based on the performance profile."""
+        current_profile = self.state.server.profile
+        logger.debug("current profile: %s, config profile: %s", current_profile, profile)
+        if current_profile is None or current_profile != profile:
+            meminfo = self.workload.meminfo()
+            if "MemTotal" not in meminfo:
+                logger.warning("Could not read MemTotal from meminfo. Skipping profile configuration.")
+                return False
+            self._update_jvm_heap_size(profile.get_jvm_heap_size(meminfo["MemTotal"]))
+            self.state.server.profile = profile
+            return True
+        return False
 
-        # only update the file if there is data to update
-        if cm_ips_set:
-            lines = "\n".join([entry for entry in cm_ips_set if entry.strip()])
-            self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
+    def _update_jvm_heap_size(self, heap_size_in_kb: int) -> None:
+        """Update jvm.options heap values."""
+        self.yaml_setter.replace(
+            self.JVM_OPTIONS,
+            "-Xms[0-9]+[kmgKMG]",
+            f"-Xms{heap_size_in_kb}k",
+            regex=True,
+        )
+        self.yaml_setter.replace(
+            self.JVM_OPTIONS,
+            "-Xmx[0-9]+[kmgKMG]",
+            f"-Xmx{heap_size_in_kb}k",
+            regex=True,
+        )
 
-    def _get_cert_filename(self, cert_type: CertType, store_type: str) -> str:
-        """Get certificate filename for a given cert type and store type.
+    def set_admin_tls_conf(self, secrets: dict[str, Any]) -> None:
+        """Configure admin DN in opensearch.yml."""
+        if "subject" not in secrets:
+            raise OpenSearchError("Admin TLS secret missing subject")
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            "plugins.security.authcz.admin_dn/{}",
+            normalized_tls_subject(secrets["subject"]),
+        )
 
-        Args:
-            cert_type: Certificate type (UNIT_HTTP or UNIT_TRANSPORT).
-            store_type: Store type ("keystore" or "truststore").
+    def set_node_tls_conf(self, cert_type: CertType, truststore_pwd: str, keystore_pwd: str):
+        """Configure node TLS (HTTP or transport) in opensearch.yml."""
+        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+        certs_dir = path_as_posix(self.workload.paths.certs)
 
-        Returns:
-            Certificate filename (e.g., "unit-http.p12", "ca.p12").
-        """
-        if store_type == "truststore":
-            return "ca.p12"
-        if cert_type == CertType.UNIT_HTTP:
-            return "unit-http.p12"
-        if cert_type == CertType.UNIT_TRANSPORT:
-            return "unit-transport.p12"
-        return f"{cert_type.val}.p12"
+        # Store paths
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.keystore_type",
+            "PKCS12",
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.keystore_filepath",
+            f"{certs_dir}/{cert_type.val}.p12",
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.truststore_type",
+            "PKCS12",
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.truststore_filepath",
+            f"{certs_dir}/ca.p12",
+        )
 
-    def _write_tls_store_configs(self, layer: str, cert_type: CertType, certs_dir: str) -> None:
-        """Write keystore and truststore type and filepath configurations.
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-            cert_type: Certificate type (UNIT_HTTP or UNIT_TRANSPORT).
-            certs_dir: Directory path for certificates.
-        """
-        for store_type, cert in [("keystore", layer), ("truststore", "ca")]:
-            # Set store type (PKCS12)
-            self.yaml_setter.put(
-                self.CONFIG_YML,
-                f"plugins.security.ssl.{layer}.{store_type}_type",
-                "PKCS12",
-            )
-
-            # Set store filepath
-            cert_filename = self._get_cert_filename(cert_type, store_type)
-            self.yaml_setter.put(
-                self.CONFIG_YML,
-                f"plugins.security.ssl.{layer}.{store_type}_filepath",
-                f"{certs_dir}/{cert_filename}",
-            )
-
-    def _write_tls_passwords(self, layer: str, keystore_pwd: str, truststore_pwd: str) -> None:
-        """Write keystore and truststore passwords.
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-            keystore_pwd: Keystore password.
-            truststore_pwd: Truststore password.
-        """
-        for store_type, pwd in [("keystore", keystore_pwd), ("truststore", truststore_pwd)]:
-            self.yaml_setter.put(
-                self.CONFIG_YML,
-                f"plugins.security.ssl.{layer}.{store_type}_password",
-                pwd,
-            )
-
-    def _write_tls_layer_specific_configs(self, layer: str) -> None:
-        """Write layer-specific TLS configurations (enabled flags, protocols, client auth).
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-        """
-        # Set enabled TLS protocols
+        # Passwords
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.keystore_password",
+            keystore_pwd,
+        )
+        self.yaml_setter.put(
+            self.CONFIG_YML,
+            f"plugins.security.ssl.{layer}.truststore_password",
+            truststore_pwd,
+        )
         self.yaml_setter.put(
             self.CONFIG_YML,
             f"plugins.security.ssl.{layer}.enabled_protocols",
             "TLSv1.2",
         )
 
-        # Enable layer-specific TLS
-        self.yaml_setter.put(
-            self.CONFIG_YML,
-            f"plugins.security.ssl.{layer}.enabled",
-            True,
-        )
-        logger.info(
-            f"Enabled {layer} SSL after {layer} TLS configuration was written to opensearch.yml"
-        )
-
-        # Set HTTP client auth mode (only for HTTP layer)
-        if layer == "http":
-            self.yaml_setter.put(
-                self.CONFIG_YML,
-                "plugins.security.ssl.http.clientauth_mode",
-                "OPTIONAL",
-            )
-            logger.debug("Set HTTP clientauth_mode to OPTIONAL (mTLS enabled for HTTP layer)")
-
-    def _validate_tls_config_after_write(self, layer: str) -> None:
-        """Validate TLS configuration after writing to ensure all required keys are present.
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-
-        Raises:
-            OpenSearchError: If required keys are missing or empty.
-        """
-        try:
-            written_config = self.yaml_setter.load(self.CONFIG_YML)
-            required_keys = [
-                f"plugins.security.ssl.{layer}.keystore_filepath",
-                f"plugins.security.ssl.{layer}.truststore_filepath",
-                f"plugins.security.ssl.{layer}.keystore_password",
-                f"plugins.security.ssl.{layer}.truststore_password",
-            ]
-
-            missing_keys = []
-            empty_keys = []
-            present_keys = []
-
-            for key_path in required_keys:
-                value = get_nested_value(written_config, key_path)
-                if value is None:
-                    missing_keys.append(key_path)
-                elif not isinstance(value, str) or not value.strip():
-                    empty_keys.append(key_path)
-                else:
-                    present_keys.append(key_path)
-
-            if missing_keys or empty_keys:
-                error_msg = (
-                    f"CRITICAL: {layer} TLS config write failed! "
-                    f"Missing keys: {missing_keys}. Empty keys: {empty_keys}. "
-                    f"Present keys: {present_keys}"
-                )
-                logger.error(error_msg)
-                raise OpenSearchError(error_msg)
-
-            logger.info(
-                f"Successfully wrote {layer} TLS configuration. "
-                f"All required keys present and non-empty: {present_keys}"
-            )
-        except OpenSearchError:
-            raise
-        except Exception as e:
-            logger.warning(f"Could not verify {layer} TLS config after write: {e}")
-
-    def set_node_tls_conf(self, cert_type: CertType, truststore_pwd: str, keystore_pwd: str):
-        """Configures TLS for nodes.
-
-        This method writes the complete TLS configuration (keystore/truststore paths and passwords)
-        for either HTTP or transport layer. Both HTTP and transport TLS configs must be complete
-        before OpenSearch can start with TLS enabled.
-
-        Args:
-            cert_type: either CertType.UNIT_HTTP or CertType.UNIT_TRANSPORT
-            truststore_pwd: password for the CA truststore (ca.p12)
-            keystore_pwd: password for the unit keystore (unit-http.p12 or unit-transport.p12)
-        """
-        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
-        certs_dir = path_as_posix(self.workload.paths.certs)
-
-        config_path = self.yaml_setter.base_path / self.CONFIG_YML
-        logger.info(
-            f"Writing {layer} TLS configuration to {config_path} "
-            f"(cert_type={cert_type.val}, certs_dir={certs_dir})"
-        )
-
-        # Write all TLS configurations
-        self._write_tls_store_configs(layer, cert_type, certs_dir)
-        self._write_tls_passwords(layer, keystore_pwd, truststore_pwd)
-        self._write_tls_layer_specific_configs(layer)
-
-        # Validate after write
-        self._validate_tls_config_after_write(layer)
+        # Enable TLS
+        self.yaml_setter.put(self.CONFIG_YML, f"plugins.security.ssl.{layer}.enabled", True)
 
     def _is_tls_layer_configured(self, layer: str, keystore_filename: str) -> bool:
-        """Check if TLS configuration for a specific layer is present and files exist.
-
-        Args:
-            layer: TLS layer name ("transport" or "http").
-            keystore_filename: expected keystore filename such as "unit-transport.p12".
-
-        Returns:
-            True if all required config keys are present and certificate files exist.
-        """
+        """Check if TLS config for a layer is present and files exist."""
         try:
             config = self.yaml_setter.load(self.CONFIG_YML)
             required_keys = [
@@ -521,92 +414,20 @@ class ConfigManager(BaseManager):
                 f"plugins.security.ssl.{layer}.keystore_password",
                 f"plugins.security.ssl.{layer}.truststore_password",
             ]
-
-            # Check if all config keys are present and non-empty
             for key_path in required_keys:
                 value = get_nested_value(config, key_path)
-                if value is None:
-                    logger.debug(f"{layer.capitalize()} TLS config missing key: {key_path}")
-                    return False
-                if not isinstance(value, str) or not value.strip():
-                    logger.debug(
-                        f"{layer.capitalize()} TLS config has empty value for key: {key_path}"
-                    )
+                if not (isinstance(value, str) and value.strip()):
                     return False
 
-            # Verify certificate files exist
             keystore_path = self.workload.paths.certs / keystore_filename
             truststore_path = self.workload.paths.certs / "ca.p12"
-
-            if not keystore_path.exists():
-                logger.debug(f"{layer.capitalize()} keystore file not found: {keystore_path}")
-                return False
-
-            if not truststore_path.exists():
-                logger.debug(f"{layer.capitalize()} truststore file not found: {truststore_path}")
-                return False
-
-            return True
-        except Exception as e:
-            logger.debug(f"Could not check {layer} TLS config: {e}")
+            return keystore_path.exists() and truststore_path.exists()
+        except Exception:
             return False
 
     def is_transport_tls_configured(self) -> bool:
-        """Check if transport TLS configuration is present in opensearch.yml and files exist."""
         return self._is_tls_layer_configured("transport", "unit-transport.p12")
 
     def is_http_tls_configured(self) -> bool:
-        """Check if HTTP TLS configuration is present in opensearch.yml and files exist."""
         return self._is_tls_layer_configured("http", "unit-http.p12")
 
-    def set_admin_tls_conf(self, secrets: dict[str, Any]) -> None:
-        """Configures the admin certificate."""
-        self.yaml_setter.put(
-            self.CONFIG_YML,
-            "plugins.security.authcz.admin_dn/{}",
-            normalized_tls_subject(secrets["subject"]),
-        )
-
-    def set_profile_configuration_if_needed(
-        self, current_profile: OpenSearchProfile, config_profile: OpenSearchProfile
-    ) -> bool:
-        """Configure the profile and return whether restart is needed or not"""
-        logger.debug("current profile: %s, config profile: %s", current_profile, config_profile)
-        if current_profile is None or current_profile != config_profile:
-            meminfo_data = self.workload.meminfo()
-            if "MemTotal" not in meminfo_data:
-                logger.warning(
-                    "Could not read MemTotal from meminfo. Skipping profile configuration."
-                )
-                return False
-
-            self.set_jvm_heap_size(config_profile.get_jvm_heap_size(meminfo_data["MemTotal"]))
-
-            # store profile in unit state
-            self.state.server.profile = config_profile
-            return True
-        return False
-
-    def set_jvm_heap_size(self, heap_size_in_kb: int) -> None:
-        """Apply the performance profile's jvm heap size to the opensearch config."""
-        # Check if jvm.options file exists before trying to modify it
-        jvm_options_path = self.yaml_setter.base_path / self.JVM_OPTIONS
-        if not jvm_options_path.exists():
-            logger.debug(
-                f"JVM options file {jvm_options_path} does not exist yet. Skipping heap size configuration."
-            )
-            return
-
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{str(heap_size_in_kb)}k",
-            regex=True,
-        )
-
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{str(heap_size_in_kb)}k",
-            regex=True,
-        )

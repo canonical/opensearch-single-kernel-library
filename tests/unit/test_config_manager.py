@@ -43,7 +43,12 @@ def test_set_client_auth(harness, mocker, substrate):
 
     mocker.patch(
         "opensearch_single_kernel.workload.base.Paths.seed_hosts",
-        return_value=seed_unicast_hosts,
+        return_value=config_path / "tmp" / seed_unicast_hosts,
+        new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.Paths.opensearch_config",
+        return_value=config_path / "tmp" / opensearch_yml,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -64,7 +69,7 @@ def test_set_client_auth(harness, mocker, substrate):
     )
 
     # call method
-    harness.charm.config_manager.set_client_auth()
+    harness.charm.config_manager.update_opensearch_config()
 
     # check the changes
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
@@ -92,16 +97,17 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     app = App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name)
     deployment_desc.return_value = DeploymentDescription(
         config=PeerClusterConfig(
-            cluster_name="logs",
+            cluster_name="opensearch-dev",
             init_hold=False,
             roles=["cluster_manager", "data"],
-            profile="production",
+            data_temperature="hot",
         ),
         start=StartMode.WITH_PROVIDED_ROLES,
         pending_directives=[],
-        app=App(model_uuid="model-uuid", name="opensearch"),
+        app=app,
         typ=DeploymentType.MAIN_ORCHESTRATOR,
         state=DeploymentState(value=State.ACTIVE),
+        promotion_time=None,
     )
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
     mocker.patch(
@@ -122,7 +128,17 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     )
     mocker.patch(
         "opensearch_single_kernel.workload.base.Paths.seed_hosts",
-        return_value=config_path / "unicast_hosts.txt",
+        return_value=config_path / "tmp" / seed_unicast_hosts,
+        new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.Paths.opensearch_config",
+        return_value=config_path / "tmp" / opensearch_yml,
+        new_callable=PropertyMock,
+    )
+    is_bootstrap_contributor = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchServer.is_bootstrap_contributor",
+        return_value=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -130,15 +146,11 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
         return_value="20.20.20.20",
         new_callable=PropertyMock,
     )
-    harness.charm.config_manager.set_node(
-        app=app,
-        cluster_name="opensearch-dev",
-        unit_name=harness.charm.state.unit_name,
+
+    harness.charm.config_manager.update_opensearch_config(
         roles=["cluster_manager", "data"],
         cm_names=["cm1"],
         cm_ips=["20.20.20.20"],
-        contribute_to_bootstrap=True,
-        node_temperature="hot",
     )
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     assert opensearch_conf["cluster.name"] == "opensearch-dev"
@@ -162,6 +174,10 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     expected_bootstrap_names = ["cm1"] if substrate == "vm" else [expected_node_name]
     assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == expected_bootstrap_names
 
+    # test cleanup_conf_if_bootstrapped
+    is_bootstrap_contributor.return_value = False
+    harness.charm.config_manager.update_opensearch_config()
+    opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     # Base security stuff set by set_node()
     assert get_nested_value(opensearch_conf, "plugins.security.disabled") is False
     assert get_nested_value(opensearch_conf, "plugins.security.ssl_cert_reload_enabled") is True
@@ -177,9 +193,6 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
         is True
     )
 
-    # cleanup_initial_cluster_managers
-    harness.charm.config_manager.cleanup_initial_cluster_managers()
-    opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     assert "cluster.initial_cluster_manager_nodes" not in opensearch_conf
 
     # unicast_hosts content

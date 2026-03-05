@@ -21,6 +21,8 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     PERFORMANCE_PROFILE,
     TLS_RELATION,
+    CertType,
+    Scope,
     StartMode,
     Substrates,
 )
@@ -28,6 +30,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
     Model,
+    Node,
     OpenSearchProfile,
     PeerClusterApp,
     PerformanceType,
@@ -46,7 +49,10 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
-from opensearch_single_kernel.utils.helpers import format_unit_name
+from opensearch_single_kernel.utils.helpers import (
+    format_unit_name,
+    normalized_tls_subject,
+)
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -165,6 +171,46 @@ class OpenSearchServer(RelationState):
         """Update the value of 'certs_exp_checked_at'"""
         self.update({"certs_exp_checked_at": value})
 
+    @property
+    def allocation_exclusions_to_delete(self) -> set[str]:
+        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+            )
+        )
+
+    @allocation_exclusions_to_delete.setter
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
+        self.update({"allocation-exclusions-to-delete": ",".join(value)})
+
+    @property
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("delete-voting-exclusions", "").split(","),
+            )
+        )
+
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in application databag."""
+        self.update({"delete-voting-exclusions": ",".join(value)})
+
+    @property
+    def last_host_ip(self) -> str | None:
+        """Get the last configured IP for the unit. Used for tracking the IP change."""
+        return self.relation_data.get("last_host_ip")
+
+    @last_host_ip.setter
+    def last_host_ip(self, value: str) -> None:
+        """Set the value of last configured IP for the unit. Used for tracking the IP change."""
+        self.update({"last_host_ip": value})
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -242,12 +288,12 @@ class OpenSearchApplication(RelationState):
         self.update({"security_index_initialised": str(value)})
 
     @property
-    def nodes_config(self) -> dict:
+    def nodes_config(self) -> dict[str, Node]:
         """Return the value of 'nodes_config' in application state"""
         nodes_config = self.get_object("nodes_config")
         if not nodes_config:
             return {}
-        return nodes_config
+        return {name: Node.from_dict(node) for name, node in nodes_config.items()}
 
     @property
     def bootstrapped(self) -> bool:
@@ -261,6 +307,11 @@ class OpenSearchApplication(RelationState):
         if not current_deployment_desc:
             return None
         return DeploymentDescription.from_dict(current_deployment_desc)
+
+    @deployment_desc.setter
+    def deployment_desc(self, deployment_desc: DeploymentDescription):
+        """Set the deployment description."""
+        self.put_object("deployment-description", deployment_desc.to_dict())
 
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
@@ -287,6 +338,37 @@ class OpenSearchApplication(RelationState):
         """Update the value of 'update-ts' in the application databag."""
         self.update({"update-ts": str(timestamp)})
 
+    @property
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("delete-voting-exclusions", "").split(","),
+            )
+        )
+
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in application databag."""
+        self.update({"delete-voting-exclusions": ",".join(value)})
+
+    @property
+    def allocation_exclusions_to_delete(self) -> set[str]:
+        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+            )
+        )
+
+    @allocation_exclusions_to_delete.setter
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
+        self.update({"allocation-exclusions-to-delete": ",".join(value)})
+
+    @property
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
         data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
@@ -393,6 +475,16 @@ class ClusterState(Object):
     def unit_name(self):
         """Name of the current unit."""
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
+
+    @property
+    def node_config(self) -> Node | None:
+        """Return the current node from 'nodes_config' in application state."""
+        return (
+            new_node_conf
+            if (nodes_config := self.application.nodes_config)
+            and (new_node_conf := nodes_config.get(self.unit_name))
+            else None
+        )
 
     @property
     def node_name(self) -> str | None:
@@ -568,8 +660,8 @@ class ClusterState(Object):
     def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
         deployment_desc = self.application.deployment_desc
-        # during early lifecycle (e.g. first pebble-ready), the deployment description may not
-        #  be computed yet, callers should handle None.
+        # during early lifecycle (first pebble-ready), the deployment description may not
+        # be computed yet, callers should handle None.
         if deployment_desc is None:
             return None
         return PeerClusterApp(
@@ -581,6 +673,43 @@ class ClusterState(Object):
                 if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
                 else GENERATED_ROLES
             ),
+        )
+
+    @property
+    def tls_truststore_password(self) -> str | None:
+        """Get the truststore-password from the TLS admin_secrets."""
+        return (
+            truststore_pwd
+            if (
+                admin_secrets := self.secrets.get_object(
+                    Scope.APP, CertType.APP_ADMIN.val, peek=True
+                )
+            )
+            and (truststore_pwd := admin_secrets.get("truststore-password"))
+            else None
+        )
+
+    def get_tls_keystore_password(self, cert_type: CertType) -> str | None:
+        """Get the keystore-password of provided cert_type from the TLS cert_secret."""
+        return (
+            keystore_pwd
+            if (cert_secret := self.secrets.get_object(Scope.UNIT, cert_type.val, peek=True))
+            and (keystore_pwd := cert_secret.get("keystore-password"))
+            else None
+        )
+
+    @property
+    def tls_subject(self) -> str | None:
+        """Get the normalized_tls_subject from the TLS admin_secrets."""
+        return (
+            normalized_tls_subject(subject)
+            if (
+                admin_secrets := self.secrets.get_object(
+                    Scope.APP, CertType.APP_ADMIN.val, peek=True
+                )
+            )
+            and (subject := admin_secrets.get("subject"))
+            else None
         )
 
     def computed_roles(self) -> list[str]:

@@ -80,6 +80,14 @@ class OpenSearchStopError(OpenSearchError):
     """Exception thrown when OpenSearch fails to stop."""
 
 
+class OpenSearchProvidedRolesException(OpenSearchError):
+    """Exception class for events when the user provided node roles will violate quorum."""
+
+
+class OpenSearchExclusionsException(OpenSearchError):
+    """Exception class for all Voting/Allocation exclusions related exceptions."""
+
+
 class ContainerNotReadyError(OpenSearchError):
     """Raised when the container is not ready."""
 

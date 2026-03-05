@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Utilities for editing yaml config files at any depth level and maintaining comments."""
+
 import logging
 import re
 import sys
@@ -16,7 +17,7 @@ from typing import Any, Dict, List
 from charmlibs.pathops import PathProtocol
 from ops.pebble import ConnectionError as PebbleConnectionError
 from overrides import override
-from ruamel.yaml import YAML, CommentedSeq
+from ruamel.yaml import YAML, CommentedMap, CommentedSeq
 from ruamel.yaml.comments import CommentedSet
 
 from opensearch_single_kernel.common.exceptions import ContainerNotReadyError
@@ -91,6 +92,19 @@ class ConfigSetter(ABC):
             Dict[str, any]: The final version of the YAML config.
         """
         pass
+
+    @abstractmethod
+    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+        """Rewrite a config file with new configuration while preserving formatting and comments.
+
+        Args:
+            config_file: path to the targeted config while relative to the base path.
+            val: new configuration dictionary.
+
+        Returns:
+            whether config file was changed.
+        """
+        ...
 
     @abstractmethod
     def delete(
@@ -188,6 +202,9 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
+        if not path.exists():
+            raise FileNotFoundError(f"{path} not found.")
+        lines = self.workload.read_text(path).strip().split("\n")
         try:
             if not path.exists():
                 raise FileNotFoundError(f"{path} not found.")
@@ -251,6 +268,25 @@ class YamlConfigSetter(ConfigSetter):
         )
 
         return data
+
+    @override
+    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+        """Rewrite a config file with new configuration while preserving formatting and comments.
+
+        Args:
+            config_file: path to the targeted config while relative to the base path.
+            val: new configuration dictionary.
+
+        Returns:
+            whether config file was changed.
+        """
+        target = self.load(config_file)
+        YamlConfigSetter.__deep_rewrite_update(target, val)
+        path = self.base_path / config_file
+        old_content = path.read_text()
+        self.__dump(target, OutputType.file, config_file)
+        new_content = path.read_text()
+        return old_content != new_content
 
     @override
     def delete(
@@ -332,7 +368,7 @@ class YamlConfigSetter(ConfigSetter):
         config_file: str,
         text_to_append: str,
     ) -> None:
-        """Append any string to a text file.
+        """Append line to a text file if it's not found in it already.
 
         Args:
             config_file (str): Path to the source config file
@@ -343,6 +379,13 @@ class YamlConfigSetter(ConfigSetter):
         """
         path = self.base_path / config_file
 
+        if not path.exists():
+            raise FileNotFoundError(f"{path} not found.")
+
+        data = self.workload.read_text(path)
+        if text_to_append not in data.splitlines():
+            data = data + "\n" + text_to_append
+            self.workload.write_text(data, path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists():
@@ -538,3 +581,16 @@ class YamlConfigSetter(ConfigSetter):
         ret = CommentedSeq()
         ret.fa.set_flow_style()
         return ret
+
+    @staticmethod
+    def __deep_rewrite_update(target: dict, val: dict) -> None:
+        """Update target dict to match provided dict."""
+        for k in target.copy().keys():
+            if k not in val:
+                del target[k]
+        for k, v in val.items():
+            if k in target and isinstance(target[k], CommentedMap) and isinstance(v, dict):
+                # Preserve comments in nested maps
+                YamlConfigSetter.__deep_rewrite_update(target[k], v)
+            else:
+                target[k] = v
