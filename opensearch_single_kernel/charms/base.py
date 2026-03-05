@@ -118,7 +118,6 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                 if len(nodes) > 1:
                     # 1. Add current node to the voting + alloc exclusions
                     self.exclusions_manager.add_current(
-                        node=self.config_manager.current_node,
                         scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
                         voting=True,
                         allocation=not restart,

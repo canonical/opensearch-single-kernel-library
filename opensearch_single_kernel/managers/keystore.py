@@ -31,6 +31,7 @@ class KeystoreManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the keystore manager class."""
         super().__init__(state, workload)
+        self.name = "keystore_manager"
 
     def _create_if_needed(self) -> None:
         """Creates the keystore if not already present."""

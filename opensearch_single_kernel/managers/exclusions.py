@@ -5,6 +5,7 @@
 """OpenSearch Nodes Exclusions manager."""
 
 import logging
+from functools import cached_property
 
 from opensearch_single_kernel.common.constants import Scope
 from opensearch_single_kernel.common.exceptions import (
@@ -31,13 +32,13 @@ class NodesExclusionsManager(BaseManager):
 
     def add_current(
         self,
-        node: Node,
         scope: Scope,
         voting: bool = True,
         allocation: bool = True,
         raise_error: bool = False,
     ) -> None:
         """Add voting and alloc exclusions."""
+        node = self.api_or_state_node
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._add_voting(scope, node):
                 logger.error(f"Failed to add voting exclusion: {node.name}.")
@@ -60,13 +61,13 @@ class NodesExclusionsManager(BaseManager):
 
     def delete_current(
         self,
-        node: Node,
         scope: Scope,
         voting: bool = True,
         allocation: bool = True,
         raise_error: bool = False,
     ) -> None:
         """Delete voting and alloc exclusions."""
+        node = self.api_or_state_node
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._delete_voting({node.name}, scope):
                 logger.error(f"Failed to delete voting exclusion: {node.name}.")
@@ -85,13 +86,15 @@ class NodesExclusionsManager(BaseManager):
                 if raise_error:
                     raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
 
-    def cleanup(self, scope: Scope, node: Node) -> None:
+    def cleanup(self, scope: Scope) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
         units_to_cleanup = self._units_to_cleanup(list(state.delete_voting_exclusions))
         self._delete_voting(units_to_cleanup, scope)
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
-        if allocations_to_cleanup and self._delete_allocations(node, allocations_to_cleanup):
+        if allocations_to_cleanup and self._delete_allocations(
+            self.api_or_state_node, allocations_to_cleanup
+        ):
             state.update({"allocation-exclusions-to-delete": ""})
 
     def add_to_cleanup_list(self, unit_name: str, scope: Scope) -> None:
@@ -263,3 +266,24 @@ class NodesExclusionsManager(BaseManager):
             return res
         except OpenSearchHttpError:
             return False
+
+    @cached_property
+    def api_or_state_node(self) -> Node:
+        """Return the current node configuration from API or state."""
+        unit_id = self.state.server.unit_id
+        node = None
+        try:
+            node_id = self.opensearch_client.get_node_id(self.state.unit_name)
+            if node_id is not None:
+                node = self.opensearch_client.get_current_node(node_id, unit_id, self.alt_hosts)
+            else:
+                node = self.state.node_config
+        except OpenSearchHttpError:
+            node = self.state.node_config
+
+        if node is None:
+            raise OpenSearchExclusionsException(
+                "Failed to acquire current node configuration both from API and state"
+            )
+
+        return node

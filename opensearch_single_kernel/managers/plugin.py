@@ -18,15 +18,19 @@ from ops import ModelError, SecretNotFoundError
 from opensearch_single_kernel.common.constants import Scope
 from opensearch_single_kernel.core.models import PluginConfigInfo
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
 
-class PluginManager:
+class PluginManager(BaseManager):
     """Manager to persist OpenSearch plugin configuration information"""
 
-    def __init__(self, state: ClusterState):
-        self._state = state
+    def __init__(self, state: ClusterState, workload: BaseWorkload):
+        """Creates the plugin manager class."""
+        super().__init__(state, workload)
+        self.name = "plugin_manager"
 
     def put_plugin_config(
         self,
@@ -37,7 +41,7 @@ class PluginManager:
         cleanup: dict[str, list[str]] | None = None,
     ) -> None:
         """Adds plugin configuration information to peer relation data"""
-        state = self._state.application if scope == Scope.APP else self._state.server
+        state = self.state.application if scope == Scope.APP else self.state.server
         plugins = state.plugin_config_info
         plugin_config = plugins.get(label) or PluginConfigInfo()
         plugin_config.relation_name = relation_name
@@ -49,7 +53,7 @@ class PluginManager:
 
     def remove_plugin_config(self, scope: Scope, label: str) -> None:
         """Removes plugin configuration information from peer relation data"""
-        state = self._state.application if scope == Scope.APP else self._state.server
+        state = self.state.application if scope == Scope.APP else self.state.server
         plugins = state.plugin_config_info
         if label in plugins:
             del plugins[label]
@@ -69,8 +73,8 @@ class PluginManager:
             label: label of the secret to store
             relation_name: name of the relation from which the secret content came
         """
-        self._state.secrets.put(Scope.APP, label, json.dumps(content))
-        secret_id = self._state.secrets.get_secret_id(Scope.APP, label)
+        self.state.secrets.put(Scope.APP, label, json.dumps(content))
+        secret_id = self.state.secrets.get_secret_id(Scope.APP, label)
         if not secret_id:
             logger.error("Could not create secret with label: %s", label)
         self.put_plugin_config(
@@ -84,7 +88,7 @@ class PluginManager:
             label: label of the secret to remove
         """
         try:
-            self._state.secrets.delete(Scope.APP, label)
+            self.state.secrets.delete(Scope.APP, label)
         except SecretNotFoundError:
             logger.error("Can't find secret '%s'", label)
         except ModelError as e:

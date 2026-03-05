@@ -28,8 +28,6 @@ from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 
 def format_unit_name(unit: Unit | str, app: App) -> str:
     """Format unit_name according the app."""

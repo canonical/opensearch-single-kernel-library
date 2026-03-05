@@ -173,6 +173,20 @@ AZURE_RELATION = "azure-credentials"
 GCS_RELATION = "gcs-credentials"
 
 
+# Paths
+BASE_SNAP_DIR = "/var/snap/opensearch"
+SNAP_DATA = "current"
+SNAP_COMMON = "common"
+SNAP = "/snap/opensearch/current"
+
+
+# Secrets
+PW_POSTFIX = "password"
+HASH_POSTFIX = f"{PW_POSTFIX}-hash"
+ADMIN_PW = f"admin-{PW_POSTFIX}"
+ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
+SECRETS_LABEL_SEPARATOR = ":"
+
 # Backup
 S3_CREDENTIALS = "s3-creds"
 S3_PEER_SECRET_KEYS = [
@@ -199,36 +213,7 @@ AZURE_REPOSITORY = "azure-repository"
 GCS_REPOSITORY = "gcs-repository"
 OPENSEARCH_BACKUP_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
-# Paths
-BASE_SNAP_DIR = "/var/snap/opensearch"
-SNAP_DATA = "current"
-SNAP_COMMON = "common"
-SNAP = "/snap/opensearch/current"
-
-
-# Secrets
-PW_POSTFIX = "password"
-HASH_POSTFIX = f"{PW_POSTFIX}-hash"
-ADMIN_PW = f"admin-{PW_POSTFIX}"
-ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
-SECRETS_LABEL_SEPARATOR = ":"
-S3_CREDENTIALS = "s3-creds"
-S3_PEER_SECRET_KEYS = [
-    "secret-key",
-    "access-key",
-    "s3-secret-key",
-    "s3-access-key",
-    S3_CREDENTIALS,
-]
-AZURE_CREDENTIALS = "azure-creds"
-AZURE_PEER_SECRET_KEYS = [
-    "azure-storage-account",
-    "azure-secret-key",
-    "secret-key",
-    "storage-account",
-    AZURE_CREDENTIALS,
-]
-GCS_CREDENTIALS = "gcs-creds"
+# SMTP
 SMTP_SECRET_LABEL = "plugin-notifications"
 
 

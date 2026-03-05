@@ -99,7 +99,7 @@ class ClusterManager(BaseManager):
             # new cluster
             deployment_desc = self._new_cluster_setup(user_config)
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
-            self.state.application.put_object("deployment-description", deployment_desc.to_dict())
+            self.state.application.deployment_desc = deployment_desc
             return False
         # update cluster deployment desc
         logger.debug("Existing deployment_desc before cluster setup: %s", current_deployment_desc)
@@ -109,7 +109,7 @@ class ClusterManager(BaseManager):
             return False
 
         # TODO: Should we add an entry on DeploymentDesc "errors" to reflect on status?
-        self.state.application.put_object("deployment-description", deployment_desc.to_dict())
+        self.state.application.deployment_desc = deployment_desc
 
         # TODO: once peer clusters relation implemented, we should apply all directives
         #  + removing them from queue. We currently only apply the status.
@@ -445,7 +445,7 @@ class ClusterManager(BaseManager):
 
         deployment_desc.pending_directives.remove(directive)
         logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
-        self.state.application.put_object("deployment-description", deployment_desc.to_dict())
+        self.state.application.deployment_desc = deployment_desc
 
     def compute_and_broadcast_updated_topology(self, current_nodes: list[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
@@ -454,11 +454,6 @@ class ClusterManager(BaseManager):
         """
         if not current_nodes:
             return False
-
-        current_reported_nodes = {
-            name: Node.from_dict(node)
-            for name, node in (self.state.application.nodes_config or {}).items()
-        }
 
         if (
             deployment_desc := self.state.application.deployment_desc
@@ -486,7 +481,7 @@ class ClusterManager(BaseManager):
                     temperature=temperature,
                 )
 
-        if current_reported_nodes == updated_nodes:
+        if self.state.application.nodes_config == updated_nodes:
             return False
 
         self.state.application.put_object("nodes_config", updated_nodes)
@@ -590,13 +585,21 @@ class ClusterManager(BaseManager):
     def cleanup_on_last_unit_removal(self) -> None:
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
-            self.state.application.update({"bootstrap_contributors_count": ""})
-            self.state.application.update({"nodes_config": ""})
+            self.state.application.update(
+                {
+                    "bootstrap_contributors_count": "",
+                    "nodes_config": "",
+                }
+            )
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
-                self.state.application.update({"is_security_index_initialised": ""})
-                self.state.application.update({"bootstrapped": ""})
+                self.state.application.update(
+                    {
+                        "is_security_index_initialised": "",
+                        "bootstrapped": "",
+                    }
+                )
         # TODO: Large Deployment
         # if self.opensearch_peer_cm.is_provider():
         #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)

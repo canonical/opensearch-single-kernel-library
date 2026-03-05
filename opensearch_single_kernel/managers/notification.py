@@ -19,8 +19,10 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import SMTP_SECRET_LABEL
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRelationData
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.workload.base import BaseWorkload
 
 
 class NotificationsClientError(RuntimeError):
@@ -66,6 +68,11 @@ class SmtpConfig:
 
 class NotificationsManager(BaseManager):
     """Notifications plugin API client using OpenSearchDistribution request."""
+
+    def __init__(self, state: ClusterState, workload: BaseWorkload):
+        """Creates the notifications manager class."""
+        super().__init__(state, workload)
+        self.name = "notifications_manager"
 
     @staticmethod
     def label(relation_id: int) -> str:
