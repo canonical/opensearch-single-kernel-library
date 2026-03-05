@@ -19,6 +19,7 @@ from ops.pebble import ConnectionError as PebbleConnectionError
 from ops.pebble import Error as PebbleError
 from ops.pebble import (
     Layer,
+    ServiceInfo,
     ServiceStatus,
 )
 from overrides import override
@@ -27,8 +28,6 @@ from opensearch_single_kernel.common.constants import (
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
     DIR_PERMISSIONS_SECURE,
-    OPENSEARCH_RUN_AS_GROUP,
-    OPENSEARCH_RUN_AS_USER,
     OPENSEARCH_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
@@ -183,6 +182,20 @@ class K8sWorkload(BaseWorkload):
         self._container_getter = container_getter
         self._paths: Optional[BasePaths] = None
 
+    def _get_service(self) -> ServiceInfo | None:
+        """Return current service info, if present."""
+        try:
+            services = self.container.get_services()
+        except (PebbleConnectionError, PebbleError, ModelError, TypeError):
+            return None
+
+        target = OPENSEARCH_SERVICE_NAME
+        for svc in services:
+            # ServiceInfo has .name
+            if getattr(svc, "name", None) == target:
+                return svc
+        return None
+
     @property
     def container(self) -> Container:
         """Get the container instance.
@@ -217,8 +230,10 @@ class K8sWorkload(BaseWorkload):
         This method is idempotent and is intended to be called from the
         K8s pebble-ready hook before starting the service.
         """
-        user = str(OPENSEARCH_RUN_AS_USER)
-        group = str(OPENSEARCH_RUN_AS_GROUP)
+        # Pebble file API resolves user/group by *name*, not numeric UID/GID.
+        user = str(PEBBLE_SERVICE_USER)
+        group = str(PEBBLE_SERVICE_GROUP)
+        root_group = "root"
         required_dirs: list[tuple[PathProtocol, int]] = [
             (self.paths.data, DIR_PERMISSIONS_SECURE),
             (self.paths.data_dir, DIR_PERMISSIONS_SECURE),
@@ -231,7 +246,8 @@ class K8sWorkload(BaseWorkload):
 
         for dir_path, mode in required_dirs:
             try:
-                dir_path.mkdir(mode=mode, parents=True, exist_ok=True, user=user, group=group)
+                dir_group = root_group if dir_path == self.paths.certs else group
+                dir_path.mkdir(mode=mode, parents=True, exist_ok=True, user=user, group=dir_group)
             except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
                 logger.warning("Failed to ensure directory %s exists: %s", dir_path, e)
 
@@ -250,7 +266,7 @@ class K8sWorkload(BaseWorkload):
             layer_dict = self._build_pebble_layer_dict(opensearch_cmd)
 
             layer = Layer(layer_dict)
-            self.container.add_layer(self.SERVICE_NAME, layer, combine=True)
+            self.container.add_layer(OPENSEARCH_SERVICE_NAME, layer, combine=True)
 
             logger.info("Configured pebble plan for %s service", self.SERVICE_NAME)
 
@@ -322,11 +338,12 @@ class K8sWorkload(BaseWorkload):
             % java_home
         )
 
+        service_name = OPENSEARCH_SERVICE_NAME
         layer_dict = {
             "summary": "OpenSearch service layer",
             "description": "Pebble plan layer for OpenSearch",
             "services": {
-                self.SERVICE_NAME: {
+                service_name: {
                     "override": "replace",
                     "summary": "OpenSearch service",
                     "command": opensearch_cmd,
@@ -614,10 +631,9 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            services = self.container.get_services([self.SERVICE_NAME])
-            if not services:
+            service = self._get_service()
+            if service is None:
                 return False
-            service = services[0]
 
             if service.current == ServiceStatus.ACTIVE:
                 return True
@@ -625,7 +641,7 @@ class K8sWorkload(BaseWorkload):
                 return True
 
             return False
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
+        except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
             logger.debug("Error checking service status: %s", e)
             return False
 
@@ -642,7 +658,7 @@ class K8sWorkload(BaseWorkload):
 
             # ensure plan is present and readiness checks are enabled when starting intentionally.
             self._configure_pebble_plan(enable_checks=True)
-            self.container.start(self.SERVICE_NAME)
+            self.container.start(OPENSEARCH_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStartError() from e
@@ -658,13 +674,12 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            services = self.container.get_services([self.SERVICE_NAME])
-            if not services:
+            service = self._get_service()
+            if service is None:
                 return False
-            service = services[0]
 
             return service.current == ServiceStatus.ERROR
-        except (PebbleConnectionError, PebbleError, ModelError, KeyError) as e:
+        except (PebbleConnectionError, PebbleError, ModelError, KeyError, TypeError) as e:
             logger.warning("Failed to check if service is failed: %s", e)
             return False
 
@@ -685,13 +700,13 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            services = self.container.get_services([self.SERVICE_NAME])
-            if services and services[0].current == ServiceStatus.ACTIVE:
+            service = self._get_service()
+            if service is not None and service.current == ServiceStatus.ACTIVE:
                 logger.info("The %s service is already started.", self.SERVICE_NAME)
                 return
 
-            self.container.start(self.SERVICE_NAME)
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
+            self.container.start(OPENSEARCH_SERVICE_NAME)
+        except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStartError() from e
 
@@ -1121,7 +1136,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchStopError("Container is not ready")
 
-            self.container.stop(self.SERVICE_NAME)
+            self.container.stop(OPENSEARCH_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to stop the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStopError() from e

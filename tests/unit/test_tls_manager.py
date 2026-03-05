@@ -557,8 +557,10 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         "openssl pkcs12 -export .*-out " rf"{certs_dir}/app-admin\.p12 .*-name app-admin",
         run_cmd.call_args_list[0].args[0],
     )
+    expected_mode = "640"
     assert re.search(
-        rf"(sudo )?chmod 640 {certs_dir}/app-admin\.p12", run_cmd.call_args_list[1].args[0]
+        rf"(sudo )?chmod {expected_mode} {certs_dir}/app-admin\.p12",
+        run_cmd.call_args_list[1].args[0],
     )
     assert conf_dir in str(tempfile.call_args_list[0][1]["dir"])
 
@@ -705,8 +707,10 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
         "openssl pkcs12 -export .*-out " rf"{certs_dir}/{cert_type}\.p12 .*-name {cert_type}",
         run_cmd.call_args_list[0].args[0],
     )
+    expected_mode = "640"
     assert re.search(
-        rf"(sudo )?chmod 640 {certs_dir}/{cert_type}\.p12", run_cmd.call_args_list[1].args[0]
+        rf"(sudo )?chmod {expected_mode} {certs_dir}/{cert_type}\.p12",
+        run_cmd.call_args_list[1].args[0],
     )
     assert conf_dir in str(tempfile.call_args_list[0][1]["dir"])
 
@@ -835,16 +839,30 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     update_request_ca_bundle.assert_called_once()
 
     # Old CA cert is saved with corresponding alias, new CA cert added to keystore
-    assert run_cmd.call_count == 3
-    assert re.search(
-        r"keytool -changealias -alias ca-0 -destalias old-ca-0",
-        run_cmd.call_args_list[0].args[0],
+    # extra commands are expected due to post-write permission/ownership normalization.
+    assert run_cmd.call_count == (4 if substrate == "vm" else 5)
+    assert any(
+        re.search(r"keytool -changealias -alias ca-0 -destalias old-ca-0", call.args[0])
+        for call in run_cmd.call_args_list
     )
-    assert re.search(r"keytool -importcert.* *-alias ca-0", run_cmd.call_args_list[1].args[0])
-    assert (
-        f"chmod +r {str(harness.charm.workload.paths.certs)}/ca.p12"
-        in run_cmd.call_args_list[2].args[0]
+    assert any(
+        re.search(r"keytool -importcert.* *-alias ca-0", call.args[0])
+        for call in run_cmd.call_args_list
     )
+    assert any(
+        f"chmod +r {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+        for call in run_cmd.call_args_list
+    )
+    expected_mode = "640"
+    assert any(
+        f"chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+        for call in run_cmd.call_args_list
+    )
+    if substrate != "vm":
+        assert any(
+            f"chown 584792:0 {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+            for call in run_cmd.call_args_list
+        )
     assert str(harness.charm.workload.paths.conf) in str(tempfile.call_args_list[0][1]["dir"])
     # NOTE: The new cert and chain are NOT saved into the keystore (disk)
 
@@ -1367,8 +1385,9 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         rf"{str(harness.charm.workload.paths.certs)}/app-admin\.p12 -name app-admin",
         run_cmd.call_args_list[0].args[0],
     )
+    expected_mode = "640"
     assert re.search(
-        rf"(sudo )?chmod 640 {str(harness.charm.workload.paths.certs)}/app-admin\.p12",
+        rf"(sudo )?chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/app-admin\.p12",
         run_cmd.call_args_list[1].args[0],
     )
     assert str(harness.charm.workload.paths.conf) in str(tempfile.call_args_list[0][1]["dir"])
@@ -1556,7 +1575,10 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         "openssl pkcs12 -export .* -out " rf"{certs_dir}/{cert_type}\.p12 -name {cert_type}",
         run_cmd.call_args_list[0].args[0],
     )
-    assert f"chmod 640 {certs_dir}/{cert_type}.p12" in run_cmd.call_args_list[1].args[0]
+    expected_mode = "640"
+    assert (
+        f"chmod {expected_mode} {certs_dir}/{cert_type}.p12" in run_cmd.call_args_list[1].args[0]
+    )
 
     assert any(
         (
@@ -1672,7 +1694,8 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     harness.charm.tls_events._on_certificate_available(harness.charm.on.certificate_available)
 
     if leader:
-        assert run_cmd.call_count == (3 if substrate == "vm" else 9)
+        # extra commands are expected due to post-write permission/ownership normalization.
+        assert run_cmd.call_count == (4 if substrate == "vm" else 11)
         assert harness.model.unit.status == MaintenanceStatus("Applying new CA certificate...")
         assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
             "csr": csr,

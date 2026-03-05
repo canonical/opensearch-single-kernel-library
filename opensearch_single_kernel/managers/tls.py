@@ -13,8 +13,10 @@ from charmlibs.pathops import PathProtocol
 from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_RUN_AS_GROUP,
+    DIR_PERMISSIONS_CERTIFICATES,
     OPENSEARCH_RUN_AS_USER,
+    PEBBLE_SERVICE_USER,
+    ROOT_GID,
     CertType,
     Scope,
     StoreType,
@@ -61,15 +63,6 @@ class TlsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "tls_manager"
-
-    def _get_workload_uid_gid(self) -> tuple[int, int]:
-        """Return numeric uid/gid used by the workload process.
-
-        For Kubernetes substrates, the OpenSearch container runs as a fixed numeric UID/GID to
-        match the rock image user definition. These IDs are used for chown calls
-        when writing TLS artifacts. On VM, this value is currently unused.
-        """
-        return OPENSEARCH_RUN_AS_USER, OPENSEARCH_RUN_AS_GROUP
 
     @property
     def keytool(self) -> str:
@@ -374,7 +367,12 @@ class TlsManager(BaseManager):
         return None
 
     def update_request_ca_bundle(self, ca_chain: str | None = None) -> None:
-        """Create a new chain.pem file for requests module"""
+        """Create/update a chain.pem file for the requests module.
+
+        TODO: Stop persisting the CA chain as a workload file (chain.pem).
+        # Instead, retrieve the CA chain from Juju secrets
+        # and pass it to requests without writing it to disk.
+        """
         logger.debug("Updating requests TLS CA bundle")
         if ca_chain is None:
             admin_secret = self.state.secrets.get_object(
@@ -382,7 +380,8 @@ class TlsManager(BaseManager):
             )
             ca_chain = admin_secret.get("chain")
 
-        # we store the pem format to make it easier for the python requests lib
+        # We store the PEM format to make it easier for the python requests lib.
+        # TODO: Prefer consuming the CA chain from secrets without writing to the workload FS.
         chain_path = self.workload.paths.certs / "chain.pem"
         if parent_dir_path := chain_path.parent:
             self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
@@ -391,6 +390,11 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
         if ca_chain not in bundle_content:
             self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
+            # Snap-style permissions: keep the bundle readable/writable by the workload user,
+            # and accessible to root via group bits when needed.
+            chain_path_str = path_as_posix(chain_path)
+            self._set_tls_store_permissions(chain_path_str)
+            self._best_effort_set_tls_store_ownership(chain_path_str)
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
@@ -486,11 +490,11 @@ class TlsManager(BaseManager):
                 # ContainerPath.mkdir uses Pebble file API and will raise PebbleConnectionError
                 # when the container isn't reachable.
                 cert_dir_path.mkdir(
-                    mode=0o750,
+                    mode=DIR_PERMISSIONS_CERTIFICATES,
                     parents=True,
                     exist_ok=True,
-                    user=str(OPENSEARCH_RUN_AS_USER),
-                    group=str(OPENSEARCH_RUN_AS_GROUP),
+                    user=str(PEBBLE_SERVICE_USER),
+                    group="root",
                 )
             else:
                 # On VM, pathops operates on the unit filesystem. Keep default ownership
@@ -519,7 +523,10 @@ class TlsManager(BaseManager):
             logger.debug("Could not unlink %s (may not exist): %s", path, e)
 
     def _set_tls_store_permissions(self, store_path_str: str) -> None:
-        """Set keystore permissions after writing."""
+        """Set keystore permissions after writing.
+
+        Force for a known minimum access mode.
+        """
         chmod_cmd = (
             f"chmod 640 {store_path_str}"
             if self.state.substrate == Substrates.K8S
@@ -535,8 +542,7 @@ class TlsManager(BaseManager):
         if self.state.substrate != Substrates.K8S:
             return
         try:
-            uid, gid = self._get_workload_uid_gid()
-            self.workload.run_cmd(f"chown {uid}:{gid} {store_path_str}")
+            self.workload.run_cmd(f"chown {OPENSEARCH_RUN_AS_USER}:{ROOT_GID} {store_path_str}")
         except OpenSearchCmdError as e:
             # Expected to fail if running as non-root, fsGroup may cover it.
             logger.debug("Could not change ownership of %s: %s", store_path_str, e)
@@ -748,6 +754,11 @@ class TlsManager(BaseManager):
             use_sudo=self.state.substrate == Substrates.VM,
         ):
             return False
+
+        # ensure the CA truststore ends up with expected ownership/permissions on K8s.
+        ca_store_path_str = path_as_posix(self.workload.paths.certs / f"{CA_ALIAS}.p12")
+        self._set_tls_store_permissions(ca_store_path_str)
+        self._best_effort_set_tls_store_ownership(ca_store_path_str)
 
         self.update_request_ca_bundle(secrets.get("chain"))
 

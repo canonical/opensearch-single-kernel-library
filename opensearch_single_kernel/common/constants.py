@@ -186,6 +186,9 @@ PEER_CLUSTER_WRONG_RELATION = "Cluster name doesn't match with related cluster. 
 OPENSEARCH_RUN_AS_USER = 584792
 OPENSEARCH_RUN_AS_GROUP = 584792
 
+# Root group id (gid 0). Used when we want root to have group-level access.
+ROOT_GID = 0
+
 # Container name for K8s deployments
 CONTAINER_NAME = "opensearch"
 
@@ -198,6 +201,7 @@ DIR_PERMISSIONS_READONLY = 0o755
 # writable directory permissions (logs)
 DIR_PERMISSIONS_WRITABLE = 0o777
 # certificates directory permissions
+# minimum permissions: daemon can write, root can list/read.
 DIR_PERMISSIONS_CERTIFICATES = 0o750
 # secure directory permissions
 DIR_PERMISSIONS_SECURE = 0o775

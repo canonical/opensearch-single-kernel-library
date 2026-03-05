@@ -86,7 +86,7 @@
 # Require explicit names when deleting indices:
 #
 #action.destructive_requires_name: true
-node.attr.app_id: add7c33d-5fde-48e7-a38f-5f278b66923a/opensearch
+node.attr.app_id: 4f4ff093-dd38-400e-9c59-88287e3d3541/opensearch-k8s
 node.attr.temp: hot
 node.roles:
 - cluster_manager
@@ -95,7 +95,7 @@ plugins.security.ssl.http.clientauth_mode: OPTIONAL
 
 cluster.name: opensearch-dev
 
-node.name: opensearch-0.a5d
+node.name: opensearch-0
 
 network.host:
 - _site_
@@ -111,9 +111,9 @@ http.publish_host: 30.30.30.30
 
 discovery.seed_providers: file
 
-path.data: /var/snap/opensearch/common/var/lib/opensearch
+path.data: /var/lib/opensearch/data
 
-path.logs: /var/snap/opensearch/common/var/log/opensearch
+path.logs: /var/log/opensearch/logs
 
 plugins.security.disabled: false
 

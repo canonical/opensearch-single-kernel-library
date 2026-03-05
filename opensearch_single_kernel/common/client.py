@@ -63,6 +63,10 @@ class OpenSearchClient:
         workload container is temporarily unreachable, we fall back to the last
         staged copy in the charm container.
 
+        TODO: Stop relying on a workload-side chain.pem file.
+        # Instead, retrieve the CA chain directly from Juju secrets
+        # and pass it to requests without persisting it on disk.
+
         Returns:
             str | bool: Path to chain.pem file accessible from the charm container, or
             False / raises when the CA chain is not available yet.
