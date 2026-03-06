@@ -12,6 +12,7 @@ from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -28,9 +29,9 @@ class BaseManager:
         self.workload = workload
 
     @property
-    def opensearch_client(self):
+    def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
-        admin_field = self.state.secrets.password_key("admin")
+        admin_field = password_key("admin")
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)
         return OpenSearchClient(
             self.workload, self.state.host_ip, OPENSEARCH_HTTP_PORT, admin_secret
@@ -43,7 +44,7 @@ class BaseManager:
         all_hosts = list(all_units_ips.values())
 
         if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([Node.from_dict(node).ip for node in nodes_conf.values()])
+            all_hosts.extend([node.ip for node in nodes_conf.values()])
 
         # TODO: Add getting relation data form state
         # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():

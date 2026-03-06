@@ -618,7 +618,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
+    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
@@ -742,7 +742,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
+    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
@@ -880,7 +880,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_non_leader
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
+    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
@@ -1140,6 +1140,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.current_node")
+    mocker.patch(
+        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
+    )
     mocker.patch(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
@@ -1415,8 +1418,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     exists = mocker.patch("charmlibs.pathops.LocalPath.exists")
     mocker.patch("socket.socket.connect")
 
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_admin_tls_conf")
+    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
@@ -1593,8 +1595,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     )
     split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
 
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_node_tls_conf")
-    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.set_admin_tls_conf")
+    mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )

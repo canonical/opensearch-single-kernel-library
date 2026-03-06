@@ -11,10 +11,9 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from hashlib import md5
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
-from pydantic import BaseModel, Field, root_validator, validator
-from pydantic.utils import ROOT_KEY
+from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
@@ -33,8 +32,6 @@ class Model(ABC, BaseModel):
     """Base model class."""
 
     def __init__(self, **data: Any) -> None:
-        if self.__custom_root_type__ and data.keys() != {ROOT_KEY}:
-            data = {ROOT_KEY: data}
         super().__init__(**data)
 
     def to_str(self, by_alias: bool = False) -> str:
@@ -99,23 +96,24 @@ class App(Model):
     name: str | None = None
     model_uuid: str | None = None
 
-    @root_validator
-    def set_props(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def set_props(self):
         """Generate the attributes depending on the input."""
-        if None not in list(values.values()):
-            return values
+        # If all values are not None, we return self
+        if None not in [self.id, self.name, self.model_uuid, self.short_id]:
+            return self
 
-        if not values["id"] and None in [values["name"], values["model_uuid"]]:
+        if not self.id and None in [self.name, self.model_uuid]:
             raise ValueError("'id' or 'name and model_uuid' must be set.")
 
-        if values["id"]:
-            full_id_split = values["id"].split("/")
-            values["name"], values["model_uuid"] = full_id_split[-1], full_id_split[0]
+        if self.id:
+            full_id_split = self.id.split("/")
+            self.name, self.model_uuid = full_id_split[-1], full_id_split[0]
         else:
-            values["id"] = f"{values['model_uuid']}/{values['name']}"
+            self.id = f"{self.model_uuid}/{self.name}"
+        self.short_id = md5(self.id.encode()).hexdigest()[:3]
 
-        values["short_id"] = md5(values["id"].encode()).hexdigest()[:3]
-        return values
+        return self
 
 
 class Node(Model):
@@ -129,7 +127,7 @@ class Node(Model):
     temperature: str | None = None
 
     @classmethod
-    @validator("roles")
+    @field_validator("roles")
     def roles_set(cls, v):
         """Returns deduplicated list of roles."""
         return list(set(v))
@@ -188,13 +186,13 @@ class PeerClusterConfig(Model):
     # profile called "testing".
     data_temperature: str | None = None
 
-    @root_validator
-    def set_node_temperature(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def set_node_temperature(self):
         """Set and validate the node temperature."""
         allowed_temps = ["hot", "warm", "cold", "frozen", "content"]
 
         input_temps = set()
-        for role in values["roles"]:
+        for role in self.roles:
             if not role.startswith("data."):
                 continue
 
@@ -208,13 +206,12 @@ class PeerClusterConfig(Model):
             raise ValueError("More than 1 data temperature provided.")
         elif input_temps:
             temperature = input_temps.pop()
-            values["data_temperature"] = temperature
+            self.data_temperature = temperature
 
-            values["roles"].append("data")
-            values["roles"].remove(f"data.{temperature}")
-            values["roles"] = list(set(values["roles"]))
-
-        return values
+            self.roles.append("data")
+            self.roles.remove(f"data.{temperature}")
+            self.roles = list(set(self.roles))
+        return self
 
 
 class PeerClusterApp(Model):
@@ -226,18 +223,16 @@ class PeerClusterApp(Model):
     roles: list[str]
 
 
-class PeerClusterFleetApps(Model):
+class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
     """Model class for all applications in a large deployment as a dict."""
 
-    __root__: dict[str, PeerClusterApp]
-
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         """Implements the iter magic method."""
-        return iter(self.__root__)
+        return iter(self.root)
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> PeerClusterApp:
         """Implements the getitem magic method."""
-        return self.__root__[item]
+        return self.root[item]
 
 
 class DeploymentState(Model):
@@ -246,15 +241,15 @@ class DeploymentState(Model):
     value: State
     message: str = Field(default="")
 
-    @root_validator
-    def prevent_none(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def prevent_none(self):
         """Validate the message or lack of depending on the state."""
-        if values["value"] == State.ACTIVE:
-            values["message"] = ""
-        elif not values["message"].strip():
+        if self.value == State.ACTIVE:
+            self.message = ""
+        elif not self.message.strip():
             raise ValueError("The message must be set when state not Active.")
 
-        return values
+        return self
 
 
 class DeploymentDescription(Model):
@@ -267,15 +262,15 @@ class DeploymentDescription(Model):
     typ: DeploymentType
     state: DeploymentState = DeploymentState(value=State.ACTIVE)
     cluster_name_autogenerated: bool = False
-    promotion_time: float | None
+    promotion_time: float | None = None
 
-    @root_validator
-    def set_promotion_time(cls, values):  # noqa: N805
+    @model_validator(mode="after")
+    def set_promotion_time(self):
         """Set promotion time of a failover to a main CM."""
-        if not values["promotion_time"] and values["typ"] == DeploymentType.MAIN_ORCHESTRATOR:
-            values["promotion_time"] = datetime.now().timestamp()
+        if not self.promotion_time and self.typ == DeploymentType.MAIN_ORCHESTRATOR:
+            self.promotion_time = datetime.now().timestamp()
 
-        return values
+        return self
 
 
 class ProfileMemoryRequirements(Model):

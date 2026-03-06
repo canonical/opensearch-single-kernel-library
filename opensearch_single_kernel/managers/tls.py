@@ -127,7 +127,7 @@ class TlsManager(BaseManager):
 
     def create_store_pwd_if_not_exists(
         self, scope: Scope, cert_type: CertType, store_type: StoreType
-    ):
+    ) -> None:
         """Create passwords for the key stores if not already created.
 
         Args:
@@ -155,7 +155,7 @@ class TlsManager(BaseManager):
                 merge=True,
             )
 
-    def _get_subject(self, cert_type: CertType) -> str:
+    def _get_certificate_subject(self, cert_type: CertType) -> str:
         """Get subject of the certificate."""
         if cert_type == CertType.APP_ADMIN:
             cn = "admin"
@@ -227,7 +227,7 @@ class TlsManager(BaseManager):
         if password is not None:
             password = password.encode("utf-8")
 
-        subject = self._get_subject(cert_type)
+        subject = self._get_certificate_subject(cert_type)
         organization = self.state.application.deployment_desc.config.cluster_name
         csr = generate_csr(
             add_unique_id_to_subject_name=False,
@@ -253,7 +253,7 @@ class TlsManager(BaseManager):
 
     def update_certificate_secret_if_needed(
         self, scope: Scope, cert_type: CertType, ca_chain: str, certificate: str, ca: str
-    ):
+    ) -> None:
         """Update the certificate secrets if needed"""
         current_secret_obj = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
         secret = {
@@ -364,7 +364,7 @@ class TlsManager(BaseManager):
             key_pwd=secrets.get("key-password"),
         )
 
-    def delete_stored_tls_resources(self):
+    def delete_stored_tls_resources(self) -> None:
         """Delete the TLS resources of the unit that are stored on disk."""
         for cert_type in [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]:
             certificate_path = self.workload.paths.certs / f"{cert_type}.p12"
@@ -458,7 +458,7 @@ class TlsManager(BaseManager):
             logger.error("Error reading the current certificate: %s", e)
             return None
 
-    def reload_tls_certificates(self):
+    def reload_tls_certificates(self) -> None:
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
