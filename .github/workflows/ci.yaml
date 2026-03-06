@@ -114,17 +114,6 @@ jobs:
       - name: Run tests
         run: tox run -e unit-${{ matrix.env }}
 
-  build-application-charm:
-    strategy:
-      fail-fast: false
-      matrix:
-        path:
-          - tests/integration/relations/opensearch_provider/application-charm
-    name: Build charm | ${{ matrix.path }}
-    uses: canonical/data-platform-workflows/.github/workflows/build_charm.yaml@v32.1.0
-    with:
-      path-to-charm-directory: ${{ matrix.path }}
-
   build:
     name: Build test charms
     runs-on: ubuntu-latest
@@ -133,6 +122,7 @@ jobs:
       matrix:
         path:
           - tests/charms/opensearch_test_charm
+          - tests/integration/relations/opensearch_provider/application-charm
     steps:
       - name: Install CLI
         run: pipx install git+https://github.com/canonical/data-platform-workflows@v31.1.1#subdirectory=python/cli
