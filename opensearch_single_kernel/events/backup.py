@@ -293,7 +293,7 @@ class BackupEventsHandler(Object):
             return
 
         try:
-            self.charm.backup_manager.verify_credentials(
+            self.charm.backup_manager.verify_stored_credentials(
                 object_storage_type, object_storage_config
             )
         except OpenSearchHttpError as e:

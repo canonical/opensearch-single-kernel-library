@@ -465,7 +465,7 @@ class BackupManager(BaseManager):
                 f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
             )
 
-    def verify_credentials(
+    def verify_stored_credentials(
         self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
     ) -> None:
         """Verify that the stored credentials are valid."""
