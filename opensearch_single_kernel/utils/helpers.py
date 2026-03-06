@@ -94,6 +94,17 @@ def deployment_type(
     )
 
 
+def normalize_k8s_bootstrap_name(value: str | None) -> str:
+    """Normalize bootstrap names to match K8s container hostnames.
+
+    Typical inputs:
+    - "app-0.c67" (formatted unit name)
+    - "app-0" (pod hostname)
+    - "app-0.namespace.svc.cluster.local" (DNS)
+    """
+    return (value or "").split(".", 1)[0]
+
+
 def split_ca_chain(pem_content: str) -> list[str]:
     """Split PEM chain into individual certificates."""
     end_cert_marker = "-----END CERTIFICATE-----"

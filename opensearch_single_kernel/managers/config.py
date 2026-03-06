@@ -5,7 +5,6 @@
 """OpenSearch Config manager."""
 
 import logging
-import socket
 from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType, Substrates
@@ -123,14 +122,6 @@ class ConfigManager(BaseManager):
         # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
         return ["_site_", "_local_", *sorted(self.state.network_hosts)]
 
-    def _node_name(self) -> str:
-        """Compute node.name for opensearch.yml."""
-        if self.state.substrate == Substrates.K8S:
-            # In K8s, OpenSearch defaults to using container hostname.
-            # state.node_name already returns socket.gethostname() for K8s.
-            return self.state.node_name or socket.gethostname()
-        return self.state.unit_name
-
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""
         if not (deployment_desc := self.state.application.deployment_desc):
@@ -138,7 +129,7 @@ class ConfigManager(BaseManager):
 
         return {
             "cluster.name": deployment_desc.config.cluster_name,
-            "node.name": self._node_name(),
+            "node.name": self.state.node_name,
             "network.host": self._network_hosts(),
             "http.publish_host": self.workload.get_host_public_ip()
             or self.state.network_ingress_address,
@@ -161,15 +152,6 @@ class ConfigManager(BaseManager):
             else {}
         )
 
-    @staticmethod
-    def _normalize_k8s_bootstrap_name(value: str) -> str:
-        """Normalize bootstrap names to match K8s container hostnames."""
-        # Typical inputs:
-        # - "app-0.c67" (formatted unit name)
-        # - "app-0" (pod hostname)
-        # - "app-0.namespace.svc.cluster.local" (DNS)
-        return (value or "").split(".", 1)[0]
-
     def _opensearch_cluster_manager_config(
         self,
         roles: list[str],
@@ -186,7 +168,7 @@ class ConfigManager(BaseManager):
         if self.state.substrate == Substrates.K8S:
             # K8s bootstrap names must match OpenSearch runtime node.name (hostname).
             # Each unit writes its own hostname here.
-            names = [self._node_name()]
+            names = [self.state.node_name]
         else:
             names = sorted(cm_names)
 
