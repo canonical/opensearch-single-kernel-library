@@ -46,9 +46,9 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type, format_unit_name
 from opensearch_single_kernel.utils.helpers import (
     deployment_type,
+    format_unit_name,
     mask_sensitive_information,
     path_as_posix,
 )

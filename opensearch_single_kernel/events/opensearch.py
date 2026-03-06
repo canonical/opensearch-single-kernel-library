@@ -428,7 +428,6 @@ class OpenSearchEventsHandler(Object):
                 event.defer()
                 return
 
-
         if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
             if (
                 self.charm.state.application.deployment_desc.start

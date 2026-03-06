@@ -5,7 +5,9 @@
 """OpenSearch TLS manager."""
 
 import logging
+import os
 import socket
+import tempfile
 from datetime import datetime
 from typing import Any
 
@@ -81,7 +83,7 @@ class TlsManager(BaseManager):
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
         """Check if all TLS resources are stored on disk."""
         # For K8s, the filesystem is ephemeral and the charm can restore TLS files from
-        # Juju secrets on pebble-ready. In unit tests we also mock away most container
+        # Juju secrets on pebble-ready. In unit tests we also mock most container
         # filesystem operations, so checking for on-disk artifacts is not reliable.
         if self.state.substrate == Substrates.K8S:
             return self.all_certificates_available()
@@ -98,8 +100,6 @@ class TlsManager(BaseManager):
         ca_issuer = self.get_cert_issuer(cert=current_ca)
 
         for cert_type in cert_types:
-            # Use cert_type.val for explicit filename mapping
-            # This ensures consistency: unit-transport.p12, unit-http.p12, app-admin.p12
             cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
             try:
                 if not cert_type_path.exists():
@@ -390,7 +390,7 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
         if ca_chain not in bundle_content:
             self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
-            # Snap-style permissions: keep the bundle readable/writable by the workload user,
+            # Apply snap-style permissions: keep the bundle readable/writable by the workload user,
             # and accessible to root via group bits when needed.
             chain_path_str = path_as_posix(chain_path)
             self._set_tls_store_permissions(chain_path_str)
@@ -653,19 +653,39 @@ class TlsManager(BaseManager):
     def reload_tls_certificates(self) -> None:
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
-        admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-        with (
-            self.workload.temp_file(
-                mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
-            ) as tmp_cert,
-            self.workload.temp_file(
-                mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
-            ) as tmp_key,
-        ):
+        admin_secret = (
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
+        if not admin_secret.get("cert") or not admin_secret.get("key"):
+            raise OpenSearchFileOperationError("Admin TLS cert/key not available to reload")
+
+        # requests runs in the charm container, so cert/key files must be accessible locally.
+        tmp_cert_path: str | None = None
+        tmp_key_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as tmp_cert:
+                tmp_cert.write(admin_secret["cert"])
+                tmp_cert.flush()
+                tmp_cert_path = tmp_cert.name
+            os.chmod(tmp_cert_path, 0o600)
+
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as tmp_key:
+                tmp_key.write(admin_secret["key"])
+                tmp_key.flush()
+                tmp_key_path = tmp_key.name
+            os.chmod(tmp_key_path, 0o600)
 
             self.opensearch_client.reload_tls_certificates(
-                cert_files=(path_as_posix(tmp_cert), path_as_posix(tmp_key))
+                cert_files=(tmp_cert_path, tmp_key_path)
             )
+        finally:
+            for p in (tmp_cert_path, tmp_key_path):
+                if not p:
+                    continue
+                try:
+                    os.unlink(p)
+                except FileNotFoundError:
+                    pass
 
     def finalize_ca_certs_rotation(self) -> None:
         """Handle the completion of CA rotation."""

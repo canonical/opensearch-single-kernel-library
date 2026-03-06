@@ -26,14 +26,6 @@ parts:
       # `--user` needed (in addition to `--break-system-packages`) for Ubuntu >=24.04
       PIP_BREAK_SYSTEM_PACKAGES=true python3 -m pip install --user --upgrade pip==24.3.1  # renovate: charmcraft-pip-latest
 
-      # charmcraft installs dependencies from source and some build backends (e.g. older setuptools_scm)
-      # still import `pkg_resources`. Ensure we use a setuptools version that bundles it.
-      #
-      # setuptools 69.x trips on some packages' PEP 621 license metadata (e.g. google-crc32c),
-      # while very new setuptools versions (>=82) remove `pkg_resources` which older build
-      # backends still import (e.g. setuptools_scm 3.x). Pin to a compatible middle ground.
-      PIP_BREAK_SYSTEM_PACKAGES=true python3 -m pip install --user setuptools==80.9.0 wheel
-
       # Use uv to install poetry so that a newer version of Python can be installed if needed by poetry
       curl --proto '=https' --tlsv1.2 -LsSf https://github.com/astral-sh/uv/releases/download/0.5.15/uv-installer.sh | sh  # renovate: charmcraft-uv-latest
       # poetry 2.0.0 requires Python >=3.9

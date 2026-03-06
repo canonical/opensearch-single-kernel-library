@@ -23,13 +23,12 @@ from tenacity import (
 )
 from tenacity.wait import WaitBaseT
 
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.common.exceptions import (
     ContainerNotReadyError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
+from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.workload.base import BaseWorkload
 

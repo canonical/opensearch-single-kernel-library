@@ -193,8 +193,6 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
         is True
     )
 
-    assert "cluster.initial_cluster_manager_nodes" not in opensearch_conf
-
     # unicast_hosts content
     with open(config_path / ("tmp/" + seed_unicast_hosts), "r") as f:
         stored = {line.strip() for line in f.readlines()}

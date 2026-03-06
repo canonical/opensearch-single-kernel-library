@@ -464,9 +464,6 @@ class K8sWorkload(BaseWorkload):
         script_path = "%s/%s" % (self.paths.home, script_name)
         full_command = self._build_script_command(script_path, args)
         env_setup = self._build_script_environment(full_command)
-
-        # Use run_cmd so unit tests can mock command execution consistently
-        # instead of requiring Harness.handle_exec registrations.
         quoted = shlex.quote(env_setup)
         result = self.run_cmd(f"bash -c {quoted}")
         return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)

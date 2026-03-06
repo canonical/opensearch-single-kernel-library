@@ -9,7 +9,10 @@ import socket
 from typing import Any
 
 from opensearch_single_kernel.common.constants import CertType, Substrates
-from opensearch_single_kernel.common.exceptions import ContainerNotReadyError, OpenSearchError
+from opensearch_single_kernel.common.exceptions import (
+    ContainerNotReadyError,
+    OpenSearchError,
+)
 from opensearch_single_kernel.core.models import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -46,10 +49,18 @@ class ConfigManager(BaseManager):
         cm_names: list[str] | None = None,
         cm_ips: list[str] | None = None,
     ) -> bool:
-        """Reconcile whole OpenSearch config using values from application state.
+        """Reconcile whole Opensearch config using values from application state.
 
-        Updates opensearch.yml & unicast_hosts.txt config files and ensures
-        jvm.options & opensearch-security/config.yml are populated with correct static options.
+        Updates opensearch.yml & unicast_hosts.txt config files and assures
+        jvm.options & opensearch-security/config.yml are populated with right static options.
+
+        Args:
+            roles: override node roles got from nodes_config.
+            cm_names: cluster manager nodes for bootstrapping.
+            cm_ips: override seed_hosts got from nodes_config.
+
+        Returns:
+            whether the opensearch.yml config was changed.
         """
         if roles is None:
             roles = self._opensearch_roles
@@ -74,24 +85,14 @@ class ConfigManager(BaseManager):
             self.update_seeds_config()
 
         self.state.server.last_host_ip = self.state.host_ip
-        changed = self.yaml_setter.rewrite(self.CONFIG_YML, config)
-
-        # Ensure bootstrap-only settings do not linger after bootstrap.
-        if (
-            not cm_names
-            or "cluster_manager" not in roles
-            or not self.state.server.is_bootstrap_contributor
-        ):
-            existing = self.yaml_setter.load(self.CONFIG_YML)
-            if "cluster.initial_cluster_manager_nodes" in existing:
-                self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
-                changed = True
-
-        return changed
+        return self.yaml_setter.rewrite(self.CONFIG_YML, config)
 
     @staticmethod
     def _opensearch_static_config() -> dict[str, Any]:
-        """Static OpenSearch settings written to opensearch.yml."""
+        """Get set of static config options for the Opensearch.
+
+        Intended for opensearch.yml config file.
+        """
         return {
             # This allows the new CMs to be discovered automatically
             # (hot reload of unicast_hosts.txt)
@@ -109,6 +110,7 @@ class ConfigManager(BaseManager):
                 "security_rest_api_access",
             ],
             # The security plugin will accept TLS client certs if certs but doesn't require them
+            # TODO this may be REQUIRED if we want to ensure certs provided by the client app
             "plugins.security.ssl.http.clientauth_mode": "OPTIONAL",
             "prometheus.metric_name.prefix": "opensearch_",
             "prometheus.indices": "false",
@@ -119,7 +121,6 @@ class ConfigManager(BaseManager):
     def _network_hosts(self) -> list[str]:
         """Compute network.host entries for opensearch.yml."""
         # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
-        # Historical behavior also included _local_ for both substrates.
         return ["_site_", "_local_", *sorted(self.state.network_hosts)]
 
     def _node_name(self) -> str:
@@ -325,7 +326,9 @@ class ConfigManager(BaseManager):
         if current_profile is None or current_profile != profile:
             meminfo = self.workload.meminfo()
             if "MemTotal" not in meminfo:
-                logger.warning("Could not read MemTotal from meminfo. Skipping profile configuration.")
+                logger.warning(
+                    "Could not read MemTotal from meminfo. Skipping profile configuration."
+                )
                 return False
             self._update_jvm_heap_size(profile.get_jvm_heap_size(meminfo["MemTotal"]))
             self.state.server.profile = profile
@@ -426,8 +429,9 @@ class ConfigManager(BaseManager):
             return False
 
     def is_transport_tls_configured(self) -> bool:
+        """Check if transport TLS is configured."""
         return self._is_tls_layer_configured("transport", "unit-transport.p12")
 
     def is_http_tls_configured(self) -> bool:
+        """Check if HTTP TLS is configured."""
         return self._is_tls_layer_configured("http", "unit-http.p12")
-
