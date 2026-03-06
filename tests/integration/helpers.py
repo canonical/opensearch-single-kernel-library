@@ -882,8 +882,13 @@ async def app_name(ops_test: OpsTest) -> str | None:
 
     logger.info(f"Apps inside app_name: {apps}")
 
+    # Integration tests can run against both the VM charm ("opensearch") and the K8s charm
+    # ("opensearch-k8s"). Match both.
+    opensearch_charm_names = {"opensearch", "opensearch-k8s"}
     opensearch_apps = {
-        name: desc for name, desc in apps.items() if desc["charm-name"] == "opensearch"
+        name: desc
+        for name, desc in apps.items()
+        if desc.get("charm-name") in opensearch_charm_names
     }
     for name, desc in opensearch_apps.items():
         if name == "opensearch-main":

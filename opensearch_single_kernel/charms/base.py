@@ -53,12 +53,13 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         # State
         self.state = ClusterState(self, self.substrate)
 
-        # Initialize managers and event handlers
-        # K8s subclass needs to override this to set up workload first
-        self._initialize_managers()
+        # Initialize managers and events
+        # K8s charm provides a lazy workload property so managers can be initialized
+        # even before the workload container is ready.
+        self._initialize_managers_and_events()
 
-    def _initialize_managers(self):
-        """Initialize managers and event handlers.
+    def _initialize_managers_and_events(self):
+        """Initialize managers and events.
 
         This method will be called by subclasses (e.g. K8s) after setting up workload.
         Managers will check workload.workload_present when they actually need to use it.
@@ -73,7 +74,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.health_manager = HealthManager(self.state, self.workload)
         self.config_manager = ConfigManager(self.state, self.workload)
 
-        # Event Handlers
+        # Events
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
 

@@ -13,8 +13,6 @@ from opensearch_single_kernel.common.constants import (
     CONTAINER_NAME,
     Substrates,
 )
-from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.workload.base import BaseWorkload
 from opensearch_single_kernel.workload.k8s import K8sWorkload
 
@@ -25,47 +23,15 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
     """OpenSearch Kubernetes Charm"""
 
     def __init__(self, *args):
-        """Initialize the OpenSearch Kubernetes Charm.
+        """Initialize the OpenSearch Kubernetes Charm."""
+        super().__init__(*args)
 
-        This calls the __init__ of the class that comes after OpenSearchBaseCharm in the MRO,
-        which is ops.CharmBase. This skips OpenSearchBaseCharm.__init__().
-        We need self.unit initialized first (from ops.CharmBase.__init__())
-        Then, we need to create the workload with the container before initializing managers.
-        This ensures the container is available before creating
-        the workload and initializing manager.
-
-        Args:
-            *args: variable length argument list passed to ops.CharmBase.__init__().
-
-        """
-        super(OpenSearchBaseCharm, self).__init__(*args)
-
-        self.status = Status(self)
-        self.state = ClusterState(self, self.substrate)
-
-        # Get container may return None if not ready yet
+    def _get_container(self):
+        """Return the workload container if available, else None."""
         try:
-            container = self.unit.get_container(CONTAINER_NAME)
+            return self.unit.get_container(CONTAINER_NAME)
         except ModelError:
-            container = None
-
-        # Workload can be created even if container is None
-        # it will check readiness when needed
-        if container is None:
-
-            def get_container():
-                try:
-                    return self.unit.get_container(CONTAINER_NAME)
-                except ModelError:
-                    return None
-
-            self._workload = K8sWorkload(container_getter=get_container)
-        else:
-            self._workload = K8sWorkload(container_getter=lambda: container)
-
-        # Now, we can initialize managers
-        # The managers will check workload.workload_present when they need to use it
-        self._initialize_managers()
+            return None
 
     @property
     def workload(self) -> BaseWorkload:
@@ -76,6 +42,10 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         Returns:
             BaseWorkload: The K8sWorkload instance for this charm
         """
+        if not hasattr(self, "_workload") or self._workload is None:
+            # Workload can be created even if the container isn't ready yet.
+            # Managers will check workload.workload_present when they actually need to use it.
+            self._workload = K8sWorkload(container_getter=self._get_container)
         return self._workload
 
     @property

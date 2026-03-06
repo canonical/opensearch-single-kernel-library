@@ -225,15 +225,6 @@ CHMOD_WRITABLE = "777"
 CHMOD_CERTIFICATES = "750"
 CHMOD_SECURE = "775"
 
-# Sysctl configuration
-SYSCTL_TCP_RETRIES2_NAME = "net.ipv4.tcp_retries2"
-SYSCTL_TCP_RETRIES2_VALUE = "5"
-
-# K8s volume mount paths
-K8S_DATA_MOUNT_PATH = "/var/lib/opensearch"
-K8S_LOGS_MOUNT_PATH = "/var/log/opensearch"
-K8S_CERTIFICATES_MOUNT_PATH = "/etc/opensearch/certificates"
-
 # Pebble service user/group
 PEBBLE_SERVICE_USER = "_daemon_"
 PEBBLE_SERVICE_GROUP = "_daemon_"

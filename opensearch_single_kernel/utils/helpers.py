@@ -27,8 +27,10 @@ from opensearch_single_kernel.core.models import App, PeerClusterConfig
 def path_as_posix(path: PathProtocol) -> str:
     """Convert a PathProtocol to a POSIX path string.
 
-    `PathProtocol` implementations aren't guaranteed to be `pathlib.Path`, so prefer `.as_posix()`
-    when available and fall back to `str()` otherwise.
+    The workload code uses PathProtocol and some callers (config generation, command execution)
+    need a plain string path, but PathProtocol implementations aren't guaranteed to be
+    pathlib.Path. The reason is pathlib.Path is a default type for paths in Python. Hence, we use
+    .as_posix() when available and fall back to str().
     """
     as_posix = getattr(path, "as_posix", None)
     return as_posix() if callable(as_posix) else str(path)

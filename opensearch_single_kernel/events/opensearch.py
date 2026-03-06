@@ -478,9 +478,6 @@ class OpenSearchEventsHandler(Object):
         We do the K8s container preparation:
             filesystem permissions, pebble plan, restore tls files from Juju secret.
         """
-        if self.charm.state.substrate != Substrates.K8S:
-            return
-
         try:
             self.charm.workload.prepare_for_pebble_ready()
         except ContainerNotReadyError as e:

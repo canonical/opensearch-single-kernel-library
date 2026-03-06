@@ -36,7 +36,13 @@ class NodesExclusionsManager(BaseManager):
         raise_error: bool = False,
     ) -> None:
         """Add voting and alloc exclusions."""
-        node = self.api_or_state_node
+        try:
+            node = self.api_or_state_node
+        except OpenSearchExclusionsException as e:
+            logger.warning("Skipping add exclusions: cannot resolve current node (%s)", e)
+            if raise_error:
+                raise
+            return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._add_voting(scope, node):
                 logger.error(f"Failed to add voting exclusion: {node.name}.")
@@ -65,7 +71,13 @@ class NodesExclusionsManager(BaseManager):
         raise_error: bool = False,
     ) -> None:
         """Delete voting and alloc exclusions."""
-        node = self.api_or_state_node
+        try:
+            node = self.api_or_state_node
+        except OpenSearchExclusionsException as e:
+            logger.warning("Skipping delete exclusions: cannot resolve current node (%s)", e)
+            if raise_error:
+                raise
+            return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._delete_voting({node.name}, scope):
                 logger.error(f"Failed to delete voting exclusion: {node.name}.")
@@ -271,7 +283,12 @@ class NodesExclusionsManager(BaseManager):
         unit_id = self.state.server.unit_id
         node = None
         try:
-            node_id = self.opensearch_client.get_node_id(self.state.unit_name)
+            node_name = self.state.node_name
+            if node_name is None:
+                node = self.state.node_config
+                node_id = None
+            else:
+                node_id = self.opensearch_client.get_node_id(node_name)
             if node_id is not None:
                 node = self.opensearch_client.get_current_node(node_id, unit_id, self.alt_hosts)
             else:

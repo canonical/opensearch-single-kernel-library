@@ -231,6 +231,14 @@ class ConfigManager(BaseManager):
         logs_path = path_as_posix(self.workload.paths.logs_dir)
         self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={logs_path}/")
         self.yaml_setter.append(self.JVM_OPTIONS, "-Djdk.tls.client.protocols=TLSv1.2")
+        if self.state.substrate == Substrates.K8S:
+            truststore_path = path_as_posix(self.workload.paths.certs / "cacert.p12")
+            self.yaml_setter.append(
+                self.JVM_OPTIONS, f"-Djavax.net.ssl.trustStore={truststore_path}"
+            )
+            self.yaml_setter.append(
+                self.JVM_OPTIONS, "-Djavax.net.ssl.trustStorePassword=changeit"
+            )
 
     def _update_static_security_options(self) -> None:
         """Update OpenSearch security config file with static options."""
