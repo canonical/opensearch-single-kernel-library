@@ -177,7 +177,7 @@ class NotificationsEvents(Object):
             self.charm.keystore_manager.put_entries(entries)
 
             # reload secure settings
-            self.charm.keystore_events.reload_event.emit()
+            self.charm.reload_keystore_event.emit()
             # store cleanup info per relation
             cleanup = {
                 "keys": list(entries.keys()),
@@ -296,7 +296,7 @@ class NotificationsEvents(Object):
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:
             self.charm.keystore_manager.remove_entries(keys)
-            self.charm.keystore_events.reload_event.emit()
+            self.charm.reload_keystore_event.emit()
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
 
@@ -342,4 +342,4 @@ class NotificationsEvents(Object):
         )
 
         self.charm.keystore_manager.put_entries(keys)
-        self.charm.keystore_events.reload_event.emit()
+        self.charm.reload_keystore_event.emit()
