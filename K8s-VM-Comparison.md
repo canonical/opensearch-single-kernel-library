@@ -529,4 +529,4 @@ Handle Juju events with substrate-specific logic:
 K8s-specific charm logic:
 
 - Creates `K8sWorkload` with a `container_getter` so managers can check readiness (`workload_present`)
-- Defers container preparation to the `pebble-ready` event via `workload.prepare_for_pebble_ready()`
+- Defers container preparation to the `pebble-ready` event via `workload.prepare_container()`

@@ -157,11 +157,11 @@ class BaseWorkload(ABC):
         """Install the workload."""
         pass
 
-    def prepare_for_pebble_ready(self) -> None:
-        """Prepare workload when pebble-ready is emitted (K8s only).
+    def prepare_container(self) -> None:
+        """Prepare the workload runtime environment.
 
-        K8s workloads should override this to perform container preparation (e.g,
-        permissions, and layer configuration) once Pebble is ready.
+        K8s workloads should override this to perform container preparation that requires Pebble
+        connectivity (e.g. permissions, and Pebble layer configuration).
         """
         return None
 

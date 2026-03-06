@@ -472,6 +472,22 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
+    def reconcile_tls_resources(self) -> None:
+        """Reconcile TLS resources on the workload runtime.
+
+        On K8s, TLS material can be present in Juju secrets while the workload container filesystem
+        is empty (pod restart) or not yet prepared (early hook ordering). This reconciliation:
+        - prepares the container (permissions + Pebble layer)
+        - restores TLS artifacts on disk from Juju secrets
+
+        On VM, this is a no-op.
+        """
+        if self.charm.state.substrate != Substrates.K8S:
+            return
+
+        self.charm.workload.prepare_container()
+        self.charm.tls_manager.restore_tls_files_from_secrets()
+
     def _on_pebble_ready(self, event) -> None:
         """Handle pebble-ready for K8s workload container.
 
@@ -479,25 +495,13 @@ class OpenSearchEventsHandler(Object):
             filesystem permissions, pebble plan, restore tls files from Juju secret.
         """
         try:
-            self.charm.workload.prepare_for_pebble_ready()
+            self.reconcile_tls_resources()
         except ContainerNotReadyError as e:
             logger.info("Container not ready on pebble-ready: %s", e)
             event.defer()
             return
-        except OpenSearchInstallError as e:
-            logger.warning("Failed to prepare container on pebble-ready: %s", e)
-            event.defer()
-            return
-
-        # K8s: restore TLS files on disk from Juju secrets.
-        try:
-            self.charm.tls_manager.restore_tls_files_from_secrets()
-        except ContainerNotReadyError as e:
-            logger.info("Container not ready to restore TLS files: %s", e)
-            event.defer()
-            return
-        except OpenSearchFileOperationError as e:
-            logger.warning("Failed to restore TLS files from secrets: %s", e)
+        except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
+            logger.warning("Failed to reconcile TLS resources on pebble-ready: %s", e)
             event.defer()
             return
 
@@ -522,28 +526,30 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.state.application.is_security_index_initialised:
-            try:
-                # Leader election event happening after a previous leader got killed
-                if not self.charm.cluster_manager.opensearch_client.is_node_up():
-                    event.defer()
-                    return
-                if self.charm.status.apply_health(unit=False) in [
-                    HealthColors.UNKNOWN,
-                    HealthColors.YELLOW_TEMP,
-                ]:
-                    event.defer()
-                    return
-                nodes = self.charm.cluster_manager.get_nodes(True)
-                if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
-                    # Nodes Config updated, we would need to reconfigure and restart
-                    if self.charm.config_manager.update_opensearch_config():
-                        # Restart needed
-                        self.charm.status.set(CharmStatuses.WAITING_TO_START)
-                        logger.debug("Restarting opensearch due to reconfiguring node roles")
-                        self.charm.restart_opensearch_event.emit()
-            except ContainerNotReadyError as e:
-                logger.info("Container not ready for leader election: %s", e)
+            # Leader election event happening after a previous leader got killed
+            if not self.charm.cluster_manager.opensearch_client.is_node_up():
                 event.defer()
+                return
+            if self.charm.status.apply_health(unit=False) in [
+                HealthColors.UNKNOWN,
+                HealthColors.YELLOW_TEMP,
+            ]:
+                event.defer()
+                return
+            nodes = self.charm.cluster_manager.get_nodes(True)
+            if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
+                # Nodes Config updated, we would need to reconfigure and restart
+                try:
+                    restart_needed = self.charm.config_manager.update_opensearch_config()
+                except ContainerNotReadyError as e:
+                    logger.info("Container not ready for leader election: %s", e)
+                    event.defer()
+                    return
+
+                if restart_needed:
+                    self.charm.status.set(CharmStatuses.WAITING_TO_START)
+                    logger.debug("Restarting opensearch due to reconfiguring node roles")
+                    self.charm.restart_opensearch_event.emit()
             return
 
         # TODO: check if cluster can start independently
@@ -566,13 +572,13 @@ class OpenSearchEventsHandler(Object):
         # Restore purged system users in local `internal_users.yml`
         # with corresponding credentials
         if self.charm.unit.is_leader():
-            try:
-                for user in OPENSEARCH_SYSTEM_USERS:
+            for user in OPENSEARCH_SYSTEM_USERS:
+                try:
                     self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
-            except ContainerNotReadyError as e:
-                logger.info("Container not ready for leader election: %s", e)
-                event.defer()
-                return
+                except ContainerNotReadyError as e:
+                    logger.info("Container not ready for leader election: %s", e)
+                    event.defer()
+                    return
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
@@ -647,32 +653,16 @@ class OpenSearchEventsHandler(Object):
             not self.charm.state.application.is_admin_user_initialized
             or not self.charm.tls_manager.is_fully_configured()
         ):
-            # K8s: after pod recreation, TLS secrets can be present while files are not yet
-            # restored on disk. Although we restore them when pebble_ready hook run,
-            # sometimes opensearch tries to start before pebble-ready
-            # hook finishes its execution.
-            # For those cases, we perform another check just starting service and
-            # if the tls files are not restored yet _on_start_opensearch will
-            # restore them from Juju secrets
-            # https://documentation.ubuntu.com/juju/3.6/reference/hook/#container-pebble-ready
-            if (
-                self.charm.state.substrate == Substrates.K8S
-                and self.charm.state.application.is_admin_user_initialized
-                and self.charm.state.tls_relation
-                and self.charm.tls_manager.all_certificates_available()
-            ):
-                pass
+            if not self.charm.state.tls_relation:
+                status = CharmStatuses.TLS_RELATION_MISSING
             else:
-                if not self.charm.state.tls_relation:
-                    status = CharmStatuses.TLS_RELATION_MISSING
+                if not self.charm.state.application.is_admin_user_initialized:
+                    status = CharmStatuses.ADMIN_USER_NOT_CONFIGURED
                 else:
-                    if not self.charm.state.application.is_admin_user_initialized:
-                        status = CharmStatuses.ADMIN_USER_NOT_CONFIGURED
-                    else:
-                        status = CharmStatuses.TLS_NOT_FULLY_CONFIGURED
-                self.charm.status.set(status)
-                event.defer()
-                return
+                    status = CharmStatuses.TLS_NOT_FULLY_CONFIGURED
+            self.charm.status.set(status)
+            event.defer()
+            return
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_NOT_CONFIGURED)
         self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
@@ -685,12 +675,18 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.unit.is_leader():
             try:
                 self.charm.users_manager.purge_initial_default_users()
-                for user in OPENSEARCH_SYSTEM_USERS:
-                    self.charm.users_manager.save_user_locally(user)
             except ContainerNotReadyError as e:
                 logger.info("Container not ready to configure users on start: %s", e)
                 event.defer()
                 return
+
+            for user in OPENSEARCH_SYSTEM_USERS:
+                try:
+                    self.charm.users_manager.save_user_locally(user)
+                except ContainerNotReadyError as e:
+                    logger.info("Container not ready to configure users on start: %s", e)
+                    event.defer()
+                    return
 
         deployment_desc = self.charm.state.application.deployment_desc
         # only start the main orchestrator if a data node is available
@@ -803,61 +799,103 @@ class OpenSearchEventsHandler(Object):
         # missing keystores/truststores.
         if self.charm.state.substrate == Substrates.K8S:
             try:
-                self.charm.workload.prepare_for_pebble_ready()
-                self.charm.tls_manager.restore_tls_files_from_secrets()
+                self.reconcile_tls_resources()
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready to prepare for start: %s", e)
+                event.defer()
+                return
+            except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
+                logger.warning("Failed to reconcile TLS resources for start: %s", e)
+                event.defer()
+                return
 
-                # Pod deletes mean /etc/opensearch/opensearch.yml is recreated
-                # from the image. Ensure TLS config is rewritten from Juju secrets before
-                # starting OpenSearch, otherwise the security plugin will fail at bootstrap.
-                admin_secrets = (
-                    self.charm.state.secrets.get_object(
-                        Scope.APP, CertType.APP_ADMIN.val, peek=True
-                    )
-                    or {}
+            # Pod deletes mean /etc/opensearch/opensearch.yml is recreated
+            # from the image. Ensure TLS config is rewritten from Juju secrets before
+            # starting OpenSearch, otherwise the security plugin will fail at bootstrap.
+            admin_secrets = (
+                self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+                or {}
+            )
+            transport_secrets = (
+                self.charm.state.secrets.get_object(
+                    Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
                 )
-                transport_secrets = (
-                    self.charm.state.secrets.get_object(
-                        Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-                    )
-                    or {}
-                )
-                http_secrets = (
-                    self.charm.state.secrets.get_object(
-                        Scope.UNIT, CertType.UNIT_HTTP.val, peek=True
-                    )
-                    or {}
-                )
+                or {}
+            )
+            http_secrets = (
+                self.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val, peek=True)
+                or {}
+            )
 
-                truststore_pwd = admin_secrets.get("truststore-password")
-                transport_keystore_pwd = transport_secrets.get("keystore-password")
-                http_keystore_pwd = http_secrets.get("keystore-password")
+            truststore_pwd = admin_secrets.get("truststore-password")
+            transport_keystore_pwd = transport_secrets.get("keystore-password")
+            http_keystore_pwd = http_secrets.get("keystore-password")
 
-                if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
-                    # Only rewrite if TLS config is missing. /etc/opensearch comes from the
-                    # image, but any runtime writes can be lost on container recreation.
-                    if not (
-                        self.charm.config_manager.is_transport_tls_configured()
-                        and self.charm.config_manager.is_http_tls_configured()
-                    ):
+            if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
+                # Only rewrite if TLS config is missing. /etc/opensearch comes from the
+                # image, but any runtime writes can be lost on container recreation.
+                if not (
+                    self.charm.config_manager.is_transport_tls_configured()
+                    and self.charm.config_manager.is_http_tls_configured()
+                ):
+                    try:
                         self.charm.config_manager.set_admin_tls_conf(admin_secrets)
+                    except ContainerNotReadyError as e:
+                        logger.info(
+                            "Container not ready to rewrite admin TLS config for start: %s", e
+                        )
+                        event.defer()
+                        return
+                    except (
+                        OpenSearchInstallError,
+                        OpenSearchFileOperationError,
+                        OpenSearchError,
+                    ) as e:
+                        logger.warning("Failed to rewrite admin TLS config for start: %s", e)
+                        event.defer()
+                        return
+
+                    try:
                         self.charm.config_manager.set_node_tls_conf(
                             CertType.UNIT_TRANSPORT,
                             truststore_pwd=truststore_pwd,
                             keystore_pwd=transport_keystore_pwd,
                         )
+                    except ContainerNotReadyError as e:
+                        logger.info(
+                            "Container not ready to rewrite transport TLS config for start: %s", e
+                        )
+                        event.defer()
+                        return
+                    except (
+                        OpenSearchInstallError,
+                        OpenSearchFileOperationError,
+                        OpenSearchError,
+                    ) as e:
+                        logger.warning("Failed to rewrite transport TLS config for start: %s", e)
+                        event.defer()
+                        return
+
+                    try:
                         self.charm.config_manager.set_node_tls_conf(
                             CertType.UNIT_HTTP,
                             truststore_pwd=truststore_pwd,
                             keystore_pwd=http_keystore_pwd,
                         )
-            except ContainerNotReadyError as e:
-                logger.info("Container not ready to prepare/restore TLS for start: %s", e)
-                event.defer()
-                return
-            except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
-                logger.warning("Failed to prepare/restore TLS for start: %s", e)
-                event.defer()
-                return
+                    except ContainerNotReadyError as e:
+                        logger.info(
+                            "Container not ready to rewrite HTTP TLS config for start: %s", e
+                        )
+                        event.defer()
+                        return
+                    except (
+                        OpenSearchInstallError,
+                        OpenSearchFileOperationError,
+                        OpenSearchError,
+                    ) as e:
+                        logger.warning("Failed to rewrite HTTP TLS config for start: %s", e)
+                        event.defer()
+                        return
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -896,9 +934,9 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.status.set(CharmStatuses.WAITING_TO_START)
 
+        # Set the configuration of the node
+        # Retrieve the nodes of the cluster, needed to configure this node
         try:
-            # Set the configuration of the node
-            # Retrieve the nodes of the cluster, needed to configure this node
             nodes = self.charm.cluster_manager.get_nodes(False)
             computed_roles = self.charm.state.computed_roles()
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
@@ -906,8 +944,6 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.configure_bootstrap_contributors(
                 computed_roles, cm_names, cm_ips
             )
-
-            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_ips=cm_ips)
         except OpenSearchHttpError as e:
             # We might be starting with a partially-formed cluster (or temporary API issues).
             # Fall back to rendering config without cluster topology data.
@@ -918,26 +954,43 @@ class OpenSearchEventsHandler(Object):
                 logger.info("Unable to write base config before start: %s", e2)
                 event.defer()
                 return
-        except OpenSearchFileOperationError as e:
-            logger.info("Unable to write OpenSearch config before start: %s", e)
-            event.defer()
-            return
-        except ContainerNotReadyError as e:
-            logger.info("Container not ready to configure node before start: %s", e)
-            event.defer()
-            return
+        else:
+            try:
+                self.charm.config_manager.update_opensearch_config(
+                    cm_names=cm_names, cm_ips=cm_ips
+                )
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready to configure node before start: %s", e)
+                event.defer()
+                return
+            except OpenSearchFileOperationError as e:
+                logger.info("Unable to write OpenSearch config before start: %s", e)
+                event.defer()
+                return
+            except OpenSearchError as e:
+                logger.info("Unable to write OpenSearch config before start: %s", e)
+                event.defer()
+                return
 
         try:
-            self.charm.cluster_manager.start(
-                wait_until_http_200=(
-                    not self.charm.unit.is_leader()
-                    or self.charm.state.application.is_security_index_initialised
+            try:
+                self.charm.cluster_manager.start(
+                    wait_until_http_200=(
+                        not self.charm.unit.is_leader()
+                        or self.charm.state.application.is_security_index_initialised
+                    )
                 )
-            )
-            self._post_start_init(event)
-        except ContainerNotReadyError as e:
-            logger.info("Container not ready for start opensearch: %s", e)
-            event.defer()
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready for start opensearch: %s", e)
+                event.defer()
+                return
+
+            try:
+                self._post_start_init(event)
+            except ContainerNotReadyError as e:
+                logger.info("Container not ready for post-start init: %s", e)
+                event.defer()
+                return
         except (
             OpenSearchHttpError,
             OpenSearchStartTimeoutError,
@@ -1004,11 +1057,7 @@ class OpenSearchEventsHandler(Object):
         # apply cluster health
         self.charm.status.apply_health(wait_for_green_first=True, app=self.charm.unit.is_leader())
 
-        if (
-            self.charm.unit.is_leader()
-            and deployment_desc is not None
-            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-        ):
+        if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             # Creating the monitoring user
             self.charm.users_manager.put_or_update_internal_user_leader(COS_USER, update=False)
 

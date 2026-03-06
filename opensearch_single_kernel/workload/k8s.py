@@ -28,7 +28,7 @@ from opensearch_single_kernel.common.constants import (
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
     DIR_PERMISSIONS_SECURE,
-    OPENSEARCH_SERVICE_NAME,
+    OPENSEARCH_PEBBLE_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
     OpenSearchPaths,
@@ -169,7 +169,7 @@ class K8sPaths(BasePaths):
 class K8sWorkload(BaseWorkload):
     """Kubernetes OpenSearch Workload."""
 
-    SERVICE_NAME = OPENSEARCH_SERVICE_NAME
+    SERVICE_NAME = OPENSEARCH_PEBBLE_SERVICE_NAME
 
     def __init__(self, container_getter: Optional["Callable[[], Container]"] = None):
         """Initialize K8s workload.
@@ -189,7 +189,7 @@ class K8sWorkload(BaseWorkload):
         except (PebbleConnectionError, PebbleError, ModelError, TypeError):
             return None
 
-        target = OPENSEARCH_SERVICE_NAME
+        target = OPENSEARCH_PEBBLE_SERVICE_NAME
         for svc in services:
             # ServiceInfo has .name
             if getattr(svc, "name", None) == target:
@@ -266,7 +266,7 @@ class K8sWorkload(BaseWorkload):
             layer_dict = self._build_pebble_layer_dict(opensearch_cmd)
 
             layer = Layer(layer_dict)
-            self.container.add_layer(OPENSEARCH_SERVICE_NAME, layer, combine=True)
+            self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
 
             logger.info("Configured pebble plan for %s service", self.SERVICE_NAME)
 
@@ -274,8 +274,8 @@ class K8sWorkload(BaseWorkload):
             logger.warning("Failed to configure pebble plan: %s", e)
             # this might be called before container is ready
 
-    def prepare_for_pebble_ready(self) -> None:
-        """Prepare the K8s container once Pebble is ready.
+    def prepare_container(self) -> None:
+        """Prepare the K8s workload container once it is connectable.
 
         This is the only place where we apply:
         - directory ownership/permissions
@@ -338,7 +338,7 @@ class K8sWorkload(BaseWorkload):
             % java_home
         )
 
-        service_name = OPENSEARCH_SERVICE_NAME
+        service_name = OPENSEARCH_PEBBLE_SERVICE_NAME
         layer_dict = {
             "summary": "OpenSearch service layer",
             "description": "Pebble plan layer for OpenSearch",
@@ -655,7 +655,7 @@ class K8sWorkload(BaseWorkload):
 
             # ensure plan is present and readiness checks are enabled when starting intentionally.
             self._configure_pebble_plan(enable_checks=True)
-            self.container.start(OPENSEARCH_SERVICE_NAME)
+            self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStartError() from e
@@ -702,7 +702,7 @@ class K8sWorkload(BaseWorkload):
                 logger.info("The %s service is already started.", self.SERVICE_NAME)
                 return
 
-            self.container.start(OPENSEARCH_SERVICE_NAME)
+            self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStartError() from e
@@ -1133,7 +1133,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchStopError("Container is not ready")
 
-            self.container.stop(OPENSEARCH_SERVICE_NAME)
+            self.container.stop(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to stop the %s service: %s", self.SERVICE_NAME, e)
             raise OpenSearchStopError() from e

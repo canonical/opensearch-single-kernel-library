@@ -206,7 +206,7 @@ ROOT_GID = 0
 CONTAINER_NAME = "opensearch"
 
 # Service name for Pebble
-OPENSEARCH_SERVICE_NAME = "opensearch"
+OPENSEARCH_PEBBLE_SERVICE_NAME = "opensearch"
 
 # File permissions as octal
 # standard directory permissions
