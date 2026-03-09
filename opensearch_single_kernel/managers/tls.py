@@ -81,10 +81,13 @@ class TlsManager(BaseManager):
         return path_as_posix(keytool_path)
 
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
-        """Check if all TLS resources are stored on disk."""
-        # For K8s, the filesystem is ephemeral and the charm can restore TLS files from
-        # Juju secrets on pebble-ready. In unit tests we also mock most container
-        # filesystem operations, so checking for on-disk artifacts is not reliable.
+        """Check if all TLS resources are stored and ready to use.
+
+        VM: certs are on persistent disk and match the stored CA (issuer check).
+        K8s: certs are available in Juju secrets (source of truth), the charm
+        restores to the ephemeral filesystem on pebble-ready/start, so we do not
+        require on-disk presence here.
+        """
         if self.state.substrate == Substrates.K8S:
             return self.all_certificates_available()
 
@@ -101,13 +104,7 @@ class TlsManager(BaseManager):
 
         for cert_type in cert_types:
             cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
-            try:
-                if not cert_type_path.exists():
-                    return False
-            except (PebbleConnectionError, AttributeError) as e:
-                # If we can't check existence (container not ready, directory doesn't exist),
-                # consider resources as not stored
-                logger.debug(f"Could not check if certificate file exists {cert_type_path}: {e}")
+            if not cert_type_path.exists():
                 return False
 
             scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
@@ -221,11 +218,18 @@ class TlsManager(BaseManager):
         if cert_type == CertType.APP_ADMIN:
             return sans
 
+        # Base DNS names: how this unit can be addressed by clients and other nodes.
+        # unit_name is the Juju unit (such asopensearch/0), gethostname/getfqdn cover
+        # short and fully-qualified hostnames used in configs or DNS.
         dns = {self.state.unit_name, socket.gethostname(), socket.getfqdn()}
         logger.info(f"This is the current DNS {dns}")
+        # Primary network address for this unit (peer relation binding), required for
+        # node-to-node and client connections that use the IP.
         ips = {self.state.host_ip} if self.state.host_ip else set()
 
         if cert_type == CertType.UNIT_HTTP:
+            # HTTP cert must also be valid for the address clients use to reach this
+            # unit (load balancer, ingress, or public IP).
             host_public_ip = self.workload.get_host_public_ip()
             if host_public_ip:
                 if self.state.substrate == Substrates.VM:
@@ -235,8 +239,8 @@ class TlsManager(BaseManager):
                     # K8s: get_host_public_ip() returns a stable DNS name
                     dns.add(host_public_ip)
 
-        # Enrich SANs via reverse DNS where possible.
-        # Unit tests rely on this, runtime failures are ignored.
+        # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
+        # so the certificate is accepted when clients connect by those names.
         for ip in ips.copy():
             try:
                 name, aliases, addresses = socket.gethostbyaddr(ip)
@@ -250,6 +254,7 @@ class TlsManager(BaseManager):
             except (socket.herror, socket.gaierror):
                 continue
 
+        # empty strings would be invalid in SANs.
         sans["sans_ip"] = [ip for ip in ips if ip.strip()]
         sans["sans_dns"] = [entry for entry in dns if entry.strip()]
 
@@ -380,8 +385,8 @@ class TlsManager(BaseManager):
             )
             ca_chain = admin_secret.get("chain")
 
-        # We store the PEM format to make it easier for the python requests lib.
         # TODO: Prefer consuming the CA chain from secrets without writing to the workload FS.
+        # We store the PEM format to make it easier for the python requests lib.
         chain_path = self.workload.paths.certs / "chain.pem"
         if parent_dir_path := chain_path.parent:
             self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
@@ -544,13 +549,19 @@ class TlsManager(BaseManager):
             logger.debug("Could not set permissions on %s: %s", store_path_str, e)
 
     def _best_effort_set_tls_store_ownership(self, store_path_str: str) -> None:
-        """Best-effort ownership fix for K8s."""
-        if self.state.substrate != Substrates.K8S:
-            return
+        """Best-effort ownership fix for TLS artifacts on each substrate."""
         try:
-            self.workload.run_cmd(f"chown {OPENSEARCH_RUN_AS_USER}:{ROOT_GID} {store_path_str}")
+            if self.state.substrate == Substrates.K8S:
+                owner = f"{OPENSEARCH_RUN_AS_USER}:{ROOT_GID}"
+                cmd = f"chown {owner} {store_path_str}"
+            else:
+                # Snap services run as snap_daemon on VM, so 640 files must be handed off.
+                owner = "snap_daemon:root"
+                cmd = f"sudo chown {owner} {store_path_str}"
+
+            self.workload.run_cmd(cmd)
         except OpenSearchCmdError as e:
-            # Expected to fail if running as non-root, fsGroup may cover it.
+            # Expected to fail if running as non-root, or if the runtime fixes ownership later.
             logger.debug("Could not change ownership of %s: %s", store_path_str, e)
 
     def store_admin_tls_secrets_if_applies(self) -> None:
@@ -659,7 +670,9 @@ class TlsManager(BaseManager):
         if not admin_secret.get("cert") or not admin_secret.get("key"):
             raise OpenSearchFileOperationError("Admin TLS cert/key not available to reload")
 
-        # requests runs in the charm container, so cert/key files must be accessible locally.
+        # Use host temp files, not workload.temp_file: the HTTPS request is made by the
+        # charm process. The cert paths are passed to requests, so they must be on the
+        # charm's filesystem.
         tmp_cert_path: str | None = None
         tmp_key_path: str | None = None
         try:

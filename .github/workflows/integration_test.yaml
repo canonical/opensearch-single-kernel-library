@@ -42,7 +42,7 @@ jobs:
           )
           jobs = []
           for job in spread_jobs:
-              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
+              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/vm/test_charm.py:ubuntu24"
               _, runner, task, variant = job.split(":")
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")

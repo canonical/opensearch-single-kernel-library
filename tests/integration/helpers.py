@@ -48,6 +48,93 @@ def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:
     )["applications"][app]
 
 
+def _get_unit_address(raw_unit: dict[str, Any]) -> Optional[str]:
+    """Return unit address from raw status; K8s may use 'address' instead of 'public-address'."""
+    return raw_unit.get("public-address") or raw_unit.get("address")
+
+
+def _format_config_value(value: Any) -> str:
+    """Format a config value for `juju deploy --config key=value`."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+async def deploy_opensearch(  # noqa: C901
+    ops_test: OpsTest,
+    charm: str,
+    substrate: str,
+    application_name: str,
+    num_units: int,
+    *,
+    series: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+    constraints: Optional[str] = None,
+    resources: Optional[Dict[str, str]] = None,
+    storage: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Deploy the OpenSearch charm.
+
+    For local K8s charms, use the Juju CLI so the OCI image resource is attached reliably.
+    """
+    if substrate == "k8s":
+        cmd = [
+            "deploy",
+            "--model",
+            ops_test.model.info.name,
+            charm,
+            application_name,
+            "--num-units",
+            str(num_units),
+        ]
+        if config:
+            for key, value in config.items():
+                cmd.extend(["--config", f"{key}={_format_config_value(value)}"])
+        if constraints:
+            cmd.extend(["--constraints", constraints])
+        if resources:
+            for name, value in resources.items():
+                cmd.extend(["--resource", f"{name}={value}"])
+
+        return_code, stdout, stderr = await ops_test.juju(*cmd)
+        assert return_code == 0, stderr or stdout
+        return
+
+    deploy_kwargs = {
+        "application_name": application_name,
+        "num_units": num_units,
+    }
+    if series:
+        deploy_kwargs["series"] = series
+    if config:
+        deploy_kwargs["config"] = config
+    if constraints:
+        deploy_kwargs["constraints"] = constraints
+    if resources:
+        deploy_kwargs["resources"] = resources
+    if storage:
+        deploy_kwargs["storage"] = storage
+
+    await ops_test.model.deploy(charm, **deploy_kwargs)
+
+
+async def get_cloud_type(ops_test: OpsTest) -> str:
+    """Return current cloud type of the selected controller."""
+    assert ops_test.model, "Model must be present"
+    controller = await ops_test.model.get_controller()
+    cloud = await controller.cloud()
+    return cloud.cloud.type_
+
+
+async def get_constraints(ops_test: OpsTest, mem_gb: int = 4) -> Optional[str]:
+    """Return memory constraints for OpenSearch charm on VM to avoid OOM in integration tests."""
+    cloud_type = await get_cloud_type(ops_test)
+    # localhost controller typically uses LXD; lxd is the cloud type when added explicitly
+    if cloud_type in ("lxd", "localhost"):
+        return f"mem={mem_gb}G"
+    return None
+
+
 def now() -> str:
     """Print date."""
     return datetime.now().strftime("%H:%M:%S")
@@ -108,14 +195,24 @@ async def _get_unit(
 
     app_id = f"{ops_test.model.uuid}/{app}"
     app_short_id = md5(app_id.encode()).hexdigest()[:3]
-    machine_id = -1 if subordinate else int(raw_unit["machine"])
+    # K8s units may not have "machine" or use a different structure; use -1 when missing.
+    machine_val = raw_unit.get("machine", -1)
+    machine_id = -1 if subordinate else (int(machine_val) if machine_val != -1 else -1)
+
+    ip = _get_unit_address(raw_unit) or ""
+
+    try:
+        hostname = await get_unit_hostname(ops_test, unit_id, app)
+    except Exception:
+        # On K8s use address as hostname for wait logic.
+        hostname = ip
 
     return Unit(
         id=unit_id,
         short_name=unit_name.replace("/", "-"),
         name=f"{unit_name.replace('/', '-')}.{app_short_id}",
-        ip=raw_unit["public-address"],
-        hostname=await get_unit_hostname(ops_test, unit_id, app),
+        ip=ip,
+        hostname=hostname,
         is_leader=raw_unit.get("leader", False),
         machine_id=machine_id,
         workload_status=Status(
@@ -142,8 +239,8 @@ async def get_application_units(ops_test: OpsTest, app: str) -> List[Unit]:
     # `get_unit_ip` should be replaced with `.public_address`
     raw_app = get_raw_application(ops_test, app)
     units = []
-    for u_name, raw_unit in raw_app["units"].items():
-        if not raw_unit.get("public-address"):
+    for u_name, raw_unit in raw_app.get("units", {}).items():
+        if not _get_unit_address(raw_unit):
             # unit not ready yet...
             continue
         units.append(_get_unit(ops_test, app, raw_app, u_name, raw_unit))
@@ -168,7 +265,7 @@ async def get_application_subordinate_units(
         else:
             raise ValueError(f"Subordinate unit for {app} not found in {principal_app}")
 
-        if not raw_unit.get("public-address"):
+        if not _get_unit_address(raw_unit):
             # unit not ready yet...
             continue
 
@@ -882,8 +979,8 @@ async def app_name(ops_test: OpsTest) -> str | None:
 
     logger.info(f"Apps inside app_name: {apps}")
 
-    # Integration tests can run against both the VM charm ("opensearch") and the K8s charm
-    # ("opensearch-k8s"). Match both.
+    # Integration tests can run against both the VM charm (opensearch) and the K8s charm
+    # (opensearch-k8s). Match both.
     opensearch_charm_names = {"opensearch", "opensearch-k8s"}
     opensearch_apps = {
         name: desc

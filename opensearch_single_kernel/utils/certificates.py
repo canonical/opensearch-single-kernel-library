@@ -223,6 +223,17 @@ def store_ca_chain(  # noqa: C901
     return True
 
 
+def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
+    """Return True if the exception indicates the keystore file does not exist."""
+    msg = (exc.out or "") + (exc.err or "")
+    # keytool messages change a bit between JDKs, keep this intentionally.
+    return (
+        "Keystore file does not exist" in msg
+        or ("FileNotFoundException" in msg and keystore_path in msg)
+        or ("No such file or directory" in msg and keystore_path in msg)
+    )
+
+
 def remove_ca(
     workload: BaseWorkload,
     alias: str,
@@ -239,16 +250,6 @@ def remove_ca(
         store_path: Path to the trust store.
         keytool_cmd: command to run the keytool command.
     """
-
-    def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
-        msg = (exc.out or "") + (exc.err or "")
-        # keytool messages vary a bit between JDKs, keep this intentionally loose.
-        return (
-            "Keystore file does not exist" in msg
-            or ("FileNotFoundException" in msg and keystore_path in msg)
-            or ("No such file or directory" in msg and keystore_path in msg)
-        )
-
     list_cmd = f"{keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
     list_args = f"-storepass {store_pwd}"
     try:

@@ -27,6 +27,8 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
+pytestmark = pytest.mark.skip_if_substrate("k8s")
+
 
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest, charm, series, substrate) -> None:
@@ -49,7 +51,12 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, substrate) -> 
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
         ops_test.model.deploy(
-            charm, num_units=1, series=series, storage=storage, config=CONFIG_OPTS
+            charm,
+            application_name=APP_NAME,
+            num_units=1,
+            series=series,
+            storage=storage,
+            config=CONFIG_OPTS,
         ),
     )
 

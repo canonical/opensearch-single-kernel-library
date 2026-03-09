@@ -473,7 +473,13 @@ class ClusterState(Object):
 
     @property
     def unit_name(self):
-        """Name of the current unit."""
+        """Juju unit identity (such as opensearch-0, opensearch-1).
+
+        Use this for relation data, lock documents and any place that must identify
+        the Juju unit consistently across all units. For OpenSearch's node.name
+        (config and API), use node_name instead on K8s as that is the pod hostname.
+        On VM, node_name is equals this formatted unit name.
+        """
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
     @property
@@ -491,11 +497,10 @@ class ClusterState(Object):
         """Opensearch node.name for the current unit.
 
         On K8s, OpenSearch defaults to using the container/pod hostname as its runtime
-        node.name. We must use that value (and configure OpenSearch to match it),
+        node.name. We must use that value and configure OpenSearch to match it,
         because OpenSearch APIs and cluster bootstrapping refer to nodes by the exact
         runtime node.name. Using Juju's formatted unit name on K8s can cause node
-        lookups to fail (in exclusions, role queries) when the value doesn't match
-        what the OpenSearch process advertises.
+        lookups to fail (in exclusions, role queries).
 
         On VM, we keep using the formatted Juju unit name as node.name.
         """

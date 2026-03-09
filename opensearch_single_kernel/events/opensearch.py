@@ -5,7 +5,6 @@
 """Handler for General OpenSearch charm events."""
 
 import logging
-import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -476,11 +475,12 @@ class OpenSearchEventsHandler(Object):
         """Reconcile TLS resources on the workload runtime.
 
         On K8s, TLS material can be present in Juju secrets while the workload container filesystem
-        is empty (pod restart) or not yet prepared (early hook ordering). This reconciliation:
+        is empty (after pod restart) or not yet prepared (early hook ordering).
+        This reconciliation:
         - prepares the container (permissions + Pebble layer)
         - restores TLS artifacts on disk from Juju secrets
 
-        On VM, this is a no-op.
+        On VM, this is a not operational.
         """
         if self.charm.state.substrate != Substrates.K8S:
             return
@@ -547,8 +547,10 @@ class OpenSearchEventsHandler(Object):
                     return
 
                 if restart_needed:
-                    self.charm.status.set(CharmStatuses.WAITING_TO_START)
-                    logger.debug("Restarting opensearch due to reconfiguring node roles")
+                    logger.debug(
+                        "Leader election reconfigured node roles; emitting restart."
+                        " WAITING_TO_START will be set by _on_start_opensearch once restart begins."
+                    )
                     self.charm.restart_opensearch_event.emit()
             return
 
@@ -618,9 +620,8 @@ class OpenSearchEventsHandler(Object):
 
             # Now, reissue a restart: we should not have stopped in the first place
             # as "started" flag is still set to True.
-            # We do not wait for the 200 return, as maybe more than one unit is coming back
-            # Note: start_service_only() is polymorphic, for VM it starts snap service,
-            # for K8s it starts Pebble service.
+            # We do not wait for the 200 return, as maybe more than one unit is coming back.
+            # start_service_only() is polymorphic but here we call it only for VMs.
             try:
                 self.charm.workload.start_service_only()
                 # We're done here, we can return
@@ -722,16 +723,9 @@ class OpenSearchEventsHandler(Object):
         # adding large deployment yet, we always ignore
         if self.charm.lock_manager.should_ignore_lock(deployment_desc):
             logger.debug(
-                "Requesting start as first data node without lock: %s", self.charm.state.unit_name
+                "Requesting start as first data node without lock: %s",
+                self.charm.state.unit_name,
             )
-            # TODO:
-            # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
-            # event.defer()
-            # Temporary workaround for the moment to reduce startup delays:
-            logger.info("Emitting the start opensearch event (ignoring lock)")
-            # do not defer, otherwise we may only retry on the next hook
-            # often update-status, causing an unnecessary several minutes startup delay.
-            self.charm.start_opensearch_event.emit(ignore_lock=True)
             return
 
         logger.info("Emitting the start opensearch event")
@@ -789,9 +783,6 @@ class OpenSearchEventsHandler(Object):
             # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
             return
 
-        if self.charm.state.server.started:
-            self.charm.state.server.update({"started": ""})
-
         # K8s: start / custom start events can run before pebble-ready
         # after an agent restart. Ensure the container is prepared and TLS files are
         # restored from Juju secrets before attempting to start OpenSearch,
@@ -834,16 +825,17 @@ class OpenSearchEventsHandler(Object):
             if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
                 # Only rewrite if TLS config is missing. /etc/opensearch comes from the
                 # image, but any runtime writes can be lost on container recreation.
+                # Use full config reconcile so admin_dn and node
+                # TLS come from state (same path as config-changed),
+                # instead of targeted set_admin_tls_conf/set_node_tls_conf.
                 if not (
                     self.charm.config_manager.is_transport_tls_configured()
                     and self.charm.config_manager.is_http_tls_configured()
                 ):
                     try:
-                        self.charm.config_manager.set_admin_tls_conf(admin_secrets)
+                        self.charm.config_manager.update_opensearch_config()
                     except ContainerNotReadyError as e:
-                        logger.info(
-                            "Container not ready to rewrite admin TLS config for start: %s", e
-                        )
+                        logger.info("Container not ready to rewrite TLS config for start: %s", e)
                         event.defer()
                         return
                     except (
@@ -851,49 +843,7 @@ class OpenSearchEventsHandler(Object):
                         OpenSearchFileOperationError,
                         OpenSearchError,
                     ) as e:
-                        logger.warning("Failed to rewrite admin TLS config for start: %s", e)
-                        event.defer()
-                        return
-
-                    try:
-                        self.charm.config_manager.set_node_tls_conf(
-                            CertType.UNIT_TRANSPORT,
-                            truststore_pwd=truststore_pwd,
-                            keystore_pwd=transport_keystore_pwd,
-                        )
-                    except ContainerNotReadyError as e:
-                        logger.info(
-                            "Container not ready to rewrite transport TLS config for start: %s", e
-                        )
-                        event.defer()
-                        return
-                    except (
-                        OpenSearchInstallError,
-                        OpenSearchFileOperationError,
-                        OpenSearchError,
-                    ) as e:
-                        logger.warning("Failed to rewrite transport TLS config for start: %s", e)
-                        event.defer()
-                        return
-
-                    try:
-                        self.charm.config_manager.set_node_tls_conf(
-                            CertType.UNIT_HTTP,
-                            truststore_pwd=truststore_pwd,
-                            keystore_pwd=http_keystore_pwd,
-                        )
-                    except ContainerNotReadyError as e:
-                        logger.info(
-                            "Container not ready to rewrite HTTP TLS config for start: %s", e
-                        )
-                        event.defer()
-                        return
-                    except (
-                        OpenSearchInstallError,
-                        OpenSearchFileOperationError,
-                        OpenSearchError,
-                    ) as e:
-                        logger.warning("Failed to rewrite HTTP TLS config for start: %s", e)
+                        logger.warning("Failed to rewrite TLS config for start: %s", e)
                         event.defer()
                         return
 
@@ -932,6 +882,7 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        logger.debug("Setting WAITING_TO_START from _on_start_opensearch")
         self.charm.status.set(CharmStatuses.WAITING_TO_START)
 
         # Set the configuration of the node
@@ -946,12 +897,14 @@ class OpenSearchEventsHandler(Object):
             )
         except OpenSearchHttpError as e:
             # We might be starting with a partially-formed cluster (or temporary API issues).
-            # Fall back to rendering config without cluster topology data.
+            # Fall back: use nodes_config from peer relation if available (leader already
+            # pushed topology), so we still set initial_cluster_manager_nodes and seeds for VM.
             logger.debug("Error getting nodes before start: %s", e)
             try:
                 self.charm.config_manager.update_opensearch_config()
             except (ContainerNotReadyError, OpenSearchFileOperationError, OpenSearchError) as e2:
                 logger.info("Unable to write base config before start: %s", e2)
+                self.charm.lock_manager.release()
                 event.defer()
                 return
         else:
@@ -961,14 +914,12 @@ class OpenSearchEventsHandler(Object):
                 )
             except ContainerNotReadyError as e:
                 logger.info("Container not ready to configure node before start: %s", e)
+                self.charm.lock_manager.release()
                 event.defer()
                 return
-            except OpenSearchFileOperationError as e:
+            except (OpenSearchFileOperationError, OpenSearchError) as e:
                 logger.info("Unable to write OpenSearch config before start: %s", e)
-                event.defer()
-                return
-            except OpenSearchError as e:
-                logger.info("Unable to write OpenSearch config before start: %s", e)
+                self.charm.lock_manager.release()
                 event.defer()
                 return
 
@@ -1049,8 +1000,10 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.lock_manager.release()
 
-        # Add a timestamp to always trigger relation changed
-        self.charm.state.server.update({"started": str(time.time())})
+        # Mark unit as started. Use a stable value so we do not trigger relation-changed on
+        # every _post_start_init
+        if not self.charm.state.server.started:
+            self.charm.state.server.update({"started": "true"})
 
         # Apply OpenSearch upstream recommended settings
         self.charm.cluster_manager.apply_upstream_fixes()
@@ -1065,6 +1018,7 @@ class OpenSearchEventsHandler(Object):
 
         # clear waiting to start status
         self.charm.status.clear(CharmStatuses.REQUEST_LOCK_ON_START)
+        logger.debug("Clearing WAITING_TO_START from _post_start_init")
         self.charm.status.clear(CharmStatuses.WAITING_TO_START)
         self.charm.status.clear(CharmStatuses.SERVICE_START_ERROR)
         self.charm.status.clear(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
@@ -1305,8 +1259,7 @@ class OpenSearchEventsHandler(Object):
                     and event.is_first_data_node
                 )
             )
-        else:
-            return self.is_cluster_healthy_to_start()
+        return self.is_cluster_healthy_to_start()
 
     def post_start_ca_rotation(self) -> None:
         """Configure TLS CA rotation after OpenSearch is started."""

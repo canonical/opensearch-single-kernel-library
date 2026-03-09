@@ -42,8 +42,16 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStopError,
 )
 from opensearch_single_kernel.utils.helpers import (
+    build_command_list,
+    build_command_with_args,
+    build_property_value_error,
+    build_script_command,
+    build_unreadable_property_error,
     mask_sensitive_information,
+    parse_meminfo_output,
     path_as_posix,
+    property_violates_requirement,
+    wait_for_process_output,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 from opensearch_single_kernel.workload.base import Paths as BasePaths
@@ -262,7 +270,8 @@ class K8sWorkload(BaseWorkload):
         - Runs OpenSearch as a non-root user/group defined in the Pebble layer
         """
         try:
-            opensearch_cmd = self._determine_opensearch_command()
+            # The K8s image exposes the OpenSearch launcher directly as `opensearch`.
+            opensearch_cmd = path_as_posix(self.paths.bin / "opensearch")
             layer_dict = self._build_pebble_layer_dict(opensearch_cmd)
 
             layer = Layer(layer_dict)
@@ -292,32 +301,6 @@ class K8sWorkload(BaseWorkload):
         except (PebbleConnectionError, ModelError) as e:
             logger.error("Failed to prepare container on pebble-ready: %s", e)
             raise OpenSearchInstallError() from e
-
-    def _determine_opensearch_command(self) -> str:
-        """Determine OpenSearch executable command.
-
-        Tries opensearch.sh script first, falls back to direct opensearch binary.
-
-        Returns:
-            str: command string to execute OpenSearch.
-
-        Raises:
-            OpenSearchFileOperationError: if filesystem checks fail.
-        """
-        opensearch_bin = self.paths.bin
-        opensearch_script = opensearch_bin / "opensearch.sh"
-
-        try:
-            if opensearch_script.exists():
-                return "bash %s" % path_as_posix(opensearch_script)
-        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
-            raise OpenSearchFileOperationError(e) from e
-
-        # fallback to direct opensearch binary if script doesn't exist
-        opensearch_cmd = opensearch_bin / "opensearch"
-        opensearch_cmd_str = path_as_posix(opensearch_cmd)
-        logger.debug("opensearch.sh not found, using direct binary: %s", opensearch_cmd_str)
-        return opensearch_cmd_str
 
     def _build_pebble_layer_dict(self, opensearch_cmd: str) -> dict:
         """Build Pebble layer dictionary with OpenSearch service configuration.
@@ -462,26 +445,11 @@ class K8sWorkload(BaseWorkload):
             OpenSearchCmdError: if container is not connected or script execution fails.
         """
         script_path = "%s/%s" % (self.paths.home, script_name)
-        full_command = self._build_script_command(script_path, args)
+        full_command = build_script_command(script_path, args)
         env_setup = self._build_script_environment(full_command)
         quoted = shlex.quote(env_setup)
         result = self.run_cmd(f"bash -c {quoted}")
         return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)
-
-    def _build_script_command(self, script_path: str, args: str | None) -> str:
-        """Build bash command to execute script.
-
-        Args:
-            script_path: full path to the script file.
-            args: Optional arguments to pass to the script.
-
-        Returns:
-            str: full bash command string.
-        """
-        command = "bash %s" % script_path
-        if args:
-            command = "%s %s" % (command, args)
-        return command
 
     def _build_script_environment(self, command: str) -> str:
         """Build environment setup string for script execution.
@@ -716,11 +684,11 @@ class K8sWorkload(BaseWorkload):
         """
         try:
             result = self.run_cmd("cat /proc/meminfo")
-            return self._parse_meminfo_output(result.out)
+            return parse_meminfo_output(result.out)
         except OpenSearchCmdError as e:
             # try to parse output from error message if it exists
             if e.out:
-                if parsed := self._parse_meminfo_output(e.out):
+                if parsed := parse_meminfo_output(e.out):
                     logger.debug(
                         "Successfully parsed meminfo from command output despite non-zero exit code: %s",
                         parsed,
@@ -730,24 +698,6 @@ class K8sWorkload(BaseWorkload):
             return {}
         except OSError as e:
             logger.warning("Failed to read meminfo: %s", e)
-            return {}
-
-    def _parse_meminfo_output(self, output: str) -> dict[str, float]:
-        """Parse meminfo output into dictionary.
-
-        Args:
-            output: raw output from /proc/meminfo or cat command.
-
-        Returns:
-            dict[str, float]: Parsed memory info values, empty dict if parsing fails.
-
-        """
-        try:
-            meminfo_lines = output.split("\n")
-            meminfo = [line.split() for line in meminfo_lines if line.strip()]
-            return {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
-        except (ValueError, IndexError, AttributeError) as parse_error:
-            logger.warning("Failed to parse meminfo output: %s", parse_error)
             return {}
 
     @override
@@ -815,89 +765,14 @@ class K8sWorkload(BaseWorkload):
         current_value = self._get_kernel_property_value(property_name)
 
         if current_value is None:
-            return self._build_unreadable_property_error(property_name, config_method)
+            return build_unreadable_property_error(property_name, config_method)
 
-        if self._property_violates_requirement(current_value, required_value, comparison_op):
-            return self._build_property_value_error(
+        if property_violates_requirement(current_value, required_value, comparison_op):
+            return build_property_value_error(
                 property_name, current_value, required_value, comparison_op, config_method
             )
 
         return None
-
-    def _property_violates_requirement(
-        self, current_value: int, required_value: int, comparison_op: str
-    ) -> bool:
-        """Check if current property value violates the requirement.
-
-        Args:
-            current_value: Current property value.
-            required_value: Required property value.
-            comparison_op: Comparison operator (< or >).
-
-        Returns:
-            bool: True if requirement is violated, False otherwise.
-        """
-        if comparison_op == "<":
-            return current_value < required_value
-        elif comparison_op == ">":
-            return current_value > required_value
-        return False
-
-    def _build_unreadable_property_error(self, property_name: str, config_method: str) -> str:
-        """Build error message for unreadable kernel property.
-
-        Args:
-            property_name: kernel property name.
-            config_method: description of how to configure this property.
-
-        Returns:
-            str: error message.
-        """
-        error_message = (
-            "Cannot read %s from container. "
-            "This may indicate missing permissions or node-level configuration issue. "
-            "For K8s deployments, configure via %s."
-        ) % (property_name, config_method)
-        return error_message
-
-    def _build_property_value_error(
-        self,
-        property_name: str,
-        current_value: int,
-        required_value: int,
-        comparison_op: str,
-        config_method: str,
-    ) -> str:
-        """Build error message for property value that violates requirement.
-
-        Args:
-            property_name: Kernel property name.
-            current_value: Current property value.
-            required_value: Required property value.
-            comparison_op: Comparison operator ("<" or ">").
-            config_method: Description of how to configure this property.
-
-        Returns:
-            str: error message.
-        """
-        if comparison_op == "<":
-            comparison_text = "below"
-        else:
-            comparison_text = "above"
-
-        fix_instruction = "%s=%s" % (property_name, required_value)
-
-        error_message = (
-            "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
-        ) % (
-            property_name,
-            current_value,
-            comparison_text,
-            required_value,
-            config_method,
-            fix_instruction,
-        )
-        return error_message
 
     @override
     def _get_kernel_property_value(self, prop: str) -> int | None:
@@ -1010,7 +885,7 @@ class K8sWorkload(BaseWorkload):
         Raises:
             OpenSearchCmdError: If command execution fails or container is not ready
         """
-        command_with_args = self._build_command_with_args(command, args)
+        command_with_args = build_command_with_args(command, args)
         masked_command = mask_sensitive_information(command_with_args)
         logger.debug("Executing command in container: %s", masked_command)
 
@@ -1018,7 +893,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 raise OpenSearchCmdError(cmd=command, out="", err="Container not connected")
 
-            cmd_list = self._build_command_list(command_with_args)
+            cmd_list = build_command_list(command_with_args)
             logger.debug("Executing command list: %s", cmd_list)
 
             process = self.container.exec(
@@ -1028,7 +903,7 @@ class K8sWorkload(BaseWorkload):
                 combine_stderr=True,
             )
 
-            stdout, stderr = self._wait_for_process_output(process, masked_command, command)
+            stdout, stderr = wait_for_process_output(process, masked_command, command)
             logger.debug(
                 "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
             )
@@ -1041,86 +916,6 @@ class K8sWorkload(BaseWorkload):
                 "Error executing command %s: %s: %s", masked_command, type(e).__name__, e
             )
             raise OpenSearchCmdError(cmd=command, out="", err=str(e)) from e
-
-    def _build_command_with_args(self, command: str, args: str | None) -> str:
-        """Build command string with optional arguments.
-
-        Args:
-            command: command to run
-            args: Additional command line arguments
-
-        Returns:
-            str: Command with arguments concatenated
-        """
-        if args is not None:
-            return "%s %s" % (command, args)
-        return command
-
-    def _build_command_list(self, command_with_args: str) -> list[str]:
-        """Build command list for container.exec().
-
-        Detects shell metacharacters and wraps command in shell if needed.
-        Otherwise splits command into list of arguments.
-
-        Args:
-            command_with_args: Full command string with arguments
-
-        Returns:
-            list[str]: Command list suitable for container.exec()
-        """
-        if self._needs_shell(command_with_args):
-            # command contains shell metacharacters, must run via shell
-            return ["sh", "-c", command_with_args]
-        elif " " in command_with_args:
-            # simple command with arguments, split it properly
-            return command_with_args.split()
-        else:
-            return [command_with_args]
-
-    def _needs_shell(self, command: str) -> bool:
-        """Check if command requires shell interpretation.
-
-        Shell metacharacters include: |, >, <, &&, ||, ;, $(), ${}, ``, 2>, >>, <<, &, etc.
-
-        Args:
-            command: Command string to check
-
-        Returns:
-            bool: True if command contains shell metacharacters
-        """
-        shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
-        return any(char in command for char in shell_metachars)
-
-    def _wait_for_process_output(
-        self, process, masked_command: str, original_command: str
-    ) -> tuple[str, str]:
-        """Wait for process to complete and return output.
-
-        Args:
-            process: process object from container.exec()
-            masked_command: command string with sensitive info masked for logging
-            original_command: original command string for error messages
-
-        Returns:
-            tuple[str, str]: (stdout, stderr) - stderr is
-                typically empty due to combine_stderr=True
-
-        Raises:
-            OpenSearchCmdError: If process fails or returns non-zero exit code
-        """
-        try:
-            stdout, stderr = process.wait_output()
-            return stdout, stderr
-        except Exception as e:
-            # wait_output() raises on non-zero exit or other errors
-            # some errors are expected and handled by callers such as "does not exist" for keytool
-            # log those as debug instead of warning
-            error_string = str(e).lower()
-            if "does not exist" in error_string or "keystore file does not exist" in error_string:
-                logger.debug("wait_output() failed for %s (expected): %s", masked_command, e)
-            else:
-                logger.warning("wait_output() failed for %s: %s", masked_command, e)
-            raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
 
     @override
     def stop(self) -> None:
@@ -1167,22 +962,16 @@ class K8sWorkload(BaseWorkload):
             path: PathProtocol object representing the file path
 
         Raises:
-            ContainerNotReadyError: If container is not ready
-            OpenSearchFileOperationError: For other file operation errors
+            OpenSearchFileOperationError: If container is not ready or file operation fails.
         """
         try:
-            # ensure parent directory exists before writing
             path.parent.mkdir(
                 mode=DIR_PERMISSIONS_READONLY,
                 parents=True,
                 exist_ok=True,
             )
-            # use ContainerPath API to write the file
             path.write_text(content)
-        except PebbleConnectionError as e:
-            # raise ContainerNotReadyError so hooks can defer cleanly
-            raise ContainerNotReadyError("Container not ready for write_text: %s" % e) from e
-        except (PebbleError, ModelError, OSError, ValueError) as e:
+        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
             raise OpenSearchFileOperationError(e) from e
 
     @override

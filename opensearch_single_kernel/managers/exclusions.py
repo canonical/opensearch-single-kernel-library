@@ -285,7 +285,6 @@ class NodesExclusionsManager(BaseManager):
         try:
             node_name = self.state.node_name
             if node_name is None:
-                node = self.state.node_config
                 node_id = None
             else:
                 node_id = self.opensearch_client.get_node_id(node_name)

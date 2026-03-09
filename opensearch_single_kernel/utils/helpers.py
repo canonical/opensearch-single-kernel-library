@@ -4,6 +4,7 @@
 
 """A set of helpers functions."""
 import base64
+import logging
 import math
 import re
 import secrets
@@ -22,6 +23,8 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
+
+logger = logging.getLogger(__name__)
 
 
 def path_as_posix(path: PathProtocol) -> str:
@@ -152,6 +155,191 @@ def parse_tls_file(raw_content: str) -> bytes:
             raw_content,
         ).encode("utf-8")
     return base64.b64decode(raw_content)
+
+
+def build_command_with_args(command: str, args: str | None) -> str:
+    """Build command string with optional arguments.
+
+    Args:
+        command: Command to run.
+        args: Additional command line arguments.
+
+    Returns:
+        str: Command with arguments concatenated.
+    """
+    if args is not None:
+        return "%s %s" % (command, args)
+    return command
+
+
+def build_script_command(script_path: str, args: str | None) -> str:
+    """Build bash command to execute script.
+
+    Args:
+        script_path: Full path to the script file.
+        args: Optional arguments to pass to the script.
+
+    Returns:
+        str: Full bash command string.
+    """
+    return build_command_with_args("bash %s" % script_path, args)
+
+
+def needs_shell(command: str) -> bool:
+    """Check if command requires shell interpretation.
+
+    Shell metacharacters include: |, >, <, &&, ||, ;, $(), ${}, ``, 2>, >>, <<, &, etc.
+
+    Args:
+        command: Command string to check.
+
+    Returns:
+        bool: True if command contains shell metacharacters.
+    """
+    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
+    return any(char in command for char in shell_metachars)
+
+
+def build_command_list(command_with_args: str) -> list[str]:
+    """Build command list for container.exec().
+
+    Detects shell metacharacters and wraps command in shell if needed.
+    Otherwise splits command into list of arguments.
+
+    Args:
+        command_with_args: Full command string with arguments.
+
+    Returns:
+        list[str]: Command list suitable for container.exec().
+    """
+    if needs_shell(command_with_args):
+        return ["sh", "-c", command_with_args]
+    if " " in command_with_args:
+        return command_with_args.split()
+    return [command_with_args]
+
+
+def parse_meminfo_output(output: str) -> dict[str, float]:
+    """Parse meminfo output into dictionary.
+
+    Args:
+        output: Raw output from /proc/meminfo or cat command.
+
+    Returns:
+        dict[str, float]: Parsed memory info values, empty dict if parsing fails.
+    """
+    try:
+        meminfo_lines = output.split("\n")
+        meminfo = [line.split() for line in meminfo_lines if line.strip()]
+        return {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
+    except (ValueError, IndexError, AttributeError) as parse_error:
+        logger.warning("Failed to parse meminfo output: %s", parse_error)
+        return {}
+
+
+def wait_for_process_output(
+    process: Any, masked_command: str, original_command: str
+) -> tuple[str, str]:
+    """Wait for process to complete and return output.
+
+    Args:
+        process: Process object from container.exec() (has wait_output()).
+        masked_command: Command string with sensitive info masked for logging.
+        original_command: Original command string for error messages.
+
+    Returns:
+        tuple[str, str]: (stdout, stderr). stderr is typically empty when
+        combine_stderr=True was used for exec().
+
+    Raises:
+        OpenSearchCmdError: If process fails or returns non-zero exit code.
+    """
+    try:
+        stdout, stderr = process.wait_output()
+        return stdout, stderr
+    except Exception as e:
+        error_string = str(e).lower()
+        if "does not exist" in error_string or "keystore file does not exist" in error_string:
+            logger.debug("wait_output() failed for %s (expected): %s", masked_command, e)
+        else:
+            logger.warning("wait_output() failed for %s: %s", masked_command, e)
+        raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
+
+
+def build_unreadable_property_error(property_name: str, config_method: str) -> str:
+    """Build error message for unreadable kernel property.
+
+    Args:
+        property_name: Kernel property name.
+        config_method: Description of how to configure this property.
+
+    Returns:
+        str: error message.
+    """
+    return (
+        "Cannot read %s from container. "
+        "This may indicate missing permissions or node-level configuration issue. "
+        "For K8s deployments, configure via %s."
+    ) % (property_name, config_method)
+
+
+def property_violates_requirement(
+    current_value: int, required_value: int, comparison_op: str
+) -> bool:
+    """Check if current property value violates the requirement.
+
+    Args:
+        current_value: Current property value.
+        required_value: Required property value.
+        comparison_op: Comparison operator (< or >).
+
+    Returns:
+        bool: True if requirement is violated, False otherwise.
+    """
+    if comparison_op == "<":
+        return current_value < required_value
+    if comparison_op == ">":
+        return current_value > required_value
+    return False
+
+
+def build_property_value_error(
+    property_name: str,
+    current_value: int,
+    required_value: int,
+    comparison_op: str,
+    config_method: str,
+) -> str:
+    """Build error message for property value that violates requirement.
+
+    Args:
+        property_name: Kernel property name.
+        current_value: Current property value.
+        required_value: Required property value.
+        comparison_op: Comparison operator ("<" or ">").
+        config_method: Description of how to configure this property.
+
+    Returns:
+        str: error message.
+    """
+    if comparison_op == "<":
+        comparison_text = "below"
+    else:
+        comparison_text = "above"
+
+    fix_instruction = "%s=%s" % (property_name, required_value)
+
+    error_message = (
+        "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
+    ) % (
+        property_name,
+        current_value,
+        comparison_text,
+        required_value,
+        config_method,
+        fix_instruction,
+    )
+    return error_message
 
 
 def get_nested_value(config: dict, key_path: str) -> Any:

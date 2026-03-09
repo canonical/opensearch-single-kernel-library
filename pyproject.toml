@@ -45,7 +45,7 @@ requests = "2.32.4"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-pydantic = ">= 1.0"
+pydantic = ">= 2.0"
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.7"
@@ -59,7 +59,7 @@ lightkube = "^0.17.0"
 # data_platform_libs/v0/data_interfaces.py
 ops = "^3.3.0"
 # data_platform_libs/v0/upgrade.py
-pydantic = ">= 1.0"
+pydantic = ">= 2.0"
 # tls_certificates_interface/v3/tls_certificates.py
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"

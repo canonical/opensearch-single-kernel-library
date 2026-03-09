@@ -3,14 +3,16 @@
 
 """Unit Tests for Charm related operations."""
 
-from unittest.mock import PropertyMock, call, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
+import pytest
 from ops import ActiveStatus, BlockedStatus
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchInstallError,
 )
+from opensearch_single_kernel.events.custom_events import StartOpenSearch
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -41,6 +43,80 @@ def test_on_install_error(harness, substrate):
             assert isinstance(harness.model.unit.status, BlockedStatus)
         else:
             assert not isinstance(harness.model.unit.status, BlockedStatus)
+
+
+def test_k8s_pebble_plan_uses_opensearch_binary(harness, substrate, mocker):
+    """K8s Pebble plan should launch the image-provided `opensearch` binary."""
+    if substrate == "vm":
+        pytest.skip("K8s-only workload launcher test")
+
+    build_layer = mocker.patch(
+        "opensearch_single_kernel.workload.k8s.K8sWorkload._build_pebble_layer_dict",
+        return_value={
+            "summary": "OpenSearch service layer",
+            "description": "Pebble plan layer for OpenSearch",
+            "services": {
+                "opensearch": {
+                    "override": "replace",
+                    "summary": "OpenSearch service",
+                    "command": "/usr/share/opensearch/bin/opensearch",
+                    "startup": "disabled",
+                    "user": "_daemon_",
+                    "group": "_daemon_",
+                    "environment": {},
+                }
+            },
+        },
+    )
+    add_layer = mocker.patch.object(harness.charm.workload.container, "add_layer")
+
+    harness.charm.workload._configure_pebble_plan()
+
+    build_layer.assert_called_once_with("/usr/share/opensearch/bin/opensearch")
+    add_layer.assert_called_once()
+
+
+def test_unit_allowed_to_start_non_leader_not_allowed_when_no_alt_hosts(
+    harness, mocker, substrate
+):
+    """When security index is not initialised and alt_hosts is empty, only leader can start.
+
+    A non-leader unit is not allowed to start in this case, is_cluster_healthy_to_start
+    is only used when the cluster is already initialised or alt_hosts is set.
+    """
+    from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
+
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.base.BaseManager.alt_hosts",
+        new_callable=PropertyMock,
+        return_value=None,
+    )
+    is_cluster_healthy = mocker.patch.object(
+        OpenSearchEventsHandler,
+        "is_cluster_healthy_to_start",
+        return_value=True,
+    )
+
+    harness.set_leader(False)
+    event = StartOpenSearch(
+        MagicMock(),  # handle
+        is_first_data_node=False,
+    )
+
+    result = harness.charm.opensearch_events.unit_allowed_to_start(event)
+
+    assert result is False
+    is_cluster_healthy.assert_not_called()
 
 
 def test_on_leader_elected(harness, mocker):

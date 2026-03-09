@@ -28,6 +28,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
     StartMode,
     State,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
@@ -85,10 +86,13 @@ class ClusterManager(BaseManager):
             return
 
         # start the opensearch service
+        logger.debug("Starting OpenSearch workload service")
         self.workload.start_service()
 
         start = datetime.now()
-        while not (connected := _is_connected()) and (datetime.now() - start).seconds < 180:
+        while (
+            not (connected := _is_connected()) and (datetime.now() - start).total_seconds() < 180
+        ):
             time.sleep(3)
         if not connected:
             logger.debug(f"waited {datetime.now() - start} opensearch did not start")
@@ -367,9 +371,14 @@ class ClusterManager(BaseManager):
             raise OpenSearchError(
                 "Cannot initialize security index: truststore-password not found in admin secrets"
             )
-        # Use DNS name for K8s (matches cert SANs) or host_ip for VM
-        # For K8s, get_host_public_ip() returns a stable DNS name that matches certificate SANs
-        securityadmin_host = self.workload.get_host_public_ip() or self.state.host_ip
+        # Use node_name on K8s (pod hostname, matches cert SANs); on VM use a connectable
+        # address (get_host_public_ip or host_ip). VM node_name is the logical unit name
+        # (e.g. opensearch-0), not a resolvable host for the securityadmin CLI.
+        securityadmin_host = (
+            (self.state.node_name if self.state.substrate == Substrates.K8S else None)
+            or self.workload.get_host_public_ip()
+            or self.state.host_ip
+        )
 
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",

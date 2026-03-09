@@ -26,7 +26,11 @@ import os
 import ops
 from ops import Relation
 
-from opensearch_single_kernel.common.constants import DeploymentType, StartMode
+from opensearch_single_kernel.common.constants import (
+    DeploymentType,
+    StartMode,
+    Substrates,
+)
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
@@ -423,11 +427,14 @@ class LockManager(PeerLockManager):
             try:
                 unit_with_lock = self.unit_with_lock(host)
             except OpenSearchHttpError as e:
-                # Do not crash a Juju hook if OpenSearch isn't reachable at the moment.
-                # This can happen transiently on K8s (pod IP changes, DNS not ready).
-                logger.warning("[Node lock] Could not check lock holder: %s", e)
-                super().release()
-                return
+                # On K8s only: do not crash the hook when OpenSearch is temporarily unreachable
+                # (pod IP changes, DNS not ready). On VM we re-raise so the lock doc is not left
+                # behind and the next unit can acquire.
+                if self.state.substrate == Substrates.K8S:
+                    logger.warning("[Node lock] Could not check lock holder: %s", e)
+                    super().release()
+                    return
+                raise
             current_app_units = [
                 format_unit_name(unit, app=current_app) for unit in self.state.all_units
             ]
@@ -463,7 +470,10 @@ class LockManager(PeerLockManager):
                     )
                 except OpenSearchHttpError as e:
                     if e.response_code != 404:
-                        logger.warning("[Node lock] Could not release opensearch lock: %s", e)
+                        if self.state.substrate == Substrates.K8S:
+                            logger.warning("[Node lock] Could not release opensearch lock: %s", e)
+                        else:
+                            raise
                 logger.debug("[Node lock] Released opensearch lock")
         super().release()
         logger.debug("[Node lock] Released peer lock (if held)")

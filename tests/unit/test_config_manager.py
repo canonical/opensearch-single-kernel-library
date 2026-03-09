@@ -168,10 +168,8 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
 
-    # bootstrap names differ by substrate:
-    # - VM: uses cm_names
-    # - K8s: uses hostname (node.name) because bootstrap must match runtime node name
-    expected_bootstrap_names = ["cm1"] if substrate == "vm" else [expected_node_name]
+    # K8s: single-unit start, only this node. VM: 3-node start, sorted(cm_names).
+    expected_bootstrap_names = [expected_node_name] if substrate == "k8s" else ["cm1"]
     assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == expected_bootstrap_names
 
     # test cleanup_conf_if_bootstrapped

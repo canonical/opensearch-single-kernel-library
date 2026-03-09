@@ -204,10 +204,7 @@ class YamlConfigSetter(ConfigSetter):
 
         if not path.exists():
             raise FileNotFoundError(f"{path} not found.")
-        lines = self.workload.read_text(path).strip().split("\n")
         try:
-            if not path.exists():
-                raise FileNotFoundError(f"{path} not found.")
             contents = path.read_text()
         except PebbleConnectionError as e:
             raise ContainerNotReadyError(f"Container not ready to read {path}: {e}") from e
@@ -247,7 +244,7 @@ class YamlConfigSetter(ConfigSetter):
         try:
             data = self.load(config_file)
         except FileNotFoundError:
-            # If file doesn't exist, start with empty dict (and ensure parent dir exists).
+            # If file doesn't exist, start with empty dict and ensure parent dir exists.
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
             except PebbleConnectionError as e:
@@ -273,20 +270,63 @@ class YamlConfigSetter(ConfigSetter):
     def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
         """Rewrite a config file with new configuration while preserving formatting and comments.
 
+        Returns True only when the config content has semantically changed, so that callers
+        (peer relation handler) do not restart the service on every hook due to
+        YAML formatting or key-order differences.
+
         Args:
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
 
         Returns:
-            whether config file was changed.
+            whether config file was changed (semantic comparison).
         """
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
         old_content = path.read_text()
+        # Semantic comparison: avoid write (and restart) when only formatting/order changed
+        try:
+            old_data = self.yaml.load(StringIO(old_content))
+            if old_data is None:
+                old_data = {}
+            if YamlConfigSetter._normalized_config_equal(target, old_data):
+                return False
+        except Exception:
+            # If comparison fails (invalid YAML), fall back to write
+            pass
         self.__dump(target, OutputType.file, config_file)
-        new_content = path.read_text()
-        return old_content != new_content
+        return True
+
+    @staticmethod
+    def _normalized_config_equal(a: Any, b: Any) -> bool:
+        """Compare two config structures for semantic equality (ignore key/list order)."""
+        return YamlConfigSetter._normalize_for_compare(
+            a
+        ) == YamlConfigSetter._normalize_for_compare(b)
+
+    @staticmethod
+    def _normalize_for_compare(obj: Any) -> Any:
+        """Normalize config structure for comparison.
+
+        Sort dict keys and order-independent lists so that two semantically equal
+        configs compare equal regardless of key or list order.
+        """
+        if obj is None:
+            return None
+        if isinstance(obj, Mapping):
+            # Sort keys so dict order (from YAML load) does not affect equality.
+            return tuple(
+                (k, YamlConfigSetter._normalize_for_compare(v)) for k, v in sorted(obj.items())
+            )
+        if isinstance(obj, list):
+            normalized = tuple(YamlConfigSetter._normalize_for_compare(x) for x in obj)
+            # Sort lists of primitives (node.roles) so order does not affect equality.
+            primitives = (str, int, float, bool, type(None))
+            if normalized and all(isinstance(x, primitives) for x in normalized):
+                return tuple(sorted(normalized))
+            return normalized
+        return obj
 
     @override
     def delete(
@@ -386,22 +426,6 @@ class YamlConfigSetter(ConfigSetter):
         if text_to_append not in data.splitlines():
             data = data + "\n" + text_to_append
             self.workload.write_text(data, path)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists():
-                try:
-                    existing = path.read_text()
-                    data = f"{existing.rstrip()}\n{text_to_append}"
-                except (FileNotFoundError, OSError) as e:
-                    # If read failed for other reasons, create new file with the text to append.
-                    logger.debug("Could not read %s, creating new file: %s", path, e)
-                    data = text_to_append
-            else:
-                data = text_to_append
-                logger.debug("File %s does not exist, creating it.", path)
-            path.write_text(data)
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(f"Container not ready to update {path}: {e}") from e
 
     def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream.
@@ -423,9 +447,9 @@ class YamlConfigSetter(ConfigSetter):
                     f"Container not ready to create dir {target_path.parent}: {e}"
                 ) from e
 
-            # Dump to StringIO buffer first, then write using workload.write_text()
-            # This is necessary because ruamel.yaml.dump() expects a file-like object,
-            # but PathProtocol objects don't implement the write() method
+            # Necessary for K8s: ruamel.yaml.dump() requires a stream with write(), and the
+            # path is inside the container so the charm cannot open() it. Dump to a buffer
+            # in the charm, then write the content via the workload/path API.
             buffer = StringIO()
             self.yaml.dump(data, buffer)
             yaml_content = buffer.getvalue()

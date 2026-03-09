@@ -1,4 +1,5 @@
 venv/
+.venv/
 build/
 *.charm
 .tox/
@@ -16,6 +17,9 @@ cloudinit-userdata.yaml
 # Moving to Poetry, we do not need this file to be pushed any longer
 /requirements.txt
 /requirements-last-build.txt
+
+# uv (optional local alternative to Poetry); project uses poetry.lock
+uv.lock
 
 ########################################################
 #

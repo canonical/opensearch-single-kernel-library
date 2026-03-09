@@ -103,7 +103,7 @@ prometheus.nodes.filter: _local
 network.publish_host: 20.20.20.20
 
 cluster.name: opensearch-dev
-node.name: opensearch-0.fde
+node.name: opensearch-0
 network.host:
 - _site_
 - _local_
@@ -112,8 +112,8 @@ http.publish_host: 30.30.30.30
 node.roles:
 - cluster_manager
 - data
-node.attr.app_id: b7d0e0ec-f65f-4d8b-ad1f-196e93994101/opensearch
-path.data: /var/snap/opensearch/common/var/lib/opensearch
-path.logs: /var/snap/opensearch/common/var/log/opensearch
-path.home: /var/snap/opensearch/current/usr/share/opensearch
+node.attr.app_id: b829ae42-ca47-455a-8a42-4b74c611c2c6/opensearch-k8s
+path.data: /var/lib/opensearch/data
+path.logs: /var/log/opensearch/logs
+path.home: /usr/share/opensearch
 node.attr.temp: hot

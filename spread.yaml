@@ -116,10 +116,8 @@ backends:
           username: ubuntu
 
 suites:
-  tests/spread/vm/:
-    summary: Spread tests for OpenSearch VM
-  #tests/spread/k8s/:
-    #summary: Spread tests for OpenSearch Kubernetes
+  tests/spread/:
+    summary: Spread tests for OpenSearch (VM and K8s, runs on every push)
 
 path: /root/spread_project
 
@@ -135,7 +133,7 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* ]]
+  if [[ -n "$DOCKERHUB_MIRROR" ]]
   then
     # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
     # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
@@ -159,36 +157,22 @@ prepare: |
     microk8s start
   fi
 
-  if [[ $SPREAD_SUITE == *"vm"* ]]
-  then
-    concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
-  fi
-
-  if [[ $SPREAD_SUITE == *"k8s"* ]]
-  then
-    concierge prepare --trace -c concierge-microk8s.yaml
-    # microk8s config | juju add-k8s my-k8s --client
-    # juju bootstrap my-k8s concierge-microk8s
-    # juju add-model --controller concierge-microk8s testing
-  fi
+  # Prepare both VM (LXD) and K8s (microk8s) backends so CI runs both on every push
+  concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
+  concierge prepare --trace -c concierge-microk8s.yaml
 
   # Install charmcraft & pipx (on lxd-vm backend)
   pipx install tox poetry
 prepare-each: |
   cd "$SPREAD_PATH"
 
-  # `concierge prepare` needs to be run for each spread job in case Juju version changed
-  if [[ $SPREAD_SUITE == *"vm"* ]]
+  # Switch to the backend required by this job (vm -> LXD, k8s -> microk8s)
+  if [[ "$SPREAD_TASK" == *"/vm/"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml
-  else
-    concierge prepare --trace -c concierge-microk8s.yaml
-  fi
-
-  if [[ $SPREAD_SUITE == *"vm"* ]]
-  then
     juju switch concierge-lxd
   else
+    concierge prepare --trace -c concierge-microk8s.yaml
     juju switch concierge-microk8s
   fi
 

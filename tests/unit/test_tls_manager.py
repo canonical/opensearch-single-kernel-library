@@ -549,7 +549,7 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     # This is because the function that applies on normal units to save app certificate
     # is executed on top of the mechanism that recognizes that the leader
     # received a new app cert
-    assert run_cmd.call_count == (4 if substrate == "vm" else 6)
+    assert run_cmd.call_count == 6
 
     certs_dir = str(harness.charm.workload.paths.certs)
     conf_dir = str(harness.charm.workload.paths.conf)
@@ -562,6 +562,11 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         rf"(sudo )?chmod {expected_mode} {certs_dir}/app-admin\.p12",
         run_cmd.call_args_list[1].args[0],
     )
+    if substrate == "vm":
+        assert any(
+            f"sudo chown snap_daemon:root {certs_dir}/app-admin.p12" in call.args[0]
+            for call in run_cmd.call_args_list
+        )
     assert conf_dir in str(tempfile.call_args_list[0][1]["dir"])
 
     assert harness.model.app.status == original_status_app
@@ -697,9 +702,9 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
 
     # The new cert is saved to the keystore
     if harness.charm.unit.is_leader():
-        assert run_cmd.call_count == (2 if substrate == "vm" else 3)
+        assert run_cmd.call_count == 3
     else:
-        assert run_cmd.call_count == (4 if substrate == "vm" else 6)
+        assert run_cmd.call_count == 6
 
     certs_dir = str(harness.charm.workload.paths.certs)
     conf_dir = str(harness.charm.workload.paths.conf)
@@ -712,6 +717,11 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
         rf"(sudo )?chmod {expected_mode} {certs_dir}/{cert_type}\.p12",
         run_cmd.call_args_list[1].args[0],
     )
+    if substrate == "vm":
+        assert any(
+            f"sudo chown snap_daemon:root {certs_dir}/{cert_type}.p12" in call.args[0]
+            for call in run_cmd.call_args_list
+        )
     assert conf_dir in str(tempfile.call_args_list[0][1]["dir"])
 
     assert harness.model.unit.status == original_status_unit
@@ -840,7 +850,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     # Old CA cert is saved with corresponding alias, new CA cert added to keystore
     # extra commands are expected due to post-write permission/ownership normalization.
-    assert run_cmd.call_count == (4 if substrate == "vm" else 5)
+    assert run_cmd.call_count == 5
     assert any(
         re.search(r"keytool -changealias -alias ca-0 -destalias old-ca-0", call.args[0])
         for call in run_cmd.call_args_list
@@ -858,7 +868,13 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
         f"chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
         for call in run_cmd.call_args_list
     )
-    if substrate != "vm":
+    if substrate == "vm":
+        assert any(
+            f"sudo chown snap_daemon:root {str(harness.charm.workload.paths.certs)}/ca.p12"
+            in call.args[0]
+            for call in run_cmd.call_args_list
+        )
+    else:
         assert any(
             f"chown 584792:0 {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
             for call in run_cmd.call_args_list
@@ -1383,7 +1399,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
     harness.charm.tls_events._on_certificate_available(event_mock)
 
     # NOTE: Currently store_new_tls_resources() is invoked twice for 'app-admin' cert!
-    assert run_cmd.call_count == (4 if substrate == "vm" else 6)
+    assert run_cmd.call_count == 6
 
     # Exporting new certs
     assert re.search(
@@ -1396,6 +1412,12 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         rf"(sudo )?chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/app-admin\.p12",
         run_cmd.call_args_list[1].args[0],
     )
+    if substrate == "vm":
+        assert any(
+            "sudo chown snap_daemon:root "
+            f"{str(harness.charm.workload.paths.certs)}/app-admin.p12" in call.args[0]
+            for call in run_cmd.call_args_list
+        )
     assert str(harness.charm.workload.paths.conf) in str(tempfile.call_args_list[0][1]["dir"])
     assert harness.charm.state.server.tls_ca_renewed
     # Note that the old flag is left intact
@@ -1570,9 +1592,9 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     # Note: the high number of operations come from the fact that on each certificate received
     # the 'issuer' is checked on each certificate that is saved on the disk.
     if harness.charm.unit.is_leader():
-        assert run_cmd.call_count == (14 if substrate == "vm" else 8)
+        assert run_cmd.call_count == (16 if substrate == "vm" else 8)
     else:
-        assert run_cmd.call_count == (16 if substrate == "vm" else 11)
+        assert run_cmd.call_count == (19 if substrate == "vm" else 11)
 
     certs_dir = str(harness.charm.workload.paths.certs)
     conf_dir = str(harness.charm.workload.paths.conf)
@@ -1584,6 +1606,11 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     assert (
         f"chmod {expected_mode} {certs_dir}/{cert_type}.p12" in run_cmd.call_args_list[1].args[0]
     )
+    if substrate == "vm":
+        assert any(
+            f"sudo chown snap_daemon:root {certs_dir}/{cert_type}.p12" in call.args[0]
+            for call in run_cmd.call_args_list
+        )
 
     assert any(
         (
@@ -1699,7 +1726,13 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
     if leader:
         # extra commands are expected due to post-write permission/ownership normalization.
-        assert run_cmd.call_count == (4 if substrate == "vm" else 11)
+        assert run_cmd.call_count == (5 if substrate == "vm" else 11)
+        if substrate == "vm":
+            assert any(
+                "sudo chown snap_daemon:root "
+                f"{str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+                for call in run_cmd.call_args_list
+            )
         assert harness.model.unit.status == MaintenanceStatus("Applying new CA certificate...")
         assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
             "csr": csr,

@@ -43,6 +43,7 @@ from tests.integration.helpers import (
     get_application_unit_ids,
     get_application_unit_ids_ips,
     get_application_unit_names,
+    get_constraints,
     get_leader_unit_ip,
     get_reachable_unit_ips,
     is_up,
@@ -52,13 +53,17 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
+pytestmark = pytest.mark.skip_if_substrate("k8s")
+
 
 NUM_HA_UNITS = 3
 
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -68,19 +73,34 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
+    os_deploy_kwargs = {
+        "application_name": APP_NAME,
+        "num_units": NUM_HA_UNITS,
+        "series": series,
+        "config": CONFIG_OPTS,
+    }
+    if substrate == "k8s":
+        os_deploy_kwargs["resources"] = charm_resources
+    else:
+        constraints = await get_constraints(ops_test)
+        if constraints:
+            os_deploy_kwargs["constraints"] = constraints
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(charm, num_units=NUM_HA_UNITS, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(charm, **os_deploy_kwargs),
     )
 
     # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.wait_for_idle(
+    await wait_until(
+        ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        status="active",
-        timeout=1400,
+        apps_statuses=["active"],
+        units_statuses=["active"],
+        wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1, APP_NAME: NUM_HA_UNITS},
+        timeout=2400,
         idle_period=IDLE_PERIOD,
     )
     assert len(ops_test.model.applications[APP_NAME].units) == NUM_HA_UNITS

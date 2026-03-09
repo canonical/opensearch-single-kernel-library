@@ -15,7 +15,10 @@ from charmlibs.pathops import PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+    OPENSEARCH_SNAP_REVISION,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -200,9 +203,21 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
-            return
+            # Only skip starting if the process is actually listening (avoids stuck state
+            # where systemd reports active but the process crashed or never bound to port).
+            host = self.get_host_public_ip()
+            if host and self.is_reachable(host, OPENSEARCH_HTTP_PORT):
+                logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
+                return
+            logger.debug(
+                "Snap reports opensearch.daemon active but not reachable; restarting service."
+            )
+            try:
+                self.opensearch_snap.stop([self.SERVICE_NAME])
+            except snap.SnapError as e:
+                logger.warning("Stop before restart failed: %s", e)
 
+        logger.debug("Starting OpenSearch snap service opensearch.%s", self.SERVICE_NAME)
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:

@@ -31,8 +31,8 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             "opensearch_single_kernel.workload.vm.snap.SnapCache",
             return_value={"opensearch": fake_snap},
         )
-        # Unit tests should not shell out to Juju CLI (such as `unit-get public-address`).
-        # VM workload callers can fall back to `state.host_ip` populated by `harness.add_network`.
+        # Unit tests should not run Juju CLI (such as unit-get public-address).
+        # VM workload callers can fall back to state.host_ip populated by harness.add_network.
         mocker.patch(
             "opensearch_single_kernel.workload.vm.VMWorkload.get_host_public_ip",
             return_value=None,
@@ -42,7 +42,7 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             OpenSearchK8sCharm as TestCharm,
         )
 
-    # In K8s, the container hostname is the Pod name (e.g. "opensearch-0").
+    # In K8s, the container hostname is the Pod name ("opensearch-0").
     # When running unit tests on a local machine, socket.gethostname() would
     # return the host machine name which breaks node.name-dependent logic.
     if substrate != "vm":
