@@ -12,58 +12,19 @@ This client wraps OpenSearchDistribution.request() to manage notifications confi
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
-from enum import Enum
 
-from tenacity import retry, stop_after_attempt, wait_fixed
-
-from opensearch_single_kernel.common.constants import SMTP_SECRET_LABEL
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.constants import (
+    SMTP_SECRET_LABEL,
+    SmtpTransportSecurity,
+)
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchSmtpMissingParametersError,
+)
+from opensearch_single_kernel.core.models import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRelationData
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
-
-
-class NotificationsClientError(RuntimeError):
-    """Raises when Notifications API operations fail."""
-
-
-class TransportSecurity(str, Enum):
-    """SMTP transport security protocol.
-
-    Enum values match relation data (smtp-integrator). api_method() maps to
-    OpenSearch Notifications API strings (start_tls, ssl).
-    """
-
-    NONE = "none"
-    STARTTLS = "starttls"
-    TLS = "tls"
-
-    def api_method(self) -> str:
-        """Return the OpenSearch Notifications API method string."""
-        return {"none": "none", "starttls": "start_tls", "tls": "ssl"}[self.value]
-
-
-@dataclass(frozen=True)
-class SmtpConfig:
-    """SMTP-related config derived from relation data.
-
-    Attributes:
-        sender_email: From-address for the SMTP sender (relation smtp_sender).
-        smtp_account_id: OpenSearch config id for the SMTP account (e.g. smtp-88_smtp-account).
-        label: Plugin/config label for this relation (e.g. plugin-notifications-88).
-        group_id: OpenSearch config id for the recipient group (e.g. smtp-88_recipients).
-        channel_id: OpenSearch config id for the email channel (e.g. smtp-88_email-channel).
-        transport_security: SMTP transport security (none, start_tls, tls).
-    """
-
-    sender_email: str
-    smtp_account_id: str
-    label: str
-    group_id: str
-    channel_id: str
-    transport_security: TransportSecurity
 
 
 class NotificationsManager(BaseManager):
@@ -132,7 +93,7 @@ class NotificationsManager(BaseManager):
         """
         return f"smtp-{relation_id}_smtp-account"
 
-    def get_smtp_config(self, parameters: SmtpRelationData, relation_id: int) -> SmtpConfig:
+    def get_smtp_config(self, smtp_data: SmtpRelationData, relation_id: int) -> SmtpConfig:
         """Derive SMTP-related config IDs and normalized values from relation data.
 
         Args:
@@ -143,14 +104,31 @@ class NotificationsManager(BaseManager):
             SmtpConfig with sender_email, smtp_account_id, label, group_id,
             channel_id, and transport_security.
         """
-        sender_email = str(parameters.smtp_sender)
+        missing = []
+        if not smtp_data.smtp_sender:
+            missing.append("smtp_sender")
+        if not smtp_data.host:
+            missing.append("host")
+        if not smtp_data.port:
+            missing.append("port")
+        if not smtp_data.transport_security:
+            missing.append("transport_security")
+        if smtp_data.auth_type != "none":
+            if not smtp_data.user:
+                missing.append("user")
+            if not smtp_data.password:
+                missing.append("password")
+        if missing:
+            raise OpenSearchSmtpMissingParametersError(missing)
+
+        sender_email = str(smtp_data.smtp_sender)
         smtp_account_id = self.smtp_account_id_from_relation(relation_id)
         label = self.label(relation_id)
         group_id = self.recipient_group_id(smtp_account_id)
         channel_id = self.email_channel_id(smtp_account_id)
-        ts = parameters.transport_security
+        ts = smtp_data.transport_security
         raw_ts = ts.value if hasattr(ts, "value") else ts
-        transport_security = TransportSecurity(str(raw_ts).strip().lower())
+        transport_security = SmtpTransportSecurity(str(raw_ts).strip().lower())
         return SmtpConfig(
             sender_email=sender_email,
             smtp_account_id=smtp_account_id,
@@ -166,7 +144,7 @@ class NotificationsManager(BaseManager):
         smtp_account_id: str,
         host: str,
         port: int,
-        transport_security: TransportSecurity,
+        transport_security: SmtpTransportSecurity,
         from_address: str,
         description: str = "",
     ) -> None:
@@ -192,7 +170,7 @@ class NotificationsManager(BaseManager):
                 "from_address": from_address,
             },
         }
-        self._create_or_update_config(
+        self.opensearch_client.create_or_update_notification_config(
             config_id=smtp_account_id, name=smtp_account_id, config=config
         )
 
@@ -218,7 +196,9 @@ class NotificationsManager(BaseManager):
                 "recipient_list": [{"recipient": r} for r in recipients],
             },
         }
-        self._create_or_update_config(config_id=group_id, name=group_id, config=config)
+        self.opensearch_client.create_or_update_notification_config(
+            config_id=group_id, name=group_id, config=config
+        )
 
     def put_email_channel(
         self,
@@ -248,89 +228,6 @@ class NotificationsManager(BaseManager):
                 "email_group_id_list": list(email_group_ids),
             },
         }
-        self._create_or_update_config(config_id=channel_id, name=channel_id, config=config)
-
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def delete_config(self, config_id: str) -> None:
-        """Delete config by id.
-
-        404 (config already gone) is treated as success.
-
-        Args:
-            config_id: Notification Config ID
-        """
-        try:
-            self.opensearch_client.request(
-                "DELETE", f"/_plugins/_notifications/configs/{config_id}"
-            )
-        except OpenSearchHttpError as exc:
-            code = getattr(exc, "response_code", None)
-            if code == 404:
-                return
-            raise
-
-    def _create_or_update_config(
-        self, *, config_id: str, name: str, config: dict[str, object]
-    ) -> None:
-        """Create config if missing, otherwise update.
-
-        Args:
-            config_id: Notification Config ID
-            name: Notification Name
-            config: Notification Config
-        """
-        try:
-            if self.config_exists(config_id):
-                self._update_config(config_id=config_id, config=config)
-            else:
-                self._create_config(config_id=config_id, name=name, config=config)
-        except OpenSearchHttpError as exc:
-            raise NotificationsClientError(
-                f"Failed notifications config_id={config_id}: {exc}"
-            ) from exc
-
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def config_exists(self, config_id: str) -> bool:
-        """Check if config exists.
-
-        Args:
-            config_id: Notification Config ID
-
-        Returns:
-            True if config exists, False if 404.
-        """
-        try:
-            self.opensearch_client.request("GET", f"/_plugins/_notifications/configs/{config_id}")
-            return True
-        except OpenSearchHttpError as exc:
-            code = getattr(exc, "response_code", None)
-            if code == 404:
-                return False
-            raise
-
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def _create_config(self, *, config_id: str, name: str, config: dict[str, object]) -> None:
-        """Create notification config.
-
-        Args:
-            config_id: Notification Config ID
-            name: Notification Name
-            config: Notification Config
-        """
-        payload = {"config_id": config_id, "name": name, "config": config}
-        self.opensearch_client.request(
-            "POST", "/_plugins/_notifications/configs/", payload=payload
-        )
-
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def _update_config(self, *, config_id: str, config: dict[str, object]) -> None:
-        """Update notification config.
-
-        Args:
-            config_id: Notification Config ID
-            config: Notification Config
-        """
-        payload = {"config": config}
-        self.opensearch_client.request(
-            "PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload
+        self.opensearch_client.create_or_update_notification_config(
+            config_id=channel_id, name=channel_id, config=config
         )

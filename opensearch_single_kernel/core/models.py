@@ -5,10 +5,10 @@
 
 """Collection of models used for the operation of the charm."""
 
-
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
@@ -23,6 +23,9 @@ from opensearch_single_kernel.common.constants import (
     PerformanceType,
     StartMode,
     State,
+)
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
+    TransportSecurity,
 )
 
 logger = logging.getLogger(__name__)
@@ -308,7 +311,8 @@ class OpenSearchProfile(ABC):
         """Get the JVM heap size in KB based on the memory requirements."""
         if self.memory_requirements.jvm_heap_percentage:
             return min(
-                int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE_IN_KB
+                int(self.memory_requirements.jvm_heap_percentage * mem_size),
+                MAX_HEAP_SIZE_IN_KB,
             )
         return _1GB_IN_KB
 
@@ -385,3 +389,24 @@ class PluginConfigInfo(Model):
             for item in items:
                 if item not in current:
                     current.append(item)
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """SMTP-related config derived from relation data.
+
+    Attributes:
+        sender_email: From-address for the SMTP sender (relation smtp_sender).
+        smtp_account_id: OpenSearch config id for the SMTP account (e.g. smtp-88_smtp-account).
+        label: Plugin/config label for this relation (e.g. plugin-notifications-88).
+        group_id: OpenSearch config id for the recipient group (e.g. smtp-88_recipients).
+        channel_id: OpenSearch config id for the email channel (e.g. smtp-88_email-channel).
+        transport_security: SMTP transport security (none, start_tls, tls).
+    """
+
+    sender_email: str
+    smtp_account_id: str
+    label: str
+    group_id: str
+    channel_id: str
+    transport_security: TransportSecurity

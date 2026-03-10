@@ -4,7 +4,6 @@
 
 """Charm-specific exceptions."""
 
-
 import json
 from typing import Optional
 
@@ -90,3 +89,13 @@ class OpenSearchExclusionsException(OpenSearchError):
 
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
+
+
+class OpenSearchSmtpMissingParametersError(OpenSearchError):
+    """Exception thrown if there are missing parameters when generating smtp config."""
+
+    def __init__(self, missing_parameters: list[str]) -> None:
+        self.missing_parameters = missing_parameters
+        super().__init__(
+            f"Parameters missing from smtp-integrator: {', '.join(missing_parameters)}"
+        )

@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.custom_events import (
+    ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
 )
@@ -48,6 +49,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     restart_opensearch_event = EventSource(RestartOpenSearch)
     start_opensearch_event = EventSource(StartOpenSearch)
+    reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
     def __init__(self, *args):
         super().__init__(*args)

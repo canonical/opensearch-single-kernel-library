@@ -10,7 +10,6 @@ import logging
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
-    OpenSearchHttpError,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -68,7 +67,11 @@ class KeystoreManager(BaseManager):
         return self.workload.run_cmd(self.KEYSTORE, "list").splitlines()
 
     def reload(self) -> bool:
-        """Reload the keystore."""
+        """Reload the keystore.
+
+        Returns:
+            whether a reload was successful.
+        """
         self._create_if_needed()
         self.workload.run_cmd(self.KEYSTORE, "upgrade")
 
@@ -77,12 +80,8 @@ class KeystoreManager(BaseManager):
             logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
             return True
 
-        try:
-            response = self.opensearch_client.request("POST", "_nodes/reload_secure_settings")
-        except OpenSearchHttpError as e:
-            logger.error("Could not reload secure settings: %s", e)
+        if not self.opensearch_client.reload_secure_settings():
             return False
 
-        success = response.get("_nodes", {}).get("failed", -1) == 0
-        logger.debug("keystore reloaded: %s", success)
-        return success
+        logger.debug("Keystore reload successful")
+        return True
