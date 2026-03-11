@@ -21,11 +21,9 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
     PerformanceType,
+    SmtpTransportSecurity,
     StartMode,
     State,
-)
-from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
-    TransportSecurity,
 )
 
 logger = logging.getLogger(__name__)
@@ -386,9 +384,7 @@ class PluginConfigInfo(Model):
         """Merge items into cleanup dictionary avoiding duplicates."""
         for key, items in cleanup.items():
             current = self.cleanup.setdefault(key, [])
-            for item in items:
-                if item not in current:
-                    current.append(item)
+            current = sorted(list(set(current) | set(items)))
 
 
 @dataclass(frozen=True)
@@ -409,4 +405,4 @@ class SmtpConfig:
     label: str
     group_id: str
     channel_id: str
-    transport_security: TransportSecurity
+    transport_security: SmtpTransportSecurity

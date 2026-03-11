@@ -45,6 +45,21 @@ class KeystoreManager(BaseManager):
         """Add a new file entry in the keystore."""
         self.workload.run_cmd(self.KEYSTORE, f"add-file {key} {filename} --force")
 
+    def put_notifications_plugin_smtp_credentials(
+        self, account_id: str, user: str | None, password: str | None
+    ) -> dict[str, str]:
+        """Build a smtp credential entries and put them in the keystore.
+
+        Returns:
+            built smtp credentials entries.
+        """
+        entries = {
+            f"opensearch.notifications.core.email.{account_id}.username": user or "",
+            f"opensearch.notifications.core.email.{account_id}.password": password or "",
+        }
+        self.put_entries(entries)
+        return entries
+
     def remove_entries(self, keys: list[str]) -> None:
         """Remove entries from the keystore."""
         self._create_if_needed()

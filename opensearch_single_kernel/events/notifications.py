@@ -157,33 +157,16 @@ class NotificationsEvents(Object):
 
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
-            entries = {
-                f"opensearch.notifications.core.email.{config.smtp_account_id}.username": smtp_data.user,
-                f"opensearch.notifications.core.email.{config.smtp_account_id}.password": smtp_data.password,
-            }
-            self.charm.keystore_manager.put_entries(entries)
+            credentials = self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
+                config.smtp_account_id, smtp_data.user, smtp_data.password
+            )
 
             # reload secure settings
             self.charm.reload_keystore_event.emit()
             # store cleanup info per relation
-            cleanup = {
-                "keys": list(entries.keys()),
-                "smtp_account_id": [config.smtp_account_id],
-            }
-            self.charm.plugin_manager.put_plugin_config(
-                scope=Scope.UNIT, label=config.label, cleanup=cleanup
+            self.charm.plugin_manager.put_notifications_plugin_smtp_config(
+                config, credentials, self.charm.unit.is_leader(), self.relation_name
             )
-
-            if self.charm.unit.is_leader():
-                # leader stores secret for subclusters for per relation
-                self.charm.plugin_manager.store_plugin_secret(
-                    content={
-                        "keys": entries,
-                        "smtp_account_id": cleanup["smtp_account_id"],
-                    },
-                    label=config.label,
-                    relation_name=self.relation_name,
-                )
         else:
             # No keystore entries for auth_type "none", still store smtp_account_id for cleanup
             self.charm.plugin_manager.put_plugin_config(
@@ -298,7 +281,7 @@ class NotificationsEvents(Object):
         #     self.charm.peer_cluster_provider.refresh_relation_data(event)
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
-        """Handles secret changes (support multiple smtp relations).
+        """Handles smtp secrets changes (support multiple smtp relations).
 
         Args:
             event: SecretChangedEvent

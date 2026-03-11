@@ -170,7 +170,7 @@ class NotificationsManager(BaseManager):
                 "from_address": from_address,
             },
         }
-        self.opensearch_client.create_or_update_notification_config(
+        self.opensearch_client.put_notification_config(
             config_id=smtp_account_id, name=smtp_account_id, config=config
         )
 
@@ -196,7 +196,7 @@ class NotificationsManager(BaseManager):
                 "recipient_list": [{"recipient": r} for r in recipients],
             },
         }
-        self.opensearch_client.create_or_update_notification_config(
+        self.opensearch_client.put_notification_config(
             config_id=group_id, name=group_id, config=config
         )
 
@@ -228,6 +228,6 @@ class NotificationsManager(BaseManager):
                 "email_group_id_list": list(email_group_ids),
             },
         }
-        self.opensearch_client.create_or_update_notification_config(
+        self.opensearch_client.put_notification_config(
             config_id=channel_id, name=channel_id, config=config
         )

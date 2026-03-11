@@ -607,7 +607,7 @@ class OpenSearchClient:
                 return False
             raise
 
-    def create_or_update_notification_config(
+    def put_notification_config(
         self, *, config_id: str, name: str, config: dict[str, object]
     ) -> None:
         """Create config if missing, otherwise update.
@@ -643,8 +643,7 @@ class OpenSearchClient:
         try:
             self.request("DELETE", f"/_plugins/_notifications/configs/{config_id}")
         except OpenSearchHttpError as exc:
-            code = getattr(exc, "response_code", None)
-            if code == 404:
+            if getattr(exc, "response_code", None) == 404:
                 return
             raise
 
