@@ -11,7 +11,14 @@ from typing import Any
 
 from charmlibs.pathops import PathProtocol
 
-from opensearch_single_kernel.common.constants import CertType, Scope, StoreType, CA_ALIAS, OLD_CA_ALIAS, CERTS_EXPIRATION_DATE_FORMAT
+from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
+    CertType,
+    Scope,
+    StoreType,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,

@@ -7,17 +7,15 @@ import logging
 
 from charmlibs.pathops import PathProtocol
 
+from opensearch_single_kernel.common.constants import KEYTOOL
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
 from opensearch_single_kernel.utils.helpers import is_alias_missing_error
 from opensearch_single_kernel.workload.base import BaseWorkload
-from opensearch_single_kernel.common.constants import KEYTOOL
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def read_ca(

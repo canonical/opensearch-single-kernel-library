@@ -17,14 +17,14 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
 )
-from opensearch_single_kernel.utils.secrets import (
-    hash_key,
-    password_key,
-)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import generate_hashed_password
+from opensearch_single_kernel.utils.secrets import (
+    hash_key,
+    password_key,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)

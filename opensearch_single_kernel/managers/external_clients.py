@@ -5,6 +5,7 @@
 """OpenSearch External Clients manager."""
 
 import logging
+from functools import cached_property
 from typing import Any
 
 from opensearch_single_kernel.common.constants import (
@@ -16,15 +17,14 @@ from opensearch_single_kernel.common.constants import (
     ExtraUserRolePermissions,
     Scope,
 )
-from functools import cached_property
-from opensearch_single_kernel.utils.secrets import (
-    password_key,
-)
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState, ExternalOpenSearchClient
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import generate_hashed_password
+from opensearch_single_kernel.utils.secrets import (
+    password_key,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -129,8 +129,6 @@ class ExternalClientsManager(BaseManager):
         users[str(relation_id)] = user
         self.state.application.client_users_dict = users
 
-
-
     def update_relation_credentials(
         self, external_client: ExternalOpenSearchClient, username: str, password: str
     ):
@@ -206,8 +204,10 @@ class ExternalClientsManager(BaseManager):
             return
         relation_users = self.state.application.client_users_dict
 
-        if departed_external_client and departed_external_client.relation and (
-            not relation_users or departed_external_client.relation.id not in relation_users
+        if (
+            departed_external_client
+            and departed_external_client.relation
+            and (not relation_users or departed_external_client.relation.id not in relation_users)
         ):
             logging.warning(
                 "User for relation %d wasn't registered in internal cham workflows.",
@@ -252,7 +252,9 @@ class ExternalClientsManager(BaseManager):
             logger.debug(
                 "Cannot update relations roles mapping as node is not active. Deferring event"
             )
-            raise OpenSearchUserMgmtError("Cannot update relations roles mapping as node is not active.")
+            raise OpenSearchUserMgmtError(
+                "Cannot update relations roles mapping as node is not active."
+            )
         users = self.state.application.client_users_dict
         for _, user in users.items():
             self.opensearch_client.create_role_mapping(
@@ -261,13 +263,10 @@ class ExternalClientsManager(BaseManager):
 
     def update_dashboards_password(self):
         """Update each Opensearch Dashboards relation with the latest kibanaserver."""
-        pwd = self.state.secrets.get(
-            Scope.APP, password_key(KIBANA_SERVER_USER)
-        )
+        pwd = self.state.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
         for dashboards_client in self.state.dashboards_clients:
             dashboards_client.username = KIBANA_SERVER_USER
             dashboards_client.password = pwd
-
 
     @cached_property
     def version(self) -> str:

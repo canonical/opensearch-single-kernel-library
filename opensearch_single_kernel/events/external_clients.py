@@ -108,7 +108,7 @@ class ExternalClientsEventsHandler(Object):
             )
             return
 
-        external_client.version = self.charm.external_clients_manager.version 
+        external_client.version = self.charm.external_clients_manager.version
         external_client.username = username
         external_client.password = pwd
         external_client.index = event.index
@@ -118,7 +118,6 @@ class ExternalClientsEventsHandler(Object):
             logger.error(f"Failed to update relation TLS info: missing key {e}")
             event.defer()
             return
-        
 
         self.update_external_client_endpoints(external_client)
 

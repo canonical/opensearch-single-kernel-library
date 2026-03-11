@@ -5,8 +5,7 @@
 """Base OpenSearch manager."""
 import logging
 import random
-from functools import cached_property
-from typing import List, Optional
+from typing import Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
@@ -38,7 +37,7 @@ class BaseManager:
         )
 
     @property
-    def alt_hosts(self) -> Optional[List[str]]:
+    def alt_hosts(self) -> Optional[list[str]]:
         """Return an alternative host (of another node)in case the current is offline."""
         all_units_ips = self.state.units_ips
         all_hosts = list(all_units_ips.values())

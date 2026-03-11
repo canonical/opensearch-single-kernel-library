@@ -178,8 +178,10 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchHttpError:
                 logger.error("unable to get nodes")
                 nodes = []
-            # Update all external clients with new endpoints 
-            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(nodes)
+            # Update all external clients with new endpoints
+            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
+                nodes
+            )
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
             # TODO: Handle once large deployments are implemented
@@ -353,7 +355,9 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchHttpError:
                 logger.error("unable to get nodes")
                 nodes = []
-            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(nodes)
+            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
+                nodes
+            )
             # TODO: Handle upgrade in progress
             # if self.upgrade_in_progress:
             # logger.debug(

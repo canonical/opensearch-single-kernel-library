@@ -182,7 +182,7 @@ COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
-# TLS 
+# TLS
 CA_ALIAS = "ca"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
 KEYTOOL = "opensearch.keytool"

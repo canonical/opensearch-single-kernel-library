@@ -70,7 +70,6 @@ class OpenSearchClient:
             else:
                 raise e
 
-
     def create_role(
         self,
         role_name: str,
@@ -143,7 +142,6 @@ class OpenSearchClient:
             raise OpenSearchUserMgmtError(f"removing role {role_name} failed")
 
         return resp
-
 
     def create_user(
         self, user_name: str, roles: list[str] | None, hashed_pwd: str

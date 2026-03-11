@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
-    ConfigChangedEvent,
     Object,
     RelationBrokenEvent,
     RelationCreatedEvent,
@@ -321,7 +320,6 @@ class TLSEventsHandler(Object):
         """Handle a cert that was revoked or has expired"""
         logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
         self._on_certificate_expiring(event)
-
 
     def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
