@@ -33,6 +33,8 @@ from opensearch_single_kernel.common.constants import (
     OPENSEARCH_DATA_STORAGE_NAME,
     OPENSEARCH_SYSTEM_USERS,
     PEER_RELATION,
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
     CertType,
     DeploymentType,
     Directive,
@@ -59,10 +61,6 @@ from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
-)
-from opensearch_single_kernel.utils.certificates import (
-    CERTS_EXPIRATION_DATE_FORMAT,
-    OLD_CA_ALIAS,
 )
 from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.secrets import (

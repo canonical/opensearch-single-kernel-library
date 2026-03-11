@@ -17,6 +17,7 @@ from ops import (
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_USERS,
     TLS_RELATION,
+    OLD_CA_ALIAS,
     CertType,
     DeploymentType,
     Scope,
@@ -34,7 +35,6 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     CertificateInvalidatedEvent,
     TLSCertificatesRequiresV3,
 )
-from opensearch_single_kernel.utils.certificates import OLD_CA_ALIAS
 from opensearch_single_kernel.utils.helpers import generate_password
 from opensearch_single_kernel.utils.secrets import password_key
 
