@@ -393,7 +393,7 @@ class TLSEventsHandler(Object):
 
         password = event.params.get("password") or generate_password()
         try:
-            self.charm.users_manager.put_or_update_internal_user_leader(user_name, password)
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(user_name, password)
             label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit

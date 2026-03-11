@@ -1036,7 +1036,7 @@ class OpenSearchEventsHandler(Object):
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
-                self.charm.users_manager.put_internal_user(sys_user, password)
+                self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
