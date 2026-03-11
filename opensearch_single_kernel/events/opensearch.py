@@ -27,14 +27,14 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    CERTS_EXPIRATION_DATE_FORMAT,
     COS_USER,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
+    OLD_CA_ALIAS,
     OPENSEARCH_DATA_STORAGE_NAME,
     OPENSEARCH_SYSTEM_USERS,
     PEER_RELATION,
-    CERTS_EXPIRATION_DATE_FORMAT,
-    OLD_CA_ALIAS,
     CertType,
     DeploymentType,
     Directive,

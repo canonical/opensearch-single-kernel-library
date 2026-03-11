@@ -15,9 +15,9 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    OLD_CA_ALIAS,
     OPENSEARCH_USERS,
     TLS_RELATION,
-    OLD_CA_ALIAS,
     CertType,
     DeploymentType,
     Scope,
