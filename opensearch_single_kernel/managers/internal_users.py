@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
-    OpenSearchUserMgmtError
+    OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -50,9 +50,9 @@ class InternalUsersManager(BaseManager):
         update: bool = True,
     ) -> None:
         """Create system user or update it with a new password.
-        
-        Raise: 
-            OpenSearchUserMgmtErorr: In case of error when updating user password. 
+
+        Raise:
+            OpenSearchUserMgmtErorr: In case of error when updating user password.
         """
         # Leader is to set new password and hash, others populate existing hash locally
         secret = self.state.secrets.get(Scope.APP, password_key(user))
@@ -144,10 +144,10 @@ class InternalUsersManager(BaseManager):
                 },
             )
 
-    # TODO: This needs to be called separately when we want to create 
+    # TODO: This needs to be called separately when we want to create
     # COS user since it don't go with the put_internal_user function.
     # We will most probably do that in PR of COS refactoring
-    def create_cos_user(self, hashed_pwd)-> None:
+    def create_cos_user(self, hashed_pwd) -> None:
         """Create COS user using the OpenSearch API."""
         roles = [COS_ROLE]
         try:

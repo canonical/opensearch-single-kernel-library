@@ -17,7 +17,10 @@ from opensearch_single_kernel.common.constants import (
     ExtraUserRolePermissions,
     Scope,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError, OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchUserMgmtError,
+)
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState, ExternalOpenSearchClient
 from opensearch_single_kernel.managers.base import BaseManager

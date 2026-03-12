@@ -513,7 +513,6 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
-
         try:
             # Restore purged system users in local `internal_users.yml`
             # with corresponding credentials
@@ -523,7 +522,7 @@ class OpenSearchEventsHandler(Object):
                         user, update=False
                     )
         except OpenSearchUserMgmtError:
-            logger.error(f"An error occured while updating internal user")
+            logger.error("An error occurred while updating internal user")
             event.defer()
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
