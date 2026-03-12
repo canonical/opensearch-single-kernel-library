@@ -21,64 +21,42 @@ jobs:
         run: |
           sudo snap install go --classic
           go install github.com/snapcore/spread/cmd/spread@latest
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
           pipx install tox poetry
       - name: Collect spread jobs
         id: collect-jobs
         shell: python
         run: |
           import json
+          import pathlib
           import os
-          import shutil
           import subprocess
-          import sys
-
-          # Prefer spread from GITHUB_PATH, else ~/go/bin
-          spread_bin = shutil.which("spread")
-          if not spread_bin:
-              spread_bin = os.path.expanduser("~/go/bin/spread")
-          if not os.path.isfile(spread_bin):
-              sys.stderr.write(f"spread not found at {spread_bin}; using empty job list.\n")
-              jobs = []
-          else:
-              # Run from repo root so spread finds spread.yaml
-              cwd = os.environ.get("GITHUB_WORKSPACE", ".")
-              result = subprocess.run(
-                  [spread_bin, "-list", "github-ci"],
+          spread_jobs = (
+              subprocess.run(
+                  [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci"],
                   capture_output=True,
+                  check=True,
                   text=True,
-                  cwd=cwd,
               )
-              if result.returncode != 0:
-                  # Backend may be unavailable (e.g. manual backend on GitHub-hosted runner).
-                  sys.stderr.write(
-                      f"spread -list github-ci failed (exit {result.returncode}), using empty job list.\n"
-                  )
-                  if result.stderr:
-                      sys.stderr.write(f"stderr: {result.stderr}\n")
-                  if result.stdout:
-                      sys.stderr.write(f"stdout: {result.stdout}\n")
-                  jobs = []
+              .stdout.strip()
+              .split("\n")
+          )
+          jobs = []
+          for job in spread_jobs:
+              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/vm/test_charm.py:ubuntu24"
+              _, runner, task, variant = job.split(":", 3)
+              task = task.removeprefix("tests/spread/")
+              if runner.endswith("-arm"):
+                  architecture = "arm64"
               else:
-                  spread_jobs = result.stdout.strip().split("\n") if result.stdout.strip() else []
-                  jobs = []
-                  for job in spread_jobs:
-                      # Example `job`: "github-ci:ubuntu-24.04:tests/spread/vm/test_charm.py:ubuntu24"
-                      _, runner, task, variant = job.split(":")
-                      task = task.removeprefix("tests/spread/")
-                      if runner.endswith("-arm"):
-                          architecture = "arm64"
-                      else:
-                          architecture = "amd64"
-                      name = f"{task}:{variant} | {architecture}"
-                      name_in_artifact = f"{task.replace('/', '-')}-{variant}-{architecture}"
-                      jobs.append({
-                          "spread_job": job,
-                          "name": name,
-                          "name_in_artifact": name_in_artifact,
-                          "runner": runner,
-                      })
-
+                  architecture = "amd64"
+              name = f"{task}:{variant} | {architecture}"
+              name_in_artifact = f"{task.replace('/', '-')}-{variant}-{architecture}"
+              jobs.append({
+                  "spread_job": job,
+                  "name": name,
+                  "name_in_artifact": name_in_artifact,
+                  "runner": runner,
+              })
           output = f"jobs={json.dumps(jobs)}"
           print(output)
           with open(os.environ["GITHUB_OUTPUT"], "a") as file:
