@@ -28,7 +28,6 @@ from ops import (
 
 from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
-    COS_USER,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
@@ -455,8 +454,8 @@ class OpenSearchEventsHandler(Object):
         if self.charm.unit.is_leader():
             try:
                 self.charm.external_clients_manager.update_relations_roles_mapping()
-            except OpenSearchUserMgmtError:
-                logger.error("Failed to update relations roles mapping")
+            except OpenSearchUserMgmtError as e:
+                logger.error(f"Failed to update relations roles mapping: {e}")
                 event.defer()
 
         if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
@@ -823,9 +822,7 @@ class OpenSearchEventsHandler(Object):
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
             # Creating the monitoring user
-            self.charm.internal_users_manager.put_or_update_internal_user_leader(
-                COS_USER, update=False
-            )
+            self.charm.internal_users_manager.create_cos_user()
 
         self.charm.unit.open_port("tcp", 9200)
 

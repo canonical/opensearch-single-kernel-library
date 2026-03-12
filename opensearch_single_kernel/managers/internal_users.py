@@ -144,11 +144,10 @@ class InternalUsersManager(BaseManager):
                 },
             )
 
-    # TODO: This needs to be called separately when we want to create
-    # COS user since it don't go with the put_internal_user function.
-    # We will most probably do that in PR of COS refactoring
-    def create_cos_user(self, hashed_pwd) -> None:
+    def create_cos_user(self, pwd: str | None = None) -> None:
         """Create COS user using the OpenSearch API."""
+        hashed_pwd, pwd = generate_hashed_password(pwd)
+
         roles = [COS_ROLE]
         try:
             self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
@@ -156,6 +155,6 @@ class InternalUsersManager(BaseManager):
                 COS_USER,
                 [{"op": "replace", "path": "/opendistro_security_roles", "value": roles}],
             )
-
+            self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
