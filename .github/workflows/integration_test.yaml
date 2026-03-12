@@ -32,18 +32,18 @@ jobs:
           import subprocess
           spread_jobs = (
               subprocess.run(
-                  [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci"],
-                  capture_output=True,
-                  check=True,
-                  text=True,
+                [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci"],
+                capture_output=True,
+                check=True,
+                text=True,
               )
               .stdout.strip()
               .split("\n")
           )
           jobs = []
           for job in spread_jobs:
-              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/vm/test_charm.py:ubuntu24"
-              _, runner, task, variant = job.split(":", 3)
+              # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
+              _, runner, task, variant = job.split(":")
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
                   architecture = "arm64"
@@ -60,7 +60,7 @@ jobs:
           output = f"jobs={json.dumps(jobs)}"
           print(output)
           with open(os.environ["GITHUB_OUTPUT"], "a") as file:
-              file.write(output + "\n")
+              file.write(output)
       - name: Generate Allure default test results
         if: ${{ github.event_name == 'schedule' && github.run_attempt == '1' }}
         run: tox run -e integration -- tests/integration --allure-default-dir=allure-default-results
