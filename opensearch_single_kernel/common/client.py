@@ -27,10 +27,7 @@ from opensearch_single_kernel.common.constants import (
     ROLESMAPPING_ENDPOINT,
     USER_ENDPOINT,
 )
-from opensearch_single_kernel.common.exceptions import (
-    OpenSearchHttpError,
-    OpenSearchUserMgmtError,
-)
+from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -79,7 +76,7 @@ class OpenSearchClient:
         """Creates a role with the given permissions.
 
         This method assumes the dicts provided are valid opensearch config. If not, raises
-        OpenSearchUserMgmtError.
+        OpenSearchHttpError
 
         Args:
             role_name: name of the role
@@ -87,25 +84,22 @@ class OpenSearchClient:
             action_groups: A valid dict of existing opensearch action groups.
 
         Raises:
-            OpenSearchUserMgmtError: If the role creation request fails.
+            OpenSearchHttpError: If the role creation request fails.
 
         Returns:
             HTTP response to opensearch API request.
         """
-        try:
-            resp = self.request(
-                "PUT",
-                f"{ROLE_ENDPOINT}/{role_name}",
-                payload={**(permissions or {}), **(action_groups or {})},
-            )
-        except OpenSearchHttpError as e:
-            raise OpenSearchUserMgmtError(e)
+        resp = self.request(
+            "PUT",
+            f"{ROLE_ENDPOINT}/{role_name}",
+            payload={**(permissions or {}), **(action_groups or {})},
+        )
 
         if resp.get("status") != "CREATED" and not (
             resp.get("status") == "OK" and "updated" in resp.get("message")
         ):
             logger.error(f"Couldn't create role: {resp}")
-            raise OpenSearchUserMgmtError(f"creating role {role_name} failed")
+            raise OpenSearchHttpError(f"creating role {role_name} failed")
 
         return resp
 
@@ -121,11 +115,6 @@ class OpenSearchClient:
         Returns:
             HTTP response to opensearch API request.
         """
-        if not role_name:
-            raise OpenSearchUserMgmtError(
-                "role name empty - sending a DELETE request to endpoint root isn't permitted"
-            )
-
         try:
             resp = self.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
         except OpenSearchHttpError as e:
@@ -135,11 +124,11 @@ class OpenSearchClient:
                     "response": "role does not exist, and therefore has not been removed",
                 }
             else:
-                raise OpenSearchUserMgmtError(e)
+                raise e
 
         logger.debug(resp)
         if resp.get("status") != "OK":
-            raise OpenSearchUserMgmtError(f"removing role {role_name} failed")
+            raise OpenSearchHttpError(f"removing role {role_name} failed")
 
         return resp
 
@@ -154,7 +143,7 @@ class OpenSearchClient:
             hashed_pwd: the hashed password for the user.
 
         Raises:
-            OpenSearchUserMgmtError: If the request fails.
+            OpenSearchHttpError: If the request fails.
 
         Returns:
             HTTP response to opensearch API request.
@@ -163,20 +152,16 @@ class OpenSearchClient:
         if roles:
             payload["opendistro_security_roles"] = roles
 
-        try:
-            resp = self.request(
-                "PUT",
-                f"{USER_ENDPOINT}/{user_name}",
-                payload=payload,
-            )
-        except OpenSearchHttpError as e:
-            logger.error(f"Couldn't create user {str(e)}")
-            raise OpenSearchUserMgmtError(e)
+        resp = self.request(
+            "PUT",
+            f"{USER_ENDPOINT}/{user_name}",
+            payload=payload,
+        )
 
         if resp.get("status") != "CREATED" and not (
             resp.get("status") == "OK" and "updated" in resp.get("message")
         ):
-            raise OpenSearchUserMgmtError(f"creating user {user_name} failed")
+            raise OpenSearchHttpError(f"creating user {user_name} failed")
 
         return resp
 
@@ -192,11 +177,6 @@ class OpenSearchClient:
         Returns:
             HTTP response to opensearch API request.
         """
-        if not user_name:
-            raise OpenSearchUserMgmtError(
-                "user name empty - sending a DELETE request to endpoint root isn't permitted"
-            )
-
         try:
             resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
         except OpenSearchHttpError as e:
@@ -206,11 +186,11 @@ class OpenSearchClient:
                     "response": "user does not exist, and therefore has not been removed",
                 }
             else:
-                raise OpenSearchUserMgmtError(e)
+                raise e
 
         logger.debug(resp)
         if resp.get("status") != "OK":
-            raise OpenSearchUserMgmtError(f"removing user {user_name} failed")
+            raise OpenSearchHttpError(f"removing user {user_name} failed")
         return resp
 
     def patch_user(self, user_name: str, patches: list[dict[str, Any]]) -> dict[str, Any]:
@@ -233,10 +213,10 @@ class OpenSearchClient:
                 payload=patches,
             )
         except OpenSearchHttpError as e:
-            raise OpenSearchUserMgmtError(e)
+            raise e
 
         if resp.get("status") != "OK":
-            raise OpenSearchUserMgmtError(f"patching user {user_name} failed")
+            raise OpenSearchHttpError(f"patching user {user_name} failed")
 
         return resp
 
@@ -248,7 +228,7 @@ class OpenSearchClient:
             mapped_users: all the users, that should be mapped to the specified role.
 
         Raises:
-            OpenSearchUserMgmtError: If the request fails.
+            OpenSearchHttpError: If the request fails.
         """
         try:
             resp = self.request(
@@ -258,12 +238,12 @@ class OpenSearchClient:
             )
         except OpenSearchHttpError as e:
             logger.error(f"Couldn't create role mapping {str(e)}")
-            raise OpenSearchUserMgmtError(e)
+            raise e
 
         if resp.get("status") != "CREATED" and not (
             resp.get("status") == "OK" and "updated" in resp.get("message")
         ):
-            raise OpenSearchUserMgmtError(f"creating role mapping {role} failed")
+            raise OpenSearchHttpError(f"creating role mapping {role} failed")
 
     def remove_role_mapping(self, role: str) -> None:
         """Remove the given role mapping if it exists.
@@ -272,13 +252,8 @@ class OpenSearchClient:
             role: name of the role mapping to be removed.
 
         Raises:
-            OpenSearchUserMgmtError: If the request fails, or if role is empty
+            OpenSearchHttpError: If the request fails, or if role is empty
         """
-        if not role:
-            raise OpenSearchUserMgmtError(
-                "role name empty - sending a DELETE request to endpoint root isn't permitted"
-            )
-
         try:
             resp = self.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
         except OpenSearchHttpError as e:
@@ -288,10 +263,10 @@ class OpenSearchClient:
                     "response": "role mapping does not exist, and therefore has not been removed",
                 }
             else:
-                raise OpenSearchUserMgmtError(e)
+                raise e
 
         if resp.get("status") != "OK":
-            raise OpenSearchUserMgmtError(f"removing role mapping {role} failed")
+            raise OpenSearchHttpError(f"removing role mapping {role} failed")
 
     def update_user_password(self, username: str, hashed_pwd: str):
         """Change user hashed password."""
@@ -301,7 +276,7 @@ class OpenSearchClient:
             [{"op": "replace", "path": "/hash", "value": hashed_pwd}],
         )
         if resp.get("status") != "OK":
-            raise OpenSearchUserMgmtError(f"{resp}")
+            raise OpenSearchHttpError(f"{resp}")
 
     def flush_translog(self, alt_hosts: list[str] | None = None) -> None:
         """Flush the OpenSearch translog to ensure all operations are committed to disk."""

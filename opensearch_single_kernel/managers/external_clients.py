@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.constants import (
     ExtraUserRolePermissions,
     Scope,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
+from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError, OpenSearchHttpError
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState, ExternalOpenSearchClient
 from opensearch_single_kernel.managers.base import BaseManager
@@ -67,10 +67,13 @@ class ExternalClientsManager(BaseManager):
             # set to this relation's specific index.
             permissions = self.get_extra_user_role_permissions(extra_user_roles, index)
             self._put_relation_user(username, permissions, hashed_pwd, external_client.relation.id)
-            self.opensearch_client.patch_user(
-                username,
-                [{"op": "replace", "path": "/opendistro_security_roles", "value": [username]}],
-            )
+            try:
+                self.opensearch_client.patch_user(
+                    username,
+                    [{"op": "replace", "path": "/opendistro_security_roles", "value": [username]}],
+                )
+            except OpenSearchHttpError as e:
+                raise OpenSearchUserMgmtError(e)
         return username, pwd
 
     def get_extra_user_role_permissions(self, extra_user_roles: str, index: str) -> dict[str, Any]:
@@ -106,13 +109,20 @@ class ExternalClientsManager(BaseManager):
 
     def _put_relation_user(
         self, user: str, permissions: dict[str, Any], hashed_pwd: str, relation_id: int
-    ):
+    ) -> None:
         """Create a relation user.
 
         Relation users are registered with a dedicated role which maps to the username,
         and their name is saved in the databag for later reference.
+
+        Raises:
+            OpenSearchUserMgmtError: In case of role creation or user creation error.
         """
-        self.opensearch_client.create_role(role_name=user, permissions=permissions)
+        try:
+            self.opensearch_client.create_role(role_name=user, permissions=permissions)
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
+
         users = self.state.application.client_users_dict
 
         if users.get(str(relation_id)):
@@ -121,11 +131,18 @@ class ExternalClientsManager(BaseManager):
                 user,
                 relation_id,
             )
+        try:
+            self.opensearch_client.create_user(user, [user], hashed_pwd)
+        except OpenSearchHttpError as e:
+            logger.error(f"Couldn't create user {str(e)}")
+            raise OpenSearchUserMgmtError(e)
 
-        self.opensearch_client.create_user(user, [user], hashed_pwd)
-        self.opensearch_client.create_role_mapping(
-            user, self.state.get_relation_mapped_users(user)
-        )
+        try:
+            self.opensearch_client.create_role_mapping(
+                user, self.state.get_relation_mapped_users(user)
+            )
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
         users[str(relation_id)] = user
         self.state.application.client_users_dict = users
 
@@ -225,17 +242,17 @@ class ExternalClientsManager(BaseManager):
             if username := relation_users.get(rel_id):
                 try:
                     self.opensearch_client.remove_user(username)
-                except OpenSearchUserMgmtError:
+                except OpenSearchHttpError:
                     logger.error(f"failed to remove user {username}")
 
                 try:
                     self.opensearch_client.remove_role(username)
-                except OpenSearchUserMgmtError:
+                except OpenSearchHttpError:
                     logger.error(f"failed to remove role {username}")
 
                 try:
                     self.opensearch_client.remove_role_mapping(username)
-                except OpenSearchUserMgmtError:
+                except OpenSearchHttpError:
                     logger.error(f"failed to remove role mapping for {username}")
 
                 del relation_users[rel_id]

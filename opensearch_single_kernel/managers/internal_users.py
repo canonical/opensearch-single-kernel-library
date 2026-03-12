@@ -16,6 +16,8 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
+    OpenSearchHttpError,
+    OpenSearchUserMgmtError
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -47,7 +49,11 @@ class InternalUsersManager(BaseManager):
         pwd: str | None = None,
         update: bool = True,
     ) -> None:
-        """Create system user or update it with a new password."""
+        """Create system user or update it with a new password.
+        
+        Raise: 
+            OpenSearchUserMgmtErorr: In case of error when updating user password. 
+        """
         # Leader is to set new password and hash, others populate existing hash locally
         secret = self.state.secrets.get(Scope.APP, password_key(user))
         if secret and not update:
@@ -59,7 +65,10 @@ class InternalUsersManager(BaseManager):
         # Updating security index
         # We need to do this for all credential changes
         if secret and update:
-            self.opensearch_client.update_user_password(user, hashed_pwd)
+            try:
+                self.opensearch_client.update_user_password(user, hashed_pwd)
+            except OpenSearchHttpError as e:
+                raise OpenSearchUserMgmtError(e)
 
         # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
         # we either need to initialize or update (local) credentials as well
@@ -134,10 +143,19 @@ class InternalUsersManager(BaseManager):
                     "description": "Kibanaserver user",
                 },
             )
-        elif user == COS_USER:
-            roles = [COS_ROLE]
+
+    # TODO: This needs to be called separately when we want to create 
+    # COS user since it don't go with the put_internal_user function.
+    # We will most probably do that in PR of COS refactoring
+    def create_cos_user(self, hashed_pwd)-> None:
+        """Create COS user using the OpenSearch API."""
+        roles = [COS_ROLE]
+        try:
             self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
             self.opensearch_client.patch_user(
                 COS_USER,
                 [{"op": "replace", "path": "/opendistro_security_roles", "value": roles}],
             )
+
+        except OpenSearchHttpError as e:
+            raise OpenSearchUserMgmtError(e)
