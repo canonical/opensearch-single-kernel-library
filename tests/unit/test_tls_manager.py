@@ -977,6 +977,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.create_cos_user"
+    )
     mocker.patch("socket.socket.connect")
 
     generate_csr.return_value = uuid.uuid4().hex.encode()
