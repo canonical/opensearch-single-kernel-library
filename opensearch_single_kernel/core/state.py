@@ -819,7 +819,7 @@ class ClusterState(Object):
     def current_peer_cluster_app(self) -> PeerClusterApp:
         """Return the current peer cluster App."""
         deployment_desc = self.application.deployment_desc
-        logger.info(f"Current deployment desc {deployment_desc}")
+        logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.planned_units,

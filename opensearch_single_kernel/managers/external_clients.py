@@ -137,7 +137,7 @@ class ExternalClientsManager(BaseManager):
         try:
             self.opensearch_client.create_user(user, [user], hashed_pwd)
         except OpenSearchHttpError as e:
-            logger.error(f"Couldn't create user {str(e)}")
+            logger.error("Couldn't create user %s", str(e))
             raise OpenSearchUserMgmtError(e)
 
         try:
@@ -246,17 +246,17 @@ class ExternalClientsManager(BaseManager):
                 try:
                     self.opensearch_client.remove_user(username)
                 except OpenSearchHttpError:
-                    logger.error(f"failed to remove user {username}")
+                    logger.error("failed to remove user %s", username)
 
                 try:
                     self.opensearch_client.remove_role(username)
                 except OpenSearchHttpError:
-                    logger.error(f"failed to remove role {username}")
+                    logger.error("failed to remove role %s", username)
 
                 try:
                     self.opensearch_client.remove_role_mapping(username)
                 except OpenSearchHttpError:
-                    logger.error(f"failed to remove role mapping for {username}")
+                    logger.error("failed to remove role mapping for %s", username)
 
                 del relation_users[rel_id]
         self.state.application.client_users_dict = relation_users
@@ -299,5 +299,5 @@ class ExternalClientsManager(BaseManager):
         # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
         result = self.workload.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null")
         output = result.out.strip()
-        logger.debug(f"version call output: {output}")
+        logger.debug("version call output: %s", output)
         return output.split(", ")[0].split(": ")[1]

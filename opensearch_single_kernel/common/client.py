@@ -98,7 +98,7 @@ class OpenSearchClient:
         if resp.get("status") != "CREATED" and not (
             resp.get("status") == "OK" and "updated" in resp.get("message")
         ):
-            logger.error(f"Couldn't create role: {resp}")
+            logger.error("Couldn't create role: %s", resp)
             raise OpenSearchHttpError(f"creating role {role_name} failed")
 
         return resp
@@ -237,7 +237,7 @@ class OpenSearchClient:
                 payload={"users": mapped_users, "backend_roles": [role]},
             )
         except OpenSearchHttpError as e:
-            logger.error(f"Couldn't create role mapping {str(e)}")
+            logger.error("Couldn't create role mapping: %s", str(e))
             raise e
 
         if resp.get("status") != "CREATED" and not (
@@ -553,7 +553,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.error(f"Error reloading TLS certificates via API: {e}")
+            logger.error("Error reloading TLS certificates via API: %s", str(e))
             raise
 
     def get_allocation_explain(
@@ -658,7 +658,7 @@ class OpenSearchClient:
             )
             return resp_code < 400
         except (OpenSearchHttpError, Exception) as e:
-            logger.debug(f"Error when checking if host {host} is up: {e}")
+            logger.debug("Error when checking if host %s is up: %s", host, e)
             return False
 
     def request(  # noqa
@@ -795,9 +795,12 @@ class OpenSearchClient:
         def log_error(retry_state: RetryCallState):
             url = urls[(retry_state.attempt_number - 1) % len(urls)]
             logger.debug(
-                f"Request {method} to {url} with payload: {payload} failed."
-                f"(Attempts left: {retry_max - retry_state.attempt_number})\n"
-                f"\tError: {retry_state.outcome.exception()}"
+                "Request %s to %s with payload: %s failed. (Attempts left: %s)\n\tError: %s",
+                method,
+                url,
+                payload,
+                retry_max - retry_state.attempt_number,
+                retry_state.outcome.exception(),
             )
 
         return log_error

@@ -130,19 +130,24 @@ def validate_index_name(index_name: str) -> bool:
     """Validates that the index name provided in the relation is acceptable."""
     if index_name in PROTECTED_INDEX_NAMES:
         logger.error(
-            f"invalid index name {index_name} - tried to access a protected index in {PROTECTED_INDEX_NAMES}"
+            "invalid index name %s - tried to access a protected index in %s",
+            index_name,
+            PROTECTED_INDEX_NAMES,
         )
         return False
 
     if not index_name.islower():
-        logger.error(f"invalid index name {index_name} - index names must be lowercase")
+        logger.error("invalid index name %s - index names must be lowercase", index_name)
         return False
 
     forbidden_chars = [" ", ",", ":", '"', "*", "+", "\\", "/", "|", "?", "#", ">", "<"]
     if any([char in index_name for char in forbidden_chars]):
+
         logger.error(
-            f"invalid index name {index_name} - index name includes one or more of "
-            f"the following forbidden characters: {forbidden_chars}"
+            "invalid index name %s - index name includes one or more of "
+            "the following forbidden characters: %s",
+            index_name,
+            forbidden_chars,
         )
         return False
 

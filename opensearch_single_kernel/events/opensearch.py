@@ -341,7 +341,7 @@ class OpenSearchEventsHandler(Object):
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
-            logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
+            logger.warning("Update status: exclusions updated and cluster health is %s.", health)
 
             if health == HealthColors.UNKNOWN:
                 return
@@ -455,7 +455,7 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.external_clients_manager.update_relations_roles_mapping()
             except OpenSearchUserMgmtError as e:
-                logger.error(f"Failed to update relations roles mapping: {e}")
+                logger.error("Failed to update relations roles mapping: %s", e)
                 event.defer()
 
         if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
@@ -553,7 +553,7 @@ class OpenSearchEventsHandler(Object):
                 # We're done here, we can return
                 return
             except OpenSearchStartError as e:
-                logger.warning(f"Machine restart detected but error at service start with: {e}")
+                logger.warning("Machine restart detected but error at service start with: %s", e)
                 # Defer and retry later
                 event.defer()
                 return
@@ -738,7 +738,7 @@ class OpenSearchEventsHandler(Object):
 
             self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_ips=cm_ips)
         except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
-            logger.debug(f"error getting the nodes: {e}")
+            logger.debug("Error getting the nodes: %s", e)
             self.charm.lock_manager.release()
             event.defer()
             return
@@ -848,7 +848,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
         except OpenSearchStopError as e:
-            logger.info(f"Error while Restarting Opensearch: {e}")
+            logger.info("Error while Restarting Opensearch: %s", e)
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()

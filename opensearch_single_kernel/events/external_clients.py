@@ -115,13 +115,13 @@ class ExternalClientsEventsHandler(Object):
         try:
             self.charm.external_clients_manager.update_relation_tls_info(external_client)
         except KeyError as e:
-            logger.error(f"Failed to update relation TLS info: missing key {e}")
+            logger.error("Failed to update relation TLS info: missing key %s", str(e))
             event.defer()
             return
 
         self.update_external_client_endpoints(external_client)
 
-        logger.info(f"new index {event.index} available")
+        logger.info("new index %s available", event.index)
         # Clear old statuses set by this hook
         self.charm.status.clear(
             CharmStatuses.NEW_INDEX_REQUESTED, pattern=Status.CheckPattern.Interpolated

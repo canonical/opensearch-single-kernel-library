@@ -173,7 +173,7 @@ class TLSEventsHandler(Object):
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate_signing_request, "csr"
             )
-            logger.debug(f"{scope.val}.{cert_type.val} TLS certificate available.")
+            logger.debug("%s.%s TLS certificate available.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate available.")
             return
@@ -238,7 +238,7 @@ class TLSEventsHandler(Object):
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
             except OpenSearchFileOperationError as e:
-                logger.debug(f"Error while updating request CA bundle: {e}")
+                logger.debug("Error while updating request CA bundle: %s", e)
                 event.defer()
                 return
 
@@ -251,7 +251,7 @@ class TLSEventsHandler(Object):
                         CertType.APP_ADMIN, admin_secrets
                     )
                 except OpenSearchFileOperationError as e:
-                    logger.debug(f"Error while storing admin TLS certificate and key: {e}")
+                    logger.debug("Error while storing admin TLS certificate and key: %s", e)
                     event.defer()
                     return
             else:
@@ -301,7 +301,7 @@ class TLSEventsHandler(Object):
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
             )
-            logger.debug(f"{scope.val}.{cert_type.val} TLS certificate expiring.")
+            logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
@@ -318,7 +318,7 @@ class TLSEventsHandler(Object):
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
         """Handle a cert that was revoked or has expired"""
-        logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
+        logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
     def on_tls_conf_set(
