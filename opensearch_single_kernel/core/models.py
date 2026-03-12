@@ -384,7 +384,7 @@ class PluginConfigInfo(Model):
         """Merge items into cleanup dictionary avoiding duplicates."""
         for key, items in cleanup.items():
             current = self.cleanup.setdefault(key, [])
-            current = sorted(list(set(current) | set(items)))
+            self.cleanup[key] = sorted(list(set(current) | set(items)))
 
 
 @dataclass(frozen=True)
