@@ -5,10 +5,10 @@
 
 """Collection of models used for the operation of the charm."""
 
-
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
@@ -21,6 +21,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
     PerformanceType,
+    SmtpTransportSecurity,
     StartMode,
     State,
 )
@@ -308,7 +309,8 @@ class OpenSearchProfile(ABC):
         """Get the JVM heap size in KB based on the memory requirements."""
         if self.memory_requirements.jvm_heap_percentage:
             return min(
-                int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE_IN_KB
+                int(self.memory_requirements.jvm_heap_percentage * mem_size),
+                MAX_HEAP_SIZE_IN_KB,
             )
         return _1GB_IN_KB
 
@@ -369,3 +371,38 @@ class TestingProfile(OpenSearchProfile):
             cluster_managers=1,
             data=1,
         )
+
+
+class PluginConfigInfo(Model):
+    """Model class for representing data needed to add or remove plugin configuration"""
+
+    relation_name: str | None = None
+    secret_id: str | None = None
+    cleanup: dict[str, list[str]] = Field(default_factory=dict)
+
+    def add_cleanup_items(self, cleanup: dict[str, list[str]]) -> None:
+        """Merge items into cleanup dictionary avoiding duplicates."""
+        for key, items in cleanup.items():
+            current = self.cleanup.setdefault(key, [])
+            self.cleanup[key] = sorted(list(set(current) | set(items)))
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """SMTP-related config derived from relation data.
+
+    Attributes:
+        sender_email: From-address for the SMTP sender (relation smtp_sender).
+        smtp_account_id: OpenSearch config id for the SMTP account (e.g. smtp-88_smtp-account).
+        label: Plugin/config label for this relation (e.g. plugin-notifications-88).
+        group_id: OpenSearch config id for the recipient group (e.g. smtp-88_recipients).
+        channel_id: OpenSearch config id for the email channel (e.g. smtp-88_email-channel).
+        transport_security: SMTP transport security (none, start_tls, tls).
+    """
+
+    sender_email: str
+    smtp_account_id: str
+    label: str
+    group_id: str
+    channel_id: str
+    transport_security: SmtpTransportSecurity

@@ -992,3 +992,54 @@ async def app_name(ops_test: OpsTest) -> str | None:
             return name
 
     return list(opensearch_apps.keys())[0] if opensearch_apps else None
+
+
+async def get_unit_relation_data(
+    ops_test: OpsTest,
+    unit_name: str,
+    target_unit_name: str,
+    relation_name: str,
+    key: str,
+    relation_id: str = None,
+) -> Optional[str]:
+    """Get relation data for an application.
+
+    Args:
+        ops_test: The ops test framework instance
+        unit_name: The name of the unit
+        relation_name: name of the relation to get connection data from
+        key: key of data to be retrieved
+        relation_id: id of the relation to get connection data from
+
+    Returns:
+        the data that was requested or None
+            if no data in the relation
+
+    Raises:
+        ValueError if it's not possible to get application unit data
+            or if there is no data for the particular relation endpoint
+            and/or alias.
+    """
+    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
+    if not raw_data:
+        raise ValueError(f"no unit info could be grabbed for {unit_name}")
+    data = yaml.safe_load(raw_data)
+    # Filter the data based on the relation name.
+    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
+    if relation_id:
+        # Filter the data based on the relation id.
+        relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
+    if not relation_data:
+        raise ValueError(
+            f"no relation data could be grabbed on relation with endpoint {relation_name}"
+        )
+    # Consider the case we are dealing with subordinate charms, e.g. grafana-agent
+    # The field "relation-units" is structured slightly different.
+    for idx in range(len(relation_data)):
+        if target_unit_name in relation_data[idx]["related-units"]:
+            break
+    else:
+        return {}
+    return (
+        relation_data[idx]["related-units"].get(target_unit_name, {}).get("data", {}).get(key, {})
+    )

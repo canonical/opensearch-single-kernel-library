@@ -622,7 +622,11 @@ class OpenSearchClient:
             raise OpenSearchHttpError(response_text=str(e))
 
     def get_log_error_http_retry(
-        self, retry_max: int, method: str, urls: list[str], payload: dict[str, Any] | None
+        self,
+        retry_max: int,
+        method: str,
+        urls: list[str],
+        payload: dict[str, Any] | None,
     ):
         """Return a custom log function to run before a new Tenacity retry."""
 
@@ -635,3 +639,87 @@ class OpenSearchClient:
             )
 
         return log_error
+
+    def create_notification_config(
+        self, *, config_id: str, name: str, config: dict[str, object]
+    ) -> None:
+        """Create notification config.
+
+        Args:
+            config_id: Notification Config ID
+            name: Notification Name
+            config: Notification Config
+        """
+        payload = {"config_id": config_id, "name": name, "config": config}
+        self.request("POST", "/_plugins/_notifications/configs/", payload=payload)
+
+    def notification_config_exists(self, config_id: str) -> bool:
+        """Check if config exists.
+
+        Args:
+            config_id: Notification Config ID
+
+        Returns:
+            True if config exists, False if 404.
+        """
+        try:
+            self.request("GET", f"/_plugins/_notifications/configs/{config_id}")
+            return True
+        except OpenSearchHttpError as exc:
+            if getattr(exc, "response_code", None) == 404:
+                return False
+            raise
+
+    def put_notification_config(
+        self, *, config_id: str, name: str, config: dict[str, object]
+    ) -> None:
+        """Create config if missing, otherwise update.
+
+        Args:
+            config_id: Notification Config ID
+            name: Notification Name
+            config: Notification Config
+        """
+        if self.notification_config_exists(config_id):
+            self.update_notification_config(config_id=config_id, config=config)
+        else:
+            self.create_notification_config(config_id=config_id, name=name, config=config)
+
+    def update_notification_config(self, *, config_id: str, config: dict[str, object]) -> None:
+        """Update notification config.
+
+        Args:
+            config_id: Notification Config ID
+            config: Notification Config
+        """
+        payload = {"config": config}
+        self.request("PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload)
+
+    def delete_notification_config(self, config_id: str) -> None:
+        """Delete config by id.
+
+        If the request returns code 404 (config already gone)
+        it is treated as success and function returns.
+
+        Args:
+            config_id: Notification Config ID
+        """
+        try:
+            self.request("DELETE", f"/_plugins/_notifications/configs/{config_id}")
+        except OpenSearchHttpError as exc:
+            if getattr(exc, "response_code", None) == 404:
+                return
+            raise
+
+    def reload_secure_settings(self) -> bool:
+        """Reload secure settings. Doesn't throw an exception.
+
+        Returns:
+            bool: whether operation was successful.
+        """
+        try:
+            response = self.request("POST", "_nodes/reload_secure_settings")
+        except OpenSearchHttpError as e:
+            logger.error("Could not reload secure settings: %s", e)
+            return False
+        return isinstance(response, dict) and response.get("_nodes", {}).get("failed", -1) == 0

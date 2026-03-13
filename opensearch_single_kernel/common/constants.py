@@ -5,7 +5,6 @@
 
 """OpenSearch Charm literals."""
 
-
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
@@ -105,6 +104,22 @@ class TlsFileExt(BaseStrEnum):
     KEYPASS = ".key-password"
 
 
+class SmtpTransportSecurity(BaseStrEnum):
+    """SMTP transport security protocol.
+
+    Enum values match relation data (smtp-integrator). api_method() maps to
+    OpenSearch Notifications API strings (start_tls, ssl).
+    """
+
+    NONE = "none"
+    STARTTLS = "starttls"
+    TLS = "tls"
+
+    def api_method(self) -> str:
+        """Return the OpenSearch Notifications API method string."""
+        return {"none": "none", "starttls": "start_tls", "tls": "ssl"}[self.value]
+
+
 class OpenSearchPaths(BaseStrEnum):
     """Base Paths for OpenSearch Snap."""
 
@@ -180,6 +195,7 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+SMTP_SECRET_LABEL = "plugin-notifications"
 
 
 # Messages
