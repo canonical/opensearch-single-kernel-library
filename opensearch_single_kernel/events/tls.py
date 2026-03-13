@@ -13,6 +13,7 @@ from ops import (
     RelationBrokenEvent,
     RelationCreatedEvent,
 )
+from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_USERS,
@@ -23,7 +24,6 @@ from opensearch_single_kernel.common.constants import (
     StoreType,
 )
 from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
     OpenSearchError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
@@ -134,7 +134,7 @@ class TLSEventsHandler(Object):
                     Scope.APP, CertType.APP_ADMIN
                 )
                 self.certs.request_certificate_creation(certificate_signing_request=csr)
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready for TLS relation created: %s", e)
                 event.defer()
                 return
@@ -160,7 +160,7 @@ class TLSEventsHandler(Object):
             )
             self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
             self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready for TLS relation created: %s", e)
             event.defer()
             return
@@ -213,7 +213,7 @@ class TLSEventsHandler(Object):
 
         try:
             current_stored_ca = self.charm.tls_manager.read_stored_ca()
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready for certificate available: %s", e)
             event.defer()
             return
@@ -224,7 +224,7 @@ class TLSEventsHandler(Object):
                     self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
                     create_store_pwd=is_unit_leader and is_main_orchestrator,
                 )
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready for certificate available: %s", e)
                 event.defer()
                 return
@@ -253,7 +253,7 @@ class TLSEventsHandler(Object):
             self.charm.tls_manager.store_new_tls_resources(
                 cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
             )
-        except (ContainerNotReadyError, OpenSearchFileOperationError) as e:
+        except (PebbleConnectionError, OpenSearchFileOperationError) as e:
             logger.info("Unable to store TLS resources yet: %s", e)
             event.defer()
             return
@@ -267,7 +267,7 @@ class TLSEventsHandler(Object):
         ):
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
-            except (ContainerNotReadyError, OpenSearchFileOperationError) as e:
+            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                 logger.debug("Error while updating request CA bundle: %s", e)
                 event.defer()
                 return
@@ -280,7 +280,7 @@ class TLSEventsHandler(Object):
                     self.charm.tls_manager.store_new_tls_resources(
                         CertType.APP_ADMIN, admin_secrets
                     )
-                except (ContainerNotReadyError, OpenSearchFileOperationError) as e:
+                except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                     logger.debug("Error while storing admin TLS certificate and key: %s", e)
                     event.defer()
                     return
@@ -311,7 +311,7 @@ class TLSEventsHandler(Object):
 
         try:
             self.on_tls_conf_set(event, scope, cert_type, renewal)
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready for TLS conf set: %s", e)
             event.defer()
         except OpenSearchError as e:
@@ -347,7 +347,7 @@ class TLSEventsHandler(Object):
                 old_certificate_signing_request=old_csr,
                 new_certificate_signing_request=new_csr,
             )
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info(f"Container not ready for certificate expiring: {e}")
             event.defer()
             return

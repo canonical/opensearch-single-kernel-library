@@ -25,7 +25,6 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
@@ -493,13 +492,9 @@ class TlsManager(BaseManager):
         On K8s, this directory can be backed by runtime mounts, ensure it exists before writing
         PKCS12 stores and temp files.
         """
-        if self.state.substrate == Substrates.K8S and not self.workload.workload_present:
-            raise ContainerNotReadyError("Container not ready to ensure certificates directory")
-
         try:
             if self.state.substrate == Substrates.K8S:
-                # ContainerPath.mkdir uses Pebble file API and will raise PebbleConnectionError
-                # when the container isn't reachable.
+                # ContainerPath.mkdir uses Pebble file API, PebbleConnectionError propagates.
                 cert_dir_path.mkdir(
                     mode=DIR_PERMISSIONS_CERTIFICATES,
                     parents=True,
@@ -508,13 +503,7 @@ class TlsManager(BaseManager):
                     group="root",
                 )
             else:
-                # On VM, pathops operates on the unit filesystem. Keep default ownership
-                # semantics and only ensure the directory exists.
                 cert_dir_path.mkdir(parents=True, exist_ok=True)
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(
-                f"Container not ready to ensure certificates directory: {e}"
-            ) from e
         except (
             FileExistsError,
             FileNotFoundError,
@@ -596,7 +585,7 @@ class TlsManager(BaseManager):
         not want to depend on a persistent volume for /etc/opensearch/certificates.
 
         if secrets are not present yet, it does nothing.
-        If Pebble/container isn't ready, it raises ContainerNotReadyError so callers can defer.
+        If Pebble/container isn't ready, it raises PebbleConnectionError so callers can defer.
         """
         if self.state.substrate != Substrates.K8S:
             return

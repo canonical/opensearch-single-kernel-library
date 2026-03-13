@@ -23,6 +23,7 @@ from ops import (
     StorageDetachingEvent,
     UpdateStatusEvent,
 )
+from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     CONTAINER_NAME,
@@ -41,7 +42,6 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
     OpenSearchCmdError,
     OpenSearchError,
     OpenSearchFileOperationError,
@@ -496,7 +496,7 @@ class OpenSearchEventsHandler(Object):
         """
         try:
             self.reconcile_tls_resources()
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready on pebble-ready: %s", e)
             event.defer()
             return
@@ -541,7 +541,7 @@ class OpenSearchEventsHandler(Object):
                 # Nodes Config updated, we would need to reconfigure and restart
                 try:
                     restart_needed = self.charm.config_manager.update_opensearch_config()
-                except ContainerNotReadyError as e:
+                except PebbleConnectionError as e:
                     logger.info("Container not ready for leader election: %s", e)
                     event.defer()
                     return
@@ -560,7 +560,7 @@ class OpenSearchEventsHandler(Object):
         # users. Purge the user list before initialising the users the charm requires.
         try:
             self.charm.users_manager.purge_initial_default_users()
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready for leader election: %s", e)
             event.defer()
             return
@@ -577,7 +577,7 @@ class OpenSearchEventsHandler(Object):
             for user in OPENSEARCH_SYSTEM_USERS:
                 try:
                     self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
-                except ContainerNotReadyError as e:
+                except PebbleConnectionError as e:
                     logger.info("Container not ready for leader election: %s", e)
                     event.defer()
                     return
@@ -676,7 +676,7 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.unit.is_leader():
             try:
                 self.charm.users_manager.purge_initial_default_users()
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready to configure users on start: %s", e)
                 event.defer()
                 return
@@ -684,7 +684,7 @@ class OpenSearchEventsHandler(Object):
             for user in OPENSEARCH_SYSTEM_USERS:
                 try:
                     self.charm.users_manager.save_user_locally(user)
-                except ContainerNotReadyError as e:
+                except PebbleConnectionError as e:
                     logger.info("Container not ready to configure users on start: %s", e)
                     event.defer()
                     return
@@ -750,7 +750,7 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready for post-start init: %s", e)
                 event.defer()
             except (OpenSearchHttpError, OpenSearchNotFullyReadyError):
@@ -791,7 +791,7 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.substrate == Substrates.K8S:
             try:
                 self.reconcile_tls_resources()
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready to prepare for start: %s", e)
                 event.defer()
                 return
@@ -834,7 +834,7 @@ class OpenSearchEventsHandler(Object):
                 ):
                     try:
                         self.charm.config_manager.update_opensearch_config()
-                    except ContainerNotReadyError as e:
+                    except PebbleConnectionError as e:
                         logger.info("Container not ready to rewrite TLS config for start: %s", e)
                         event.defer()
                         return
@@ -902,7 +902,7 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Error getting nodes before start: %s", e)
             try:
                 self.charm.config_manager.update_opensearch_config()
-            except (ContainerNotReadyError, OpenSearchFileOperationError, OpenSearchError) as e2:
+            except (PebbleConnectionError, OpenSearchFileOperationError, OpenSearchError) as e2:
                 logger.info("Unable to write base config before start: %s", e2)
                 self.charm.lock_manager.release()
                 event.defer()
@@ -912,7 +912,7 @@ class OpenSearchEventsHandler(Object):
                 self.charm.config_manager.update_opensearch_config(
                     cm_names=cm_names, cm_ips=cm_ips
                 )
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready to configure node before start: %s", e)
                 self.charm.lock_manager.release()
                 event.defer()
@@ -931,14 +931,14 @@ class OpenSearchEventsHandler(Object):
                         or self.charm.state.application.is_security_index_initialised
                     )
                 )
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready for start opensearch: %s", e)
                 event.defer()
                 return
 
             try:
                 self._post_start_init(event)
-            except ContainerNotReadyError as e:
+            except PebbleConnectionError as e:
                 logger.info("Container not ready for post-start init: %s", e)
                 event.defer()
                 return
@@ -1038,7 +1038,7 @@ class OpenSearchEventsHandler(Object):
         try:
             self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
-        except ContainerNotReadyError as e:
+        except PebbleConnectionError as e:
             logger.info("Container not ready for restart: %s", e)
             event.defer()
             return

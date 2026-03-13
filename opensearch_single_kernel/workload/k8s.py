@@ -34,7 +34,6 @@ from opensearch_single_kernel.common.constants import (
     OpenSearchPaths,
 )
 from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchInstallError,
@@ -291,14 +290,9 @@ class K8sWorkload(BaseWorkload):
         - pebble plan configuration
         """
         try:
-            if not self.container.can_connect():
-                # transient condition: Pebble/socket isn't ready yet.
-                # raise ContainerNotReadyError so hooks defer cleanly
-                raise ContainerNotReadyError("Container is not ready")
-
             self._ensure_required_directories()
             self._configure_pebble_plan(enable_checks=False)
-        except (PebbleConnectionError, ModelError) as e:
+        except ModelError as e:
             logger.error("Failed to prepare container on pebble-ready: %s", e)
             raise OpenSearchInstallError() from e
 
@@ -358,13 +352,9 @@ class K8sWorkload(BaseWorkload):
             OpenSearchInstallError: if container readiness verification fails.
         """
         try:
-            # check if container is ready
-            if not self.container.can_connect():
-                raise OpenSearchInstallError("Container is not ready")
-
             # configure pebble plan so the service can be started
             self._configure_pebble_plan(enable_checks=False)
-        except (PebbleConnectionError, ModelError) as e:
+        except ModelError as e:
             logger.error("Failed to verify container readiness: %s", e)
             raise OpenSearchInstallError() from e
 
@@ -405,10 +395,6 @@ class K8sWorkload(BaseWorkload):
                 parents=True,
                 exist_ok=True,
             )
-        except PebbleConnectionError as e:
-            raise ContainerNotReadyError(
-                f"Container not ready to create temp dir {temp_dir_path}: {e}"
-            ) from e
         except (PebbleError, ModelError, OSError, ValueError) as e:
             raise OpenSearchFileOperationError(e) from e
 
@@ -988,17 +974,11 @@ class K8sWorkload(BaseWorkload):
             str: content read from the file
 
         Raises:
-            ContainerNotReadyError: if container is not ready
-            OpenSearchFileOperationError: for other file operation errors
+            PebbleConnectionError: if container is not ready (callers may defer).
+            OpenSearchFileOperationError: for other file operation errors.
         """
         try:
-            if not self.container.can_connect():
-                raise ContainerNotReadyError("Container not ready for read_text")
-
             return path.read_text()
-        except PebbleConnectionError as e:
-            # raise ContainerNotReadyError so hooks can defer cleanly
-            raise ContainerNotReadyError("Container not ready for read_text: %s" % e) from e
         except (PebbleError, ModelError, OSError, ValueError) as e:
             raise OpenSearchFileOperationError(e) from e
 

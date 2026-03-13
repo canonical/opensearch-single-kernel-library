@@ -88,9 +88,5 @@ class OpenSearchExclusionsException(OpenSearchError):
     """Exception class for all Voting/Allocation exclusions related exceptions."""
 
 
-class ContainerNotReadyError(OpenSearchError):
-    """Raised when the container is not ready."""
-
-
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""

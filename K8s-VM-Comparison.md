@@ -231,20 +231,13 @@ path.write_text(content)    # Direct filesystem write
 - Abstraction: pathops library handles local operations
 
 
-### Container Readiness Check
+### Container Readiness
 
 K8s:
-```python
-# Must check container readiness before file operations
-if self.state.substrate == Substrates.K8S and not self.workload.workload_present:
-    raise ContainerNotReadyError("Container is not ready for filesystem operations")
-```
+Pebble/container operations are attempted directly. If the container is not ready, `ops.pebble.ConnectionError` (`PebbleConnectionError`) is raised. Event handlers catch it and defer.
 
 VM:
-```python
-# No container check needed
-# Direct filesystem access always available
-```
+Direct filesystem access, no Pebble connection.
 
 
 ## 7. System Requirements

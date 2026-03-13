@@ -13,6 +13,7 @@ from typing import Any
 import requests
 import urllib3
 from charmlibs import pathops
+from ops.pebble import ConnectionError as PebbleConnectionError
 from tenacity import (
     RetryCallState,
     Retrying,
@@ -24,7 +25,6 @@ from tenacity import (
 from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.exceptions import (
-    ContainerNotReadyError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
@@ -215,7 +215,7 @@ class OpenSearchClient:
                         staged_path.write_text(chain_content)
                         staged_path.chmod(0o644)
                         return path_as_posix(staged_path)
-            except (ContainerNotReadyError, OpenSearchFileOperationError) as e:
+            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                 logger.warning(
                     "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
                     chain_path_str,
