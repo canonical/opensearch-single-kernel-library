@@ -70,6 +70,7 @@ class NotificationsEvents(Object):
         Args:
             event: Smtp credentials available event
         """
+        is_leader = self.charm.unit.is_leader()
         smtp_data = None
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment not ready. Deferring event.")
@@ -77,7 +78,7 @@ class NotificationsEvents(Object):
             return
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            if self.charm.unit.is_leader():
+            if is_leader:
                 self.charm.status.set(CharmStatuses.SMTP_RELATION_INVALID, app=True)
             return
 
@@ -90,7 +91,7 @@ class NotificationsEvents(Object):
             smtp_data = self.smtp.get_relation_data_from_relation(event.relation)
         except SecretError as exc:
             logger.error(f"Could not read smtp relation data: {exc}")
-            if self.charm.unit.is_leader():
+            if is_leader:
                 self.charm.status.set(
                     CharmStatuses.SMTP_COULD_NOT_READ_DATA,
                     app=True,
@@ -98,7 +99,7 @@ class NotificationsEvents(Object):
                 )
                 return
 
-        if self.charm.unit.is_leader():
+        if is_leader:
             self.charm.status.clear(
                 CharmStatuses.SMTP_COULD_NOT_READ_DATA,
                 app=True,
@@ -106,10 +107,10 @@ class NotificationsEvents(Object):
             )
 
         if not smtp_data:
-            if self.charm.unit.is_leader():
+            if is_leader:
                 self.charm.status.set(CharmStatuses.SMTP_NO_RELATION_DATA, app=True)
             return
-        if self.charm.unit.is_leader():
+        if is_leader:
             self.charm.status.clear(CharmStatuses.SMTP_NO_RELATION_DATA, app=True)
 
         try:

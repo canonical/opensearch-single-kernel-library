@@ -1,12 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""OpenSearch Notifications plugin API client (configs CRUD).
+"""OpenSearch Notifications plugin manager.
 
-This client wraps OpenSearchDistribution.request() to manage notifications configs:
-- smtp sender (config_type: smtp_account)
-- email group (config_type: email_group)
-- email channel (config_type: email)
+This module is responsible of building and / or passing SMTP configs into the OpenSearch client.
 """
 
 from __future__ import annotations
@@ -28,7 +25,7 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 
 
 class NotificationsManager(BaseManager):
-    """Notifications plugin API client using OpenSearchDistribution request."""
+    """OpenSearch Notifications plugin manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the notifications manager class."""

@@ -602,8 +602,7 @@ class OpenSearchClient:
             self.request("GET", f"/_plugins/_notifications/configs/{config_id}")
             return True
         except OpenSearchHttpError as exc:
-            code = getattr(exc, "response_code", None)
-            if code == 404:
+            if getattr(exc, "response_code", None) == 404:
                 return False
             raise
 
@@ -635,7 +634,8 @@ class OpenSearchClient:
     def delete_notification_config(self, config_id: str) -> None:
         """Delete config by id.
 
-        404 (config already gone) is treated as success.
+        If the request returns code 404 (config already gone)
+        it is treated as success and function returns.
 
         Args:
             config_id: Notification Config ID
@@ -651,7 +651,7 @@ class OpenSearchClient:
         """Reload secure settings. Doesn't throw an exception.
 
         Returns:
-            whether operation was successful.
+            bool: whether operation was successful.
         """
         try:
             response = self.request("POST", "_nodes/reload_secure_settings")

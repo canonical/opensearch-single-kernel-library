@@ -212,7 +212,7 @@ class OpenSearchServer(RelationState):
 
     @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
-        """Returns configuration information for plugins this app is managing"""
+        """Returns configuration information for plugins this unit is managing"""
         plugin_config_info = self.get_object("plugin_config_info") or {}
         return {
             label: PluginConfigInfo.from_dict(plugin)
@@ -221,7 +221,7 @@ class OpenSearchServer(RelationState):
 
     @plugin_config_info.setter
     def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
-        """Returns configuration information for plugins this app is managing"""
+        """Returns configuration information for plugins this unit is managing"""
         if not value:
             self.update({"plugin_config_info": ""})
             return
