@@ -28,8 +28,6 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_deployed
-
 
 REL_ORCHESTRATOR = "peer-cluster-orchestrator"
 REL_PEER = "peer-cluster"

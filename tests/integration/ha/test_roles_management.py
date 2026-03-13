@@ -30,8 +30,6 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_substrate("k8s")
-
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed

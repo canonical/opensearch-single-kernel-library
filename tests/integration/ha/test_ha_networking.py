@@ -43,8 +43,6 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_substrate("k8s")
-
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
@@ -87,7 +85,7 @@ async def test_build_and_deploy(
         apps_statuses=["active"],
         units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1, APP_NAME: 3},
-        timeout=2400,
+        timeout=1400,
         idle_period=IDLE_PERIOD,
     )
     assert len(ops_test.model.applications[APP_NAME].units) == 3

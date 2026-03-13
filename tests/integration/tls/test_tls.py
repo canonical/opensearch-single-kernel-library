@@ -37,8 +37,6 @@ from tests.integration.tls.helpers import (
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_deployed
-
 
 TLS_CERTIFICATES_APP_NAME = "self-signed-certificates"
 # TODO update the docs to reflect the new channel once released
