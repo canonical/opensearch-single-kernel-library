@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """Base classes for charm relations."""
+
 import enum
 import json
 import logging
@@ -232,6 +233,26 @@ class RelationState:
                 del self.relation_data[field]
             except KeyError:
                 pass
+
+    def get_object(self, key: str) -> dict[str, Any] | None:
+        """Get dict / json object from the relation data store."""
+        return json.loads(data) if (data := self.relation_data.get(key)) is not None else None
+
+    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
+        """Put dict / json object into relation data store."""
+        if merge and (stored := self.get_object(key)) is not None:
+            stored.update(value)
+            value = stored
+
+        sorted_value = Model.sort_payload(value)
+
+        payload_str = None
+        if value is not None:
+            payload_str = json.dumps(
+                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
+            )
+
+        self.update({key: payload_str})
 
 
 class PeerClusterOrchestratorData(ProviderData, RequirerData):
