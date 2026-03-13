@@ -5,7 +5,6 @@
 """A set of helpers functions."""
 
 import base64
-import logging
 import json
 import logging
 import math
@@ -13,8 +12,7 @@ import re
 import secrets
 import string
 from datetime import datetime
-from typing import Any
-from typing import Iterable
+from typing import Any, Iterable
 
 import bcrypt
 from charmlibs.pathops import PathProtocol
@@ -29,6 +27,7 @@ from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 logger = logging.getLogger(__name__)
+
 
 def path_as_posix(path: PathProtocol) -> str:
     """Convert a PathProtocol to a POSIX path string.
