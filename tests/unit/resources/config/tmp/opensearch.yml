@@ -112,7 +112,7 @@ http.publish_host: 30.30.30.30
 node.roles:
 - cluster_manager
 - data
-node.attr.app_id: b829ae42-ca47-455a-8a42-4b74c611c2c6/opensearch-k8s
+node.attr.app_id: cdbb611c-1c05-4bab-9668-3934f0acc8d4/opensearch-k8s
 path.data: /var/lib/opensearch/data
 path.logs: /var/log/opensearch/logs
 path.home: /usr/share/opensearch

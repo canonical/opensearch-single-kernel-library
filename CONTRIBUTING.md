@@ -24,14 +24,22 @@ tox run -e lint          # code style
 tox run -e unit          # unit tests (defaults to VM substrate)
 tox run -e unit-vm       # unit tests (VM substrate)
 tox run -e unit-k8s      # unit tests (K8s substrate)
-tox run -e integration   # integration tests
+tox run -e integration   # integration tests (VM/LXD by default)
+tox run -e integration -- --substrate k8s   # integration tests on Kubernetes
 tox                      # runs 'lint' and 'unit' environments
 ```
 
 ### `pre-commit` hooks
 
-This repository comes with a sensible [pre-commit](https://github.com/pre-commit/pre-commit) hook configuration.
-Please install it with `pre-commit install` as this will be checked in the CI anyway.
+Code quality is enforced using [pre-commit](https://github.com/pre-commit/pre-commit) hooks. They will run before each commit and also at other stages.
+
+```shell
+# Install the first time
+pre-commit install
+
+# Run it manually with
+pre-commit run --all-files
+```
 
 ### Development guidelines
 

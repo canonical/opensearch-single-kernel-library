@@ -2,6 +2,7 @@ summary: test_tls.py
 environment:
   TEST_MODULE: tls/test_tls.py
 execute: |
+  juju switch concierge-lxd
   tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate vm --model testing --alluredir="$SPREAD_TASK/allure-results"
 artifacts:
   - allure-results
