@@ -39,14 +39,12 @@ from .tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_deployed
-
-DEFAULT_NUM_UNITS = 2
+DEFAULT_VM_NUM_UNITS = 2
 
 
 def default_num_units(substrate: str) -> int:
     """Return the default unit count for the tested substrate."""
-    return 1 if substrate == "k8s" else DEFAULT_NUM_UNITS
+    return 1 if substrate == "k8s" else DEFAULT_VM_NUM_UNITS
 
 
 @pytest.mark.abort_on_fail

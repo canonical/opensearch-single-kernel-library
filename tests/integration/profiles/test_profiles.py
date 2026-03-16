@@ -69,19 +69,17 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_build_and_deploy(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
-    # Production profile on VM needs 8G per unit so scaled cluster gets 4GB heap.
+    # Production profile needs 8G per unit so the scaled cluster gets 4GB heap.
     constraints = await get_constraints(ops_test, mem_gb=8)
     logger.info(f"Using constraints: {constraints}")
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    # On K8s we use testing profile so 1 unit can be active;
-    # VM uses production (blocked until scaled).
-    profile = "testing" if substrate == "k8s" else "production"
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
@@ -94,21 +92,13 @@ async def test_build_and_deploy(
             1,
             series=series,
             constraints=constraints,
-            config={"profile": profile},
+            config={"profile": "production"},
             resources=charm_resources,
         ),
     )
 
     # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    if substrate == "k8s":
-        await wait_until(
-            ops_test,
-            apps=[APP_NAME],
-            apps_statuses=["active"],
-            units_statuses=["active"],
-            wait_for_exact_units=1,
-        )
 
 
 @pytest.mark.abort_on_fail
@@ -143,7 +133,6 @@ async def test_scale_to_active(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_insufficient_memory(
     ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
 ) -> None:

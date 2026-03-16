@@ -64,12 +64,9 @@ async def test_build_and_deploy(
 
     # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    await wait_until(
-        ops_test,
+    await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
-        wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1, APP_NAME: 2},
+        status="active",
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )

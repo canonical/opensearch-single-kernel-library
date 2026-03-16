@@ -87,7 +87,8 @@ def charm_resources(substrate: Substrate, ubuntu_base: str) -> dict[str, str]:
 
     Juju does not reliably auto-populate OCI image resources for locally packed charms in all
     environments. For the K8s substrate, explicitly provide the `opensearch-image` resource so the
-    controller can fetch the image.
+    controller can fetch the image. The K8s workload image is published independently from the
+    charm base variants, so we always use the upstream image declared in metadata.
     """
     if substrate != "k8s":
         return {}
@@ -99,9 +100,5 @@ def charm_resources(substrate: Substrate, ubuntu_base: str) -> dict[str, str]:
         raise RuntimeError(
             "K8s test charm metadata is missing resources.opensearch-image.upstream-source"
         )
-
-    # keep resource tag aligned with the charm base under test.
-    if ubuntu_base not in upstream:
-        upstream = upstream.replace("24.04", ubuntu_base)
 
     return {"opensearch-image": upstream}
