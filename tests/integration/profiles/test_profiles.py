@@ -187,7 +187,7 @@ async def test_testing_profile(
     """Test testing profile"""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test)
+    constraints = await get_constraints(ops_test, mem_gb=8)
 
     await deploy_opensearch(
         ops_test,

@@ -287,7 +287,7 @@ async def test_build_and_deploy_small_deployment(
     #  test_prometheus_exporter_disabled_by_cos_relation_gone
     model_conf["update-status-hook-interval"] = "1m"
     await ops_test.model.set_config(model_conf)
-    constraints = await get_constraints(ops_test)
+    constraints = await get_constraints(ops_test, mem_gb=8)
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}

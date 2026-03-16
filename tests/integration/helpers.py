@@ -570,6 +570,14 @@ async def run_action(
             if unit.workload_status.value != "active":
                 continue
 
+            # K8s units do not expose SSH on port 22, so Juju actions should target
+            # any active unit directly.
+            # libjuju reports machine_id == -1 for CAAS/K8s units, which do not have
+            # a backing Juju machine or SSH on port 22.
+            if unit.machine_id == -1:
+                online_units.append(unit)
+                continue
+
             ping = subprocess.call(
                 f"nc -zv {unit.ip} 22".split(),
                 stdout=subprocess.DEVNULL,
@@ -577,6 +585,11 @@ async def run_action(
             )
             if ping == 0:
                 online_units.append(unit)
+
+        if not online_units:
+            raise RuntimeError(
+                f"No active units available to run action {action_name} on app {app}."
+            )
 
         unit_id = random.choice(online_units).id
 
