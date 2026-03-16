@@ -119,11 +119,11 @@ class OpenSearchEventsHandler(Object):
             self._on_opensearch_data_storage_detaching,
         )
 
-        # Perform container preparation when pebble is ready (K8s workload container).
-        # Workload pebble hooks only exist for K8s charms, on VM charms the event won't exist.
-        pebble_ready = getattr(self.charm.on, f"{CONTAINER_NAME}_pebble_ready", None)
-        if pebble_ready is not None:
-            self.framework.observe(pebble_ready, self._on_pebble_ready)
+        # Perform container preparation when pebble is ready for the K8s workload container.
+        if self.charm.state.substrate == Substrates.K8S:
+            self.framework.observe(
+                getattr(self.charm.on, f"{CONTAINER_NAME}_pebble_ready"), self._on_pebble_ready
+            )
 
         # --- OpenSearch Custom events ---
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)

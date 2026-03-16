@@ -618,7 +618,7 @@ class OpenSearchClient:
             )
         except requests.JSONDecodeError:
             raise OpenSearchHttpError(response_text=resp.text)
-        except (requests.RequestException, ValueError, json.JSONDecodeError, KeyError) as e:
+        except Exception as e:
             raise OpenSearchHttpError(response_text=str(e))
 
     def get_log_error_http_retry(

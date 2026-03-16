@@ -3,7 +3,6 @@
 
 """Unit Tests for config Manager functions."""
 
-import socket
 from typing import Any
 from unittest.mock import PropertyMock
 
@@ -155,9 +154,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     assert opensearch_conf["cluster.name"] == "opensearch-dev"
 
-    expected_node_name = (
-        socket.gethostname() if substrate == "k8s" else harness.charm.state.unit_name
-    )
+    expected_node_name = harness.charm.state.unit_name
     assert opensearch_conf["node.name"] == expected_node_name
 
     assert opensearch_conf["node.attr.temp"] == "hot"

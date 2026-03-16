@@ -128,7 +128,7 @@ class ConfigManager(BaseManager):
 
         return {
             "cluster.name": deployment_desc.config.cluster_name,
-            "node.name": self.state.node_name,
+            "node.name": self.state.unit_name,
             "network.host": self._network_hosts(),
             "http.publish_host": self.workload.get_host_public_ip()
             or self.state.network_ingress_address,
@@ -172,7 +172,7 @@ class ConfigManager(BaseManager):
         ):
             return {}
         if self.state.substrate == Substrates.K8S:
-            names = [self.state.node_name]
+            names = [self.state.unit_name]
         else:
             # VM: all nodes; cluster forms when quorum of 3 is available
             names = sorted(cm_names)

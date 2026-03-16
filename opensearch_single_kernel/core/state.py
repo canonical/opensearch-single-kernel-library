@@ -479,12 +479,11 @@ class ClusterState(Object):
 
     @property
     def unit_name(self):
-        """Juju unit identity (such as opensearch-0, opensearch-1).
+        """Juju unit identity (such as opensearch-0.2fe, opensearch-1.2fe).
 
-        Use this for relation data, lock documents and any place that must identify
-        the Juju unit consistently across all units. For OpenSearch's node.name
-        (config and API), use node_name instead on K8s as that is the pod hostname.
-        On VM, node_name is equals this formatted unit name.
+        Use this for relation data, lock documents and OpenSearch node identity. It
+        requires the deployment description to be available so the unit name can be
+        formatted consistently across all units.
         """
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
@@ -500,25 +499,13 @@ class ClusterState(Object):
 
     @property
     def node_name(self) -> str | None:
-        """Opensearch node.name for the current unit.
+        """Return a connectable host for the current unit.
 
-        On K8s, OpenSearch defaults to using the container/pod hostname as its runtime
-        node.name. We must use that value and configure OpenSearch to match it,
-        because OpenSearch APIs and cluster bootstrapping refer to nodes by the exact
-        runtime node.name. Using Juju's formatted unit name on K8s can cause node
-        lookups to fail (in exclusions, role queries).
-
-        On VM, we keep using the formatted Juju unit name as node.name.
+        On K8s this is the unit DNS name. On VM this is the unit IP address.
         """
         if self.substrate == Substrates.K8S:
-            return socket.gethostname()
-
-        # VM substrate: unit_name depends on deployment_desc being available.
-        # If it isn't ready yet, return None so callers can defer/retry.
-        if self.application.deployment_desc is None:
-            return None
-
-        return self.unit_name
+            return socket.getfqdn()
+        return self.host_ip
 
     @property
     def planned_units(self) -> int:

@@ -100,9 +100,9 @@ def test_get_sans(harness, mocker, substrate):
     else:  # k8s
         expected_sans = {
             "sans_oid": ["1.2.3.4.5.5"],
-            "sans_ip": sorted(base_ips),
+            "sans_ip": [],
             "sans_dns": sorted(
-                base_dns_entries
+                [harness.charm.state.unit_name, "nebula"]
                 + ["opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"]
             ),
         }
@@ -110,11 +110,23 @@ def test_get_sans(harness, mocker, substrate):
     assert dict((key, sorted(val)) for key, val in unit_http_sans.items()) == expected_sans
 
     unit_transport_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_TRANSPORT)
-    assert dict((key, sorted(val)) for key, val in unit_transport_sans.items()) == {
-        "sans_oid": ["1.2.3.4.5.5"],
-        "sans_ip": sorted(base_ips),
-        "sans_dns": sorted(base_dns_entries),
-    }
+    expected_transport_sans = (
+        {
+            "sans_oid": ["1.2.3.4.5.5"],
+            "sans_ip": sorted(base_ips),
+            "sans_dns": sorted(base_dns_entries),
+        }
+        if substrate == "vm"
+        else {
+            "sans_oid": ["1.2.3.4.5.5"],
+            "sans_ip": [],
+            "sans_dns": sorted([harness.charm.state.unit_name, "nebula"]),
+        }
+    )
+    assert (
+        dict((key, sorted(val)) for key, val in unit_transport_sans.items())
+        == expected_transport_sans
+    )
 
 
 def test_find_secret(harness):
@@ -1100,9 +1112,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     # upgrade_mock.get_unit_juju_status.return_value = ActiveStatus()
     # upgrade.return_value = upgrade_mock
 
-    # OpenSearch reports node.name, on K8s we set node.name to the container hostname.
-    mock_response_root(harness.charm.state.node_name, harness.charm.state.host_ip)
-    mock_response_nodes(harness.charm.state.node_name, harness.charm.state.host_ip)
+    # OpenSearch reports its logical node identity, which now matches the formatted unit name.
+    mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
+    mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)
     mock_response_lock_not_requested("1.1.1.1")
     mock_response_health_green("1.1.1.1")
     event = MagicMock(after_upgrade=False)
@@ -1262,9 +1274,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     # upgrade_mock.get_unit_juju_status.return_value = ActiveStatus()
     # upgrade.return_value = upgrade_mock
 
-    # OpenSearch reports node.name; on K8s we set node.name to the container hostname.
-    mock_response_root(harness.charm.state.node_name, harness.charm.state.host_ip)
-    mock_response_nodes(harness.charm.state.node_name, harness.charm.state.host_ip)
+    # OpenSearch reports its logical node identity, which now matches the formatted unit name.
+    mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
+    mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)
     mock_response_lock_not_requested("1.1.1.1")
     mock_response_health_green("1.1.1.1")
     event = MagicMock(after_upgrade=False)

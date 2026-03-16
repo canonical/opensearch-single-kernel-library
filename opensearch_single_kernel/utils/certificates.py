@@ -173,6 +173,22 @@ def store_ca_chain(  # noqa: C901
                 )
             except OpenSearchCmdError as e:
                 msg = (e.out or "") + (e.err or "")
+                if "Destination alias" in msg and "already exists" in msg:
+                    try:
+                        workload.run_cmd(
+                            f"{keytool_cmd} -delete "
+                            f"-alias {old_internal_alias} -keystore {store_path} -storetype PKCS12",
+                            f"-storepass {store_pwd}",
+                        )
+                        workload.run_cmd(
+                            f"{keytool_cmd} -changealias "
+                            f"-alias {internal_alias} -destalias {old_internal_alias} "
+                            f"-keystore {store_path} -storetype PKCS12",
+                            f"-storepass {store_pwd}",
+                        )
+                        msg = ""
+                    except OpenSearchCmdError:
+                        pass
                 if ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
                     return False
 

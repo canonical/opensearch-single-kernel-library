@@ -105,7 +105,7 @@ backends:
       AZURE_STORAGE_ACCOUNT: '$(HOST: echo $AZURE_STORAGE_ACCOUNT)'
       AZURE_SECRET_KEY: '$(HOST: echo $AZURE_SECRET_KEY)'
       DOCKERHUB_MIRROR: "$(HOST: echo $DOCKERHUB_MIRROR)"
-      CONCIERGE_MICROK8S_CHANNEL: 1.33/stable
+      CONCIERGE_MICROK8S_CHANNEL: 1.34-strict/stable
       CONCIERGE_EXTRA_DEBS: pipx
     systems:
       - self-hosted-linux-amd64-noble-medium:
@@ -134,34 +134,8 @@ prepare: |
   chown -R root:root "$SPREAD_PATH"
   cd "$SPREAD_PATH"
   snap install --classic concierge
-
-  if [[ -n "$DOCKERHUB_MIRROR" ]]
-  then
-    # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
-    # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
-
-    snap install microk8s --channel "$CONCIERGE_MICROK8S_CHANNEL" --classic
-
-    # Wait for microk8s to populate iptables
-    # https://chat.canonical.com/canonical/pl/jo5cg6wqjjrudqd5ybj6hhttee
-    until [[ -n $(iptables --list | grep -i "microk8s") ]]
-    do
-      echo "MicroK8s has not yet configured iptables."
-      sleep 10
-    done
-
-    tee /var/snap/microk8s/current/args/certs.d/docker.io/hosts.toml << EOF
-    server = "$DOCKERHUB_MIRROR"
-    [host."${DOCKERHUB_MIRROR#'https://'}"]
-    capabilities = ["pull", "resolve"]
-  EOF
-    microk8s stop
-    microk8s start
-  fi
-
-  # Prepare both VM (LXD) and K8s (microk8s) backends so CI runs both on every push
-  concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
-  concierge prepare --trace -c concierge-microk8s.yaml
+  apt-get update
+  apt-get install -y pipx
 
   # Install charmcraft & pipx (on lxd-vm backend)
   pipx install tox poetry
@@ -174,6 +148,29 @@ prepare-each: |
     concierge prepare --trace -c concierge-lxd.yaml
     juju switch concierge-lxd
   else
+    if [[ -n "$DOCKERHUB_MIRROR" ]]
+    then
+      # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
+      # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
+      snap install microk8s --channel "$CONCIERGE_MICROK8S_CHANNEL" --classic
+
+      # Wait for microk8s to populate iptables
+      # https://chat.canonical.com/canonical/pl/jo5cg6wqjjrudqd5ybj6hhttee
+      until [[ -n $(iptables --list | grep -i "microk8s") ]]
+      do
+        echo "MicroK8s has not yet configured iptables."
+        sleep 10
+      done
+
+      tee /var/snap/microk8s/current/args/certs.d/docker.io/hosts.toml << EOF
+      server = "$DOCKERHUB_MIRROR"
+      [host."${DOCKERHUB_MIRROR#'https://'}"]
+      capabilities = ["pull", "resolve"]
+EOF
+      microk8s stop
+      microk8s start
+    fi
+
     concierge prepare --trace -c concierge-microk8s.yaml
     juju switch concierge-microk8s
   fi

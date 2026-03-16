@@ -283,11 +283,10 @@ class NodesExclusionsManager(BaseManager):
         unit_id = self.state.server.unit_id
         node = None
         try:
-            node_name = self.state.node_name
-            if node_name is None:
+            if self.state.application.deployment_desc is None:
                 node_id = None
             else:
-                node_id = self.opensearch_client.get_node_id(node_name)
+                node_id = self.opensearch_client.get_node_id(self.state.unit_name)
             if node_id is not None:
                 node = self.opensearch_client.get_current_node(node_id, unit_id, self.alt_hosts)
             else:

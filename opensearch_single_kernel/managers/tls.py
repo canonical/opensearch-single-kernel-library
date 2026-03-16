@@ -218,13 +218,17 @@ class TlsManager(BaseManager):
             return sans
 
         # Base DNS names: how this unit can be addressed by clients and other nodes.
-        # unit_name is the Juju unit (such asopensearch/0), gethostname/getfqdn cover
-        # short and fully-qualified hostnames used in configs or DNS.
+        # unit_name is the Juju unit, gethostname/getfqdn cover short and fully-qualified
+        # hostnames used in configs or DNS.
         dns = {self.state.unit_name, socket.gethostname(), socket.getfqdn()}
         logger.info(f"This is the current DNS {dns}")
-        # Primary network address for this unit (peer relation binding), required for
-        # node-to-node and client connections that use the IP.
-        ips = {self.state.host_ip} if self.state.host_ip else set()
+        # VM certificates must be reachable by the unit IP. On K8s, pod IPs are ephemeral
+        # across pod recreation, so only stable DNS names should be included.
+        ips = (
+            {self.state.host_ip}
+            if self.state.substrate == Substrates.VM and self.state.host_ip
+            else set()
+        )
 
         if cert_type == CertType.UNIT_HTTP:
             # HTTP cert must also be valid for the address clients use to reach this
