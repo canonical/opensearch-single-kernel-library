@@ -9,7 +9,7 @@ import json
 import logging
 import socket
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ops import Application, JujuVersion, Object, Relation, Unit
 
@@ -32,11 +32,11 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
-    Model,
     Node,
     OpenSearchProfile,
     PeerClusterApp,
     PerformanceType,
+    PluginConfigInfo,
     ProductionProfile,
     TestingProfile,
 )
@@ -44,7 +44,6 @@ from opensearch_single_kernel.core.relations import (
     PeerCluster,
     PeerClusterData,
     PeerClusterOrchestratorData,
-    RelationDataStore,
     RelationState,
 )
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
@@ -216,6 +215,23 @@ class OpenSearchServer(RelationState):
         """Set the value of last configured IP for the unit. Used for tracking the IP change."""
         self.update({"last_host_ip": value})
 
+    @property
+    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
+        """Returns configuration information for plugins this unit is managing"""
+        plugin_config_info = self.get_object("plugin_config_info") or {}
+        return {
+            label: PluginConfigInfo.from_dict(plugin)
+            for label, plugin in plugin_config_info.items()
+        }
+
+    @plugin_config_info.setter
+    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
+        """Returns configuration information for plugins this unit is managing"""
+        if not value:
+            self.update({"plugin_config_info": ""})
+            return
+        self.put_object("plugin_config_info", value)
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -229,33 +245,6 @@ class OpenSearchApplication(RelationState):
     ):
         super().__init__(relation, data_interface, component)
         self.app = component
-
-    def get_object(self, key: str) -> dict[str, Any] | None:
-        """Get dict / json object from the relation data store."""
-        data = self.relation_data.get(key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.update({key: payload_str})
 
     @property
     def name(self) -> str:
@@ -389,6 +378,23 @@ class OpenSearchApplication(RelationState):
     def client_users_dict(self, users_dict: dict[str, str]):
         """Set the client relation users dict in application databag."""
         self.put_object("client_relation_users", users_dict)
+
+    @property
+    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
+        """Returns configuration information for plugins this app is managing"""
+        plugin_config_info = self.get_object("plugin_config_info") or {}
+        return {
+            label: PluginConfigInfo.from_dict(plugin)
+            for label, plugin in plugin_config_info.items()
+        }
+
+    @plugin_config_info.setter
+    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
+        """Returns configuration information for plugins this app is managing"""
+        if not value:
+            self.update({"plugin_config_info": ""})
+            return
+        self.put_object("plugin_config_info", value)
 
 
 class ExternalOpenSearchClient(RelationState):

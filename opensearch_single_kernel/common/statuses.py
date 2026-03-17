@@ -5,6 +5,7 @@
 
 This module defines various status enums that represent the state of the charm.
 """
+
 from enum import Enum
 
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
@@ -99,3 +100,21 @@ class CharmStatuses(Enum):
     DATA_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
         "Removal of data role from current deployment not allowed - the data cannot be reallocated."
     )
+
+    # Notifications
+    SMTP_RELATION_INVALID = BlockedStatus(
+        "SMTP relation must be established with the main-orchestrator cluster."
+    )
+    SMTP_WAITING_RECIPIENTS = WaitingStatus(
+        "SMTP sender configured; waiting for recipients to create email group/channel."
+    )
+    SMTP_NO_RELATION_DATA = BlockedStatus(
+        "Relation to smtp-integrator has no data. Configure smtp-integrator and check unit logs."
+    )
+    SMTP_CONFIGURATION_ERROR = BlockedStatus(
+        "SMTP configuration failed. Check smtp-integrator and unit logs."
+    )
+    SMTP_MISSING_REQUIRED_PARAMETERS = BlockedStatus(
+        "Parameters missing from smtp-integrator: {params}."
+    )
+    SMTP_COULD_NOT_READ_DATA = BlockedStatus("Could not read smtp relation data: {exc}.")

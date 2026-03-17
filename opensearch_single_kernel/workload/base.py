@@ -79,6 +79,11 @@ class Paths:
         return self.conf / "opensearch.yml"
 
     @property
+    def opensearch_keystore(self) -> PathProtocol:
+        """Return path to the opensearch keystore."""
+        return self.conf / "opensearch.keystore"
+
+    @property
     def data(self) -> PathProtocol:
         """Return path to the data snap directory."""
         return self.snap_common / OpenSearchPaths.DATA.val

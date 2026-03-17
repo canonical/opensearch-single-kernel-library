@@ -41,7 +41,7 @@ requires:
     limit: 1
   peer-cluster:
     interface: peer_cluster
-    limit: 2  # (main+failover)_cluster_orchestrator(s)
+    limit: 2 # (main+failover)_cluster_orchestrator(s)
     optional: true
   s3-credentials:
     interface: s3
@@ -57,9 +57,10 @@ requires:
     interface: jwt
     limit: 1
     optional: true
-
+  smtp:
+    interface: smtp
 
 storage:
   opensearch-data:
     type: filesystem
-    location: /var/snap/opensearch/common  # /mnt/opensearch/data
+    location: /var/snap/opensearch/common # /mnt/opensearch/data
