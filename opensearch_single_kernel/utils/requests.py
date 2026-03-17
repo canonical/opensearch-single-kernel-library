@@ -16,7 +16,7 @@ class SSLStringAdapter(HTTPAdapter):
         self.cert_string = cert_string
         super().__init__(**kwargs)
 
-    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs) -> None:
         """Initialize the pool manager with a custom SSL context."""
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.verify_mode = ssl.CERT_REQUIRED
