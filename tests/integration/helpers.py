@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 # Keep the existing connect/read timeout used by http_request and reuse it
 # for both runner-side and in-unit K8s requests.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
+_K8S_UNIT_HTTP_RESULT_PREFIX = "__k8s_unit_http_result__="
 
 
 def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:
@@ -663,9 +664,9 @@ else:
     request_kwargs["verify"] = False
     response = requests.request(**request_kwargs)
 
-print(json.dumps({"body": response.text, "status_code": response.status_code}))
+print("__k8s_unit_http_result__=" + json.dumps({"body": response.text, "status_code": response.status_code}))
 """
-    _, stdout, _ = await ops_test.juju(
+    return_code, stdout, stderr = await ops_test.juju(
         "ssh",
         f"{APP_NAME}/{unit.id}",
         "python3",
@@ -673,7 +674,20 @@ print(json.dumps({"body": response.text, "status_code": response.status_code}))
         remote_script,
         json.dumps(script_payload),
     )
-    response = json.loads(stdout)
+    response = None
+    for line in reversed(stdout.splitlines()):
+        if not line.startswith(_K8S_UNIT_HTTP_RESULT_PREFIX):
+            continue
+
+        response = json.loads(line.removeprefix(_K8S_UNIT_HTTP_RESULT_PREFIX))
+        break
+
+    if response is None:
+        raise RuntimeError(
+            "Failed to parse K8s unit HTTP response "
+            f"(return_code={return_code}, stdout={stdout}, stderr={stderr})"
+        )
+
     if resp_status_code:
         return response["status_code"]
 
