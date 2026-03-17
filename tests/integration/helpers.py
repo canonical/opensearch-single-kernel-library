@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from hashlib import md5
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
@@ -37,6 +38,11 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)s", datefmt="%H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+
+# Keep the existing connect/read timeout used by http_request and reuse it
+# for both runner-side and in-unit K8s requests.
+_HTTP_REQUEST_TIMEOUT = (17, 17)
 
 
 def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:
@@ -486,7 +492,7 @@ async def get_application_unit_ids_ips(ops_test: OpsTest, app: str = APP_NAME) -
         app: the name of the app
 
     Returns:
-        Dictionary unit_id / unit_ip, of the application
+        Dictionary unit_id / IP, of the application
     """
     result = {}
     for unit in await get_application_units(ops_test, app):
@@ -545,10 +551,141 @@ async def get_leader_unit_id(ops_test: OpsTest, app: str = APP_NAME) -> int:
 
 
 async def get_leader_unit_ip(ops_test: OpsTest, app: str = APP_NAME) -> str:
-    """Helper function that retrieves the leader unit."""
+    """Helper function that retrieves the leader unit IP."""
     for unit in await get_application_units(ops_test, app):
         if unit.is_leader:
             return unit.ip
+
+
+async def _find_k8s_unit_for_endpoint(
+    ops_test: OpsTest, endpoint: str, app: str
+) -> Optional[Unit]:
+    """Return the K8s unit matching the endpoint host, if any."""
+    hostname = urlparse(endpoint).hostname
+    if not hostname or app != APP_NAME:
+        return None
+
+    for unit in await get_application_units(ops_test, app):
+        if unit.machine_id == -1 and unit.ip == hostname:
+            return unit
+
+    return None
+
+
+async def _http_request_from_k8s_unit(
+    ops_test: OpsTest,
+    unit: Unit,
+    method: str,
+    endpoint: str,
+    admin_secrets: Dict[str, str],
+    payload: Optional[Union[str, Dict[str, any]]] = None,
+    resp_status_code: bool = False,
+    verify: bool = True,
+    user: Optional[str] = "admin",
+    user_password: Optional[str] = None,
+    json_resp: bool = True,
+    extra_headers: Optional[Dict[str, any]] = None,
+):
+    """Run the HTTPS request from inside a K8s unit."""
+    parsed = urlparse(endpoint)
+    port = parsed.port or 9200
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    headers = {}
+    if json_resp:
+        headers.update(
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+        )
+    if extra_headers:
+        headers.update(extra_headers)
+
+    request_payload = (
+        payload
+        if isinstance(payload, str)
+        else (json.dumps(payload) if isinstance(payload, dict) else None)
+    )
+    # Pass only the request details into the unit. The unit-side script rebuilds
+    # the final URL from the unit FQDN so K8s TLS checks use the hostname that
+    # the certificate was issued for.
+    script_payload = {
+        "ca_chain": admin_secrets["ca-chain"],
+        "headers": headers,
+        "json_resp": json_resp,
+        "method": method.upper(),
+        "password": user_password or admin_secrets["password"],
+        "payload": request_payload,
+        "path": path,
+        "port": port,
+        "resp_status_code": resp_status_code,
+        "timeout": _HTTP_REQUEST_TIMEOUT,
+        "user": user,
+        "verify": verify,
+    }
+    # Run a tiny requests client inside the unit. This
+    # avoids relying on the external runner to resolve in-cluster DNS
+    # names while still keeping normal CA and hostname verification.
+    remote_script = """
+import json
+import subprocess
+import sys
+import tempfile
+
+import requests
+
+payload = json.loads(sys.argv[1])
+hostname = subprocess.check_output(["hostname", "-f"], text=True).strip()
+# Use the unit FQDN instead of the external pod IP so hostname verification
+# matches the DNS SANs present in the K8s certificate.
+url = f"https://{hostname}:{payload['port']}{payload['path']}"
+
+request_kwargs = {
+    "auth": (payload["user"], payload["password"]),
+    "headers": payload["headers"],
+    "method": payload["method"],
+    "timeout": tuple(payload["timeout"]),
+    "url": url,
+}
+if payload["payload"] is not None:
+    request_kwargs["data"] = payload["payload"]
+
+if payload["verify"]:
+    with tempfile.NamedTemporaryFile(mode="w+") as chain:
+        chain.write(payload["ca_chain"])
+        chain.flush()
+        request_kwargs["verify"] = chain.name
+        response = requests.request(**request_kwargs)
+else:
+    request_kwargs["verify"] = False
+    response = requests.request(**request_kwargs)
+
+print(json.dumps({"body": response.text, "status_code": response.status_code}))
+"""
+    _, stdout, _ = await ops_test.juju(
+        "ssh",
+        f"{APP_NAME}/{unit.id}",
+        "python3",
+        "-c",
+        remote_script,
+        json.dumps(script_payload),
+    )
+    response = json.loads(stdout)
+    if resp_status_code:
+        return response["status_code"]
+
+    if json_resp:
+        return json.loads(response["body"])
+
+    logger.info(f"\n{response['body']}")
+    return SimpleNamespace(
+        content=response["body"].encode("utf-8"),
+        status_code=response["status_code"],
+        text=response["body"],
+    )
 
 
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
@@ -649,6 +786,25 @@ async def http_request(
         A json object.
     """
     admin_secrets = await get_secrets(ops_test, app=app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+    if k8s_unit:
+        # K8s requests that start from a pod IP are executed from inside the
+        # unit so they can be retried against the unit FQDN with strict TLS.
+        logger.info(f"Calling from {k8s_unit.name}: {method} - {endpoint}")
+        return await _http_request_from_k8s_unit(
+            ops_test,
+            k8s_unit,
+            method,
+            endpoint,
+            admin_secrets,
+            payload=payload,
+            resp_status_code=resp_status_code,
+            verify=verify,
+            user=user,
+            user_password=user_password,
+            json_resp=json_resp,
+            extra_headers=extra_headers,
+        )
 
     # fetch the cluster info from the endpoint of this unit
     with requests.Session() as session, tempfile.NamedTemporaryFile(mode="w+") as chain:
@@ -660,7 +816,7 @@ async def http_request(
         request_kwargs = {
             "method": method,
             "url": endpoint,
-            "timeout": (17, 17),
+            "timeout": _HTTP_REQUEST_TIMEOUT,
         }
         headers = {}
         if json_resp:
@@ -731,10 +887,11 @@ def opensearch_client(
         hosts=[{"host": ip, "port": 9200} for ip in hosts],
         http_auth=(user_name, password),
         http_compress=True,
-        sniff_on_start=True,  # sniff before doing anything
-        sniff_on_connection_fail=True,  # refresh nodes after a node fails to respond
-        sniffer_timeout=60.0,  # and also every 60 seconds
-        # sniff_timeout=5.0,  # and also every 60 seconds
+        # Integration tests already pass the current unit IPs explicitly.
+        # Node sniffing asks OpenSearch for the full node list and
+        # replaces the client's seed hosts with the discovered addresses.
+        # Disable it here because it is brittle during CA rotation and can fail
+        # before the client ever attempts the provided hosts.
         use_ssl=True,  # turn on ssl
         verify_certs=True,  # make sure we verify SSL certificates
         ssl_assert_hostname=False,
@@ -751,7 +908,7 @@ async def get_application_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> Li
         app: the name of the app
 
     Returns:
-        list of current unit IPs of the application
+        list of current IPs of the application
     """
     return [unit.ip for unit in await get_application_units(ops_test, app)]
 
@@ -835,7 +992,7 @@ async def get_application_unit_ips_names(ops_test: OpsTest, app: str = APP_NAME)
         app: the name of the app
 
     Returns:
-        Dictionary unit_name / unit_ip, of the application
+        Dictionary unit_name / IP, of the application
     """
     result = {}
     for unit in await get_application_units(ops_test, app):

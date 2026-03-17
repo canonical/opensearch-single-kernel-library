@@ -2,6 +2,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 import asyncio
+import ipaddress
 import logging
 import os
 import time
@@ -24,7 +25,13 @@ from tenacity import (
     wait_random,
 )
 
-from ..helpers import get_application_unit_ips, get_secrets, opensearch_client
+from ..helpers import (
+    get_application_unit_ips,
+    get_application_units,
+    get_reachable_unit_ips,
+    get_secrets,
+    opensearch_client,
+)
 
 logging.getLogger("opensearch").setLevel(logging.ERROR)
 logging.getLogger("opensearchpy.helpers").setLevel(logging.ERROR)
@@ -85,7 +92,7 @@ class ContinuousWrites:
         password = await self._secrets()
         self._queue.put(
             SimpleNamespace(
-                hosts=await get_application_unit_ips(self._ops_test, app=self._app),
+                hosts=await self._hosts(),
                 password=password,
             )
         )
@@ -233,7 +240,7 @@ class ContinuousWrites:
 
     async def _client(self, unit_ip: Optional[str] = None):
         """Build an opensearch client."""
-        hosts = await get_application_unit_ips(self._ops_test, app=self._app)
+        hosts = await self._hosts()
         if unit_ip:
             hosts = [unit_ip]
 
@@ -243,6 +250,35 @@ class ContinuousWrites:
             await self._secrets(),
             ContinuousWrites.CERT_PATH,
         )
+
+    async def _hosts(self) -> list[str]:
+        """Return externally reachable hosts for the current application."""
+        reachable_hosts = self._literal_ip_hosts(
+            await get_reachable_unit_ips(self._ops_test, app=self._app)
+        )
+        # Prefer units that are already responding but fall back to all known unit IPs.
+        # By this way, writes can still retry through transient cluster recovery
+        # instead of failing on an empty host list.
+        if reachable_hosts:
+            return reachable_hosts
+
+        unit_ips = [unit.ip for unit in await get_application_units(self._ops_test, self._app)]
+        return self._literal_ip_hosts(unit_ips) or await get_application_unit_ips(
+            self._ops_test, app=self._app
+        )
+
+    @staticmethod
+    def _literal_ip_hosts(hosts: list[str]) -> list[str]:
+        """Keep only literal IPs so runner-side clients do not use in-cluster DNS names."""
+        result = []
+        for host in hosts:
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                continue
+            result.append(host)
+
+        return result
 
     @staticmethod
     async def _run(  # noqa: C901
