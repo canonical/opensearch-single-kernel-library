@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 # Keep the existing connect/read timeout used by http_request and reuse it
 # for both runner-side and in-unit K8s requests.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
+# Prefix the real response line with a unique marker so we can find it again
+# even if juju ssh prints extra noise before or after the JSON payload.
 _K8S_UNIT_HTTP_RESULT_PREFIX = "__k8s_unit_http_result__="
 
 
@@ -563,11 +566,14 @@ async def _find_k8s_unit_for_endpoint(
 ) -> Optional[Unit]:
     """Return the K8s unit matching the endpoint host, if any."""
     hostname = urlparse(endpoint).hostname
-    if not hostname or app != APP_NAME:
+    if not hostname:
         return None
 
     for unit in await get_application_units(ops_test, app):
-        if unit.machine_id == -1 and unit.ip == hostname:
+        # On K8s the pod hostname is the Juju short unit name, e.g. `opensearch-0`.
+        # We use that as the signal to run requests from inside the pod so TLS can
+        # use the pod DNS name rather than the external pod IP.
+        if unit.ip == hostname and unit.hostname == unit.short_name:
             return unit
 
     return None
@@ -575,6 +581,7 @@ async def _find_k8s_unit_for_endpoint(
 
 async def _http_request_from_k8s_unit(
     ops_test: OpsTest,
+    app: str,
     unit: Unit,
     method: str,
     endpoint: str,
@@ -588,11 +595,10 @@ async def _http_request_from_k8s_unit(
     extra_headers: Optional[Dict[str, any]] = None,
 ):
     """Run the HTTPS request from inside a K8s unit."""
-    parsed = urlparse(endpoint)
-    port = parsed.port or 9200
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
+    parsed_endpoint = urlparse(endpoint)
+    request_path = parsed_endpoint.path or "/"
+    if parsed_endpoint.query:
+        request_path = f"{request_path}?{parsed_endpoint.query}"
 
     headers = {}
     if json_resp:
@@ -605,76 +611,90 @@ async def _http_request_from_k8s_unit(
     if extra_headers:
         headers.update(extra_headers)
 
-    request_payload = (
+    request_body = (
         payload
         if isinstance(payload, str)
         else (json.dumps(payload) if isinstance(payload, dict) else None)
     )
-    # Pass only the request details into the unit. The unit-side script rebuilds
-    # the final URL from the unit FQDN so K8s TLS checks use the hostname that
-    # the certificate was issued for.
+    # Only ship the request inputs into the unit. The unit-side script rebuilds
+    # the final URL with the pod FQDN so TLS verification uses the DNS SAN from
+    # the certificate instead of the externally observed pod IP.
     script_payload = {
-        "ca_chain": admin_secrets["ca-chain"],
+        "scheme": parsed_endpoint.scheme or "https",
         "headers": headers,
-        "json_resp": json_resp,
-        "method": method.upper(),
-        "password": user_password or admin_secrets["password"],
-        "payload": request_payload,
-        "path": path,
-        "port": port,
-        "resp_status_code": resp_status_code,
-        "timeout": _HTTP_REQUEST_TIMEOUT,
-        "user": user,
+        "method": method,
+        "port": parsed_endpoint.port
+        or (443 if (parsed_endpoint.scheme or "https") == "https" else 80),
+        "path": request_path,
+        "body": request_body,
+        "timeout": list(_HTTP_REQUEST_TIMEOUT),
         "verify": verify,
+        "ca_chain": admin_secrets["ca-chain"],
+        "user": user,
+        "password": user_password or admin_secrets["password"],
     }
-    # Run a tiny requests client inside the unit. This
-    # avoids relying on the external runner to resolve in-cluster DNS
-    # names while still keeping normal CA and hostname verification.
-    remote_script = """
+    remote_script = f"""
+import base64
 import json
-import subprocess
+import socket
 import sys
 import tempfile
 
 import requests
 
-payload = json.loads(sys.argv[1])
-hostname = subprocess.check_output(["hostname", "-f"], text=True).strip()
+payload = json.loads(base64.b64decode(sys.argv[2]).decode())
 # Use the unit FQDN instead of the external pod IP so hostname verification
 # matches the DNS SANs present in the K8s certificate.
-url = f"https://{hostname}:{payload['port']}{payload['path']}"
+url = (
+    f"{{payload['scheme']}}://{{socket.getfqdn()}}:{{payload['port']}}{{payload['path']}}"
+)
 
 request_kwargs = {
-    "auth": (payload["user"], payload["password"]),
-    "headers": payload["headers"],
-    "method": payload["method"],
-    "timeout": tuple(payload["timeout"]),
-    "url": url,
+        "method": payload["method"],
+        "url": url,
+        "timeout": tuple(payload["timeout"]),
 }
-if payload["payload"] is not None:
-    request_kwargs["data"] = payload["payload"]
+if payload["headers"]:
+    request_kwargs["headers"] = payload["headers"]
+if payload["body"] is not None:
+    request_kwargs["data"] = payload["body"]
 
-if payload["verify"]:
-    with tempfile.NamedTemporaryFile(mode="w+") as chain:
+with tempfile.NamedTemporaryFile(mode="w+") as chain:
+    request_kwargs["verify"] = False
+    if payload["verify"]:
         chain.write(payload["ca_chain"])
         chain.flush()
         request_kwargs["verify"] = chain.name
-        response = requests.request(**request_kwargs)
-else:
-    request_kwargs["verify"] = False
-    response = requests.request(**request_kwargs)
 
-print("__k8s_unit_http_result__=" + json.dumps({"body": response.text, "status_code": response.status_code}))
-"""
-    return_code, stdout, stderr = await ops_test.juju(
-        "ssh",
-        f"{APP_NAME}/{unit.id}",
-        "python3",
-        "-c",
-        remote_script,
-        json.dumps(script_payload),
+    response = requests.request(
+        **request_kwargs,
+        auth=(payload["user"], payload["password"]),
     )
+
+print(
+    "{_K8S_UNIT_HTTP_RESULT_PREFIX}"
+    + json.dumps({{"body": response.text, "status_code": response.status_code}})
+)
+"""
+    # Encode both the helper script and its payload so `juju ssh` sends a single
+    # shell-safe command. This avoids the multiline `python3 -c ...` splitting
+    # issue that was previously causing the remote shell to execute `import`
+    # lines as separate shell commands.
+    remote_command = " ".join(
+        [
+            "python3",
+            "-c",
+            shlex.quote("import base64,sys;exec(base64.b64decode(sys.argv[1]).decode())"),
+            shlex.quote(base64.b64encode(remote_script.encode()).decode()),
+            shlex.quote(base64.b64encode(json.dumps(script_payload).encode()).decode()),
+        ]
+    )
+
+    return_code, stdout, stderr = await ops_test.juju("ssh", f"{app}/{unit.id}", remote_command)
     response = None
+    # juju ssh can print extra noise before or after the actual payload. The
+    # "sentinel" is the unique prefix above, so we scan for the one line that
+    # starts with it and only parse the remainder of that line as JSON.
     for line in reversed(stdout.splitlines()):
         if not line.startswith(_K8S_UNIT_HTTP_RESULT_PREFIX):
             continue
@@ -807,6 +827,7 @@ async def http_request(
         logger.info(f"Calling from {k8s_unit.name}: {method} - {endpoint}")
         return await _http_request_from_k8s_unit(
             ops_test,
+            app,
             k8s_unit,
             method,
             endpoint,

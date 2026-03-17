@@ -60,6 +60,11 @@ class ContinuousWrites:
         self._queue = None
         self._process = None
         self._initial_count = initial_count
+        # Keep the password/CA pair stable for the lifetime of the current
+        # client setup. During CA rotation the old CA can remain valid for a
+        # while, and refreshing secrets on every helper read can make this test
+        # trust the new CA before the node is serving it.
+        self._password: Optional[str] = None
 
     @retry(
         wait=wait_fixed(wait=5) + wait_random(0, 5),
@@ -89,7 +94,8 @@ class ContinuousWrites:
 
     async def update(self):
         """Update cluster related conf. Useful in cases such as scaling, pwd change etc."""
-        password = await self._secrets()
+        # the background writer should start using the latest Juju secrets.
+        password = await self._refresh_secrets()
         self._queue.put(
             SimpleNamespace(
                 hosts=await self._hosts(),
@@ -230,13 +236,24 @@ class ContinuousWrites:
         self._process.terminate()
         self._is_stopped = True
 
-    async def _secrets(self) -> str:
-        """Fetch secrets and return the password."""
+    async def _refresh_secrets(self) -> str:
+        """Fetch the latest secrets and refresh the CA file on disk."""
         secrets = await get_secrets(self._ops_test, app=self._app)
         with open(ContinuousWrites.CERT_PATH, "w") as chain:
             chain.write(secrets["ca-chain"])
 
-        return secrets["password"]
+        self._password = secrets["password"]
+        return self._password
+
+    async def _password_for_client(self) -> str:
+        """Return the cached password, refreshing secrets only when first needed."""
+        if self._password is None:
+            # The first client in a run seeds the local CA file. After that we
+            # reuse the cached value so count/stop methods do not silently switch
+            # trust roots in the middle of a CA-rotation assertion.
+            return await self._refresh_secrets()
+
+        return self._password
 
     async def _client(self, unit_ip: Optional[str] = None):
         """Build an opensearch client."""
@@ -247,7 +264,7 @@ class ContinuousWrites:
         return opensearch_client(
             hosts,
             "admin",
-            await self._secrets(),
+            await self._password_for_client(),
             ContinuousWrites.CERT_PATH,
         )
 
