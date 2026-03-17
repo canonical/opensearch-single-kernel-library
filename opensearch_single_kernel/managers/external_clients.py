@@ -148,13 +148,6 @@ class ExternalClientsManager(BaseManager):
         users[str(relation_id)] = user
         self.state.application.client_users_dict = users
 
-    def update_relation_credentials(
-        self, external_client: ExternalOpenSearchClient, username: str, password: str
-    ):
-        """Update the relation databag with credentials."""
-        external_client.username = username
-        external_client.password = password
-
     def update_all_external_clients_relation_endpoints(self, nodes: list[Node]) -> None:
         """Update the relation databags of all external clients with network endpoints."""
         for external_client in self.state.external_clients:
