@@ -2,7 +2,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Handler for TLS events."""
+"""Handler for plugins events."""
 
 import logging
 from typing import TYPE_CHECKING
@@ -30,7 +30,7 @@ class PluginEventsHandler(Object):
     """Events handler for OpenSearch plugin events"""
 
     def __init__(self, charm: "OpenSearchBaseCharm"):
-        super().__init__(charm, "plugins")
+        super().__init__(charm, "plugin_events")
         self.charm = charm
         self.framework.observe(
             self.charm.on[PEER_RELATION].relation_changed,

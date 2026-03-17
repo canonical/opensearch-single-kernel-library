@@ -13,7 +13,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from opensearch_single_kernel.common.constants import ObjectStorageType
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
-    OpenSearchHttpError,
 )
 from opensearch_single_kernel.core.models import ObjectStorageConfig
 from opensearch_single_kernel.core.state import ClusterState
@@ -131,6 +130,21 @@ class KeystoreManager(BaseManager):
         """Add a new file entry in the keystore."""
         self.workload.run_cmd(self.KEYSTORE, f"add-file {key} {filename} --force")
 
+    def put_notifications_plugin_smtp_credentials(
+        self, account_id: str, user: str | None, password: str | None
+    ) -> dict[str, str]:
+        """Build a smtp credential entries and put them in the keystore.
+
+        Returns:
+            built smtp credentials entries.
+        """
+        entries = {
+            f"opensearch.notifications.core.email.{account_id}.username": user or "",
+            f"opensearch.notifications.core.email.{account_id}.password": password or "",
+        }
+        self.put_entries(entries)
+        return entries
+
     def remove_entries(self, keys: list[str]) -> None:
         """Remove entries from the keystore."""
         self._create_if_needed()
@@ -153,7 +167,11 @@ class KeystoreManager(BaseManager):
         return self.workload.run_cmd(self.KEYSTORE, "list").splitlines()
 
     def reload(self) -> bool:
-        """Reload the keystore."""
+        """Reload the keystore.
+
+        Returns:
+            whether a reload was successful.
+        """
         self._create_if_needed()
         self.workload.run_cmd(self.KEYSTORE, "upgrade")
 
@@ -162,12 +180,8 @@ class KeystoreManager(BaseManager):
             logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
             return True
 
-        try:
-            response = self.opensearch_client.request("POST", "_nodes/reload_secure_settings")
-        except OpenSearchHttpError as e:
-            logger.error("Could not reload secure settings: %s", e)
+        if not self.opensearch_client.reload_secure_settings():
             return False
 
-        success = response.get("_nodes", {}).get("failed", -1) == 0
-        logger.debug("keystore reloaded: %s", success)
-        return success
+        logger.debug("Keystore reload successful")
+        return True

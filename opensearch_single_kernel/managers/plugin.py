@@ -16,7 +16,7 @@ import logging
 from ops import ModelError, SecretNotFoundError
 
 from opensearch_single_kernel.common.constants import Scope
-from opensearch_single_kernel.core.models import PluginConfigInfo
+from opensearch_single_kernel.core.models import PluginConfigInfo, SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -50,6 +50,31 @@ class PluginManager(BaseManager):
             plugin_config.add_cleanup_items(cleanup)
         plugins[label] = plugin_config
         state.plugin_config_info = plugins
+
+    def put_notifications_plugin_smtp_config(
+        self,
+        config: SmtpConfig,
+        credentials: dict[str, str],
+        store_secret: bool,
+        relation_name: str,
+    ) -> None:
+        """Add a notifications plugin SMTP config with credentials and secret (if store_secret)."""
+        cleanup = {
+            "keys": list(credentials.keys()),
+            "smtp_account_id": [config.smtp_account_id],
+        }
+        self.put_plugin_config(scope=Scope.UNIT, label=config.label, cleanup=cleanup)
+
+        if store_secret:
+            # leader stores secret for subclusters for per relation
+            self.store_plugin_secret(
+                content={
+                    "keys": credentials,
+                    "smtp_account_id": cleanup["smtp_account_id"],
+                },
+                label=config.label,
+                relation_name=relation_name,
+            )
 
     def remove_plugin_config(self, scope: Scope, label: str) -> None:
         """Removes plugin configuration information from peer relation data"""

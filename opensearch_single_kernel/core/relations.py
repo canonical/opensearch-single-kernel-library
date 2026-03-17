@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """Base classes for charm relations."""
+
 import enum
 import json
 import logging
@@ -235,20 +236,13 @@ class RelationState:
 
     def get_object(self, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
-        data = self.relation_data.get(key)
-        if data is None:
-            return None
-
-        return json.loads(data)
+        return json.loads(data) if (data := self.relation_data.get(key)) is not None else None
 
     def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
         """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
+        if merge and (stored := self.get_object(key)) is not None:
+            stored.update(value)
+            value = stored
 
         sorted_value = Model.sort_payload(value)
 

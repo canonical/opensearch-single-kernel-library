@@ -27,7 +27,7 @@ class KeystoreEventsHandler(Object):
         charm: "OpenSearchBaseCharm",
     ) -> None:
         """Initialize keystore events."""
-        super().__init__(charm, key="opensearch_keystore_events")
+        super().__init__(charm, key="keystore_events")
         self.charm = charm
 
         self.framework.observe(self.charm.reload_keystore_event, self._on_reload)

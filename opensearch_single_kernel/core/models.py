@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
@@ -33,6 +34,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
     PerformanceType,
+    SmtpTransportSecurity,
     StartMode,
     State,
 )
@@ -320,7 +322,8 @@ class OpenSearchProfile(ABC):
         """Get the JVM heap size in KB based on the memory requirements."""
         if self.memory_requirements.jvm_heap_percentage:
             return min(
-                int(self.memory_requirements.jvm_heap_percentage * mem_size), MAX_HEAP_SIZE_IN_KB
+                int(self.memory_requirements.jvm_heap_percentage * mem_size),
+                MAX_HEAP_SIZE_IN_KB,
             )
         return _1GB_IN_KB
 
@@ -394,9 +397,7 @@ class PluginConfigInfo(Model):
         """Merge items into cleanup dictionary avoiding duplicates."""
         for key, items in cleanup.items():
             current = self.cleanup.setdefault(key, [])
-            for item in items:
-                if item not in current:
-                    current.append(item)
+            self.cleanup[key] = sorted(list(set(current) | set(items)))
 
 
 # --- Backup related models ---
@@ -686,3 +687,24 @@ class ObjectStorageConfig(Model):
     s3: S3RelData | None = None
     azure: AzureRelData | None = None
     gcs: GcsRelData | None = None
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """SMTP-related config derived from relation data.
+
+    Attributes:
+        sender_email: From-address for the SMTP sender (relation smtp_sender).
+        smtp_account_id: OpenSearch config id for the SMTP account (e.g. smtp-88_smtp-account).
+        label: Plugin/config label for this relation (e.g. plugin-notifications-88).
+        group_id: OpenSearch config id for the recipient group (e.g. smtp-88_recipients).
+        channel_id: OpenSearch config id for the email channel (e.g. smtp-88_email-channel).
+        transport_security: SMTP transport security (none, start_tls, tls).
+    """
+
+    sender_email: str
+    smtp_account_id: str
+    label: str
+    group_id: str
+    channel_id: str
+    transport_security: SmtpTransportSecurity
