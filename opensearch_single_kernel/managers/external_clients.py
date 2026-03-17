@@ -13,7 +13,6 @@ from opensearch_single_kernel.common.constants import (
     KIBANA_SERVER_ROLE,
     KIBANA_SERVER_USER,
     OPENSEARCH_HTTP_PORT,
-    CertType,
     ExtraUserRolePermissions,
     Scope,
 )
@@ -105,7 +104,7 @@ class ExternalClientsManager(BaseManager):
         for perm_set in permissions["index_permissions"]:
             # If this isn't a set of admin permissions (which applies to all indices) then set it
             # to index.
-            if perm_set["index_patterns"] == []:
+            if perm_set["index_patterns"]:
                 perm_set["index_patterns"] = [index]
 
         return permissions
@@ -155,25 +154,6 @@ class ExternalClientsManager(BaseManager):
         """Update the relation databag with credentials."""
         external_client.username = username
         external_client.password = password
-
-    def update_relation_tls_info(
-        self, external_client: ExternalOpenSearchClient, ca_chain: str | None = None
-    ):
-        """Update the relation databag with TLS info."""
-        try:
-            # If the ca_chain=None, then we try to load the CA from the app-admin secret.
-            # If neither ca_chain nor the secret exists, we'll raise a KeyError.
-            _ch_chain = (
-                ca_chain
-                or self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val)["chain"]
-            )
-            external_client.tls_ca = _ch_chain
-        except AttributeError:
-            # cert doesn't exist - presumably we don't yet have a TLS relation.
-            logger.warning("unable to get ca_chain")
-            return
-        except TypeError:
-            raise KeyError("unable to get ca_chain")
 
     def update_all_external_clients_relation_endpoints(self, nodes: list[Node]) -> None:
         """Update the relation databags of all external clients with network endpoints."""
@@ -290,11 +270,7 @@ class ExternalClientsManager(BaseManager):
 
     @cached_property
     def version(self) -> str:
-        """Returns the version number of this opensearch instance.
-
-        Raises:
-            OpenSearchError if the GET request fails.
-        """
+        """Returns the version number of this opensearch instance."""
         # Will have a format similar to:
         # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
         result = self.workload.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null")

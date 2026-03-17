@@ -411,11 +411,6 @@ class ExternalOpenSearchClient(RelationState):
         return f"{self.relation_name}_{self.relation.id}"
 
     @property
-    def depart_flag(self) -> str:
-        """Get the depart flag key for this relation."""
-        return f"{self.relation_name}_{self.relation.id}_departing"
-
-    @property
     def version(self) -> str:
         """Get the OpenSearch version of the related client from relation databag."""
         return self.relation_data.get("version", "")
@@ -487,18 +482,6 @@ class ExternalOpenSearchClient(RelationState):
     def extra_user_roles(self, roles: str) -> None:
         """Set the extra user roles for this relation."""
         self.update({"extra-user-roles": roles})
-
-    def set_relation_departing(self) -> None:
-        """Set the relation departing flag in relation databag."""
-        self.update({self.depart_flag: "True"})
-
-    def is_relation_departing(self) -> bool:
-        """Check if the relation departing flag is set in relation databag."""
-        return self.relation_data.get(self.depart_flag, "") == "True"
-
-    def delete_relation_departing_flag(self) -> None:
-        """Delete the relation departing flag from relation databag."""
-        self.update({self.depart_flag: ""})
 
 
 class ClusterState(Object):

@@ -304,8 +304,6 @@ class VMWorkload(BaseWorkload):
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
 
-            logger.debug("%s:\n%s", command, output.stdout)
-
             if output.returncode != 0:
                 logger.debug(
                     "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout

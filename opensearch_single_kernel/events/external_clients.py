@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING
 
 from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
 
-from opensearch_single_kernel.common.constants import (
-    CLIENT_RELATION,
-)
+from opensearch_single_kernel.common.constants import CLIENT_RELATION, CertType, Scope
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchIndexError,
@@ -76,6 +74,10 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return
         external_client = self.charm.state.external_client_by_relation(event.relation)
+        if not external_client:
+            logger.error("No external client found for relation id %d", event.relation.id)
+            return
+
         if not validate_index_name(event.index):
             raise OpenSearchIndexError(f"invalid index name: {event.index}")
 
@@ -113,7 +115,9 @@ class ExternalClientsEventsHandler(Object):
         external_client.password = pwd
         external_client.index = event.index
         try:
-            self.charm.external_clients_manager.update_relation_tls_info(external_client)
+            external_client.tls_ca = self.charm.state.secrets.get_object(
+                Scope.APP, CertType.APP_ADMIN.val
+            )["chain"]
         except KeyError as e:
             logger.error("Failed to update relation TLS info: missing key %s", str(e))
             event.defer()
@@ -141,7 +145,6 @@ class ExternalClientsEventsHandler(Object):
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
-            event.defer()
             return
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.update_external_client_endpoints(external_client)
@@ -150,6 +153,8 @@ class ExternalClientsEventsHandler(Object):
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Check if this relation is being removed, and update the peer databag accordingly."""
+        if not self.charm.unit.is_leader():
+            return
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
@@ -160,25 +165,17 @@ class ExternalClientsEventsHandler(Object):
             self.update_external_client_endpoints(
                 external_client, omit_endpoints={departing_unit_ip}
             )
-        if event.departing_unit == self.charm.unit:
-            external_client.set_relation_departing()
-        if self.charm.unit.is_leader():
-            self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
-                external_client
-            )
+        self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
+            external_client
+        )
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle client relation-broken event."""
         if not self.charm.unit.is_leader():
             return
-
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
-            return
-        if external_client.is_relation_departing():
-            # This unit is being removed.
-            external_client.delete_relation_departing_flag()
             return
         # TODO: Handle upgrades
         # if self.charm.upgrade_in_progress:
