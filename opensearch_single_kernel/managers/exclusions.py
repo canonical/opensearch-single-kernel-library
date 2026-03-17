@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 class NodesExclusionsManager(BaseManager):
     """OpenSearch Nodes Exclusions Manager."""
 
-    CONFIG_YML = "opensearch.yml"
-
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "exclusions_manager"

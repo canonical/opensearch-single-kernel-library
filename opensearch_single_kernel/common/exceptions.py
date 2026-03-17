@@ -120,3 +120,7 @@ class OpenSearchListBackupsError(OpenSearchError):
 
 class OpenSearchRestoreBackupError(OpenSearchError):
     """Exception thrown when restoring a backup fails."""
+
+
+class OpenSearchInvalidStorageTypeError(OpenSearchError):
+    """Exception thrown when an invalid storage type is provided for backup/restore operations."""

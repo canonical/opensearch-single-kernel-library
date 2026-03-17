@@ -302,19 +302,7 @@ class VMWorkload(BaseWorkload):
             run_kwargs["input"] = stdin
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
-
-            # if the output is very long (e.g., list_cas with many CAs).
-
-            if len(output.stdout) > 1000:
-                logger.debug(
-                    f"{command} output is too long to display ({len(output.stdout)} characters)"
-                )
-                logger.debug(
-                    f"{command} output (truncated to 1000 chars):\n{output.stdout[:1000]}"
-                )
-            else:
-                logger.debug(f"{command}:\n{output.stdout}")
-
+            # Debug in case of error
             if output.returncode != 0:
                 logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)

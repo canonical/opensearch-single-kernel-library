@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Handler for OpenSearch Backup and Restore events."""
@@ -23,6 +23,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCreateBackupError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchInvalidStorageTypeError,
     OpenSearchListBackupsError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
@@ -131,8 +132,10 @@ class BackupEventsHandler(Object):
             self.charm.status.clear(CharmStatuses.BACKUP_RELATION_CONFLICT, app=True)
 
         # Get connection info
-        connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
-        if not connection_info:
+        try:
+            connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
+        except OpenSearchInvalidStorageTypeError as e:
+            logger.error(str(e))
             if self.charm.unit.is_leader():
                 self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return
@@ -283,13 +286,30 @@ class BackupEventsHandler(Object):
     ) -> None:
         """Verify that stored backup credentials are still valid."""
         object_storage_type = self.charm.state.storage_type
+        if not object_storage_type:
+            logger.warning(
+                "No object storage type could be determined for backup credentials verification."
+            )
+            return
         # Get connection info
-        connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
+        try:
+            connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
+        except OpenSearchInvalidStorageTypeError as e:
+            logger.error(str(e))
+            if self.charm.unit.is_leader():
+                self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            return
         # Get config using the connection info
-        object_storage_config = self.charm.backup_manager.storage_config_from_connection_info(
-            object_storage_type, connection_info
-        )
-        if not object_storage_type or not object_storage_config:
+        if not (
+            object_storage_config := self.charm.backup_manager.storage_config_from_connection_info(
+                object_storage_type, connection_info
+            )
+        ):
+            logger.warning(
+                "Object storage configuration not ready for backup credentials verification."
+            )
+            if self.charm.unit.is_leader():
+                self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return
 
         try:
@@ -408,13 +428,7 @@ class BackupEventsHandler(Object):
         object_storage_type = self.charm.state.storage_type
 
         if not object_storage_type:
-            if self.charm.unit.is_leader():
-                for status in (
-                    CharmStatuses.BACKUP_CREDENTIALS_INCORRECT,
-                    CharmStatuses.BACKUP_RELATION_CONFLICT,
-                    CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE,
-                ):
-                    self.charm.status.set(status, app=True)
+            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return "Missing relation with an object storage integrator."
 
         if object_storage_type == ObjectStorageType.CONFLICT:
@@ -452,9 +466,11 @@ class BackupEventsHandler(Object):
                     object_storage_type
                 ):
                     return "The opensearch repository could not be created yet."
+            except OpenSearchInvalidStorageTypeError as e:
+                logger.error(str(e))
+                return "Object storage credentials are invalid."
             except OpenSearchObjectStorageConfigValidationError:
-                if self.charm.unit.is_leader():
-                    self.charm.status.set(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
+                self.charm.status.set(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
@@ -482,16 +498,20 @@ class BackupEventsHandler(Object):
         self, object_storage_type: ObjectStorageType
     ) -> dict[str, str]:
         """Returns the storage connection info from the active relation.."""
-        if object_storage_type == ObjectStorageType.S3:
-            return self.s3_requirer.get_s3_connection_info() or {}
-
-        if object_storage_type == ObjectStorageType.AZURE:
-            return self.azure_requirer.get_azure_storage_connection_info() or {}
-
-        if object_storage_type == ObjectStorageType.GCS:
-            return (
-                self.gcs_requirer.get_storage_connection_info(self.charm.state.gcs_relation) or {}
-            )
+        match object_storage_type:
+            case ObjectStorageType.S3:
+                return self.s3_requirer.get_s3_connection_info() or {}
+            case ObjectStorageType.AZURE:
+                return self.azure_requirer.get_azure_storage_connection_info() or {}
+            case ObjectStorageType.GCS:
+                return (
+                    self.gcs_requirer.get_storage_connection_info(self.charm.state.gcs_relation)
+                    or {}
+                )
+            case _:
+                raise OpenSearchInvalidStorageTypeError(
+                    "Unsupported object storage type: %s" % object_storage_type
+                )
 
     def update_stored_credentials(
         self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
@@ -522,8 +542,6 @@ class BackupEventsHandler(Object):
         """Cleanup stored credentials and related config for a given object storage type."""
         try:
             self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type)
-            # Reload keystore after cleanup
-            self.charm.reload_keystore_event.emit()
         except OpenSearchCmdError as e:
             logger.warning(
                 "Keystore cleanup for %s failed after retries: %s",
@@ -533,7 +551,7 @@ class BackupEventsHandler(Object):
             return False
         try:
             # If the storage type is gcs, also remove the service account json file
-            if object_storage_type == ObjectStorageType.GCS or str(object_storage_type) == "gcs":
+            if object_storage_type == ObjectStorageType.GCS:
                 self.charm.backup_manager.remove_gcs_service_account_json()
         except OpenSearchFileOperationError as e:
             logger.warning("Failed to remove GCS service account JSON file during cleanup: %s", e)

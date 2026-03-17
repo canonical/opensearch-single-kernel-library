@@ -316,8 +316,8 @@ class OpenSearchClient:
             wait_strategy=wait_fixed(3),
         )
 
-        logger.info(f"Snapshot request submitted with backup-id: {snapshot_id}")
-        logger.debug(f"Create snapshot request with id: {snapshot_id} - response: {response}")
+        logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
+        logger.debug("Create snapshot request with id: %s - response: %s", snapshot_id, response)
 
         # This should always pass and is set for documentation purposes
         assert response.get("accepted") is True
@@ -459,7 +459,7 @@ class OpenSearchClient:
         host: str | None = None,
         alt_hosts: list[str] | None = None,
     ) -> dict[str, dict[str, str]]:
-        """Get all shards of all indexes in the cluster."""
+        """Get all shards of all indices in the cluster."""
         # Get cluster state
         cluster_state = self.request(
             "GET",

@@ -672,7 +672,7 @@ class ClusterState(Object):
             logger.debug("Deployment description missing; storage type unknown.")
             return None
 
-        if deployment_desc.typ in {DeploymentType.MAIN_ORCHESTRATOR}:
+        if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             active = [
                 r
                 for r in [
