@@ -217,14 +217,17 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
                 idle_period=IDLE_PERIOD,
             )
 
-        # Restart continuous writes so the client rebuilds itself with the
-        # latest secrets after CA rotation.
-        # We intentionally do not compare ContinuousWrites.CERT_PATH before and
-        # after restart because helper calls like count() can already refresh
-        # that temp file from Juju secrets before we read it here.
+        # Check if the continuous-writes client works with the new certs as well
+        with open(ContinuousWrites.CERT_PATH, "r") as f:
+            orig_cert = f.read()
         await c_writes.stop()
 
-        await c_writes.start()
+        await c_writes.start()  # Forces the Cont. Writes to pick the new cert
+
+        with open(ContinuousWrites.CERT_PATH, "r") as f:
+            new_cert = f.read()
+
+        assert orig_cert != new_cert, "New cert was not picked up"
         await asyncio.sleep(30)
         final_count = await c_writes.count()
         await c_writes.stop()

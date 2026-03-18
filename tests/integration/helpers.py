@@ -637,10 +637,11 @@ async def _http_request_from_k8s_unit(
 import base64
 import json
 import socket
+import ssl
 import sys
 import tempfile
-
-import requests
+import urllib.error
+import urllib.request
 
 payload = json.loads(base64.b64decode(sys.argv[2]).decode())
 # Use the unit FQDN instead of the external pod IP so hostname verification
@@ -649,37 +650,45 @@ url = (
     f"{{payload['scheme']}}://{{socket.getfqdn()}}:{{payload['port']}}{{payload['path']}}"
 )
 
-request_kwargs = {
-        "method": payload["method"],
-        "url": url,
-        "timeout": tuple(payload["timeout"]),
-}
-if payload["headers"]:
-    request_kwargs["headers"] = payload["headers"]
-if payload["body"] is not None:
-    request_kwargs["data"] = payload["body"]
+headers = payload["headers"] or {{}}
+if payload["user"] is not None and payload["password"] is not None:
+    basic_auth = base64.b64encode(
+        f"{{payload['user']}}:{{payload['password']}}".encode()
+    ).decode()
+    headers["Authorization"] = f"Basic {{basic_auth}}"
 
+request = urllib.request.Request(
+    url=url,
+    data=payload["body"].encode() if payload["body"] is not None else None,
+    headers=headers,
+    method=payload["method"],
+)
 with tempfile.NamedTemporaryFile(mode="w+") as chain:
-    request_kwargs["verify"] = False
+    ssl_context = ssl._create_unverified_context()
     if payload["verify"]:
         chain.write(payload["ca_chain"])
         chain.flush()
-        request_kwargs["verify"] = chain.name
+        ssl_context = ssl.create_default_context(cafile=chain.name)
 
-    response = requests.request(
-        **request_kwargs,
-        auth=(payload["user"], payload["password"]),
-    )
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(payload["timeout"]),
+            context=ssl_context,
+        ) as response:
+            status_code = response.getcode()
+            body = response.read().decode()
+    except urllib.error.HTTPError as error:
+        status_code = error.code
+        body = error.read().decode()
 
 print(
     "{_K8S_UNIT_HTTP_RESULT_PREFIX}"
-    + json.dumps({{"body": response.text, "status_code": response.status_code}})
+    + json.dumps({{"body": body, "status_code": status_code}})
 )
 """
-    # Encode both the helper script and its payload so `juju ssh` sends a single
-    # shell-safe command. This avoids the multiline `python3 -c ...` splitting
-    # issue that was previously causing the remote shell to execute `import`
-    # lines as separate shell commands.
+    # Encode both the helper script and its payload so juju ssh sends a single
+    # shell-safe command.
     remote_command = " ".join(
         [
             "python3",
@@ -692,8 +701,8 @@ print(
 
     return_code, stdout, stderr = await ops_test.juju("ssh", f"{app}/{unit.id}", remote_command)
     response = None
-    # juju ssh can print extra noise before or after the actual payload. The
-    # "sentinel" is the unique prefix above, so we scan for the one line that
+    # juju ssh can print extra noise before or after the actual payload.
+    # We can use a uniq prefix, so we scan for the one line that
     # starts with it and only parse the remainder of that line as JSON.
     for line in reversed(stdout.splitlines()):
         if not line.startswith(_K8S_UNIT_HTTP_RESULT_PREFIX):
@@ -925,6 +934,8 @@ def opensearch_client(
         # Integration tests already pass the current unit IPs explicitly.
         # Node sniffing asks OpenSearch for the full node list and
         # replaces the client's seed hosts with the discovered addresses.
+        # The discovered node endpoints are commonly pod IPs or cluster-local DNS names,
+        # and the runner outside Kubernetes cannot reliably use them.
         # Disable it here because it is brittle during CA rotation and can fail
         # before the client ever attempts the provided hosts.
         use_ssl=True,  # turn on ssl

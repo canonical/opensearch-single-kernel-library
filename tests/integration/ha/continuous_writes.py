@@ -2,7 +2,6 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 import asyncio
-import ipaddress
 import logging
 import os
 import time
@@ -25,13 +24,7 @@ from tenacity import (
     wait_random,
 )
 
-from ..helpers import (
-    get_application_unit_ips,
-    get_application_units,
-    get_reachable_unit_ips,
-    get_secrets,
-    opensearch_client,
-)
+from ..helpers import get_application_unit_ips, get_secrets, opensearch_client
 
 logging.getLogger("opensearch").setLevel(logging.ERROR)
 logging.getLogger("opensearchpy.helpers").setLevel(logging.ERROR)
@@ -60,11 +53,6 @@ class ContinuousWrites:
         self._queue = None
         self._process = None
         self._initial_count = initial_count
-        # Keep the password/CA pair stable for the lifetime of the current
-        # client setup. During CA rotation the old CA can remain valid for a
-        # while, and refreshing secrets on every helper read can make this test
-        # trust the new CA before the node is serving it.
-        self._password: Optional[str] = None
 
     @retry(
         wait=wait_fixed(wait=5) + wait_random(0, 5),
@@ -94,11 +82,10 @@ class ContinuousWrites:
 
     async def update(self):
         """Update cluster related conf. Useful in cases such as scaling, pwd change etc."""
-        # the background writer should start using the latest Juju secrets.
-        password = await self._refresh_secrets()
+        password = await self._secrets()
         self._queue.put(
             SimpleNamespace(
-                hosts=await self._hosts(),
+                hosts=await get_application_unit_ips(self._ops_test, app=self._app),
                 password=password,
             )
         )
@@ -236,66 +223,26 @@ class ContinuousWrites:
         self._process.terminate()
         self._is_stopped = True
 
-    async def _refresh_secrets(self) -> str:
-        """Fetch the latest secrets and refresh the CA file on disk."""
+    async def _secrets(self) -> str:
+        """Fetch secrets and return the password."""
         secrets = await get_secrets(self._ops_test, app=self._app)
         with open(ContinuousWrites.CERT_PATH, "w") as chain:
             chain.write(secrets["ca-chain"])
 
-        self._password = secrets["password"]
-        return self._password
-
-    async def _password_for_client(self) -> str:
-        """Return the cached password, refreshing secrets only when first needed."""
-        if self._password is None:
-            # The first client in a run seeds the local CA file. After that we
-            # reuse the cached value so count/stop methods do not silently switch
-            # trust roots in the middle of a CA-rotation assertion.
-            return await self._refresh_secrets()
-
-        return self._password
+        return secrets["password"]
 
     async def _client(self, unit_ip: Optional[str] = None):
         """Build an opensearch client."""
-        hosts = await self._hosts()
+        hosts = await get_application_unit_ips(self._ops_test, app=self._app)
         if unit_ip:
             hosts = [unit_ip]
 
         return opensearch_client(
             hosts,
             "admin",
-            await self._password_for_client(),
+            await self._secrets(),
             ContinuousWrites.CERT_PATH,
         )
-
-    async def _hosts(self) -> list[str]:
-        """Return externally reachable hosts for the current application."""
-        reachable_hosts = self._literal_ip_hosts(
-            await get_reachable_unit_ips(self._ops_test, app=self._app)
-        )
-        # Prefer units that are already responding but fall back to all known unit IPs.
-        # By this way, writes can still retry through transient cluster recovery
-        # instead of failing on an empty host list.
-        if reachable_hosts:
-            return reachable_hosts
-
-        unit_ips = [unit.ip for unit in await get_application_units(self._ops_test, self._app)]
-        return self._literal_ip_hosts(unit_ips) or await get_application_unit_ips(
-            self._ops_test, app=self._app
-        )
-
-    @staticmethod
-    def _literal_ip_hosts(hosts: list[str]) -> list[str]:
-        """Keep only literal IPs so runner-side clients do not use in-cluster DNS names."""
-        result = []
-        for host in hosts:
-            try:
-                ipaddress.ip_address(host)
-            except ValueError:
-                continue
-            result.append(host)
-
-        return result
 
     @staticmethod
     async def _run(  # noqa: C901
