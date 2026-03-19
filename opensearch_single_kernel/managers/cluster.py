@@ -124,7 +124,8 @@ class ClusterManager(BaseManager):
             # checks if peer cluster relation is set
             if not self.state.peer_cluster_relation:
                 deployment_state = DeploymentState(
-                    value=State.BLOCKED_WAITING_FOR_RELATION, message=PEER_CLUSTER_NO_RELATION
+                    value=State.BLOCKED_WAITING_FOR_RELATION,
+                    message=PEER_CLUSTER_NO_RELATION,
                 )
                 directives.append(Directive.SHOW_STATUS)
                 directives.append(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
@@ -677,3 +678,18 @@ class ClusterManager(BaseManager):
             except OpenSearchHttpError as e:
                 if e.response_code != 404:
                     continue
+
+    def get_prometheus_labels(self) -> dict[str, str] | None:
+        """Return the labels for the prometheus scrape."""
+        try:
+            if not (roles := self.roles):
+                return None
+            taggable_roles = GENERATED_ROLES + ["voting"]
+            roles = set(role if role in taggable_roles else "other" for role in roles)
+            roles = sorted(roles)
+            return {"roles": ",".join(roles)}
+        except KeyError:
+            # At very early stages of the deployment, "node.roles" may not be yet present
+            # in the opensearch.yml, nor APIs is responding. Therefore, we need to catch
+            # the KeyError here and report the appropriate response.
+            return None
