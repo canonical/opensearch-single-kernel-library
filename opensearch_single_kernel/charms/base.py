@@ -11,13 +11,18 @@ from time import time_ns
 import ops
 from ops import EventSource
 
-from opensearch_single_kernel.common.constants import PEER_RELATION, Scope, Substrates
+from opensearch_single_kernel.common.constants import (
+    PEER_RELATION,
+    Scope,
+    Substrates,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.events.cos import CosEventsHandler
 from opensearch_single_kernel.events.custom_events import (
     ReloadKeystoreEvent,
     RestartOpenSearch,
@@ -84,6 +89,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.external_clients_events = ExternalClientsEventsHandler(self)
         self.keystore_events = KeystoreEventsHandler(self)
         self.notifications_events = NotificationsEvents(self)
+        self.cos_events = CosEventsHandler(self)
 
     def trigger_peer_rel_changed(
         self,
