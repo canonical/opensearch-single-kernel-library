@@ -227,6 +227,7 @@ class BackupEventsHandler(Object):
         self.charm.status.clear(
             CharmStatuses.BACKUP_REPOSITORY_MISCONFIGURED,
             pattern=Status.CheckPattern.Interpolated,
+            app=True,
         )
         # TODO: Handle large deployments
         # Refresh peer relations
@@ -342,24 +343,37 @@ class BackupEventsHandler(Object):
 
     def _on_create_backup_action(self, event: ActionEvent) -> None:
         """Handler for create backup action event."""
-        if error_message := self._action_missing_pre_requisites():
+        object_storage_type = self.charm.state.storage_type
+
+        if not object_storage_type:
+            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            event.fail("Missing relation with an object storage integrator.")
+
+        if error_message := self._action_missing_pre_requisites(object_storage_type):
             event.fail(error_message)
             return
 
         self.charm.status.set(CharmStatuses.BACKUP_IN_PROGRESS)
         try:
-            try:
-                result = self.charm.backup_manager.create_snapshot()
-                event.set_results(result)
-            except OpenSearchCreateBackupError as e:
-                event.fail(str(e))
-                return
+            result = self.charm.backup_manager.create_snapshot()
+            event.set_results(result)
+        except OpenSearchCreateBackupError as e:
+            event.fail(str(e))
+            return
         finally:
             self.charm.status.clear(CharmStatuses.BACKUP_IN_PROGRESS)
 
     def _on_list_backups_action(self, event: ActionEvent) -> None:
         """Handler for list backups changes."""
-        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
+        object_storage_type = self.charm.state.storage_type
+
+        if not object_storage_type:
+            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            event.fail("Missing relation with an object storage integrator.")
+
+        if error_message := self._action_missing_pre_requisites(
+            object_storage_type, report_running_operations=False
+        ):
             event.fail(error_message)
             return
 
@@ -376,7 +390,16 @@ class BackupEventsHandler(Object):
     def _on_restore_action(self, event: ActionEvent) -> None:  # noqa C901
         """Handler for the restore action."""
         snapshot_id = event.params.get("backup-id")
-        if error_message := self._action_missing_pre_requisites():
+        object_storage_type = self.charm.state.storage_type
+
+        if not object_storage_type:
+            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            event.fail("Missing relation with an object storage integrator.")
+            return
+
+        if error_message := self._action_missing_pre_requisites(
+            object_storage_type, report_running_operations=False
+        ):
             event.fail(error_message)
             return
 
@@ -406,7 +429,9 @@ class BackupEventsHandler(Object):
             self.charm.status.clear(CharmStatuses.RESTORE_IN_PROGRESS)
 
     def _action_missing_pre_requisites(  # noqa C901
-        self, report_running_operations: bool = True
+        self,
+        object_storage_type: ObjectStorageType,
+        report_running_operations: bool = True,
     ) -> str | None:
         """Compute the missing prerequisites for running a snapshot/restore action.
 
@@ -424,12 +449,6 @@ class BackupEventsHandler(Object):
         # TODO: Handle upgrades
         # if self.charm.upgrade_in_progress:
         #    return "Backup/Restore operations not supported while upgrade in-progress."
-
-        object_storage_type = self.charm.state.storage_type
-
-        if not object_storage_type:
-            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
-            return "Missing relation with an object storage integrator."
 
         if object_storage_type == ObjectStorageType.CONFLICT:
             return "Conflict: more than one object storage integrators integrated."
@@ -470,7 +489,6 @@ class BackupEventsHandler(Object):
                 logger.error(str(e))
                 return "Object storage credentials are invalid."
             except OpenSearchObjectStorageConfigValidationError:
-                self.charm.status.set(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."

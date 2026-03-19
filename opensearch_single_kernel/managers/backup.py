@@ -87,7 +87,7 @@ class BackupManager(BaseManager):
         except ValidationError as e:
             raise OpenSearchObjectStorageConfigValidationError(e) from e
         return (
-            ObjectStorageConfig(**{object_storage_type.val.lower(): rel_data})
+            ObjectStorageConfig(**{object_storage_type.value.lower(): rel_data})
             if rel_data
             else None
         )
@@ -109,7 +109,7 @@ class BackupManager(BaseManager):
         if (
             not config
             or (
-                storage_type == ObjectStorageType.S3.val
+                storage_type == ObjectStorageType.S3
                 and (not config.s3 or not config.s3.credentials)
             )
             or (
@@ -343,7 +343,7 @@ class BackupManager(BaseManager):
             )
         except OpenSearchHttpError as e:
             logger.error("Could not create a new snapshot: %s", e)
-            raise OpenSearchCreateBackupError(f"Backup request failed with: {str(e)}")
+            raise OpenSearchCreateBackupError("Backup request failed with: %s" % str(e))
 
         # Fetch the new snapshot for sanity check
         try:
@@ -356,7 +356,9 @@ class BackupManager(BaseManager):
             return {"backup-id": snapshot_id, "status": status}
         except OpenSearchHttpError as e:
             logger.error("Unknown state for snapshot %s: %s", snapshot_id, e)
-            raise OpenSearchCreateBackupError(f"Unknown state for backup {snapshot_id}: {str(e)}")
+            raise OpenSearchCreateBackupError(
+                "Unknown state for backup %s: %s" % (snapshot_id, str(e))
+            )
 
     def list_snapshots(self, output_format: str) -> dict[str, str]:
         """List snapshots in the repository for the given storage type.
@@ -377,7 +379,7 @@ class BackupManager(BaseManager):
             )
         except OpenSearchHttpError as e:
             logger.error("Could not fetch the list of snapshots: %s", e)
-            raise OpenSearchListBackupsError(f"Backup request failed with: {str(e)}")
+            raise OpenSearchListBackupsError("Backup request failed with: %s" % str(e))
 
         if output_format == "json":
             return {"backups": json.dumps(snapshots)}
@@ -419,11 +421,11 @@ class BackupManager(BaseManager):
                 )
             ):
                 logger.error("Backup %s not found", snapshot_id)
-                raise OpenSearchRestoreBackupError(f"Backup {snapshot_id} not found.")
+                raise OpenSearchRestoreBackupError("Backup %s not found." % snapshot_id)
         except OpenSearchHttpError as e:
             logger.error("Backup %s could not be fetched. Error: \n%s", snapshot_id, e)
             raise OpenSearchRestoreBackupError(
-                f"Backup {snapshot_id} could not be fetched. Error: {str(e)}."
+                "Backup %s could not be fetched. Error: %s." % (snapshot_id, str(e))
             )
 
         # close indices that were snapshotted if they still exist, so they can be restored
@@ -435,10 +437,11 @@ class BackupManager(BaseManager):
             )
             if indices_failed_to_close:
                 raise OpenSearchRestoreBackupError(
-                    f"Failed to close {len(indices_failed_to_close)} open indices. Check logs for details."
+                    "Failed to close %d open indices. Check logs for details."
+                    % len(indices_failed_to_close)
                 )
         except OpenSearchHttpError as e:
-            raise OpenSearchRestoreBackupError(f"Failed to close open indices. Error: {str(e)}.")
+            raise OpenSearchRestoreBackupError("Failed to close open indices. Error: %s." % str(e))
 
         # start the restore
         logger.info("Starting restore of snapshot %s.", snapshot_id)
@@ -505,7 +508,6 @@ class BackupManager(BaseManager):
         Returns:
             bool: True if an operation is in progress, False otherwise.
         """
-        return (
-            self.opensearch_client.is_snapshot_in_progress()
-            or self.opensearch_client.is_restore_in_progress()
-        )
+        return self.opensearch_client.is_snapshot_in_progress(
+            self.alt_hosts
+        ) or self.opensearch_client.is_restore_in_progress(self.alt_hosts)
