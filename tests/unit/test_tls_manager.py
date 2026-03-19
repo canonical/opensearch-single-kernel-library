@@ -862,7 +862,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     # Old CA cert is saved with corresponding alias, new CA cert added to keystore
     # extra commands are expected due to post-write permission/ownership normalization.
-    assert run_cmd.call_count == 5
+    assert run_cmd.call_count == (6 if substrate == "vm" else 5)
     assert any(
         re.search(r"keytool -changealias -alias ca-0 -destalias old-ca-0", call.args[0])
         for call in run_cmd.call_args_list
@@ -1738,7 +1738,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
     if leader:
         # extra commands are expected due to post-write permission/ownership normalization.
-        assert run_cmd.call_count == (5 if substrate == "vm" else 11)
+        assert run_cmd.call_count == (6 if substrate == "vm" else 11)
         if substrate == "vm":
             assert any(
                 "sudo chown snap_daemon:root "
