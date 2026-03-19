@@ -70,11 +70,10 @@ class CharmStatuses(Enum):
     WAITING_TO_START = WaitingStatus("Waiting for OpenSearch to start...")
 
     # Client
-    NEW_INDEX_REQUESTED = MaintenanceStatus("new index {index} requested")
-    INDEX_CREATION_FAILED = BlockedStatus(
-        "failed to create {index} index - deferring index-requested event..."
-    )
-    USER_CREATION_FAILED = BlockedStatus("failed to create users for {rel_name} relation {id}")
+    NEW_INDEX_REQUESTED = MaintenanceStatus("New index {index} requested")
+    INDEX_CREATION_FAILED = BlockedStatus("Failed to create {index} index - see the logs...")
+    INVALID_INDEX_NAME = BlockedStatus("Invalid index name: {index}")
+    USER_CREATION_FAILED = BlockedStatus("Failed to create users for {rel_name} relation {id}")
 
     # Stop
     SERVICE_IS_STOPPING = WaitingStatus("The OpenSearch service is stopping.")

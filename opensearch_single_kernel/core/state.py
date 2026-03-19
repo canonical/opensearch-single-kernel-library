@@ -371,8 +371,7 @@ class OpenSearchApplication(RelationState):
     @property
     def client_users_dict(self) -> dict[str, str]:
         """Get the client relation users dict from application databag."""
-        users_dict = self.get_object("client_relation_users") or {}
-        return users_dict
+        return self.get_object("client_relation_users") or {}
 
     @client_users_dict.setter
     def client_users_dict(self, users_dict: dict[str, str]):

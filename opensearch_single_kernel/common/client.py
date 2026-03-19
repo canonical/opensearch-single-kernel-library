@@ -23,9 +23,9 @@ from tenacity import (
 from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.constants import (
-    ROLE_ENDPOINT,
-    ROLESMAPPING_ENDPOINT,
     USER_ENDPOINT,
+    USER_ROLE_ENDPOINT,
+    USER_ROLESMAPPING_ENDPOINT,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import App, Node
@@ -71,7 +71,7 @@ class OpenSearchClient:
             else:
                 raise e
 
-    def create_role(
+    def create_user_role(
         self,
         role_name: str,
         permissions: dict[str, str] | None = None,
@@ -95,7 +95,7 @@ class OpenSearchClient:
         """
         resp = self.request(
             "PUT",
-            f"{ROLE_ENDPOINT}/{role_name}",
+            f"{USER_ROLE_ENDPOINT}/{role_name}",
             payload={**(permissions or {}), **(action_groups or {})},
         )
 
@@ -107,7 +107,7 @@ class OpenSearchClient:
 
         return resp
 
-    def remove_role(self, role_name: str) -> dict[str, Any]:
+    def remove_user_role(self, role_name: str) -> dict[str, Any]:
         """Remove the given role from opensearch distribution.
 
         Args:
@@ -120,7 +120,7 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
+            resp = self.request("DELETE", f"{USER_ROLE_ENDPOINT}/{role_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -224,7 +224,7 @@ class OpenSearchClient:
 
         return resp
 
-    def create_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+    def create_user_role_mapping(self, role: str, mapped_users: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 
         Args:
@@ -237,7 +237,7 @@ class OpenSearchClient:
         try:
             resp = self.request(
                 "PUT",
-                f"{ROLESMAPPING_ENDPOINT}/{role}",
+                f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
                 payload={"users": mapped_users, "backend_roles": [role]},
             )
         except OpenSearchHttpError as e:
@@ -249,7 +249,7 @@ class OpenSearchClient:
         ):
             raise OpenSearchHttpError(f"creating role mapping {role} failed")
 
-    def remove_role_mapping(self, role: str) -> None:
+    def remove_user_role_mapping(self, role: str) -> None:
         """Remove the given role mapping if it exists.
 
         Args:
@@ -259,7 +259,7 @@ class OpenSearchClient:
             OpenSearchHttpError: If the request fails, or if role is empty
         """
         try:
-            resp = self.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
+            resp = self.request("DELETE", f"{USER_ROLESMAPPING_ENDPOINT}/{role}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 resp = {

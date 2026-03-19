@@ -314,8 +314,7 @@ class OpenSearchEventsHandler(Object):
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
-        deployment_desc = self.charm.state.application.deployment_desc
-        if not deployment_desc:
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
 
@@ -349,8 +348,8 @@ class OpenSearchEventsHandler(Object):
         if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-            except OpenSearchHttpError:
-                logger.error("unable to get nodes")
+            except OpenSearchHttpError as e:
+                logger.error("unable to get nodes %s", str(e))
                 nodes = []
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
@@ -520,8 +519,8 @@ class OpenSearchEventsHandler(Object):
                     self.charm.internal_users_manager.put_or_update_internal_user_leader(
                         user, update=False
                     )
-        except OpenSearchUserMgmtError:
-            logger.error("An error occurred while updating internal user")
+        except OpenSearchUserMgmtError as e:
+            logger.error("An error occurred while updating internal user %s", str(e))
             event.defer()
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
@@ -1171,8 +1170,8 @@ class OpenSearchEventsHandler(Object):
             if self.charm.unit.is_leader():
                 try:
                     nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-                except OpenSearchHttpError:
-                    logger.error("unable to get nodes")
+                except OpenSearchHttpError as e:
+                    logger.error("unable to get nodes: %s", str(e))
                     nodes = []
                 self.charm.external_clients_manager.update_relation_endpoints(
                     external_client, nodes

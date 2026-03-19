@@ -284,5 +284,5 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
 
 # Endpoints
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
-ROLE_ENDPOINT = "/_plugins/_security/api/roles"
-ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
+USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"

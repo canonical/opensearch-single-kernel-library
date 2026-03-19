@@ -11,8 +11,8 @@ from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepar
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, CertType, Scope
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchHttpError,
-    OpenSearchIndexError,
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
@@ -73,13 +73,15 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up() or not event.index:
             event.defer()
             return
-        external_client = self.charm.state.external_client_by_relation(event.relation)
-        if not external_client:
+        if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
         if not validate_index_name(event.index):
-            raise OpenSearchIndexError(f"invalid index name: {event.index}")
+            self.charm.status.set(
+                CharmStatuses.INVALID_INDEX_NAME, dynamic_params={"index": event.index}
+            )
+            return
 
         self.charm.status.set(
             CharmStatuses.NEW_INDEX_REQUESTED, dynamic_params={"index": event.index}
@@ -109,8 +111,12 @@ class ExternalClientsEventsHandler(Object):
                 dynamic_params={"rel_name": CLIENT_RELATION, "id": event.relation.id},
             )
             return
-
-        external_client.version = self.charm.external_clients_manager.version
+        try:
+            external_client.version = self.charm.external_clients_manager.version
+        except OpenSearchCmdError as e:
+            logger.error("Failed to update relation version info: %s", str(e))
+            event.defer()
+            return
         external_client.username = username
         external_client.password = pwd
         external_client.index = event.index
@@ -194,8 +200,8 @@ class ExternalClientsEventsHandler(Object):
         if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-            except OpenSearchHttpError:
-                logger.error("unable to get nodes")
+            except OpenSearchHttpError as e:
+                logger.error("unable to get nodes %s", str(e))
                 nodes = []
             self.charm.external_clients_manager.update_relation_endpoints(
                 external_client, nodes, omit_endpoints=omit_endpoints

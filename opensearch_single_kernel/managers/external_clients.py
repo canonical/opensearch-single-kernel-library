@@ -121,7 +121,7 @@ class ExternalClientsManager(BaseManager):
             OpenSearchUserMgmtError: In case of role creation or user creation error.
         """
         try:
-            self.opensearch_client.create_role(role_name=user, permissions=permissions)
+            self.opensearch_client.create_user_role(role_name=user, permissions=permissions)
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
@@ -140,7 +140,7 @@ class ExternalClientsManager(BaseManager):
             raise OpenSearchUserMgmtError(e)
 
         try:
-            self.opensearch_client.create_role_mapping(
+            self.opensearch_client.create_user_role_mapping(
                 user, self.state.get_relation_mapped_users(user)
             )
         except OpenSearchHttpError as e:
@@ -222,12 +222,12 @@ class ExternalClientsManager(BaseManager):
                     logger.error("failed to remove user %s", username)
 
                 try:
-                    self.opensearch_client.remove_role(username)
+                    self.opensearch_client.remove_user_role(username)
                 except OpenSearchHttpError:
                     logger.error("failed to remove role %s", username)
 
                 try:
-                    self.opensearch_client.remove_role_mapping(username)
+                    self.opensearch_client.remove_user_role_mapping(username)
                 except OpenSearchHttpError:
                     logger.error("failed to remove role mapping for %s", username)
 
@@ -250,7 +250,7 @@ class ExternalClientsManager(BaseManager):
             )
         users = self.state.application.client_users_dict
         for _, user in users.items():
-            self.opensearch_client.create_role_mapping(
+            self.opensearch_client.create_user_role_mapping(
                 user, self.state.get_relation_mapped_users(user)
             )
 
