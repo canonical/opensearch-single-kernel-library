@@ -125,6 +125,7 @@ def store_ca(
         store_path=store_path,
         ca=ca,
         keep_previous=keep_previous,
+        snap_user_with_write_permission=True,
         add_read_perm=True,
         use_sudo=use_sudo,
         keytool_cmd=keytool_cmd,
