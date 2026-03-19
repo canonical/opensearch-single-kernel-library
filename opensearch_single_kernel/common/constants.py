@@ -172,6 +172,7 @@ SYSTEM_INDICES = {
 
 # OpenSearch default port
 OPENSEARCH_HTTP_PORT = 9200
+COS_PORT = "9200"
 
 # OpenSearch storage name
 OPENSEARCH_DATA_STORAGE_NAME = "opensearch-data"
@@ -186,6 +187,7 @@ PEER_CLUSTER_RELATION = "peer-cluster"
 S3_RELATION = "s3-credentials"
 AZURE_RELATION = "azure-credentials"
 GCS_RELATION = "gcs-credentials"
+COS_RELATION = "cos-agent"
 
 
 # Paths
