@@ -104,7 +104,7 @@ class ExternalClientsManager(BaseManager):
         for perm_set in permissions["index_permissions"]:
             # If this isn't a set of admin permissions (which applies to all indices) then set it
             # to index.
-            if perm_set["index_patterns"]:
+            if not perm_set["index_patterns"]:
                 perm_set["index_patterns"] = [index]
 
         return permissions
