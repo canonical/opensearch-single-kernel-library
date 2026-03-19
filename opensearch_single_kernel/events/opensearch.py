@@ -456,6 +456,7 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchUserMgmtError as e:
                 logger.error("Failed to update relations roles mapping: %s", e)
                 event.defer()
+                return
 
         if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
             logger.debug(
@@ -522,6 +523,7 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchUserMgmtError as e:
             logger.error("An error occurred while updating internal user %s", str(e))
             event.defer()
+            return
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 

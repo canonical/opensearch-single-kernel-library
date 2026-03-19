@@ -130,7 +130,6 @@ class OpenSearchClient:
             else:
                 raise e
 
-        logger.debug(resp)
         if resp.get("status") != "OK":
             raise OpenSearchHttpError(f"removing role {role_name} failed")
 

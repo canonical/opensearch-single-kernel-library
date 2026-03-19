@@ -44,7 +44,7 @@ class ExternalClientsManager(BaseManager):
         external_client: ExternalOpenSearchClient,
         index: str,
         extra_user_roles: str | None = None,
-    ) -> tuple[str, str] | None:
+    ) -> tuple[str, str]:
         """Creates necessary opensearch users and permissions for this relation.
 
         Args:

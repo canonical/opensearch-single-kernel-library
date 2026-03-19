@@ -110,6 +110,7 @@ class ExternalClientsEventsHandler(Object):
                 CharmStatuses.USER_CREATION_FAILED,
                 dynamic_params={"rel_name": CLIENT_RELATION, "id": event.relation.id},
             )
+            event.defer()
             return
         try:
             external_client.version = self.charm.external_clients_manager.version
@@ -173,6 +174,16 @@ class ExternalClientsEventsHandler(Object):
             )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
             external_client
+        )
+        # Clear old statuses when the relation is departed
+        self.charm.status.clear(
+            CharmStatuses.NEW_INDEX_REQUESTED, pattern=Status.CheckPattern.Interpolated
+        )
+        self.charm.status.clear(
+            CharmStatuses.INDEX_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
+        )
+        self.charm.status.clear(
+            CharmStatuses.USER_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
         )
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
