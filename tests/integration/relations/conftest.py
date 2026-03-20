@@ -27,9 +27,9 @@ async def ops_test_microk8s(
     Returns:
         OpsTest object with MicroK8s connection and Juju model.
     """
-    model_name = f"{ops_test.model_name}-uk8s"
+    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
     request.config.option.controller = ops_test.controller_name
-    request.config.option.cloud = "uk8s"
+    request.config.option.cloud = MICROK8S_CLOUD_NAME
     request.config.option.model = model_name
     request.config.option.model_alias = model_name
     ops_res = OpsTest(request, tmp_path_factory)
@@ -58,7 +58,7 @@ async def microk8s_model(ops_test: OpsTest) -> AsyncGenerator[Model, Any]:
     Returns:
         Connected Juju model.
     """
-    model_name = f"{ops_test.model_name}-uk8s"
+    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
     controller = Controller()
     await controller.connect()
     if model_name in await controller.list_models():

@@ -14,7 +14,15 @@ from ops import (
     RelationDepartedEvent,
 )
 
-from opensearch_single_kernel.common.constants import OAUTH_RELATION, CertType, Scope
+from opensearch_single_kernel.common.constants import (
+    OAUTH_CLIENT_AUDIENCE,
+    OAUTH_CLIENT_GRANT_TYPES,
+    OAUTH_CLIENT_REDIRECT_URI,
+    OAUTH_CLIENT_SCOPE,
+    OAUTH_RELATION,
+    CertType,
+    Scope,
+)
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.models import DeploymentType
@@ -38,10 +46,10 @@ class OAuthEventsHandler(Object):
 
         # NOTE: Placeholder config options, not really needed by Opensearch
         client_config = ClientConfig(
-            audience=["opensearch"],
-            redirect_uri="http://opensearch.local",
-            scope="openid email profile",
-            grant_types=["client_credentials"],
+            audience=OAUTH_CLIENT_AUDIENCE,
+            redirect_uri=OAUTH_CLIENT_REDIRECT_URI,
+            scope=OAUTH_CLIENT_SCOPE,
+            grant_types=OAUTH_CLIENT_GRANT_TYPES,
         )
         self.oauth = OAuthRequirer(self.charm, client_config, relation_name=OAUTH_RELATION)
         self.framework.observe(

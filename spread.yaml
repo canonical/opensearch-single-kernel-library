@@ -135,7 +135,7 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* ]]
+  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_SUITE == *"oauth"*]]
   then
     # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
     # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
@@ -162,6 +162,12 @@ prepare: |
   if [[ $SPREAD_SUITE == *"vm"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
+    if [[ $SPREAD_SUITE == *"oauth"* ]]
+    then
+      /snap/bin/juju add-k8s uk8s --client --controller $(/snap/bin/juju show-controller | yq "keys | .[0]")
+      # microk8s config | juju add-k8s uk8s --client
+      # juju add-model --controller concierge-lxd testing-uk8s
+    fi
   fi
 
   if [[ $SPREAD_SUITE == *"k8s"* ]]
