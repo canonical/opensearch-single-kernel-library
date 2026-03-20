@@ -135,7 +135,7 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_SUITE == *"oauth"*]]
+  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_SUITE == *"oauth"* ]]
   then
     # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
     # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75

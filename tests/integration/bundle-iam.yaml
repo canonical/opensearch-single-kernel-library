@@ -90,3 +90,4 @@ relations:
   - [identity-platform-login-ui-operator:kratos-info, kratos:kratos-info]
   - [traefik-admin:certificates, self-signed-certificates:certificates]
   - [traefik-public:certificates, self-signed-certificates:certificates]
+
