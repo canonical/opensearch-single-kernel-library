@@ -87,6 +87,10 @@ class OpenSearchExclusionsException(OpenSearchError):
     """Exception class for all Voting/Allocation exclusions related exceptions."""
 
 
+class OpenSearchIndexError(OpenSearchError):
+    """Exception thrown when an opensearch index is invalid."""
+
+
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
 
