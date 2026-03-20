@@ -61,8 +61,9 @@ class PeerLockManager(BaseManager):
             self.refresh_lock()
 
         if self._unit_with_lock != self.state.unit_name:
+
             logger.debug(
-                f"[Node lock] Not acquired. Unit with peer databag lock: {self._unit_with_lock}"
+                "[Node lock] Not acquired. Unit with peer databag lock: %s", self._unit_with_lock
             )
             return False
 
@@ -204,7 +205,7 @@ class PeerLockManager(BaseManager):
         for unit in (self.state.server.unit, *self._relation.units):
             if self._unit_requested_lock(unit):
                 self._unit_with_lock = format_unit_name(unit, app=deployment_desc.app)
-                logger.debug(f"[Node lock] (leader) granted peer lock to {unit.name=}")
+                logger.debug("[Node lock] (leader) granted peer lock to %s", unit.name)
                 break
         else:
             logger.debug("[Node lock] (leader) cleared peer lock")
@@ -288,7 +289,8 @@ class LockManager(PeerLockManager):
             except OpenSearchHttpError:
                 logger.exception("Error getting OpenSearch nodes")
                 return False
-            logger.debug(f"[Node lock] Opensearch {online_nodes=}")
+
+            logger.debug("[Node lock] Opensearch %s", online_nodes)
             assert online_nodes > 0
             try:
                 unit = self.unit_with_lock(host)
@@ -380,7 +382,7 @@ class LockManager(PeerLockManager):
 
             if unit:
                 # Another unit has lock
-                logger.debug(f"[Node lock] Not acquired. Unit with opensearch lock: {unit}")
+                logger.debug("[Node lock] Not acquired. Unit with opensearch lock: %s", unit)
                 return False
 
             assert online_nodes == 1
@@ -461,7 +463,9 @@ class LockManager(PeerLockManager):
             indices = self.opensearch_client.get_indices(host, alt_hosts)
             if self.OPENSEARCH_INDEX in indices:
                 logger.debug(
-                    f"{self.OPENSEARCH_INDEX} already created. Skipping creation attempt. List:{indices}"
+                    "%s already created. Skipping creation attempt. List:%s",
+                    self.OPENSEARCH_INDEX,
+                    indices,
                 )
                 if self.state.application.app.planned_units() > 1:
                     self.opensearch_client.request(

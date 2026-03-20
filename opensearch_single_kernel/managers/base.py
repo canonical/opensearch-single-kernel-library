@@ -3,8 +3,9 @@
 # See LICENSE file for licensing details.
 
 """Base OpenSearch manager."""
+import logging
 import random
-from typing import List, Optional
+from typing import Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
@@ -12,6 +13,8 @@ from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
 
 
 class BaseManager:
@@ -34,7 +37,7 @@ class BaseManager:
         )
 
     @property
-    def alt_hosts(self) -> Optional[List[str]]:
+    def alt_hosts(self) -> Optional[list[str]]:
         """Return an alternative host (of another node)in case the current is offline."""
         all_units_ips = self.state.units_ips
         all_hosts = list(all_units_ips.values())
