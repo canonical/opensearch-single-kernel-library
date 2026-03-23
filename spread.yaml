@@ -159,7 +159,7 @@ prepare: |
     microk8s start
   fi
 
-  if [[ $SPREAD_SUITE == *"k8s"* ]]
+  if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
     concierge prepare --trace -c concierge-microk8s.yaml
     # microk8s config | juju add-k8s my-k8s --client
