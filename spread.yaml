@@ -159,6 +159,14 @@ prepare: |
     microk8s start
   fi
 
+  if [[ $SPREAD_SUITE == *"k8s"* ]]
+  then
+    concierge prepare --trace -c concierge-microk8s.yaml
+    # microk8s config | juju add-k8s my-k8s --client
+    # juju bootstrap my-k8s concierge-microk8s
+    # juju add-model --controller concierge-microk8s testing
+  fi
+
   if [[ $SPREAD_SUITE == *"vm"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
@@ -168,14 +176,6 @@ prepare: |
       # microk8s config | juju add-k8s uk8s --client
       # juju add-model --controller concierge-lxd testing-uk8s
     fi
-  fi
-
-  if [[ $SPREAD_SUITE == *"k8s"* ]]
-  then
-    concierge prepare --trace -c concierge-microk8s.yaml
-    # microk8s config | juju add-k8s my-k8s --client
-    # juju bootstrap my-k8s concierge-microk8s
-    # juju add-model --controller concierge-microk8s testing
   fi
 
   # Install charmcraft & pipx (on lxd-vm backend)
