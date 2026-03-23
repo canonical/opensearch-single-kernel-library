@@ -172,6 +172,8 @@ prepare: |
     concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
     if [[ $SPREAD_TASK == *"oauth"* ]]
     then
+      mkdir -p ~/.kube
+      microk8s.kubectl config view --raw > ~/.kube/config
       /snap/bin/juju add-k8s uk8s --client --controller $(/snap/bin/juju show-controller | yq "keys | .[0]")
       # microk8s config | juju add-k8s uk8s --client
       # juju add-model --controller concierge-lxd testing-uk8s
