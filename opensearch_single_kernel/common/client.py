@@ -29,7 +29,6 @@ from opensearch_single_kernel.common.constants import (
     USER_ROLE_ENDPOINT,
     USER_ROLESMAPPING_ENDPOINT,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
@@ -616,7 +615,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.error("Error reloading TLS certificates via API: %s", str(e))
+            logger.error(f"Error reloading TLS certificates via API: {e}")
             raise
 
     def get_allocation_explain(

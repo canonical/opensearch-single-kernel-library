@@ -587,13 +587,13 @@ class ClusterManager(BaseManager):
     @property
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
+        if self.state.application.deployment_desc is None:
+            return self.yaml_setter.load("opensearch.yml")["node.roles"]
+
         try:
             return self.opensearch_client.get_roles_by_unit_name(
                 self.state.unit_name, self.alt_hosts
             )
-            if self.state.application.deployment_desc is None:
-                return self.yaml_setter.load("opensearch.yml")["node.roles"]
-            return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 

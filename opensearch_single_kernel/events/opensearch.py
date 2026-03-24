@@ -29,7 +29,6 @@ from ops.pebble import ConnectionError as PebbleConnectionError
 from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
     CONTAINER_NAME,
-    COS_USER,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
@@ -571,9 +570,8 @@ class OpenSearchEventsHandler(Object):
 
         # User config is currently in a default state, which contains multiple insecure default
         # users. Purge the user list before initialising the users the charm requires.
-        self.charm.internal_users_manager.purge_initial_default_users()
         try:
-            self.charm.users_manager.purge_initial_default_users()
+            self.charm.internal_users_manager.purge_initial_default_users()
         except PebbleConnectionError as e:
             logger.info("Container not ready for leader election: %s", e)
             event.defer()
@@ -585,24 +583,17 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
-        try:
-            # Restore purged system users in local `internal_users.yml`
-            # with corresponding credentials
-            if self.charm.unit.is_leader():
-                for user in OPENSEARCH_SYSTEM_USERS:
-                    self.charm.internal_users_manager.put_or_update_internal_user_leader(
-                        user, update=False
-                    )
-        except OpenSearchUserMgmtError as e:
-            logger.error("An error occurred while updating internal user %s", str(e))
-            event.defer()
-            return
-        # Restore purged system users in local `internal_users.yml`
-        # with corresponding credentials
+        # Restore purged system users in local `internal_users.yml` with corresponding credentials
         if self.charm.unit.is_leader():
             for user in OPENSEARCH_SYSTEM_USERS:
                 try:
-                    self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
+                    self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                        user, update=False
+                    )
+                except OpenSearchUserMgmtError as e:
+                    logger.error("An error occurred while updating internal user %s", str(e))
+                    event.defer()
+                    return
                 except PebbleConnectionError as e:
                     logger.info("Container not ready for leader election: %s", e)
                     event.defer()
@@ -700,18 +691,16 @@ class OpenSearchEventsHandler(Object):
 
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
-            self.charm.internal_users_manager.purge_initial_default_users()
             try:
-                self.charm.users_manager.purge_initial_default_users()
+                self.charm.internal_users_manager.purge_initial_default_users()
             except PebbleConnectionError as e:
                 logger.info("Container not ready to configure users on start: %s", e)
                 event.defer()
                 return
 
             for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.internal_users_manager.save_user_locally(user)
                 try:
-                    self.charm.users_manager.save_user_locally(user)
+                    self.charm.internal_users_manager.save_user_locally(user)
                 except PebbleConnectionError as e:
                     logger.info("Container not ready to configure users on start: %s", e)
                     event.defer()

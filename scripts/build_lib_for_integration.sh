@@ -1,19 +1,16 @@
 #!/bin/bash
 
-## This builds the whl and then copies it to all 4 test charms and updates the requirements file.
+## This builds the whl and then copies it to test charms and updates their dependencies.
 
 set -e
 
-# Helper function to avoid code duplication
 pack_charm() {
-    if ${CI_CACHE:-false}; then
+    if [ "${CI_CACHE:-false}" = "true" ] && command -v ccc >/dev/null 2>&1; then
         ccc pack -v
     else
         charmcraft pack -v
     fi
 }
-
-git_hash=$(git describe --always --dirty)
 
 LIB_PATH="./opensearch_single_kernel"
 
@@ -31,44 +28,28 @@ else
 fi
 
 for directory in "${TEST_CHARMS[@]}"; do
+    if [[ " ${THIRD_PARTY_CHARMS[*]} " =~ ${directory} ]]; then
+        echo "Packing third party charm ${directory}"
+        pushd "$directory" >/dev/null
+        pack_charm
+        popd >/dev/null
+        continue
+    fi
 
-
-
-    echo "clearing out libs for charm"
+    echo "Clearing out libs for charm ${directory}"
     directory_lib_path="${directory}/${LIB_PATH}"
     rm -rf "$directory_lib_path"
-    mkdir "$directory_lib_path"
-    echo "copying over libs from single kernel charm"
+    mkdir -p "$directory_lib_path"
+
+    echo "Copying over libs from single kernel charm"
     cp -r "${LIB_PATH}" "$directory_lib_path"
     # Copy pyproject.toml and README.md to the library directory as it is needed for poetry
     cp "pyproject.toml" "$directory_lib_path"
     cp "README.md" "$directory_lib_path"
 
+    echo "Building charm ${directory}"
+    pushd "$directory" >/dev/null
 
-    # Pack the third party charms
-    if [[ " ${THIRD_PARTY_CHARMS[*]} " =~ ${directory} ]]; then
-        echo "Packing third party charm ${directory}\n"
-        pushd $directory
-        pack_charm
-        popd
-    else
-        echo "clearing out libs for charm"
-        directory_lib_path="${directory}/${LIB_PATH}"
-        rm -rf "$directory_lib_path"
-        mkdir "$directory_lib_path"
-        echo "copying over libs from single kernel charm"
-        cp -r "${LIB_PATH}" "$directory_lib_path"
-        cp "pyproject.toml" "$directory_lib_path"
-        cp "README.md" "$directory_lib_path"
-
-        echo "Building charm ${directory}\n"
-
-
-        pushd $directory
-
-        # Backup files
-        cp pyproject.toml pyproject.toml.backup
-        cp poetry.lock poetry.lock.backup
     # Backup files if they exist in the charm directory
     if [ -f pyproject.toml ]; then
         cp pyproject.toml pyproject.toml.backup
@@ -77,51 +58,34 @@ for directory in "${TEST_CHARMS[@]}"; do
         cp poetry.lock poetry.lock.backup
     fi
 
-        # Disable strict mode for build test lib.
-        pushd "${LIB_PATH}"
-        git init
-        sed 's/strict = true/strict = false/' -i "pyproject.toml"
-        popd
+    # Disable strict mode for the copied test library.
+    pushd "${LIB_PATH}" >/dev/null
+    git init >/dev/null 2>&1
+    sed -i 's/strict = true/strict = false/' "pyproject.toml"
+    popd >/dev/null
 
-        poetry add "${LIB_PATH}/"
-        poetry lock
     # Add library and lock dependencies if pyproject.toml exists in charm directory
     if [ -f pyproject.toml ]; then
         poetry add "${LIB_PATH}/"
         poetry lock
     else
-        echo "Info: pyproject.toml not found in ${directory}, skipping poetry operations (library copied but not added as dependency)"
+        echo "Info: pyproject.toml not found in ${directory}, skipping poetry operations."
     fi
 
-        python3 -c 'import pathlib; import shutil; import subprocess; git_hash=subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout; file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
     # Update charm_version with git hash if charm_version file exists
     if [ -f charm_version ]; then
-        python3 -c 'import pathlib; import shutil; import subprocess; git_hash=subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout; file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
+        python3 -c 'import pathlib, shutil, subprocess; git_hash = subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout.strip(); file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
     fi
 
-        # Pack the charm
-        pack_charm
     # Pack the charm only if charmcraft.yaml exists
     if [ -f charmcraft.yaml ]; then
-        # Use ccc (charmcraft cache) if CI_CACHE is set and ccc command exists, otherwise use charmcraft
-        if [ "${CI_CACHE:-false}" = "true" ] && command -v ccc >/dev/null 2>&1; then
-            ccc pack -v
-        else
-            charmcraft pack -v
-        fi
+        pack_charm
     else
-        echo "Info: charmcraft.yaml not found in ${directory}, skipping charm packing (library copied successfully)"
+        echo "Info: charmcraft.yaml not found in ${directory}, skipping charm packing."
     fi
 
-        # Cleanup
-        echo "removing copied files from single kernel charm."
-        rm ${LIB_PATH} -rf
-        mv charm_version.backup charm_version
-        mv pyproject.toml.backup pyproject.toml
-        mv poetry.lock.backup poetry.lock
-    # Cleanup
-    echo "removing copied files from single kernel charm."
-    rm ${LIB_PATH} -rf
+    echo "Removing copied files from single kernel charm."
+    rm -rf "${LIB_PATH}"
     if [ -f charm_version.backup ]; then
         mv charm_version.backup charm_version
     fi
@@ -132,7 +96,5 @@ for directory in "${TEST_CHARMS[@]}"; do
         mv poetry.lock.backup poetry.lock
     fi
 
-        # Go back to root directory
-        popd
-    fi
+    popd >/dev/null
 done

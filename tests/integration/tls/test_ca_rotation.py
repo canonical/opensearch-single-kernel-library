@@ -14,7 +14,7 @@ from tests.integration.conftest import (
     CONFIG_OPTS,
     IDLE_PERIOD,
     MODEL_CONFIG,
-    UNIT_IDS,
+    get_unit_ids,
 )
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.helpers import (
@@ -62,6 +62,7 @@ async def test_build_and_deploy_active(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
+    unit_ids = get_unit_ids(substrate)
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await deploy_opensearch(
@@ -69,7 +70,7 @@ async def test_build_and_deploy_active(
         charm,
         substrate,
         APP_NAME,
-        len(UNIT_IDS),
+        len(unit_ids),
         series=series,
         config=CONFIG_OPTS,
         constraints=await get_constraints(ops_test),
@@ -91,7 +92,7 @@ async def test_build_and_deploy_active(
         apps_statuses=["active"],
         units_statuses=["active"],
         timeout=1800,
-        wait_for_exact_units=len(UNIT_IDS),
+        wait_for_exact_units=len(unit_ids),
         idle_period=IDLE_PERIOD,
     )
 
@@ -174,6 +175,7 @@ async def test_build_large_deployment(
 @pytest.mark.abort_on_fail
 async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None:
     """Repeat the CA rotation test for the large deployment."""
+    unit_ids = get_unit_ids(substrate)
     if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
         pytest.skip("Large deployments are not supported on k8s.")
 
@@ -192,12 +194,13 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         start_count = await c_writes.count()
 
         if deploy_type == SMALL_DEPLOYMENT:
+            app_status = "blocked" if substrate == "k8s" else "active"
             await wait_until(
                 ops_test,
                 apps=[APP_NAME],
-                apps_statuses=["active"],
+                apps_statuses=[app_status],
                 units_statuses=["active"],
-                wait_for_exact_units=len(UNIT_IDS),
+                wait_for_exact_units=len(unit_ids),
                 timeout=2400,
                 idle_period=IDLE_PERIOD,
             )

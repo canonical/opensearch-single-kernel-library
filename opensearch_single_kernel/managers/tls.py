@@ -17,13 +17,8 @@ from ops.pebble import ConnectionError as PebbleConnectionError
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CERTS_EXPIRATION_DATE_FORMAT,
-    OLD_CA_ALIAS,
-    CertType,
-    Scope,
-    StoreType,
-)
-from opensearch_single_kernel.common.constants import (
     DIR_PERMISSIONS_CERTIFICATES,
+    OLD_CA_ALIAS,
     OPENSEARCH_RUN_AS_USER,
     PEBBLE_SERVICE_USER,
     ROOT_GID,
@@ -132,20 +127,18 @@ class TlsManager(BaseManager):
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug("Reading stored ca from %s", ca_trust_store)
         if not (ca_trust_store.exists() and secrets):
-        logger.debug(f"Reading stored ca from {ca_trust_store}")
+            return None
+
         try:
-            if not (ca_trust_store.exists() and secrets):
-                return None
+            return read_ca(
+                workload=self.workload,
+                alias=alias,
+                store_pwd=secrets.get("truststore-password"),
+                store_path=ca_trust_store,
+            )
         except (PebbleConnectionError, AttributeError):
             # K8s/unit tests: Container may not be connectable, treat as not stored.
             return None
-
-        return read_ca(
-            workload=self.workload,
-            alias=alias,
-            store_pwd=secrets.get("truststore-password"),
-            store_path=ca_trust_store,
-        )
 
     def all_certificates_available(self) -> bool:
         """Method that checks if all certs available and issued from same CA."""

@@ -33,6 +33,11 @@ CONFIG_OPTS = {"profile": "testing"}
 PRODUCTION_CONFIG_OPTS = {"profile": "production"}
 
 
+def get_unit_ids(substrate: str) -> list[int]:
+    """Return the unit ids supported by the test topology for a substrate."""
+    return [0] if substrate == "k8s" else UNIT_IDS
+
+
 def config_opts_for_deployment(substrate: str, num_units: int) -> dict[str, str]:
     """Return profile config matching the intended deployment topology."""
     if substrate == "k8s":

@@ -821,7 +821,10 @@ class ClusterState(Object):
     @property
     def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
-        deployment_desc = self.application.deployment_desc
+        # During early lifecycle (first pebble-ready), the deployment description may not
+        # be computed yet; callers should handle None.
+        if not (deployment_desc := self.application.deployment_desc):
+            return None
         logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,
@@ -833,20 +836,6 @@ class ClusterState(Object):
                 else GENERATED_ROLES
             ),
         )
-        # during early lifecycle (first pebble-ready), the deployment description may not
-        # be computed yet, callers should handle None.
-        if deployment_desc := self.application.deployment_desc:
-            return PeerClusterApp(
-                app=deployment_desc.app,
-                planned_units=self.planned_units,
-                units=[format_unit_name(u, app=deployment_desc.app) for u in self.all_units],
-                roles=(
-                    deployment_desc.config.roles
-                    if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
-                    else GENERATED_ROLES
-                ),
-            )
-        return None
 
     def get_relation_mapped_users(self, role: str) -> list[str]:
         """Get the list of users mapped to a specific role from config roles_mapping."""

@@ -8,7 +8,7 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
+from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, get_unit_ids
 from tests.integration.helpers import (
     deploy_opensearch,
     get_constraints,
@@ -28,6 +28,7 @@ async def test_build_and_deploy_with_manual_tls(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy prod cluster of OpenSearch with Manual TLS Operator integration."""
+    unit_ids = get_unit_ids(substrate)
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await deploy_opensearch(
@@ -35,7 +36,7 @@ async def test_build_and_deploy_with_manual_tls(
         charm,
         substrate,
         APP_NAME,
-        len(UNIT_IDS),
+        len(unit_ids),
         series=series,
         config=CONFIG_OPTS,
         constraints=await get_constraints(ops_test),
@@ -61,10 +62,10 @@ async def test_build_and_deploy_with_manual_tls(
 
     # Initialize the ManualTLSAgent to process the CSRs
     manual_tls_daemon = ManualTLSAgent(tls_app.units[0])
-    # Wait for len(UNIT_IDS)*2+1 CSRs to be created.
+    # Wait for len(unit_ids)*2+1 CSRs to be created.
     # 1 for each unit for http and transport and 1 for the admin cert.
     logger.info("Waiting for CSRs to be created")
-    await manual_tls_daemon.wait_for_csrs_in_queue(len(UNIT_IDS) * 2 + 1)
+    await manual_tls_daemon.wait_for_csrs_in_queue(len(unit_ids) * 2 + 1)
 
     # Sign all CSRs
     logger.info("Signing CSRs")
@@ -75,10 +76,10 @@ async def test_build_and_deploy_with_manual_tls(
         apps=[APP_NAME],
         apps_statuses=["active"],
         units_statuses=["active"],
-        wait_for_exact_units=len(UNIT_IDS),
+        wait_for_exact_units=len(unit_ids),
         timeout=2000,
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
+    assert len(ops_test.model.applications[APP_NAME].units) == len(unit_ids)
 
     if substrate == "k8s":
         # K8s integration currently supports only a single OpenSearch unit.
@@ -94,7 +95,7 @@ async def test_build_and_deploy_with_manual_tls(
         ops_test,
         apps=[APP_NAME],
         units_statuses=["active", "maintenance"],
-        wait_for_exact_units=len(UNIT_IDS) + 1,
+        wait_for_exact_units=len(unit_ids) + 1,
     )
 
     # Wait for the new unit request certificates
@@ -111,6 +112,6 @@ async def test_build_and_deploy_with_manual_tls(
         ops_test,
         apps=[APP_NAME],
         units_statuses=["active"],
-        wait_for_exact_units=len(UNIT_IDS) + 1,
+        wait_for_exact_units=len(unit_ids) + 1,
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS) + 1
+    assert len(ops_test.model.applications[APP_NAME].units) == len(unit_ids) + 1

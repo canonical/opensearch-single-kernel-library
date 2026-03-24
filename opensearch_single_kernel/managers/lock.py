@@ -65,7 +65,6 @@ class PeerLockManager(BaseManager):
             self.refresh_lock()
 
         if self._unit_with_lock != self.state.unit_name:
-
             logger.debug(
                 "[Node lock] Not acquired. Unit with peer databag lock: %s", self._unit_with_lock
             )
@@ -301,7 +300,6 @@ class LockManager(PeerLockManager):
             except OpenSearchHttpError:
                 logger.exception("Error getting OpenSearch nodes")
                 return False
-
             logger.debug("[Node lock] Opensearch %s", online_nodes)
             assert online_nodes > 0
             try:

@@ -267,8 +267,6 @@ class TLSEventsHandler(Object):
         ):
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
-            except OpenSearchFileOperationError as e:
-                logger.debug("Error while updating request CA bundle: %s", e)
             except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                 logger.debug("Error while updating request CA bundle: %s", e)
                 event.defer()
@@ -282,8 +280,6 @@ class TLSEventsHandler(Object):
                     self.charm.tls_manager.store_new_tls_resources(
                         CertType.APP_ADMIN, admin_secrets
                     )
-                except OpenSearchFileOperationError as e:
-                    logger.debug("Error while storing admin TLS certificate and key: %s", e)
                 except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                     logger.debug("Error while storing admin TLS certificate and key: %s", e)
                     event.defer()
