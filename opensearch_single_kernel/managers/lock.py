@@ -466,7 +466,7 @@ class LockManager(PeerLockManager):
             if OPENSEARCH_NODE_LOCK_INDEX in indices:
                 logger.debug(
                     "%s already created. Skipping creation attempt. List:%s",
-                    self.OPENSEARCH_INDEX,
+                    OPENSEARCH_NODE_LOCK_INDEX,
                     indices,
                 )
                 if self.state.application.app.planned_units() > 1:
