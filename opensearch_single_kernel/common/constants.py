@@ -223,6 +223,7 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detection-state",
 ]
 DEFAULT_EXTRA_USER_ROLE = "default"
+OPENSEARCH_LOCK_INDEX = ".charm_node_lock"
 
 
 # OpenSearch default port

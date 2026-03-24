@@ -261,7 +261,7 @@ class OpenSearchEventsHandler(Object):
 
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
-        if planned_units > 1 and not self.charm.lock_manager.acquired:
+        if planned_units > 1 and not self.charm.lock_manager.acquire():
             # Raise uncaught exception to prevent Juju from removing unit
             raise Exception("Unable to acquire lock: Another unit is starting or stopping.")
 
@@ -714,7 +714,7 @@ class OpenSearchEventsHandler(Object):
             # Only used for force upgrades and starting 1 data node on a large deployment
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
-        elif not self.charm.lock_manager.acquired:
+        elif not self.charm.lock_manager.acquire():
             logger.debug("Lock to start opensearch not acquired. Will retry next event")
             event.defer()
             return
@@ -840,7 +840,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
-        if not self.charm.lock_manager.acquired:
+        if not self.charm.lock_manager.acquire():
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
             return
