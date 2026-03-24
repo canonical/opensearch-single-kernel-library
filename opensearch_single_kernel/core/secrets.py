@@ -89,7 +89,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         label = self.label(scope, key)
         try:
             secret = scope_obj.add_secret(safe_value, label=label)
-            logger.debug(f"Secret added {secret}")
+            logger.debug("Secret added %s", secret)
         except ValueError as e:
             logger.error("Secret %s:%s couldn't be added", str(scope.val), str(key))
             raise OpenSearchSecretInsertionError(e)
@@ -142,7 +142,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
     def _remove_juju_secret(self, scope: Scope, key: str):
         secret = self._get_juju_secret(scope, key)
         if not secret:
-            logger.warning(f"Secret {scope}:{key} can't be deleted as it doesn't exist")
+            logger.warning(
+                "Secret %s:%s can't be deleted as it doesn't exist", str(scope.val), str(key)
+            )
             return None
 
         secret.remove_all_revisions()
@@ -168,7 +170,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         auto_casting: bool = True,
     ) -> int | float | str | bool | None:
         """Getting a secret's value."""
-        logger.debug(f"Getting secret {scope}:{key}")
+        logger.debug("Getting secret %s:%s", str(scope.val), str(key))
 
         if not self.charm.state.implements_secrets:
             return super().get(scope, key, default, auto_casting)
@@ -200,7 +202,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
     @override
     def put(self, scope: Scope, key: str, value: Any | None) -> None:
         """Adding or updating a secret's value."""
-        logger.debug(f"Putting secret {scope}:{key}")
+        logger.debug("Putting secret %s:%s", str(scope.val), str(key))
         if not self.charm.state.implements_secrets:
             return super().put(scope, key, value)
 
@@ -215,7 +217,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
     ) -> None:
         """Put a dict object into relation data store."""
-        logger.debug(f"Putting secret object {scope}:{key}")
+        logger.debug("Putting secret object %s:%s", str(scope.val), str(key))
         if not self.charm.state.implements_secrets:
             return super().put_object(scope, key, value, merge)
 
@@ -228,14 +230,14 @@ class OpenSearchSecrets(Object, RelationDataStore):
     @override
     def delete(self, scope: Scope, key: str) -> None:
         """Removing a secret."""
-        logger.debug(f"Removing secret {scope}:{key}")
+        logger.debug("Removing secret %s:%s", str(scope.val), str(key))
 
         if not self.charm.state.implements_secrets:
             return super().delete(scope, key)
 
         self._remove_juju_secret(scope, key)
 
-        logger.debug(f"Deleted secret {scope}:{key}")
+        logger.debug("Deleted secret %s:%s", str(scope.val), str(key))
 
     def get_tracked_secret(self, secret_id: str, scope: Scope, key: str) -> Secret | None:
         """Track a granted secret and add it to the cache"""

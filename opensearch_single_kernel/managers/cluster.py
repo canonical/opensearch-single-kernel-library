@@ -85,7 +85,7 @@ class ClusterManager(BaseManager):
         while not (connected := _is_connected()) and (datetime.now() - start).seconds < 180:
             time.sleep(3)
         if not connected:
-            logger.debug(f"waited {datetime.now() - start} opensearch did not start")
+            logger.debug("Waited %s but OpenSearch did not start", datetime.now() - start)
             raise OpenSearchStartTimeoutError()
 
     def reconcile_cluster_config(self) -> bool:
@@ -533,7 +533,9 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
-            return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
+            return self.opensearch_client.get_roles_by_unit_name(
+                self.state.unit_name, self.alt_hosts
+            )
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 
@@ -541,7 +543,7 @@ class ClusterManager(BaseManager):
         """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
         if not nodes:
             return {}
-        logger.debug(f"Roles before re-balancing {({node.name: node.roles for node in nodes})=}")
+        logger.debug("Roles before re-balancing: %s", {node.name: node.roles for node in nodes})
         nodes_by_name = {}
         current_cluster_nodes = []
         for node in nodes:
@@ -561,7 +563,8 @@ class ClusterManager(BaseManager):
                 temperature=node.temperature,
             )
         logger.debug(
-            f"Roles after re-balancing {({name: node.roles for name, node in nodes_by_name.items()})=}"
+            "Roles after re-balancing %s",
+            {name: node.roles for name, node in nodes_by_name.items()},
         )
         return nodes_by_name
 

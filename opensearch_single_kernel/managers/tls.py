@@ -11,7 +11,14 @@ from typing import Any
 
 from charmlibs.pathops import PathProtocol
 
-from opensearch_single_kernel.common.constants import CertType, Scope, StoreType
+from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
+    CERTS_EXPIRATION_DATE_FORMAT,
+    OLD_CA_ALIAS,
+    CertType,
+    Scope,
+    StoreType,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
@@ -23,9 +30,6 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 )
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
-    CA_ALIAS,
-    CERTS_EXPIRATION_DATE_FORMAT,
-    OLD_CA_ALIAS,
     read_ca,
     remove_ca,
     store_ca_chain,
@@ -89,7 +93,7 @@ class TlsManager(BaseManager):
         """Load stored CA cert."""
         secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
-        logger.debug(f"Reading stored ca from {ca_trust_store}")
+        logger.debug("Reading stored ca from %s", ca_trust_store)
         if not (ca_trust_store.exists() and secrets):
             return None
 
@@ -348,7 +352,7 @@ class TlsManager(BaseManager):
         if not secrets.get("key"):
             logger.error("TLS key not found, quitting.")
             return
-        logger.debug(f"Storing {cert_type.val} TLS resources on disk.")
+        logger.debug("Storing %s TLS resources on disk.", cert_type.val)
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),

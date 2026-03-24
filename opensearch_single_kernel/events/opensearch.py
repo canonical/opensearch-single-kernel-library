@@ -7,6 +7,7 @@
 import logging
 import time
 from datetime import datetime
+from time import time_ns
 from typing import TYPE_CHECKING
 
 from ops import (
@@ -26,9 +27,10 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
-    COS_USER,
+    CERTS_EXPIRATION_DATE_FORMAT,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
+    OLD_CA_ALIAS,
     OPENSEARCH_DATA_STORAGE_NAME,
     OPENSEARCH_SYSTEM_USERS,
     PEER_RELATION,
@@ -58,10 +60,6 @@ from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
-)
-from opensearch_single_kernel.utils.certificates import (
-    CERTS_EXPIRATION_DATE_FORMAT,
-    OLD_CA_ALIAS,
 )
 from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.secrets import (
@@ -169,14 +167,19 @@ class OpenSearchEventsHandler(Object):
         # update any orchestrators about planned units
         # if self.opensearch_peer_cm.is_consumer():
         # self.peer_cluster_requirer.refresh_requirer_relation_data()
-
-        # for relation in self.model.relations.get(ClientRelationName, []):
-        # self.opensearch_provider.update_endpoints(relation)
-
         self.charm.config_manager.update_seeds_config()
 
         if self.charm.unit.is_leader():
-            nodes = self.charm.cluster_manager.get_nodes(is_node_up)
+            try:
+                nodes = self.charm.cluster_manager.get_nodes(is_node_up)
+            except OpenSearchHttpError:
+                logger.error("unable to get nodes")
+                nodes = []
+            # Update all external clients with new endpoints
+            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
+                nodes
+            )
+            # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
             # TODO: Handle once large deployments are implemented
             # if self.peers_data.get(Scope.APP, "missing_relations"):
@@ -311,7 +314,7 @@ class OpenSearchEventsHandler(Object):
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
-        if not self.charm.state.application.deployment_desc:
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
 
@@ -337,26 +340,27 @@ class OpenSearchEventsHandler(Object):
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
-            logger.warning(f"Update status: exclusions updated and cluster health is {health}.")
+            logger.warning("Update status: exclusions updated and cluster health is %s.", health)
 
             if health == HealthColors.UNKNOWN:
                 return
 
-        # TODO: Handle client relations updates
-        # for relation in self.model.relations.get(ClientRelationName, []):
-        # self.opensearch_provider.update_endpoints(relation)
-
-        # deployment_desc = self.charm.state.application.deployment_desc
-        # if self.upgrade_in_progress:
-        # logger.debug(
-        # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
-        # )
-        # elif (
-        #    self.unit.is_leader()
-        #    and deployment_desc
-        #    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-        # ):
-        #    self.opensearch_provider.remove_lingering_relation_users_and_roles()
+        if self.charm.unit.is_leader():
+            try:
+                nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
+            except OpenSearchHttpError as e:
+                logger.error("unable to get nodes %s", str(e))
+                nodes = []
+            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
+                nodes
+            )
+            # TODO: Handle upgrade in progress
+            # if self.upgrade_in_progress:
+            # logger.debug(
+            # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
+            # )
+            if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -399,7 +403,7 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchInstallError:
                 self.charm.status.set(CharmStatuses.INSTALL_ERROR)
 
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
         if (
             self.charm.state.server.last_host_ip
@@ -446,6 +450,14 @@ class OpenSearchEventsHandler(Object):
         profile_restart_needed = self.charm.config_manager.update_profile_configuration(
             config_profile
         )
+        if self.charm.unit.is_leader():
+            try:
+                self.charm.external_clients_manager.update_relations_roles_mapping()
+            except OpenSearchUserMgmtError as e:
+                logger.error("Failed to update relations roles mapping: %s", e)
+                event.defer()
+                return
+
         if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
             logger.debug(
                 "Restarting opensearch due to config change: profile_restart_needed=%s",
@@ -492,7 +504,7 @@ class OpenSearchEventsHandler(Object):
 
         # User config is currently in a default state, which contains multiple insecure default
         # users. Purge the user list before initialising the users the charm requires.
-        self.charm.users_manager.purge_initial_default_users()
+        self.charm.internal_users_manager.purge_initial_default_users()
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
@@ -500,11 +512,18 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status.set(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
-        # Restore purged system users in local `internal_users.yml`
-        # with corresponding credentials
-        if self.charm.unit.is_leader():
-            for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.users_manager.put_or_update_internal_user_leader(user, update=False)
+        try:
+            # Restore purged system users in local `internal_users.yml`
+            # with corresponding credentials
+            if self.charm.unit.is_leader():
+                for user in OPENSEARCH_SYSTEM_USERS:
+                    self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                        user, update=False
+                    )
+        except OpenSearchUserMgmtError as e:
+            logger.error("An error occurred while updating internal user %s", str(e))
+            event.defer()
+            return
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
@@ -535,7 +554,7 @@ class OpenSearchEventsHandler(Object):
                 # We're done here, we can return
                 return
             except OpenSearchStartError as e:
-                logger.warning(f"Machine restart detected but error at service start with: {e}")
+                logger.warning("Machine restart detected but error at service start with: %s", e)
                 # Defer and retry later
                 event.defer()
                 return
@@ -578,9 +597,9 @@ class OpenSearchEventsHandler(Object):
 
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
-            self.charm.users_manager.purge_initial_default_users()
+            self.charm.internal_users_manager.purge_initial_default_users()
             for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.users_manager.save_user_locally(user)
+                self.charm.internal_users_manager.save_user_locally(user)
 
         deployment_desc = self.charm.state.application.deployment_desc
         # only start the main orchestrator if a data node is available
@@ -720,7 +739,7 @@ class OpenSearchEventsHandler(Object):
 
             self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_ips=cm_ips)
         except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
-            logger.debug(f"error getting the nodes: {e}")
+            logger.debug("Error getting the nodes: %s", e)
             self.charm.lock_manager.release()
             event.defer()
             return
@@ -804,7 +823,7 @@ class OpenSearchEventsHandler(Object):
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
             # Creating the monitoring user
-            self.charm.users_manager.put_or_update_internal_user_leader(COS_USER, update=False)
+            self.charm.internal_users_manager.create_cos_user()
 
         self.charm.unit.open_port("tcp", 9200)
 
@@ -830,7 +849,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
         except OpenSearchStopError as e:
-            logger.info(f"Error while Restarting Opensearch: {e}")
+            logger.info("Error while Restarting Opensearch: %s", e)
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()
@@ -1013,14 +1032,13 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Secret change for %s", str(label_key))
 
         if is_leader and label_key == password_key(KIBANA_SERVER_USER):
-            pass
-            # self.charm.opensearch_provider.update_dashboards_password()
+            self.charm.external_clients_manager.update_dashboards_password()
 
         # Non-leader units need to maintain local users in internal_users.yml
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
-                self.charm.users_manager.put_internal_user(sys_user, password)
+                self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
@@ -1048,6 +1066,25 @@ class OpenSearchEventsHandler(Object):
             )
         else:
             return self.is_cluster_healthy_to_start()
+
+    def trigger_peer_rel_changed(
+        self,
+        only_by_leader: bool = False,
+        on_other_units: bool = True,
+        on_current_unit: bool = False,
+    ) -> None:
+        """Force trigger a peer rel changed event."""
+        if only_by_leader and not self.charm.unit.is_leader():
+            return
+
+        if on_other_units or not on_current_unit:
+            if only_by_leader:
+                self.charm.state.application.update_ts = time_ns()
+            else:
+                self.charm.state.server.update_ts = time_ns()
+
+        if on_current_unit:
+            self.charm.on[PEER_RELATION].relation_changed.emit(self.charm.state.peer_relation)
 
     def post_start_ca_rotation(self) -> None:
         """Configure TLS CA rotation after OpenSearch is started."""
@@ -1128,6 +1165,19 @@ class OpenSearchEventsHandler(Object):
         )
 
         self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
+
+    def update_external_clients_endpoints(self) -> None:
+        """Update the endpoints of all the external clients relations."""
+        for external_client in self.charm.state.external_clients:
+            if self.charm.unit.is_leader():
+                try:
+                    nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
+                except OpenSearchHttpError as e:
+                    logger.error("unable to get nodes: %s", str(e))
+                    nodes = []
+                self.charm.external_clients_manager.update_relation_endpoints(
+                    external_client, nodes
+                )
 
     def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
         """Triggered when the unit IP is changed."""

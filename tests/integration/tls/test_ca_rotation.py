@@ -171,11 +171,10 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type) -> None:
         start_count = await c_writes.count()
 
         if deploy_type == SMALL_DEPLOYMENT:
-            # TODO: make app status active once we have support for +1 units
             await wait_until(
                 ops_test,
                 apps=[APP_NAME],
-                apps_statuses=["blocked"],
+                apps_statuses=["active"],
                 units_statuses=["active"],
                 wait_for_exact_units=len(UNIT_IDS),
                 timeout=2400,
