@@ -404,8 +404,8 @@ class PluginConfigInfo(Model):
 class S3RelDataCredentials(Model):
     """Model class for credentials passed on the s3 relation."""
 
-    access_key: str = Field(alias="access-key", default=None)
-    secret_key: str = Field(alias="secret-key", default=None)
+    access_key: str = Field(alias="access-key", default="")
+    secret_key: str = Field(alias="secret-key", default="")
     s3_tls_ca_chain: str | list[str] | None = Field(default=None, alias="s3-tls-ca-chain")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -525,8 +525,8 @@ class S3RelData(Model):
 class AzureRelDataCredentials(Model):
     """Model class for credentials passed on the Azure relation."""
 
-    storage_account: str = Field(alias="storage-account", default=None)
-    secret_key: str = Field(alias="secret-key", default=None)
+    storage_account: str = Field(alias="storage-account", default="")
+    secret_key: str = Field(alias="secret-key", default="")
 
     model_config = ConfigDict(populate_by_name=True)
 

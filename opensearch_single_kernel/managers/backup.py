@@ -10,7 +10,6 @@ from charmlibs.pathops import PathProtocol
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
-    GCS_SERVICE_ACCOUNT_JSON,
     S3_CA_ALIAS,
     STORE_PASSWORD,
     ObjectStorageType,
@@ -225,13 +224,11 @@ class BackupManager(BaseManager):
     def write_gcs_service_account_json(
         self,
         secret_key: str,
-        dst: str = GCS_SERVICE_ACCOUNT_JSON,
     ) -> PathProtocol:
         """Write GCS service account JSON (from relation secret_key) to a file.
 
         Args:
             secret_key: JSON string content of the service account.
-            dst: Destination path.
 
         Returns:
             Path to the written file.
@@ -240,8 +237,6 @@ class BackupManager(BaseManager):
             ValueError: if secret_key is empty or not valid JSON.
             OSError: if writing fails.
         """
-        gcs_path = self.workload.paths.root / dst
-
         if not secret_key:
             raise ValueError("Missing GCS secret_key (service account JSON).")
 
@@ -252,12 +247,11 @@ class BackupManager(BaseManager):
         except json.JSONDecodeError as e:
             raise ValueError("GCS secret_key is not valid JSON.") from e
 
-        self.workload.write_text(content, gcs_path)
-        return gcs_path
+        self.workload.write_text(content, self.workload.paths.gcs_service_account_json)
+        return self.workload.paths.gcs_service_account_json
 
     def remove_gcs_service_account_json(
         self,
-        dst: str = GCS_SERVICE_ACCOUNT_JSON,
     ) -> None:
         """Remove the GCS service account JSON file.
 
@@ -267,8 +261,7 @@ class BackupManager(BaseManager):
         Raises:
             OSError: if deletion fails for other reasons.
         """
-        path = self.workload.paths.root / dst
-        self.workload.unlink(path, missing_ok=True)
+        self.workload.unlink(self.workload.paths.gcs_service_account_json, missing_ok=True)
 
     def ensure_repository(
         self, storage_type: ObjectStorageType, storage_cfg: ObjectStorageConfig

@@ -294,7 +294,6 @@ AZURE_PEER_SECRET_KEYS = [
 GCS_CREDENTIALS = "gcs-creds"
 S3_CA_ALIAS = "s3-snapshots-gateway"
 STORE_PASSWORD = "changeit"
-GCS_SERVICE_ACCOUNT_JSON = "/var/snap/opensearch/common/home/snap_daemon/gcs_service_account.json"
 S3_REPOSITORY = "s3-repository"
 AZURE_REPOSITORY = "azure-repository"
 GCS_REPOSITORY = "gcs-repository"
