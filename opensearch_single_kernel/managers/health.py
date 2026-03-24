@@ -60,7 +60,7 @@ class HealthManager(BaseManager):
         if not response:
             return HealthColors.UNKNOWN
 
-        logger.info(f"Health: {response}")
+        logger.info("Health: %s", response)
         try:
             status = response["status"].lower()
         except (AttributeError, TypeError, KeyError) as e:
@@ -73,11 +73,15 @@ class HealthManager(BaseManager):
             response["initializing_shards"] > 0 or response["relocating_shards"] > 0
         ):
             try:
+
                 logger.debug(
-                    f"\n\nHealth: {status} -- Shards: {self.opensearch_client.get_shards(host, verbose=True)}\n\n"
+                    "Health: %s -- Shards: %s",
+                    status,
+                    self.opensearch_client.get_shards(host, verbose=True),
                 )
                 logger.debug(
-                    f"Allocation explanations: {self.opensearch_client.get_allocation_explain(host)}\n\n"
+                    "Allocation explanations: %s\n\n",
+                    self.opensearch_client.get_allocation_explain(host),
                 )
             except OpenSearchHttpError:
                 pass

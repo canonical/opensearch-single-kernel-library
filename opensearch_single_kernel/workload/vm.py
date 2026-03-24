@@ -77,7 +77,7 @@ class VMWorkload(BaseWorkload):
                 # hold the snap in charm determined revision
                 self.opensearch_snap.hold()
         except snap.SnapError as e:
-            logger.error(f"Failed to install/upgrade opensearch. \n{e}")
+            logger.error("Failed to install/upgrade opensearch. \n%s", e)
             raise OpenSearchInstallError()
 
     @contextmanager
@@ -185,7 +185,7 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStartError()
 
     @override
@@ -203,6 +203,8 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
+            logger.info("The opensearch.%s service is already started.", self.SERVICE_NAME)
+            return
             # Only skip starting if the process is actually listening (avoids stuck state
             # where systemd reports active but the process crashed or never bound to port).
             host = self.get_host_public_ip()
@@ -221,7 +223,7 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            logger.error(f"Failed to start the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStartError()
 
     @override
@@ -293,7 +295,7 @@ class VMWorkload(BaseWorkload):
 
         # only log the command and no arguments to avoid logging sensitive information
         command = mask_sensitive_information(command_with_args)
-        logger.debug(f"Executing command: {command}")
+        logger.debug("Executing command: %s", command)
 
         run_kwargs = dict(
             stdout=subprocess.PIPE,
@@ -320,10 +322,10 @@ class VMWorkload(BaseWorkload):
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
 
-            logger.debug(f"{command}:\n{output.stdout}")
-
             if output.returncode != 0:
-                logger.debug(f"{command}:\n Stderr: {output.stderr}\n Stdout: {output.stdout}")
+                logger.debug(
+                    "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout
+                )
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
             return SimpleNamespace(
                 cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
@@ -340,7 +342,7 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.stop([self.SERVICE_NAME])
         except SnapError as e:
-            logger.error(f"Failed to stop the opensearch.{self.SERVICE_NAME} service. \n{e}")
+            logger.error("Failed to stop the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStopError()
 
     @property

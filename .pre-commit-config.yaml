@@ -34,7 +34,7 @@ repos:
            )$
       - id: check-merge-conflict
       - id: end-of-file-fixer
-        exclude: ^opensearch_single_kernel/lib/
+        exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
         exclude_types:
           - svg
       - id: mixed-line-ending
@@ -42,25 +42,25 @@ repos:
   - repo: https://github.com/psf/black
     rev: 25.1.0
     hooks:
-      - id: black
-        exclude: ^opensearch_single_kernel/lib/
+    - id: black
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
 
   - repo: https://github.com/pycqa/isort
     rev: 6.0.1
     hooks:
-      - id: isort
-        exclude: ^opensearch_single_kernel/lib/
+    - id: isort
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
 
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0
     hooks:
-      - id: flake8
-        exclude: ^opensearch_single_kernel/lib/
-        additional_dependencies:
-          - Flake8-pyproject
-          - flake8-copyright
-          - flake8-docstrings
-          - pep8-naming
+    - id: flake8
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
+      additional_dependencies:
+        - Flake8-pyproject
+        - flake8-copyright
+        - flake8-docstrings
+        - pep8-naming
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6

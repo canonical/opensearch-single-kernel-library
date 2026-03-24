@@ -24,6 +24,12 @@ from tenacity import (
 )
 from tenacity.wait import WaitBaseT
 
+from opensearch_single_kernel.common.constants import (
+    USER_ENDPOINT,
+    USER_ROLE_ENDPOINT,
+    USER_ROLESMAPPING_ENDPOINT,
+)
+from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
@@ -53,6 +59,234 @@ class OpenSearchClient:
         self.port = port
         self.workload = workload
         self.admin_secret = admin_secret
+
+    def create_index(self, index_name: str) -> None:
+        """Create an index in OpenSearch.
+
+        Args:
+            index_name: The name of the index to create.
+        """
+        try:
+            self.request("PUT", f"/{index_name}")
+        except OpenSearchHttpError as e:
+            if (
+                e.response_code == 400
+                and e.response_body.get("error", {}).get("type")
+                == "resource_already_exists_exception"
+            ):
+                logger.warning("Index failed to be created as it already exists, continuing...")
+            else:
+                raise e
+
+    def create_user_role(
+        self,
+        role_name: str,
+        permissions: dict[str, str] | None = None,
+        action_groups: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Creates a role with the given permissions.
+
+        This method assumes the dicts provided are valid opensearch config. If not, raises
+        OpenSearchHttpError
+
+        Args:
+            role_name: name of the role
+            permissions: A valid dict of existing opensearch permissions.
+            action_groups: A valid dict of existing opensearch action groups.
+
+        Raises:
+            OpenSearchHttpError: If the role creation request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        resp = self.request(
+            "PUT",
+            f"{USER_ROLE_ENDPOINT}/{role_name}",
+            payload={**(permissions or {}), **(action_groups or {})},
+        )
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            logger.error("Couldn't create role: %s", resp)
+            raise OpenSearchHttpError(f"creating role {role_name} failed")
+
+        return resp
+
+    def remove_user_role(self, role_name: str) -> dict[str, Any]:
+        """Remove the given role from opensearch distribution.
+
+        Args:
+            role_name: name of the role to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if role_name is empty
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request("DELETE", f"{USER_ROLE_ENDPOINT}/{role_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return {
+                    "status": "OK",
+                    "response": "role does not exist, and therefore has not been removed",
+                }
+            else:
+                raise e
+
+        if resp.get("status") != "OK":
+            raise OpenSearchHttpError(f"removing role {role_name} failed")
+
+        return resp
+
+    def create_user(
+        self, user_name: str, roles: list[str] | None, hashed_pwd: str
+    ) -> dict[str, Any]:
+        """Create or update user and assign the requested roles to the user.
+
+        Args:
+            user_name: name of the user to be created.
+            roles: list of roles to be applied to the user. These must already exist.
+            hashed_pwd: the hashed password for the user.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        payload = {"hash": hashed_pwd}
+        if roles:
+            payload["opendistro_security_roles"] = roles
+
+        resp = self.request(
+            "PUT",
+            f"{USER_ENDPOINT}/{user_name}",
+            payload=payload,
+        )
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            raise OpenSearchHttpError(f"creating user {user_name} failed")
+
+        return resp
+
+    def remove_user(self, user_name: str) -> dict[str, Any]:
+        """Remove the given user from opensearch distribution.
+
+        Args:
+            user_name: name of the user to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if user_name is empty
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return {
+                    "status": "OK",
+                    "response": "user does not exist, and therefore has not been removed",
+                }
+            else:
+                raise e
+
+        logger.debug(resp)
+        if resp.get("status") != "OK":
+            raise OpenSearchHttpError(f"removing user {user_name} failed")
+        return resp
+
+    def patch_user(self, user_name: str, patches: list[dict[str, Any]]) -> dict[str, Any]:
+        """Applies patches to user.
+
+        Args:
+            user_name: name of the user to be created.
+            patches: a list of patches to be applied to the user in question.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails.
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request(
+                "PATCH",
+                f"{USER_ENDPOINT}/{user_name}",
+                payload=patches,
+            )
+        except OpenSearchHttpError as e:
+            raise e
+
+        if resp.get("status") != "OK":
+            raise OpenSearchHttpError(f"patching user {user_name} failed")
+
+        return resp
+
+    def create_user_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+        """Creates or replaces role mapping for selected role with all of its users mapped to it.
+
+        Args:
+            role: name of the role for users being mapped to.
+            mapped_users: all the users, that should be mapped to the specified role.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+        """
+        try:
+            resp = self.request(
+                "PUT",
+                f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
+                payload={"users": mapped_users, "backend_roles": [role]},
+            )
+        except OpenSearchHttpError as e:
+            logger.error("Couldn't create role mapping: %s", str(e))
+            raise e
+
+        if resp.get("status") != "CREATED" and not (
+            resp.get("status") == "OK" and "updated" in resp.get("message")
+        ):
+            raise OpenSearchHttpError(f"creating role mapping {role} failed")
+
+    def remove_user_role_mapping(self, role: str) -> None:
+        """Remove the given role mapping if it exists.
+
+        Args:
+            role: name of the role mapping to be removed.
+
+        Raises:
+            OpenSearchHttpError: If the request fails, or if role is empty
+        """
+        try:
+            resp = self.request("DELETE", f"{USER_ROLESMAPPING_ENDPOINT}/{role}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                resp = {
+                    "status": "OK",
+                    "response": "role mapping does not exist, and therefore has not been removed",
+                }
+            else:
+                raise e
+
+        if resp.get("status") != "OK":
+            raise OpenSearchHttpError(f"removing role mapping {role} failed")
+
+    def update_user_password(self, username: str, hashed_pwd: str):
+        """Change user hashed password."""
+        resp = self.request(
+            "PATCH",
+            f"{USER_ENDPOINT}/{username}",
+            [{"op": "replace", "path": "/hash", "value": hashed_pwd}],
+        )
+        if resp.get("status") != "OK":
+            raise OpenSearchHttpError(f"{resp}")
 
     def flush_translog(self, alt_hosts: list[str] | None = None) -> None:
         """Flush the OpenSearch translog to ensure all operations are committed to disk."""
@@ -273,7 +507,7 @@ class OpenSearchClient:
             temperature=current_node.get("attributes", {}).get("temp"),
         )
 
-    def get_roles(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
+    def get_roles_by_unit_name(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
         """Get the list of the roles assigned to this node.
 
         Args:
@@ -382,7 +616,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.error(f"Error reloading TLS certificates via API: {e}")
+            logger.error("Error reloading TLS certificates via API: %s", str(e))
             raise
 
     def get_allocation_explain(
@@ -488,8 +722,92 @@ class OpenSearchClient:
             )
             return resp_code < 400
         except (OpenSearchHttpError, Exception) as e:
-            logger.debug(f"Error when checking if host {host} is up: {e}")
+            logger.debug("Error when checking if host %s is up: %s", host, e)
             return False
+
+    def create_notification_config(
+        self, *, config_id: str, name: str, config: dict[str, object]
+    ) -> None:
+        """Create notification config.
+
+        Args:
+            config_id: Notification Config ID
+            name: Notification Name
+            config: Notification Config
+        """
+        payload = {"config_id": config_id, "name": name, "config": config}
+        self.request("POST", "/_plugins/_notifications/configs/", payload=payload)
+
+    def notification_config_exists(self, config_id: str) -> bool:
+        """Check if config exists.
+
+        Args:
+            config_id: Notification Config ID
+
+        Returns:
+            True if config exists, False if 404.
+        """
+        try:
+            self.request("GET", f"/_plugins/_notifications/configs/{config_id}")
+            return True
+        except OpenSearchHttpError as exc:
+            if getattr(exc, "response_code", None) == 404:
+                return False
+            raise
+
+    def put_notification_config(
+        self, *, config_id: str, name: str, config: dict[str, object]
+    ) -> None:
+        """Create config if missing, otherwise update.
+
+        Args:
+            config_id: Notification Config ID
+            name: Notification Name
+            config: Notification Config
+        """
+        if self.notification_config_exists(config_id):
+            self.update_notification_config(config_id=config_id, config=config)
+        else:
+            self.create_notification_config(config_id=config_id, name=name, config=config)
+
+    def update_notification_config(self, *, config_id: str, config: dict[str, object]) -> None:
+        """Update notification config.
+
+        Args:
+            config_id: Notification Config ID
+            config: Notification Config
+        """
+        payload = {"config": config}
+        self.request("PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload)
+
+    def delete_notification_config(self, config_id: str) -> None:
+        """Delete config by id.
+
+        If the request returns code 404 (config already gone)
+        it is treated as success and function returns.
+
+        Args:
+            config_id: Notification Config ID
+        """
+        try:
+            self.request("DELETE", f"/_plugins/_notifications/configs/{config_id}")
+        except OpenSearchHttpError as exc:
+            if getattr(exc, "response_code", None) == 404:
+                return
+            raise
+
+    def reload_secure_settings(self) -> bool:
+        """Reload secure settings. Doesn't throw an exception.
+
+        Returns:
+            bool: whether operation was successful.
+        """
+        try:
+            response = self.request("POST", "_nodes/reload_secure_settings")
+        except OpenSearchHttpError as e:
+            logger.error("Could not reload secure settings: %s", e)
+            return False
+        return isinstance(response, dict) and response.get("_nodes", {}).get("failed", -1) == 0
 
     def request(  # noqa
         self,
@@ -633,93 +951,12 @@ class OpenSearchClient:
         def log_error(retry_state: RetryCallState):
             url = urls[(retry_state.attempt_number - 1) % len(urls)]
             logger.debug(
-                f"Request {method} to {url} with payload: {payload} failed."
-                f"(Attempts left: {retry_max - retry_state.attempt_number})\n"
-                f"\tError: {retry_state.outcome.exception()}"
+                "Request %s to %s with payload: %s failed. (Attempts left: %s)\n\tError: %s",
+                method,
+                url,
+                payload,
+                retry_max - retry_state.attempt_number,
+                retry_state.outcome.exception(),
             )
 
         return log_error
-
-    def create_notification_config(
-        self, *, config_id: str, name: str, config: dict[str, object]
-    ) -> None:
-        """Create notification config.
-
-        Args:
-            config_id: Notification Config ID
-            name: Notification Name
-            config: Notification Config
-        """
-        payload = {"config_id": config_id, "name": name, "config": config}
-        self.request("POST", "/_plugins/_notifications/configs/", payload=payload)
-
-    def notification_config_exists(self, config_id: str) -> bool:
-        """Check if config exists.
-
-        Args:
-            config_id: Notification Config ID
-
-        Returns:
-            True if config exists, False if 404.
-        """
-        try:
-            self.request("GET", f"/_plugins/_notifications/configs/{config_id}")
-            return True
-        except OpenSearchHttpError as exc:
-            if getattr(exc, "response_code", None) == 404:
-                return False
-            raise
-
-    def put_notification_config(
-        self, *, config_id: str, name: str, config: dict[str, object]
-    ) -> None:
-        """Create config if missing, otherwise update.
-
-        Args:
-            config_id: Notification Config ID
-            name: Notification Name
-            config: Notification Config
-        """
-        if self.notification_config_exists(config_id):
-            self.update_notification_config(config_id=config_id, config=config)
-        else:
-            self.create_notification_config(config_id=config_id, name=name, config=config)
-
-    def update_notification_config(self, *, config_id: str, config: dict[str, object]) -> None:
-        """Update notification config.
-
-        Args:
-            config_id: Notification Config ID
-            config: Notification Config
-        """
-        payload = {"config": config}
-        self.request("PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload)
-
-    def delete_notification_config(self, config_id: str) -> None:
-        """Delete config by id.
-
-        If the request returns code 404 (config already gone)
-        it is treated as success and function returns.
-
-        Args:
-            config_id: Notification Config ID
-        """
-        try:
-            self.request("DELETE", f"/_plugins/_notifications/configs/{config_id}")
-        except OpenSearchHttpError as exc:
-            if getattr(exc, "response_code", None) == 404:
-                return
-            raise
-
-    def reload_secure_settings(self) -> bool:
-        """Reload secure settings. Doesn't throw an exception.
-
-        Returns:
-            bool: whether operation was successful.
-        """
-        try:
-            response = self.request("POST", "_nodes/reload_secure_settings")
-        except OpenSearchHttpError as e:
-            logger.error("Could not reload secure settings: %s", e)
-            return False
-        return isinstance(response, dict) and response.get("_nodes", {}).get("failed", -1) == 0

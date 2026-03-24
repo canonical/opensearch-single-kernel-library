@@ -20,6 +20,7 @@ from cryptography import x509
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
+    PROTECTED_INDEX_NAMES,
     DeploymentType,
     StartMode,
 )
@@ -157,6 +158,34 @@ def parse_tls_file(raw_content: str) -> bytes:
             raw_content,
         ).encode("utf-8")
     return base64.b64decode(raw_content)
+
+
+def validate_index_name(index_name: str) -> bool:
+    """Validates that the index name provided in the relation is acceptable."""
+    if index_name in PROTECTED_INDEX_NAMES:
+        logger.error(
+            "invalid index name %s - tried to access a protected index in %s",
+            index_name,
+            PROTECTED_INDEX_NAMES,
+        )
+        return False
+
+    if not index_name.islower():
+        logger.error("invalid index name %s - index names must be lowercase", index_name)
+        return False
+
+    forbidden_chars = [" ", ",", ":", '"', "*", "+", "\\", "/", "|", "?", "#", ">", "<"]
+    if any([char in index_name for char in forbidden_chars]):
+
+        logger.error(
+            "invalid index name %s - index name includes one or more of "
+            "the following forbidden characters: %s",
+            index_name,
+            forbidden_chars,
+        )
+        return False
+
+    return True
 
 
 def diff(desired: Iterable[str], current: Iterable[str]) -> tuple[set[str], set[str]]:

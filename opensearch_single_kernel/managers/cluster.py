@@ -94,7 +94,7 @@ class ClusterManager(BaseManager):
         ):
             time.sleep(3)
         if not connected:
-            logger.debug(f"waited {datetime.now() - start} opensearch did not start")
+            logger.debug("Waited %s but OpenSearch did not start", datetime.now() - start)
             raise OpenSearchStartTimeoutError()
 
     def reconcile_cluster_config(self) -> bool:
@@ -133,7 +133,8 @@ class ClusterManager(BaseManager):
             # checks if peer cluster relation is set
             if not self.state.peer_cluster_relation:
                 deployment_state = DeploymentState(
-                    value=State.BLOCKED_WAITING_FOR_RELATION, message=PEER_CLUSTER_NO_RELATION
+                    value=State.BLOCKED_WAITING_FOR_RELATION,
+                    message=PEER_CLUSTER_NO_RELATION,
                 )
                 directives.append(Directive.SHOW_STATUS)
                 directives.append(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
@@ -587,6 +588,9 @@ class ClusterManager(BaseManager):
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
         try:
+            return self.opensearch_client.get_roles_by_unit_name(
+                self.state.unit_name, self.alt_hosts
+            )
             if self.state.application.deployment_desc is None:
                 return self.yaml_setter.load("opensearch.yml")["node.roles"]
             return self.opensearch_client.get_roles(self.state.unit_name, self.alt_hosts)
@@ -597,7 +601,7 @@ class ClusterManager(BaseManager):
         """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
         if not nodes:
             return {}
-        logger.debug(f"Roles before re-balancing {({node.name: node.roles for node in nodes})=}")
+        logger.debug("Roles before re-balancing: %s", {node.name: node.roles for node in nodes})
         nodes_by_name = {}
         current_cluster_nodes = []
         for node in nodes:
@@ -617,7 +621,8 @@ class ClusterManager(BaseManager):
                 temperature=node.temperature,
             )
         logger.debug(
-            f"Roles after re-balancing {({name: node.roles for name, node in nodes_by_name.items()})=}"
+            "Roles after re-balancing %s",
+            {name: node.roles for name, node in nodes_by_name.items()},
         )
         return nodes_by_name
 
@@ -734,3 +739,18 @@ class ClusterManager(BaseManager):
             except OpenSearchHttpError as e:
                 if e.response_code != 404:
                     continue
+
+    def get_prometheus_labels(self) -> dict[str, str] | None:
+        """Return the labels for the prometheus scrape."""
+        try:
+            if not (roles := self.roles):
+                return None
+            taggable_roles = GENERATED_ROLES + ["voting"]
+            roles = set(role if role in taggable_roles else "other" for role in roles)
+            roles = sorted(roles)
+            return {"roles": ",".join(roles)}
+        except KeyError:
+            # At very early stages of the deployment, "node.roles" may not be yet present
+            # in the opensearch.yml, nor APIs is responding. Therefore, we need to catch
+            # the KeyError here and report the appropriate response.
+            return None

@@ -16,6 +16,7 @@ from ops import (
 from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
+    OLD_CA_ALIAS,
     OPENSEARCH_USERS,
     TLS_RELATION,
     CertType,
@@ -35,7 +36,6 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     CertificateInvalidatedEvent,
     TLSCertificatesRequiresV3,
 )
-from opensearch_single_kernel.utils.certificates import OLD_CA_ALIAS
 from opensearch_single_kernel.utils.helpers import generate_password
 from opensearch_single_kernel.utils.secrets import password_key
 
@@ -183,7 +183,7 @@ class TLSEventsHandler(Object):
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate_signing_request, "csr"
             )
-            logger.debug(f"{scope.val}.{cert_type.val} TLS certificate available.")
+            logger.debug("%s.%s TLS certificate available.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate available.")
             return
@@ -267,6 +267,8 @@ class TLSEventsHandler(Object):
         ):
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
+            except OpenSearchFileOperationError as e:
+                logger.debug("Error while updating request CA bundle: %s", e)
             except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                 logger.debug("Error while updating request CA bundle: %s", e)
                 event.defer()
@@ -280,6 +282,8 @@ class TLSEventsHandler(Object):
                     self.charm.tls_manager.store_new_tls_resources(
                         CertType.APP_ADMIN, admin_secrets
                     )
+                except OpenSearchFileOperationError as e:
+                    logger.debug("Error while storing admin TLS certificate and key: %s", e)
                 except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                     logger.debug("Error while storing admin TLS certificate and key: %s", e)
                     event.defer()
@@ -334,7 +338,7 @@ class TLSEventsHandler(Object):
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
             )
-            logger.debug(f"{scope.val}.{cert_type.val} TLS certificate expiring.")
+            logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
@@ -354,7 +358,7 @@ class TLSEventsHandler(Object):
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
         """Handle a cert that was revoked or has expired"""
-        logger.debug(f"Received certificate invalidation. Reason: {event.reason}")
+        logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
     def on_tls_conf_set(  # noqa: C901
@@ -454,7 +458,9 @@ class TLSEventsHandler(Object):
 
         password = event.params.get("password") or generate_password()
         try:
-            self.charm.users_manager.put_or_update_internal_user_leader(user_name, password)
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                user_name, password
+            )
             label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit

@@ -45,7 +45,7 @@ class NodesExclusionsManager(BaseManager):
             return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._add_voting(scope, node):
-                logger.error(f"Failed to add voting exclusion: {node.name}.")
+                logger.error("Failed to add voting exclusion: %s.", node.name)
                 if raise_error:
                     raise OpenSearchExclusionsException("Failed to add voting exclusion.")
 
@@ -55,11 +55,13 @@ class NodesExclusionsManager(BaseManager):
                     node=node, alt_hosts=self.alt_hosts
                 )
             except OpenSearchHttpError as e:
-                logger.error(f"Failed to add shard allocation exclusion: {node.name}. Error: {e}")
+                logger.error(
+                    "Failed to add shard allocation exclusion: %s. Error: %s", node.name, e
+                )
                 success = False
             finally:
                 if not success:
-                    logger.error(f"Failed to add shard allocation exclusion: {node.name}.")
+                    logger.error("Failed to add shard allocation exclusion: %s.", node.name)
                     if raise_error:
                         raise OpenSearchExclusionsException("Failed to add allocation exclusion.")
 
@@ -80,13 +82,13 @@ class NodesExclusionsManager(BaseManager):
             return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._delete_voting({node.name}, scope):
-                logger.error(f"Failed to delete voting exclusion: {node.name}.")
+                logger.error("Failed to delete voting exclusion: %s.", node.name)
                 if raise_error:
                     raise OpenSearchExclusionsException("Failed to delete voting exclusion.")
 
         if allocation and node.is_data():
             if not self._delete_allocations(node):
-                logger.error(f"Failed to delete shard allocation exclusion: {node.name}.")
+                logger.error("Failed to delete shard allocation exclusion: %s.", node.name)
                 # Load the content of the list, avoiding '' entries
                 state = self.state.application if scope == Scope.APP else self.state.server
                 current_allocations = state.allocation_exclusions_to_delete
@@ -198,7 +200,7 @@ class NodesExclusionsManager(BaseManager):
         try:
             return self.opensearch_client.fetch_voting_exclusions_config(alt_hosts=self.alt_hosts)
         except OpenSearchHttpError as e:
-            logger.warning(f"Failed to fetch voting exclusions: {e}")
+            logger.warning("Failed to fetch voting exclusions: %s", e)
             # no voting exclusion set
             return set()
 
@@ -253,7 +255,7 @@ class NodesExclusionsManager(BaseManager):
 
             return True
         except OpenSearchHttpError as e:
-            logger.error(f"Failed to delete voting exclusions {exclusions}: {e}")
+            logger.error("Failed to delete voting exclusions %s: %s", exclusions, e)
             return False
 
     def _delete_allocations(self, node: Node, allocs: list[str] | None = None) -> bool:

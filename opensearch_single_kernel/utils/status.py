@@ -47,7 +47,7 @@ class Status:
         status = self.charm.health_manager.get(
             wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
         )
-        logger.info(f"Current health of cluster: {status}")
+        logger.info("Current health of cluster: %s", status)
 
         if unit:
             self._apply_health_for_unit(status)

@@ -5,6 +5,9 @@
 
 """OpenSearch Charm literals."""
 
+
+from enum import Enum
+
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
@@ -132,6 +135,51 @@ class OpenSearchPaths(BaseStrEnum):
     BIN = "usr/share/opensearch/bin"
 
 
+class ExtraUserRolePermissions(Enum):
+    """An enum of user types and their associated permissions."""
+
+    # Default user has CRUD in a specific index. Update index_patterns to include the index to
+    # which these permissions are applied.
+    DEFAULT = {
+        "cluster_permissions": ["cluster_monitor"],
+        "index_permissions": [
+            {
+                "index_patterns": [],
+                "dls": "",
+                "fls": [],
+                "masked_fields": [],
+                "allowed_actions": [
+                    "indices_monitor",
+                    "data_access",
+                ],
+            }
+        ],
+    }
+
+    # Admin user has control over:
+    # - creating multiple indices
+    # - Removing indices they have created
+    ADMIN = {
+        "index_permissions": [
+            {
+                "index_patterns": ["*"],
+                "fls": [],
+                "masked_fields": [],
+                "allowed_actions": [
+                    "cluster_all",
+                    "indices_all",
+                    "crud",
+                ],
+            }
+        ],
+        "cluster_permissions": [
+            "indices_all",
+            "cluster_all",
+            "manage",
+        ],
+    }
+
+
 # Profiles
 _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
@@ -143,15 +191,37 @@ OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
 OPENSEARCH_SYSTEM_USERS = {"admin", "kibanaserver"}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {"monitor"}
 KIBANA_SERVER_USER = "kibanaserver"
+KIBANA_SERVER_ROLE = "kibana_server"
 ADMIN_USER = "admin"
 COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
+# TLS
+CA_ALIAS = "ca"
+OLD_CA_ALIAS = f"old-{CA_ALIAS}"
+KEYTOOL = "opensearch.keytool"
+OLD_CA_PREFIX = "old-"
+CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+# OpenSearch Protected Indices
+PROTECTED_INDEX_NAMES = [
+    ".opendistro_security",
+    ".opendistro-alerting-config",
+    ".opendistro-alerting-alert*",
+    ".opendistro-anomaly-results*",
+    ".opendistro-anomaly-detector*",
+    ".opendistro-anomaly-checkpoints",
+    ".opendistro-anomaly-detection-state",
+]
+DEFAULT_EXTRA_USER_ROLE = "default"
+
 
 # OpenSearch default port
 OPENSEARCH_HTTP_PORT = 9200
+COS_PORT = "9200"
 
 # OpenSearch storage name
 OPENSEARCH_DATA_STORAGE_NAME = "opensearch-data"
@@ -163,6 +233,8 @@ TLS_RELATION = "certificates"
 NODE_LOCK_RELATION = "node-lock-fallback"
 PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
+CLIENT_RELATION = "opensearch-client"
+COS_RELATION = "cos-agent"
 
 
 # Paths
@@ -210,6 +282,10 @@ CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN = (
 DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
+# Endpoints
+USER_ENDPOINT = "/_plugins/_security/api/internalusers"
+USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
+USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
 # OpenSearch container runs as UID 584792 to match rockcraft.yaml
 OPENSEARCH_RUN_AS_USER = 584792

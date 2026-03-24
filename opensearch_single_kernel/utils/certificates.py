@@ -7,6 +7,7 @@ import logging
 
 from charmlibs.pathops import PathProtocol
 
+from opensearch_single_kernel.common.constants import KEYTOOL
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
@@ -15,13 +16,6 @@ from opensearch_single_kernel.utils.helpers import is_alias_missing_error
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-
-CA_ALIAS = "ca"
-OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
-OLD_CA_PREFIX = "old-"
-CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def read_ca(

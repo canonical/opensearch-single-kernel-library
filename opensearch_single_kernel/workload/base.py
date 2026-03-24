@@ -282,7 +282,7 @@ class BaseWorkload(ABC):
             with socket.create_connection((host, port), timeout=5):
                 return True
         except OSError as e:
-            logger.debug(f"Connection to {host}:{port} fails with: {e}")
+            logger.debug("Connection to %s:%d fails with: %s", host, port, e)
             return False
 
     @abstractmethod
