@@ -248,12 +248,14 @@ class OpenSearchServer(RelationState):
         return JWTAuthConfiguration.from_dict(config)
 
     @jwt_auth_configuration.setter
-    def jwt_auth_configuration(self, value: JWTAuthConfiguration | None) -> None:
-        """Set or remove JWT auth configuration."""
-        if value is None:
-            self.update({"jwt-auth-configuration": ""})
-        else:
-            self.put_object("jwt-auth-configuration", value.to_dict())
+    def jwt_auth_configuration(self, value: JWTAuthConfiguration) -> None:
+        """Update JWT auth configuration."""
+        self.put_object("jwt-auth-configuration", value.to_dict())
+
+    @jwt_auth_configuration.deleter
+    def jwt_auth_configuration(self) -> None:
+        """Remove JWT auth configuration."""
+        self.update({"jwt-auth-configuration": ""})
 
     @property
     def oauth_openid_connect_url(self) -> str | None:

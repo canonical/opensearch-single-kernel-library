@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Module for events handler related to OpenSearch JWT authentication configuration."""
@@ -79,7 +79,7 @@ class JWTEventsHandler(Object):
                 self.charm.status.clear(CharmStatuses.JWT_RELATION_INVALID, app=True)
             return
 
-        self.charm.state.server.jwt_auth_configuration = None
+        del self.charm.state.server.jwt_auth_configuration
         self.charm.config_manager.update_security_config()
 
         self.apply_security_config_if_needed(event)
