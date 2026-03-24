@@ -362,7 +362,7 @@ class OpenSearchClient:
             f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
             payload=payload,
             alt_hosts=alt_hosts,
-            timeout=60,
+            timeout=10 * 60,
             retries=3,
             wait_strategy=wait_fixed(3),
             retry_strategy=retry_if_exception_type(OpenSearchHttpError),

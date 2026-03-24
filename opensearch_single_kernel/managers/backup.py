@@ -255,9 +255,6 @@ class BackupManager(BaseManager):
     ) -> None:
         """Remove the GCS service account JSON file.
 
-        Args:
-            dst: Path to the service account file.
-
         Raises:
             OSError: if deletion fails for other reasons.
         """

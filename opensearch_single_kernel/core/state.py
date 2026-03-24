@@ -553,6 +553,7 @@ class ClusterState(Object):
         """Get GCS relation."""
         return self.model.get_relation(GCS_RELATION)
 
+    @property
     def external_client_relations(self) -> set[Relation]:
         """Get OpenSearch client relation."""
         return self.model.relations[CLIENT_RELATION]
