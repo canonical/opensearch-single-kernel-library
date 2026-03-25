@@ -135,7 +135,7 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* ]]
+  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
     # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
     # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
@@ -159,17 +159,28 @@ prepare: |
     microk8s start
   fi
 
-  if [[ $SPREAD_SUITE == *"vm"* ]]
-  then
-    concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
-  fi
-
-  if [[ $SPREAD_SUITE == *"k8s"* ]]
+  if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
     concierge prepare --trace -c concierge-microk8s.yaml
     # microk8s config | juju add-k8s my-k8s --client
     # juju bootstrap my-k8s concierge-microk8s
     # juju add-model --controller concierge-microk8s testing
+  fi
+
+  if [[ $SPREAD_SUITE == *"vm"* ]]
+  then
+    concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
+    if [[ $SPREAD_TASK == *"oauth"* ]]
+    then
+      mkdir -p ~/.kube
+      microk8s.kubectl config view --raw > ~/.kube/config
+      export LOCAL_IP="127.0.0.1"
+      export PUBLIC_IP=$(ip -4 -j route get 2.2.2.2 | jq -r '.[] | .prefsrc')
+      sed -i 's/'${LOCAL_IP}'/'${PUBLIC_IP}'/g' ~/.kube/config
+      cat ~/.kube/config | juju add-k8s uk8s --client --controller $(/snap/bin/juju show-controller | yq "keys | .[0]")
+      # microk8s config | juju add-k8s uk8s --client
+      # juju add-model --controller concierge-lxd testing-uk8s
+    fi
   fi
 
   # Install charmcraft & pipx (on lxd-vm backend)
