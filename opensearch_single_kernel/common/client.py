@@ -1254,7 +1254,7 @@ class OpenSearchClient:
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,
-                        "verify": f"{self.workload.paths.certs}/chain.pem",
+                        "verify": self.workload.paths.certs_chain.as_posix(),
                         "headers": {
                             "Accept": "application/json",
                             "Content-Type": "application/json",

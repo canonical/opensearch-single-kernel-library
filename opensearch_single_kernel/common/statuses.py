@@ -62,6 +62,9 @@ class CharmStatuses(Enum):
 
     # Security Index
     SECURITY_INDEX_INIT_IN_PROGRESS = MaintenanceStatus("Initializing the security index...")
+    SECURITY_INDEX_UPDATE_ERROR = BlockedStatus(
+        "Failed to update security configuration, check logs for details."
+    )
 
     # Start
     SERVICE_START_ERROR = BlockedStatus(
@@ -136,3 +139,16 @@ class CharmStatuses(Enum):
     )
     BACKUP_IN_PROGRESS = MaintenanceStatus("Backup in progress...")
     RESTORE_IN_PROGRESS = MaintenanceStatus("Restore in progress...")
+
+    # JWT
+    JWT_RELATION_INVALID = BlockedStatus(
+        "JWT relation must be created with Main-cluster-orchestrator."
+    )
+    JWT_AUTH_CONFIG_INVALID = BlockedStatus(
+        "Configuration for JWT authentication is invalid. Check and correct parameters."
+    )
+
+    # OAuth
+    OAUTH_RELATION_INVALID = BlockedStatus(
+        "OAuth relation must be created with Main-cluster-orchestrator"
+    )

@@ -320,7 +320,7 @@ class TlsManager(BaseManager):
             ca_chain = admin_secret.get("chain")
 
         # we store the pem format to make it easier for the python requests lib
-        chain_path = self.workload.paths.certs / "chain.pem"
+        chain_path = self.workload.paths.certs_chain
         if parent_dir_path := chain_path.parent:
             self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
@@ -331,7 +331,7 @@ class TlsManager(BaseManager):
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
-        bundle_path = self.workload.paths.certs / "chain.pem"
+        bundle_path = self.workload.paths.certs_chain
         if not bundle_path.exists():
             return
 

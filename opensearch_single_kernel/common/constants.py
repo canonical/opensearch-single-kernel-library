@@ -217,6 +217,20 @@ SYSTEM_INDICES = {
     ".opensearch-sap-log-types-config",
     OPENSEARCH_NODE_LOCK_INDEX,
 }
+# TLS
+CA_ALIAS = "ca"
+OLD_CA_ALIAS = f"old-{CA_ALIAS}"
+KEYTOOL = "opensearch.keytool"
+OLD_CA_PREFIX = "old-"
+CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# OAuth
+OAUTH_CLIENT_AUDIENCE = ["opensearch"]
+OAUTH_CLIENT_REDIRECT_URI = "http://opensearch.local"
+OAUTH_CLIENT_SCOPE = "openid email profile"
+OAUTH_CLIENT_GRANT_TYPES = ["client_credentials"]
+
+
 # OpenSearch Protected Indices
 PROTECTED_INDEX_NAMES = [
     ".opendistro_security",
@@ -258,6 +272,8 @@ AZURE_RELATION = "azure-credentials"
 GCS_RELATION = "gcs-credentials"
 CLIENT_RELATION = "opensearch-client"
 COS_RELATION = "cos-agent"
+JWT_CONFIG_RELATION = "jwt-configuration"
+OAUTH_RELATION = "oauth"
 
 
 # Paths

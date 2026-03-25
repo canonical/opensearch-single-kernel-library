@@ -33,8 +33,10 @@ from opensearch_single_kernel.events.custom_events import (
 from opensearch_single_kernel.events.external_clients import (
     ExternalClientsEventsHandler,
 )
+from opensearch_single_kernel.events.jwt import JWTEventsHandler
 from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
 from opensearch_single_kernel.events.notifications import NotificationsEvents
+from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.managers.backup import BackupManager
@@ -97,6 +99,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.backup_events = BackupEventsHandler(self)
         self.notifications_events = NotificationsEvents(self)
         self.cos_events = CosEventsHandler(self)
+        self.jwt_events = JWTEventsHandler(self)
+        self.oauth_events = OAuthEventsHandler(self)
 
     def trigger_peer_rel_changed(
         self,
