@@ -16,8 +16,10 @@ from ops import Application, JujuVersion, Object, Relation, Unit
 from opensearch_single_kernel.common.constants import (
     CLIENT_RELATION,
     GENERATED_ROLES,
+    JWT_CONFIG_RELATION,
     KIBANA_SERVER_ROLE,
     NODE_LOCK_RELATION,
+    OAUTH_RELATION,
     OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
@@ -32,6 +34,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
+    JWTAuthConfiguration,
     Node,
     OpenSearchProfile,
     PeerClusterApp,
@@ -41,6 +44,7 @@ from opensearch_single_kernel.core.models import (
     TestingProfile,
 )
 from opensearch_single_kernel.core.relations import (
+    JwtData,
     PeerCluster,
     PeerClusterData,
     PeerClusterOrchestratorData,
@@ -52,6 +56,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
     OpenSearchProvidesData,
+    SecretGroup,
 )
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
@@ -69,7 +74,10 @@ class OpenSearchServer(RelationState):
     """State/Relation data collection for an opensearch unit"""
 
     def __init__(
-        self, relation: Relation | None, data_interface: DataPeerUnitData, component: Unit
+        self,
+        relation: Relation | None,
+        data_interface: DataPeerUnitData,
+        component: Unit,
     ):
         super().__init__(relation, data_interface, component)
         self.unit = component
@@ -232,6 +240,51 @@ class OpenSearchServer(RelationState):
             return
         self.put_object("plugin_config_info", value)
 
+    @property
+    def jwt_auth_configuration(self) -> JWTAuthConfiguration | None:
+        """Return JWT auth configuration if any."""
+        if not (config := self.get_object("jwt-auth-configuration")):
+            return None
+        return JWTAuthConfiguration.from_dict(config)
+
+    @jwt_auth_configuration.setter
+    def jwt_auth_configuration(self, value: JWTAuthConfiguration) -> None:
+        """Update JWT auth configuration."""
+        self.put_object("jwt-auth-configuration", value.to_dict())
+
+    @jwt_auth_configuration.deleter
+    def jwt_auth_configuration(self) -> None:
+        """Remove JWT auth configuration."""
+        self.update({"jwt-auth-configuration": ""})
+
+    @property
+    def oauth_openid_connect_url(self) -> str | None:
+        """Return OAuth openid_connect_url if configured."""
+        return self.relation_data.get("oauth_openid_connect_url")
+
+    @oauth_openid_connect_url.setter
+    def oauth_openid_connect_url(self, value: str | None) -> None:
+        """Set or remove OAuth openid_connect_url."""
+        self.update({"oauth_openid_connect_url": value or ""})
+
+    @property
+    def oauth_departing(self) -> bool:
+        """Return whether oauth relation broken event should be skipped.
+
+        When current leader is unit oauth relation isn't breaking
+        even if unit receives oauth relation broken event.
+        """
+        return self.relation_data.get("oauth_departing", "") == "True"
+
+    @oauth_departing.setter
+    def oauth_departing(self, value: bool):
+        """Set whether oauth relation broken event should be skipped.
+
+        When current leader is unit oauth relation isn't breaking
+        even if unit receives oauth relation broken event.
+        """
+        self.update({"oauth_departing": str(value)})
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -241,7 +294,10 @@ class OpenSearchApplication(RelationState):
     """
 
     def __init__(
-        self, relation: Relation | None, data_interface: DataPeerData, component: Application
+        self,
+        relation: Relation | None,
+        data_interface: DataPeerData,
+        component: Application,
     ):
         super().__init__(relation, data_interface, component)
         self.app = component
@@ -366,7 +422,9 @@ class OpenSearchApplication(RelationState):
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
         data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
-        return data_apps_in_fleet and any(app.planned_units > 0 for app in data_apps_in_fleet)
+        return bool(data_apps_in_fleet) and any(
+            app.planned_units > 0 for app in data_apps_in_fleet
+        )
 
     @property
     def client_users_dict(self) -> dict[str, str]:
@@ -487,6 +545,41 @@ class ExternalOpenSearchClient(RelationState):
     def extra_user_roles(self, roles: str) -> None:
         """Set the extra user roles for this relation."""
         self.update({"extra-user-roles": roles})
+
+
+class JwtState(RelationState):
+    """State for the JWT relation data."""
+
+    def is_related_secret_label(self, label: str | None) -> bool:
+        """Check whether provided secret label is related to this relation."""
+        return (
+            label
+            == self.data_interface._generate_secret_label(
+                relation.name, relation.id, SecretGroup("extra")
+            )
+            if label is not None
+            and (relation := self.data_interface._relation_from_secret_label(label))
+            else False
+        )
+
+    @property
+    def auth_configuration(self) -> JWTAuthConfiguration:
+        """Build a JWT auth configuration from the relation data.
+
+        Might throw a validation exception.
+        """
+        return JWTAuthConfiguration(
+            signing_key=self.relation_data.get("signing-key", ""),
+            jwt_header=self.relation_data.get("jwt-header"),
+            jwt_url_parameter=self.relation_data.get("jwt-url-parameter"),
+            roles_key=self.relation_data.get("roles-key", ""),
+            subject_key=self.relation_data.get("subject-key"),
+            required_audience=self.relation_data.get("required-audience"),
+            required_issuer=self.relation_data.get("required-issuer"),
+            jwt_clock_skew_tolerance_seconds=self.relation_data.get(
+                "jwt-clock-skew-tolerance-seconds"
+            ),
+        )
 
 
 class ClusterState(Object):
@@ -920,3 +1013,22 @@ class ClusterState(Object):
                 for app in cluster_fleet_apps
             )
         )
+
+    @property
+    def jwt_relation(self) -> Relation | None:
+        """Get JWT relation."""
+        return self.model.get_relation(JWT_CONFIG_RELATION)
+
+    @property
+    def jwt(self) -> JwtState:
+        """Get JWT state."""
+        return JwtState(
+            relation=self.jwt_relation,
+            data_interface=JwtData(self.model, JWT_CONFIG_RELATION),
+            component=self.model.app,
+        )
+
+    @property
+    def oauth_relation(self) -> Relation | None:
+        """Get OAuth relation."""
+        return self.model.get_relation(OAUTH_RELATION)

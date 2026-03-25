@@ -406,3 +406,16 @@ class SmtpConfig:
     group_id: str
     channel_id: str
     transport_security: SmtpTransportSecurity
+
+
+class JWTAuthConfiguration(Model):
+    """Model class for the configuration parameters of JWT authentication."""
+
+    signing_key: str
+    jwt_header: str | None = None
+    jwt_url_parameter: str | None = None
+    roles_key: str
+    subject_key: str | None = None
+    required_audience: str | None = None
+    required_issuer: str | None = None
+    jwt_clock_skew_tolerance_seconds: int | None = None

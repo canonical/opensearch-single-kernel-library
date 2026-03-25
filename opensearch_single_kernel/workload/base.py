@@ -124,8 +124,13 @@ class Paths:
         return "certificates"
 
     @property
+    def certs_chain(self) -> PathProtocol:
+        """Returns path to the certificates chain file."""
+        return self.certs / "chain.pem"
+
+    @property
     def seed_hosts(self) -> PathProtocol:
-        """Returns Seed hosts"""
+        """Returns path to the Opensearch seed hosts config file."""
         return self.conf / "unicast_hosts.txt"
 
 
