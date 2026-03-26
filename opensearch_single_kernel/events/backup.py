@@ -348,6 +348,7 @@ class BackupEventsHandler(Object):
         if not object_storage_type:
             self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             event.fail("Missing relation with an object storage integrator.")
+            return
 
         if error_message := self._action_missing_pre_requisites(object_storage_type):
             event.fail(error_message)
