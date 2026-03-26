@@ -297,9 +297,9 @@ def test_restore_when_prereqs_missing_then_action_fails(
 
     st = testing.State(leader=True, relations=rels)
 
-    monkeypatch.setattr(
+    mocker.patch(
         "opensearch_single_kernel.events.backup.BackupEventsHandler._action_missing_pre_requisites",
-        lambda _self, report_running_operations=True: "cluster not ready",
+        return_value="cluster not ready",
     )
 
     with pytest.raises(testing.ActionFailed) as err:
