@@ -14,7 +14,11 @@ from google.api_core.exceptions import Conflict, Forbidden
 from ops import testing
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import DeploymentType, HealthColors
+from opensearch_single_kernel.common.constants import (
+    DeploymentType,
+    HealthColors,
+    ObjectStorageType,
+)
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.utils import cloud_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
@@ -599,8 +603,21 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
     )
+
     _mock_backup(mocker, deployment_desc_return_value=None)
     backend, rels = backend_setup
+    if backend == "s3":
+        object_storage_type = ObjectStorageType.S3
+    elif backend == "azure":
+        object_storage_type = ObjectStorageType.AZURE
+    else:
+        object_storage_type = ObjectStorageType.GCS
+
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.storage_type",
+        new_callable=PropertyMock,
+        return_value=object_storage_type,
+    )
 
     st = testing.State(leader=True, relations=rels)
 
