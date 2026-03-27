@@ -3,7 +3,12 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Configuration manager."""
+
 import logging
+
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
@@ -18,6 +23,10 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
+)
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    InternalUsersStatuses,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -39,8 +48,7 @@ class InternalUsersManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "internal_users_manager"
+        super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
     def put_or_update_internal_user_leader(
@@ -84,7 +92,12 @@ class InternalUsersManager(BaseManager):
             self.state.secrets.put(Scope.APP, hash_key(user), hashed_pwd)
 
         if user == ADMIN_USER:
-            self.state.application.update({"admin_user_initialized": "True"})
+            self.state.application.is_admin_user_initialized = True
+            self.state.remove_status_if_present(
+                InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
+                "unit",
+                self.name,
+            )
 
     def purge_initial_default_users(self) -> None:
         """Removes all users from internal_users yaml config.
@@ -152,8 +165,31 @@ class InternalUsersManager(BaseManager):
             self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
             self.opensearch_client.patch_user(
                 COS_USER,
-                [{"op": "replace", "path": "/opendistro_security_roles", "value": roles}],
+                [
+                    {
+                        "op": "replace",
+                        "path": "/opendistro_security_roles",
+                        "value": roles,
+                    }
+                ],
             )
             self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit" and not self.state.application.is_admin_user_initialized:
+            status_list.append(InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

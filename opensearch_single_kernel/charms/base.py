@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from time import time_ns
 
 import ops
+from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import EventSource
 
 from opensearch_single_kernel.common.constants import (
@@ -20,7 +21,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.cos import CosEventsHandler
 from opensearch_single_kernel.events.custom_events import (
@@ -52,7 +53,6 @@ from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
-from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -69,9 +69,6 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     def __init__(self, *args):
         super().__init__(*args)
-
-        # Status
-        self.status = Status(self)
 
         # State
         self.state = ClusterState(self, self.substrate)
@@ -102,6 +99,19 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.jwt_events = JWTEventsHandler(self)
         self.oauth_events = OAuthEventsHandler(self)
 
+        self.status_handler = StatusHandler(
+            self,
+            self.profiles_manager,
+            self.cluster_manager,
+            self.internal_users_manager,
+            self.tls_manager,
+            self.health_manager,
+            self.lock_manager,
+            self.external_clients_manager,
+            self.notifications_manager,
+            self.snapshots_manager,
+        )
+
     def trigger_peer_rel_changed(
         self,
         only_by_leader: bool = False,
@@ -123,7 +133,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     def stop_opensearch(self, *, restart: bool = False) -> None:
         """Stop OpenSearch service."""
-        self.status.set(CharmStatuses.SERVICE_IS_STOPPING)
+        self.status_handler.set_running_status(
+            GeneralStatuses.SERVICE_IS_STOPPING.value,
+            "unit",
+            component_name=self.cluster_manager.name,
+        )
 
         if self.cluster_manager.opensearch_client.is_node_up():
             try:
@@ -146,7 +160,25 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         # Stop the workload
         self.cluster_manager.stop_workload()
-        self.status.set(CharmStatuses.SERVICE_STOPPED)
+
+    def apply_health(
+        self,
+        wait_for_green_first: bool = False,
+        use_localhost: bool = True,
+        app: bool = True,
+        unit: bool = True,
+    ):
+        """Fetch cluster health and set it on the app status."""
+        if app and not self.unit.is_leader():
+            self.trigger_peer_rel_changed(on_other_units=True)
+            return
+
+        return self.health_manager.apply_health(
+            wait_for_green_first=wait_for_green_first,
+            use_localhost=use_localhost,
+            app=app,
+            unit=unit,
+        )
 
     @property
     @abstractmethod

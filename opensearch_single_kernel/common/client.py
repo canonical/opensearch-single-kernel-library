@@ -1006,7 +1006,7 @@ class OpenSearchClient:
         )
 
     def get_health(
-        self, host: str, wait_for_green: bool, alt_hosts: list[str] | None = None
+        self, host: str | None, wait_for_green: bool, alt_hosts: list[str] | None = None
     ) -> dict[str, Any] | None:
         """Fetch the cluster health."""
         endpoint = "/_cluster/health"

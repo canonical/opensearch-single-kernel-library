@@ -10,6 +10,9 @@ from datetime import datetime
 from typing import Any
 
 from charmlibs.pathops import PathProtocol
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
@@ -23,6 +26,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
+from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -53,8 +57,7 @@ class TlsManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "tls_manager"
+        super().__init__(state, workload, "tls_manager")
 
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:
         """Check if all TLS resources are stored on disk."""
@@ -247,7 +250,12 @@ class TlsManager(BaseManager):
         return csr
 
     def update_certificate_secret_if_needed(
-        self, scope: Scope, cert_type: CertType, ca_chain: str, certificate: str, ca: str
+        self,
+        scope: Scope,
+        cert_type: CertType,
+        ca_chain: str,
+        certificate: str,
+        ca: str,
     ) -> None:
         """Update the certificate secrets if needed"""
         current_secret_obj = self.get_secrets_for_cert_type(cert_type)
@@ -380,7 +388,6 @@ class TlsManager(BaseManager):
                     mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
                 ) as tmp_cert,
             ):
-
                 cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
                 args = f"-passout pass:{store_pwd}"
                 if key_pwd:
@@ -455,7 +462,6 @@ class TlsManager(BaseManager):
                 mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
             ) as tmp_key,
         ):
-
             self.opensearch_client.reload_tls_certificates(
                 cert_files=(str(tmp_cert), str(tmp_key))
             )
@@ -560,3 +566,35 @@ class TlsManager(BaseManager):
                 return self.state.server.transport_secrets
             case CertType.UNIT_HTTP:
                 return self.state.server.http_secrets
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit":
+            if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
+                status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
+            if not self.all_tls_resources_stored():
+                status_list.append(
+                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                    if self.state.tls_relation
+                    else TlsStatuses.TLS_RELATION_MISSING.value
+                )
+            if not self.state.tls_relation and (certs := self.check_certs_expiration()):
+                missing = [cert.val for cert in certs.keys()]
+                self.state.add_status_if_not_present(
+                    TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
+                    "unit",
+                    self.name,
+                    {"certificates": ", ".join(missing)},
+                )
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

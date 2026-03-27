@@ -27,8 +27,7 @@ class ConfigManager(BaseManager):
     JVM_OPTIONS = "jvm.options"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "config_manager"
+        super().__init__(state, workload, "config_manager")
 
     @property
     def yaml_setter(self) -> YamlConfigSetter:

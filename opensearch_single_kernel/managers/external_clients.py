@@ -32,8 +32,7 @@ class ExternalClientsManager(BaseManager):
     """OpenSearch External Clients Manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "external_clients_manager"
+        super().__init__(state, workload, "external_clients_manager")
 
     def create_opensearch_users(
         self,
@@ -68,7 +67,13 @@ class ExternalClientsManager(BaseManager):
             try:
                 self.opensearch_client.patch_user(
                     username,
-                    [{"op": "replace", "path": "/opendistro_security_roles", "value": [username]}],
+                    [
+                        {
+                            "op": "replace",
+                            "path": "/opendistro_security_roles",
+                            "value": [username],
+                        }
+                    ],
                 )
             except OpenSearchHttpError as e:
                 raise OpenSearchUserMgmtError(e)

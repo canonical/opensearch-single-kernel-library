@@ -23,13 +23,17 @@ The workflow logic goes alongside the following:
 import logging
 import os
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import Relation
+from overrides import override
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchLockError,
 )
+from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -43,7 +47,7 @@ class PeerLockManager(BaseManager):
     """Fallback lock when all units of OpenSearch are offline."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
+        super().__init__(state, workload, "lock_manager")
 
     def acquire(self) -> bool:
         """Attempt to acquire lock.
@@ -66,7 +70,14 @@ class PeerLockManager(BaseManager):
                 "[Node lock] Not acquired. Unit with peer databag lock: %s",
                 self.state.application_lock.unit_with_lock,
             )
+            self.state.add_status_if_not_present(
+                LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+            )
             return False
+
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
 
         if (
             self.state.server.is_app_leader
@@ -110,6 +121,10 @@ class PeerLockManager(BaseManager):
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
+
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
         if not self.state.lock_relation:
@@ -146,13 +161,32 @@ class PeerLockManager(BaseManager):
             logger.debug("[Node lock] (leader) cleared peer lock")
             del self.state.application_lock.unit_with_lock
 
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if (
+            scope == "unit"
+            and self.state.server_lock.lock_requested
+            and self.state.application_lock.unit_with_lock != self.state.unit_name
+        ):
+            status_list.append(LockStatuses.REQUEST_LOCK_ON_START.value)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
 
 class LockManager(PeerLockManager):
     """OpenSearch Lock Manager."""
 
-    def __init__(self, state, workload):
-        self.name = "lock_manager"
-        super().__init__(state, workload)
+    OPENSEARCH_INDEX = ".charm_node_lock"
 
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""

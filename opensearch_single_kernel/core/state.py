@@ -7,10 +7,14 @@
 import json
 import logging
 import os
+import re
 import socket
 from json import JSONDecodeError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
+from data_platform_helpers.advanced_statuses.protocol import StatusesStateProtocol
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import Application, JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
@@ -31,6 +35,8 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     PERFORMANCE_PROFILE,
     S3_RELATION,
+    SMTP_RELATION,
+    STATUS_PEERS_RELATION,
     TLS_RELATION,
     CertType,
     ObjectStorageType,
@@ -38,6 +44,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     Substrates,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchInvalidStorageTypeError
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentType,
@@ -58,6 +65,9 @@ from opensearch_single_kernel.core.relations import (
     RelationState,
 )
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
+    AzureStorageRequires,
+)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
     DataPeerData,
@@ -65,12 +75,18 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     OpenSearchProvidesData,
     SecretGroup,
 )
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
+    GcsStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     lock_unit_name,
     normalized_tls_subject,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -144,6 +160,15 @@ class OpenSearchServer(RelationState):
         """Get the value of 'started' key from unit data bag"""
         return self.relation.data[self.unit].get("started", "")
 
+    @started.setter
+    def started(self, value: str) -> None:
+        """Get the value of 'started' key from unit data bag"""
+        self.relation_data.update({"started": value})
+
+    @started.deleter
+    def started(self) -> None:
+        self.relation_data.update({"started": ""})
+
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
@@ -166,7 +191,11 @@ class OpenSearchServer(RelationState):
 
     @property
     def tls_configured(self) -> bool:
-        """Get the value of 'tls_configured' from unit data bag."""
+        """Get the value of 'tls_configured' from unit data bag.
+
+        This property signalizes the completion of TlsManager.is_fully_configured()
+        process on the unit.
+        """
         return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
@@ -787,7 +816,7 @@ class LockServerState(RelationState):
         self.relation.data[self.unit].update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})
 
 
-class ClusterState(Object):
+class ClusterState(Object, StatusesStateProtocol):
     """The global OpenSearch Cluster State ."""
 
     def __init__(self, charm: "OpenSearchBaseCharm", substrate: Substrates):
@@ -798,12 +827,18 @@ class ClusterState(Object):
         # Secrets  FIXME: Handle this separately.
         self.secrets = OpenSearchSecrets(charm, peer_relation=PEER_RELATION)
 
+        self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
         # TODO: Add secrets
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
         self.client_data_interface = OpenSearchProvidesData(
             model=charm.model, relation_name=CLIENT_RELATION
         )
+
+        self.smtp_requires = SmtpRequires(charm, SMTP_RELATION)
+        self.s3_requirer = S3Requirer(charm, S3_RELATION)
+        self.azure_requirer = AzureStorageRequires(charm, AZURE_RELATION)
+        self.gcs_requirer = GcsStorageRequires(charm, GCS_RELATION)
 
     # -- Relations
 
@@ -1008,14 +1043,12 @@ class ClusterState(Object):
         """Check if TLS is configured in all the units of the current cluster."""
         if not self.peer_relation:
             return False
-        for unit in self.all_units:
-            if (
-                self.peer_relation.data[unit].get("tls_configured", "").lower() != "true"
-                or "tls_ca_renewing" in self.peer_relation.data[unit]
-                or "tls_ca_renewed" in self.peer_relation.data[unit]
-            ):
-                return False
-        return True
+        return all(
+            [
+                server.tls_configured and not server.tls_ca_renewing and not server.tls_ca_renewed
+                for server in self.servers
+            ]
+        )
 
     @property
     def ca_rotation_complete_in_cluster(self) -> bool:
@@ -1062,8 +1095,8 @@ class ClusterState(Object):
         # if this flag is set, the CA rotation routine is complete for this unit
         if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster():
             # both CA rotation and certs rotation completed in the cluster
-            self.server.update({"tls_ca_renewing": ""})
-            self.server.update({"tls_ca_renewed": ""})
+            self.server.tls_ca_renewing = False
+            self.server.tls_ca_renewed = False
             # TODO: Handle large deployment
             # self.update_tls_flag_to_peer_cluster_relation(
             # flag="tls_ca_renewing", operation="remove"
@@ -1072,6 +1105,7 @@ class ClusterState(Object):
             #    flag="tls_ca_renewed", operation="remove"
             # )
             return
+
         # this means only the CA rotation completed, still need to create certificates
         self.server.tls_ca_renewed = True
         # TODO: Handle large deployment
@@ -1304,3 +1338,140 @@ class ClusterState(Object):
             component=self.model.app,
             unit_name=self.unit_name,
         )
+
+    @property
+    def smtp_relations(self) -> list[Relation]:
+        """Get SMTP relations."""
+        return self.model.relations.get(SMTP_RELATION, [])
+
+    def add_status_if_not_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        dynamic_params: dict[str, Any] | None = None,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Add charm status if not present already.
+
+        Args:
+            status: charm status to be added.
+            scope: scope of the added charm status.
+            component: name of the responsible component of the added status.
+            dynamic_params: params to format added status message with.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                For example, if one of the parameters is a relation id, you want for search to be
+                performed only through specific relation, while other parameters should be loosen
+                by search regex. E.g. if you have a two parameters `relation_id` and `exception`,
+                you may want to add a status with {"relation_id": 1, "exception": "err"} but with
+                search parameters {"relation_id": 1, "exception": "{}"} in order to not override
+                the same statuses from different relations. Note: "{}" placeholder makes
+                parameter loosen.
+        """
+        if scope == "app" and not self.server.is_app_leader:
+            return
+
+        present_statuses = self.statuses.get(scope, component)
+
+        if not dynamic_params and status not in present_statuses:
+            self.statuses.add(status, scope, component)
+
+        if dynamic_params and (
+            not (
+                present_status := self._search_interpolated_status(
+                    status, scope, component, search_parameters
+                )
+            )
+            or present_status.message != format_status(status, dynamic_params).message
+        ):
+            # Updates dynamic params if status already present.
+            self.remove_status_if_present(status, scope, component, interpolated=True)
+            self.statuses.add(format_status(status, dynamic_params), scope, component)
+
+    def remove_status_if_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated: bool = False,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated: perform a regex search by the status message to find
+                statuses formatted with dynamic parameters.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                Note: "{}" placeholder makes parameter loosen.
+        """
+        if scope == "app" and not self.server.is_app_leader:
+            return
+
+        present_statuses = self.statuses.get(scope, component)
+
+        if not interpolated and status in present_statuses:
+            self.statuses.delete(status, scope, component)
+
+        if interpolated and (
+            present_status := self._search_interpolated_status(
+                status, scope, component, search_parameters
+            )
+        ):
+            self.statuses.delete(present_status, scope, component)
+
+    def _search_interpolated_status(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated_parameters: dict[str, Any] | None = None,
+    ) -> StatusObject | None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated_parameters: params to format searched status message with prior to
+                interpolated search. Helps to differentiate between statuses with multiple
+                dynamic parameters. Note: "{}" placeholder makes parameter loosen.
+
+        Returns:
+            status if it was found.
+        """
+        regex_pattern = re.sub(
+            r"\{.*?\}",
+            r"(?s:.*?)",
+            (
+                format_status(status, interpolated_parameters)
+                if interpolated_parameters
+                else status
+            ).message,
+        )
+        for present_status in self.statuses.get(scope, component):
+            if re.fullmatch(regex_pattern, present_status.message) is not None:
+                return present_status
+        return None
+
+    def get_storage_connection_info_from_relation(
+        self, object_storage_type: ObjectStorageType
+    ) -> dict[str, str]:
+        """Returns the storage connection info from the active relation.."""
+        match object_storage_type:
+            case ObjectStorageType.S3:
+                return self.s3_requirer.get_s3_connection_info() or {}
+            case ObjectStorageType.AZURE:
+                return self.azure_requirer.get_azure_storage_connection_info() or {}
+            case ObjectStorageType.GCS:
+                if not self.gcs_relation:
+                    return {}
+                return self.gcs_requirer.get_storage_connection_info(self.gcs_relation) or {}
+            case _:
+                raise OpenSearchInvalidStorageTypeError(
+                    "Unsupported object storage type: %s" % object_storage_type
+                )

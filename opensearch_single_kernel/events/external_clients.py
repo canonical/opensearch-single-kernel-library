@@ -15,14 +15,14 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     IndexRequestedEvent,
     OpenSearchProvides,
 )
 from opensearch_single_kernel.utils.helpers import validate_index_name
-from opensearch_single_kernel.utils.status import Status
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -78,27 +78,54 @@ class ExternalClientsEventsHandler(Object):
             return
 
         if not validate_index_name(event.index):
-            self.charm.status.set(
-                CharmStatuses.INVALID_INDEX_NAME, dynamic_params={"index": event.index}
+            self.charm.status_handler.set_running_status(
+                format_status(
+                    ExternalClientsStatuses.INVALID_INDEX_NAME.value,
+                    {"id": event.relation.id, "index": event.index},
+                ),
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.external_clients_manager.name,
             )
             return
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.INVALID_INDEX_NAME.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
+        )
 
-        self.charm.status.set(
-            CharmStatuses.NEW_INDEX_REQUESTED, dynamic_params={"index": event.index}
+        self.charm.status_handler.set_running_status(
+            ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+            "unit",
+            component_name=self.charm.external_clients_manager.name,
         )
 
         try:
             self.charm.external_clients_manager.opensearch_client.create_index(event.index)
         except OpenSearchHttpError as e:
             logger.error(
-                CharmStatuses.INDEX_CREATION_FAILED.value.message.format(index=event.index)
-                + f"\nresponse error: {e}"
+                f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
             )
-            self.charm.status.set(
-                CharmStatuses.INDEX_CREATION_FAILED, dynamic_params={"index": event.index}
+            self.charm.status_handler.set_running_status(
+                format_status(
+                    ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                    {"id": event.relation.id, "index": event.index},
+                ),
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.external_clients_manager.name,
             )
             event.defer()
             return
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
+        )
 
         try:
             username, pwd = self.charm.external_clients_manager.create_opensearch_users(
@@ -106,12 +133,23 @@ class ExternalClientsEventsHandler(Object):
             )
         except OpenSearchUserMgmtError as err:
             logger.error(err)
-            self.charm.status.set(
-                CharmStatuses.USER_CREATION_FAILED,
-                dynamic_params={"rel_name": CLIENT_RELATION, "id": event.relation.id},
+            self.charm.status_handler.set_running_status(
+                format_status(
+                    ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": event.relation.id}
+                ),
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.external_clients_manager.name,
             )
             event.defer()
             return
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.USER_CREATION_FAILED.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
+        )
         try:
             external_client.version = self.charm.external_clients_manager.version
         except OpenSearchCmdError as e:
@@ -132,15 +170,6 @@ class ExternalClientsEventsHandler(Object):
 
         logger.info("new index %s available", event.index)
         # Clear old statuses set by this hook
-        self.charm.status.clear(
-            CharmStatuses.NEW_INDEX_REQUESTED, pattern=Status.CheckPattern.Interpolated
-        )
-        self.charm.status.clear(
-            CharmStatuses.INDEX_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
-        )
-        self.charm.status.clear(
-            CharmStatuses.USER_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
-        )
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle opensearch client relation-changed event."""
@@ -174,14 +203,26 @@ class ExternalClientsEventsHandler(Object):
             external_client
         )
         # Clear old statuses when the relation is departed
-        self.charm.status.clear(
-            CharmStatuses.NEW_INDEX_REQUESTED, pattern=Status.CheckPattern.Interpolated
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.INVALID_INDEX_NAME.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
         )
-        self.charm.status.clear(
-            CharmStatuses.INDEX_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
         )
-        self.charm.status.clear(
-            CharmStatuses.USER_CREATION_FAILED, pattern=Status.CheckPattern.Interpolated
+        self.charm.state.remove_status_if_present(
+            ExternalClientsStatuses.USER_CREATION_FAILED.value,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
         )
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
