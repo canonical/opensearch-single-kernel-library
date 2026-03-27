@@ -14,7 +14,6 @@ from opensearch_single_kernel.common.constants import (
     KIBANA_SERVER_USER,
     OPENSEARCH_HTTP_PORT,
     ExtraUserRolePermissions,
-    Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
@@ -24,9 +23,6 @@ from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState, ExternalOpenSearchClient
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import generate_hashed_password
-from opensearch_single_kernel.utils.secrets import (
-    password_key,
-)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -59,7 +55,7 @@ class ExternalClientsManager(BaseManager):
         )
         if extra_user_roles == KIBANA_SERVER_ROLE:
             username = KIBANA_SERVER_USER
-            pwd = self.state.secrets.get(Scope.APP, password_key(username))
+            pwd = self.state.application.get_user_password(username)
         else:
             username = external_client.relation_username
             hashed_pwd, pwd = generate_hashed_password()
@@ -182,7 +178,7 @@ class ExternalClientsManager(BaseManager):
         if endpoints != databag_endpoints:
             external_client.endpoints = endpoints
 
-    def remove_lingering_relation_users_and_roles(  # noqa: C901
+    def remove_lingering_relation_users_and_roles(
         self, departed_external_client: ExternalOpenSearchClient | None = None
     ):
         """Removes lingering relation users and roles from opensearch.
@@ -256,7 +252,8 @@ class ExternalClientsManager(BaseManager):
 
     def update_dashboards_password(self):
         """Update each Opensearch Dashboards relation with the latest kibanaserver."""
-        pwd = self.state.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
+        # only get the secret once to optimize performance
+        pwd = self.state.application.get_user_password(KIBANA_SERVER_USER)
         for dashboards_client in self.state.dashboards_clients:
             dashboards_client.username = KIBANA_SERVER_USER
             dashboards_client.password = pwd

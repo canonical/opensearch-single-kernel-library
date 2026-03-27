@@ -4,7 +4,6 @@
 # See LICENSE file for licensing details.
 
 """Object representing the global state of OpenSearch Charm."""
-
 import json
 import logging
 import socket
@@ -62,6 +61,7 @@ from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     normalized_tls_subject,
 )
+from opensearch_single_kernel.utils.secrets import hash_key, password_key
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -78,9 +78,11 @@ class OpenSearchServer(RelationState):
         relation: Relation | None,
         data_interface: DataPeerUnitData,
         component: Unit,
+        secrets: OpenSearchSecrets,
     ):
         super().__init__(relation, data_interface, component)
         self.unit = component
+        self.secrets = secrets
 
     @property
     def unit_id(self) -> int:
@@ -285,6 +287,26 @@ class OpenSearchServer(RelationState):
         """
         self.update({"oauth_departing": str(value)})
 
+    @property
+    def transport_secrets(self) -> dict[str, str]:
+        """Get the Transport layer TLS secrets."""
+        return self.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT, peek=True) or {}
+
+    @property
+    def http_secrets(self) -> dict[str, str]:
+        """Get the HTTP layer TLS secrets."""
+        return self.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP, peek=True) or {}
+
+    @property
+    def transport_keystore_password(self) -> str | None:
+        """Get the keystore-password of transport TLS cert from the TLS cert_secret."""
+        return self.transport_secrets.get("keystore-password")
+
+    @property
+    def http_keystore_password(self) -> str | None:
+        """Get the keystore-password of HTTP TLS cert from the TLS cert_secret."""
+        return self.http_secrets.get("keystore-password")
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.
@@ -298,9 +320,12 @@ class OpenSearchApplication(RelationState):
         relation: Relation | None,
         data_interface: DataPeerData,
         component: Application,
+        # TODO to be removed when integrating data interfaces v1
+        secrets: OpenSearchSecrets,
     ):
         super().__init__(relation, data_interface, component)
         self.app = component
+        self.secrets = secrets
 
     @property
     def name(self) -> str:
@@ -452,6 +477,40 @@ class OpenSearchApplication(RelationState):
             self.update({"plugin_config_info": ""})
             return
         self.put_object("plugin_config_info", value)
+
+    @property
+    def admin_secrets(self) -> dict[str, str]:
+        """Get the admin secrets dict."""
+        return self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+
+    @property
+    def tls_truststore_password(self) -> str | None:
+        """Get the truststore-password from the TLS admin_secrets."""
+        return (
+            truststore_pwd
+            if (admin_secrets := self.admin_secrets)
+            and (truststore_pwd := admin_secrets.get("truststore-password"))
+            else None
+        )
+
+    @property
+    def tls_subject(self) -> str | None:
+        """Get the normalized_tls_subject from the TLS admin_secrets."""
+        return (
+            normalized_tls_subject(subject)
+            if (admin_secrets := self.admin_secrets) and (subject := admin_secrets.get("subject"))
+            else None
+        )
+
+    # TODO when migrated to v1 this would be changed to a match case where the passwords are explicitly
+    # defined in the application model
+    def get_user_password(self, user: str) -> str | None:
+        """Get the password for a given user from the client relation users dict."""
+        return self.secrets.get(Scope.APP, password_key(user))
+
+    def get_user_hashed_password(self, user: str) -> str | None:
+        """Get the hashed password for a given user from the client relation users dict."""
+        return self.secrets.get(Scope.APP, hash_key(user))
 
 
 class ExternalOpenSearchClient(RelationState):
@@ -661,6 +720,7 @@ class ClusterState(Object):
             relation=self.peer_relation,
             data_interface=self.peer_unit_interface,
             component=self.model.unit,
+            secrets=self.secrets,
         )
 
     @property
@@ -671,6 +731,7 @@ class ClusterState(Object):
                 relation=self.peer_relation,
                 data_interface=self.peer_unit_interface,
                 component=unit,
+                secrets=self.secrets,
             )
             for unit in self.all_units
         ]
@@ -682,6 +743,7 @@ class ClusterState(Object):
             relation=self.peer_relation,
             data_interface=self.peer_app_interface,
             component=self.model.app,
+            secrets=self.secrets,
         )
 
     @property
@@ -931,43 +993,6 @@ class ClusterState(Object):
             for mapped_user, mapped_role in roles_mapping.items()
             if mapped_role == role
         ]
-
-    @property
-    def tls_truststore_password(self) -> str | None:
-        """Get the truststore-password from the TLS admin_secrets."""
-        return (
-            truststore_pwd
-            if (
-                admin_secrets := self.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val, peek=True
-                )
-            )
-            and (truststore_pwd := admin_secrets.get("truststore-password"))
-            else None
-        )
-
-    def get_tls_keystore_password(self, cert_type: CertType) -> str | None:
-        """Get the keystore-password of provided cert_type from the TLS cert_secret."""
-        return (
-            keystore_pwd
-            if (cert_secret := self.secrets.get_object(Scope.UNIT, cert_type.val, peek=True))
-            and (keystore_pwd := cert_secret.get("keystore-password"))
-            else None
-        )
-
-    @property
-    def tls_subject(self) -> str | None:
-        """Get the normalized_tls_subject from the TLS admin_secrets."""
-        return (
-            normalized_tls_subject(subject)
-            if (
-                admin_secrets := self.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val, peek=True
-                )
-            )
-            and (subject := admin_secrets.get("subject"))
-            else None
-        )
 
     def computed_roles(self) -> list[str]:
         """Return computed_roles"""

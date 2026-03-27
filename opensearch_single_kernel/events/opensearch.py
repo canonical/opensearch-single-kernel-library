@@ -121,7 +121,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
-        pass
         # TODO: Handle upgrades
         # if self.upgrade_in_progress:
         # logger.warning(
@@ -131,7 +130,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Event received by all units when a new node joins the cluster."""
-        pass
         # TODO: Handle upgrades
         # if self.upgrade_in_progress:
         #    logger.warning(
@@ -139,7 +137,7 @@ class OpenSearchEventsHandler(Object):
         #  unrecoverable state"
         #    )
 
-    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa C901
+    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle peer relation changes."""
         # check requirements
         if not self.charm.state.application.deployment_desc:
@@ -303,7 +301,7 @@ class OpenSearchEventsHandler(Object):
                 # release lock
                 self.charm.lock_manager.release()
 
-    def _on_update_status(self, event: UpdateStatusEvent) -> None:  # noqa: C901
+    def _on_update_status(self, event: UpdateStatusEvent) -> None:
         """On update status event.
 
         We want to periodically check for the following:
@@ -403,7 +401,7 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchInstallError:
                 self.charm.status.set(CharmStatuses.INSTALL_ERROR)
 
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """On config changed event. Useful for IP changes or for user provided config changes."""
         if (
             self.charm.state.server.last_host_ip
@@ -465,7 +463,7 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
         # was deferred, then juju proceeded with a new leader election, and this now deferred-event
@@ -527,7 +525,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
-    def _on_start(self, event: StartEvent) -> None:  # noqa: C901
+    def _on_start(self, event: StartEvent) -> None:
         """Event handler for start event."""
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
@@ -645,7 +643,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.start_opensearch_event.emit()
 
-    def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
+    def _on_start_opensearch(self, event: StartOpenSearch) -> None:
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
 
@@ -983,7 +981,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.app.status = BlockedStatus(deployment_desc.state.message)
 
-    def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
+    def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Refresh secret and re-run corresponding actions if needed."""
         secret = event.secret
         secret.get_content(refresh=True)
@@ -1127,20 +1125,28 @@ class OpenSearchEventsHandler(Object):
         # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
 
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            csr = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)[
-                "csr"
-            ].encode("utf-8")
-            self.charm.tls_events.certs.request_certificate_revocation(csr)
+            secret = (
+                self.charm.state.server.transport_secrets
+                if cert_type == CertType.UNIT_TRANSPORT
+                else self.charm.state.server.http_secrets
+            )
+            self.charm.tls_events.certs.request_certificate_revocation(
+                secret["csr"].encode("utf-8")
+            )
 
         # doing this sequentially (revoking -> requesting new ones), to avoid triggering
         # the "certificate available" callback with old certificates
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secrets = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
-            old_csr = secrets["csr"].encode("utf-8")
+            secret = (
+                self.charm.state.server.transport_secrets
+                if cert_type == CertType.UNIT_TRANSPORT
+                else self.charm.state.server.http_secrets
+            )
+            old_csr = secret["csr"].encode("utf-8")
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
-                secrets=secrets,
+                secrets=secret,
                 tls_file=False,
             )
 
@@ -1153,14 +1159,11 @@ class OpenSearchEventsHandler(Object):
         """Request the generation of a new admin certificate."""
         if not self.charm.unit.is_leader():
             return
-        admin_secrets = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
 
         csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
-            secrets=admin_secrets,
+            secrets=self.charm.state.application.admin_secrets,
             tls_file=False,
         )
 

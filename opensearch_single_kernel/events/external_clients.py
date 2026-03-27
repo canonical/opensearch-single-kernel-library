@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
 
-from opensearch_single_kernel.common.constants import CLIENT_RELATION, CertType, Scope
+from opensearch_single_kernel.common.constants import CLIENT_RELATION
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchHttpError,
@@ -53,7 +53,7 @@ class ExternalClientsEventsHandler(Object):
         )
         self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
-    def _on_index_requested(self, event: IndexRequestedEvent) -> None:  # noqa
+    def _on_index_requested(self, event: IndexRequestedEvent) -> None:
         """Handle client index-requested event.
 
         The read-only-endpoints field of DatabaseProvides is unused in this relation because this
@@ -122,9 +122,7 @@ class ExternalClientsEventsHandler(Object):
         external_client.password = pwd
         external_client.index = event.index
         try:
-            external_client.tls_ca = self.charm.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val
-            )["chain"]
+            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
         except KeyError as e:
             logger.error("Failed to update relation TLS info: missing key %s", str(e))
             event.defer()

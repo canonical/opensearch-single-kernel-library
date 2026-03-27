@@ -205,7 +205,7 @@ class ConfigManager(BaseManager):
         """
         return (
             {"plugins.security.authcz.admin_dn": [tls_subject]}
-            if (tls_subject := self.state.tls_subject)
+            if (tls_subject := self.state.application.tls_subject)
             else {}
         )
 
@@ -214,24 +214,29 @@ class ConfigManager(BaseManager):
 
         Intended for opensearch.yml config file.
         """
-        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+        if cert_type == CertType.UNIT_HTTP:
+            layer = "http"
+            keystore_pwd = self.state.server.http_keystore_password
+        else:
+            layer = "transport"
+            keystore_pwd = self.state.server.transport_keystore_password
 
-        return (
-            {
-                f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
-                f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
-                f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
-                f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
-                f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
-                f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
-                f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
-                f"plugins.security.ssl.{layer}.truststore_password": truststore_pwd,
-                f"plugins.security.ssl.{layer}.enabled_protocols": "TLSv1.2",
-            }
-            if (truststore_pwd := self.state.tls_truststore_password)
-            and (keystore_pwd := self.state.get_tls_keystore_password(cert_type))
-            else {}
-        )
+        if not (
+            (truststore_pwd := self.state.application.tls_truststore_password) and keystore_pwd
+        ):
+            return {}
+
+        return {
+            f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
+            f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
+            f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
+            f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
+            f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
+            f"plugins.security.ssl.{layer}.truststore_password": truststore_pwd,
+            f"plugins.security.ssl.{layer}.enabled_protocols": "TLSv1.2",
+        }
 
     @property
     def _opensearch_data_temperature(self) -> str | None:
@@ -507,13 +512,13 @@ class ConfigManager(BaseManager):
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{str(heap_size_in_kb)}k",
+            f"-Xms{heap_size_in_kb!s}k",
             regex=True,
         )
 
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{str(heap_size_in_kb)}k",
+            f"-Xmx{heap_size_in_kb!s}k",
             regex=True,
         )
