@@ -56,7 +56,7 @@ class TlsManager(BaseManager):
         super().__init__(state, workload)
         self.name = "tls_manager"
 
-    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
+    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:
         """Check if all TLS resources are stored on disk."""
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
         if not only_unit_resources:
@@ -74,8 +74,7 @@ class TlsManager(BaseManager):
             if not cert_type_path.exists():
                 return False
 
-            scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
-            secret = self.state.secrets.get_object(scope, cert_type.val, peek=True)
+            secret = self.get_secrets_for_cert_type(cert_type)
 
             cert_issuer = self.get_cert_issuer_from_path(
                 store_pwd=secret.get("keystore-password"),
@@ -91,29 +90,27 @@ class TlsManager(BaseManager):
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secrets = self.state.application.admin_secrets
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug("Reading stored ca from %s", ca_trust_store)
-        if not (ca_trust_store.exists() and secrets):
+        if not (ca_trust_store.exists() and admin_secrets):
             return None
 
         return read_ca(
             workload=self.workload,
             alias=alias,
-            store_pwd=secrets.get("truststore-password"),
+            store_pwd=admin_secrets.get("truststore-password"),
             store_path=ca_trust_store,
         )
 
     def all_certificates_available(self) -> bool:
         """Method that checks if all certs available and issued from same CA."""
-        secrets = self.state.secrets
-
-        admin_secrets = secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secrets = self.state.application.admin_secrets
         if not admin_secrets or not admin_secrets.get("cert"):
             return False
 
         for cert_type in [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]:
-            unit_secrets = secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
+            unit_secrets = self.get_secrets_for_cert_type(cert_type)
             if not unit_secrets or not unit_secrets.get("cert"):
                 return False
 
@@ -135,7 +132,7 @@ class TlsManager(BaseManager):
         """
         store_pwd = None
 
-        secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True)
+        secrets = self.get_secrets_for_cert_type(cert_type)
         if secrets:
             store_pwd = secrets.get(f"{store_type.val}-password")
 
@@ -203,15 +200,15 @@ class TlsManager(BaseManager):
         self,
         scope: Scope,
         cert_type: CertType,
-        secrets: dict[str, str] | None = None,
+        secret: dict[str, str] | None = None,
         tls_file: bool = True,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         key = None
         password = None
-        if secrets:
-            key = secrets.get("key") if secrets.get("key") else None
-            password = secrets.get("key-password", None)
+        if secret:
+            key = secret.get("key") if secret.get("key") else None
+            password = secret.get("key-password", None)
 
         if key is None:
             key = generate_private_key()
@@ -253,7 +250,7 @@ class TlsManager(BaseManager):
         self, scope: Scope, cert_type: CertType, ca_chain: str, certificate: str, ca: str
     ) -> None:
         """Update the certificate secrets if needed"""
-        current_secret_obj = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+        current_secret_obj = self.get_secrets_for_cert_type(cert_type)
         secret = {
             "chain": current_secret_obj.get("chain"),
             "cert": current_secret_obj.get("cert"),
@@ -292,19 +289,15 @@ class TlsManager(BaseManager):
                 and secrets.get(secret_name, "").rstrip() == event_data.rstrip()
             )
 
-        app_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        app_secrets = self.state.application.admin_secrets
         if is_secret_found(app_secrets):
             return Scope.APP, CertType.APP_ADMIN, app_secrets
 
-        u_transport_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-        )
+        u_transport_secrets = self.state.server.transport_secrets
         if is_secret_found(u_transport_secrets):
             return Scope.UNIT, CertType.UNIT_TRANSPORT, u_transport_secrets
 
-        u_http_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_HTTP.val, peek=True
-        )
+        u_http_secrets = self.state.server.http_secrets
         if is_secret_found(u_http_secrets):
             return Scope.UNIT, CertType.UNIT_HTTP, u_http_secrets
 
@@ -314,9 +307,7 @@ class TlsManager(BaseManager):
         """Create a new chain.pem file for requests module"""
         logger.debug("Updating requests TLS CA bundle")
         if ca_chain is None:
-            admin_secret = self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
+            admin_secret = self.state.application.admin_secrets
             ca_chain = admin_secret.get("chain")
 
         # we store the pem format to make it easier for the python requests lib
@@ -408,11 +399,7 @@ class TlsManager(BaseManager):
         """Store admin TLS resources if available and mark unit as configured if correct."""
         # In the case of the first units before TLS is initialized,
         # or non-main orchestrator units having not received the secrets from the main yet
-        if not (
-            current_secrets := self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
-        ):
+        if not (current_secrets := self.state.application.admin_secrets):
             return
 
         # in the case the cluster was bootstrapped with multiple units at the same time
@@ -459,7 +446,7 @@ class TlsManager(BaseManager):
     def reload_tls_certificates(self) -> None:
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
-        admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secret = self.state.application.admin_secrets
         with (
             self.workload.temp_file(
                 mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
@@ -483,20 +470,16 @@ class TlsManager(BaseManager):
         """Retrieve the list of certificates for this unit."""
         certs = {}
 
-        transport_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-        )
+        transport_secrets = self.state.server.transport_secrets
         if transport_secrets and transport_secrets.get("cert"):
             certs[CertType.UNIT_TRANSPORT] = transport_secrets["cert"]
 
-        http_secrets = self.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val, peek=True)
+        http_secrets = self.state.server.http_secrets
         if http_secrets and http_secrets.get("cert"):
             certs[CertType.UNIT_HTTP] = http_secrets["cert"]
 
         if self.state.server.is_app_leader:
-            admin_secrets = self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
+            admin_secrets = self.state.application.admin_secrets
             if admin_secrets and admin_secrets.get("cert"):
                 certs[CertType.APP_ADMIN] = admin_secrets["cert"]
 
@@ -524,7 +507,7 @@ class TlsManager(BaseManager):
 
     def remove_old_ca(self) -> None:
         """Remove old CA cert from trust store."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        secrets = self.state.application.admin_secrets
         if secrets is None:
             logger.error("Cannot remove old CA: admin secrets not found.")
             return
@@ -541,16 +524,15 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
+    def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
 
-        admin_secrets = (
-            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
+        admin_secrets = self.state.application.admin_secrets
+        cert_secrets = self.get_secrets_for_cert_type(cert_type)
 
-        if not ((secrets or {}).get("ca-cert") and admin_secrets.get("truststore-password")):
+        if not (cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
@@ -559,12 +541,22 @@ class TlsManager(BaseManager):
             alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
-            ca=secrets.get("ca-cert"),
+            ca=cert_secrets.get("ca-cert"),
             keep_previous=True,
             add_read_perm=True,
         ):
             return False
 
-        self.update_request_ca_bundle(secrets.get("chain"))
+        self.update_request_ca_bundle(cert_secrets.get("chain"))
 
         return True
+
+    def get_secrets_for_cert_type(self, cert_type: CertType) -> dict[str, str]:
+        """Get secrets for a given certificate type."""
+        match cert_type:
+            case CertType.APP_ADMIN:
+                return self.state.application.admin_secrets
+            case CertType.UNIT_TRANSPORT:
+                return self.state.server.transport_secrets
+            case CertType.UNIT_HTTP:
+                return self.state.server.http_secrets

@@ -14,12 +14,10 @@ from ops import (
     RelationCreatedEvent,
     SecretChangedEvent,
 )
-from pydantic.error_wrappers import ValidationError
+from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
-    CertType,
-    Scope,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import CharmStatuses
@@ -133,9 +131,7 @@ class JWTEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (
-            admin_secrets := self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val)
-        ):
+        if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
 
