@@ -401,7 +401,7 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchInstallError:
                 self.charm.status.set(CharmStatuses.INSTALL_ERROR)
 
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
         if (
             self.charm.state.server.last_host_ip

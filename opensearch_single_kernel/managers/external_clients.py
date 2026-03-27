@@ -178,7 +178,7 @@ class ExternalClientsManager(BaseManager):
         if endpoints != databag_endpoints:
             external_client.endpoints = endpoints
 
-    def remove_lingering_relation_users_and_roles(
+    def remove_lingering_relation_users_and_roles(  # noqa: C901
         self, departed_external_client: ExternalOpenSearchClient | None = None
     ):
         """Removes lingering relation users and roles from opensearch.

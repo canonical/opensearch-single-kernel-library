@@ -502,8 +502,8 @@ class OpenSearchApplication(RelationState):
             else None
         )
 
-    # TODO when migrated to v1 this would be changed to a match case where the passwords are explicitly
-    # defined in the application model
+    # TODO when migrated to v1 this would be changed to a match case where the passwords
+    # are explicitly defined in the application model
     def get_user_password(self, user: str) -> str | None:
         """Get the password for a given user from the client relation users dict."""
         return self.secrets.get(Scope.APP, password_key(user))
