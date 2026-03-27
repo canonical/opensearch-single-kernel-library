@@ -57,6 +57,8 @@ parts:
       - libffi-dev  # Needed to build Python dependencies with Rust from source
       - libssl-dev  # Needed to build Python dependencies with Rust from source
       - pkg-config  # Needed to build Python dependencies with Rust from source
+    build-environment:
+    - PIP_CONSTRAINT: constraints.txt # Workaround setuptools 82
     override-build: |
       # Workaround for https://github.com/canonical/charmcraft/issues/2068
       # rustup used to install rustc and cargo, which are needed to build Python dependencies with Rust from source
@@ -77,6 +79,7 @@ parts:
       rustup set profile minimal
       rustup default 1.92.0  # renovate: charmcraft-rust-latest
 
+      echo "setuptools-scm<10.0.0" > constraints.txt
       craftctl default
       # Include requirements.txt in *.charm artifact for easier debugging
       cp requirements.txt "$CRAFT_PART_INSTALL/requirements.txt"
