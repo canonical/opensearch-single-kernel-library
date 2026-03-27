@@ -160,7 +160,7 @@ class TLSEventsHandler(Object):
         # Otherwise, we block.
         self.charm.status.set(CharmStatuses.TLS_RELATION_BROKEN)
 
-    def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:
+    def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
         """Enable TLS when TLS certificate available.
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.

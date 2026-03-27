@@ -317,7 +317,7 @@ def test_on_certificate_available(harness, mocker):
     event_mock = MagicMock(certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca)
     harness.charm.tls_events._on_certificate_available(event_mock)
 
-    harness.charm.state.server.transport_secrets == {
+    assert harness.charm.state.server.transport_secrets == {
         "csr": csr,
         "chain": chain[0],
         "cert": cert,

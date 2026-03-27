@@ -53,7 +53,7 @@ class ExternalClientsEventsHandler(Object):
         )
         self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
-    def _on_index_requested(self, event: IndexRequestedEvent) -> None:
+    def _on_index_requested(self, event: IndexRequestedEvent) -> None:  # noqa: C901
         """Handle client index-requested event.
 
         The read-only-endpoints field of DatabaseProvides is unused in this relation because this

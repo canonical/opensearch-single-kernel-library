@@ -137,7 +137,7 @@ class OpenSearchEventsHandler(Object):
         #  unrecoverable state"
         #    )
 
-    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:
+    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
         # check requirements
         if not self.charm.state.application.deployment_desc:
@@ -301,7 +301,7 @@ class OpenSearchEventsHandler(Object):
                 # release lock
                 self.charm.lock_manager.release()
 
-    def _on_update_status(self, event: UpdateStatusEvent) -> None:
+    def _on_update_status(self, event: UpdateStatusEvent) -> None:  # noqa: C901
         """On update status event.
 
         We want to periodically check for the following:
@@ -463,7 +463,7 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
         # was deferred, then juju proceeded with a new leader election, and this now deferred-event
@@ -525,7 +525,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.status.clear(CharmStatuses.ADMIN_USER_INIT_IN_PROGRESS)
 
-    def _on_start(self, event: StartEvent) -> None:
+    def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
@@ -643,7 +643,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.start_opensearch_event.emit()
 
-    def _on_start_opensearch(self, event: StartOpenSearch) -> None:
+    def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
 
