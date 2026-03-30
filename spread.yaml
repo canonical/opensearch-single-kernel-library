@@ -54,8 +54,6 @@ backends:
       systemctl disable --now unattended-upgrades.service
       systemctl mask unattended-upgrades.service
       pipx install charmcraftcache
-      cd "$SPREAD_PATH"
-      bash scripts/build_lib_for_integration.sh
     restore-each: |
       cd "$SPREAD_PATH"
       # Revert python-libjuju version override
@@ -124,7 +122,7 @@ path: /root/spread_project
 
 kill-timeout: 3h
 environment:
-  PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
+  PATH: $PATH:/root/.local/bin:/home/ubuntu/.local/bin
   CONCIERGE_JUJU_CHANNEL: 3.6/stable
   CHARM_UBUNTU_BASE/ubuntu24: 24.04
   CHARM_UBUNTU_BASE/ubuntu22: 22.04
@@ -135,6 +133,12 @@ prepare: |
   snap install --classic concierge
   apt-get update
   apt-get install -y pipx
+  pipx install tox poetry
+  if ! command -v charmcraft >/dev/null 2>&1
+  then
+    snap install charmcraft --classic
+  fi
+  bash scripts/build_lib_for_integration.sh
 
   if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
@@ -184,8 +188,6 @@ prepare: |
     fi
   fi
 
-  # Install charmcraft & pipx (on lxd-vm backend)
-  pipx install tox poetry
 prepare-each: |
   cd "$SPREAD_PATH"
 
