@@ -39,7 +39,7 @@ def get_nested_value(config: dict, key_path: str) -> object | None:
     if not isinstance(config, dict):
         return None
 
-    # Fast-path for "flat" YAMLs where the full dotted key exists as-is.
+    # Fast-path for flat YAMLs where the full dotted key exists as-is.
     if key_path in config:
         return config.get(key_path)
 
@@ -398,7 +398,7 @@ class YamlConfigSetter(ConfigSetter):
         """Write the YAML data on the corresponding "output_type" stream.
 
         Always writes YAML even if data is empty ({}), to ensure file exists
-        and prevent file does not exist yet loops.
+        and prevent file does not exist yet.
         """
         if output_type in [OutputType.console, OutputType.all]:
             self.yaml.dump(data, sys.stdout)

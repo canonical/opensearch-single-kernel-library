@@ -41,7 +41,6 @@ from ..plugins.helpers import (
     poll_until,
     run_knn_training,
 )
-from ..profiles.test_profiles import get_constraints
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
@@ -287,7 +286,6 @@ async def test_build_and_deploy_small_deployment(
     #  test_prometheus_exporter_disabled_by_cos_relation_gone
     model_conf["update-status-hook-interval"] = "1m"
     await ops_test.model.set_config(model_conf)
-    constraints = await get_constraints(ops_test, mem_gb=8)
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
@@ -296,7 +294,6 @@ async def test_build_and_deploy_small_deployment(
             charm,
             num_units=3,
             series=series,
-            constraints=constraints,
             config={"profile": "production"},
         ),
         ops_test.model.deploy(

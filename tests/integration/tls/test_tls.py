@@ -24,7 +24,6 @@ from tests.integration.helpers import (
     get_application_unit_ids_ips,
     get_application_unit_ips_names,
     get_application_unit_names,
-    get_constraints,
     get_leader_unit_id,
     get_leader_unit_ip,
     run_action,
@@ -65,7 +64,6 @@ async def test_build_and_deploy_active(
         len(unit_ids),
         series=series,
         config=CONFIG_OPTS,
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
 
@@ -206,7 +204,6 @@ async def test_tls_expiration(
         1,
         series=series,
         config=CONFIG_OPTS,
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
 

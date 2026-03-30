@@ -3,7 +3,6 @@
 
 
 import asyncio
-import logging
 
 import pytest
 from pytest_operator.plugin import OpsTest
@@ -21,13 +20,10 @@ from tests.integration.conftest import (
 from tests.integration.helpers import (
     deploy_opensearch,
     get_cloud_type,
-    get_constraints,
     get_leader_unit_ip,
     wait_until,
 )
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
-
-logger = logging.getLogger(__name__)
 
 _3CM_AND_3DATA_MISSING_STATUS = (
     "Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required."
@@ -75,9 +71,6 @@ async def test_build_and_deploy(
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
-    # Production profile needs 8G per unit so the scaled cluster gets 4GB heap.
-    constraints = await get_constraints(ops_test, mem_gb=8)
-    logger.info(f"Using constraints: {constraints}")
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     await asyncio.gather(
@@ -91,7 +84,6 @@ async def test_build_and_deploy(
             APP_NAME,
             1,
             series=series,
-            constraints=constraints,
             config={"profile": "production"},
             resources=charm_resources,
         ),
@@ -188,9 +180,6 @@ async def test_testing_profile(
     """Test testing profile"""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    # Use a production-sized VM so the subsequent profile-switch test needs
-    # enough memory.
-    constraints = await get_constraints(ops_test, mem_gb=8)
 
     await deploy_opensearch(
         ops_test,
@@ -200,7 +189,6 @@ async def test_testing_profile(
         1,
         series=series,
         config={"profile": "testing"},
-        constraints=constraints,
         resources=charm_resources,
     )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
@@ -237,7 +225,6 @@ async def test_large_deployment_cluster(
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test, mem_gb=8)
     await deploy_opensearch(
         ops_test,
         charm,
@@ -246,7 +233,6 @@ async def test_large_deployment_cluster(
         1,
         series=series,
         config={"cluster_name": "test", "roles": "cluster_manager", "profile": "production"},
-        constraints=constraints,
         resources=charm_resources,
     )
     await deploy_opensearch(
@@ -262,7 +248,6 @@ async def test_large_deployment_cluster(
             "roles": "data",
             "profile": "production",
         },
-        constraints=constraints,
         resources=charm_resources,
     )
 

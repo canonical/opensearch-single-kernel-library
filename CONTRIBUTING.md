@@ -29,12 +29,6 @@ tox run -e integration -- --substrate k8s   # integration tests on Kubernetes
 tox                      # runs 'lint' and 'unit' environments
 ```
 
-For local VM/LXD integration runs, you can enable memory constraints with:
-
-```shell
-OPENSEARCH_ENABLE_CONSTRAINTS=1 tox run -e integration -- --substrate vm
-```
-
 ### `pre-commit` hooks
 
 Code quality is enforced using [pre-commit](https://github.com/pre-commit/pre-commit) hooks. They will run before each commit and also at other stages.

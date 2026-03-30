@@ -21,7 +21,6 @@ from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
     app_name,
     get_application_unit_ids,
-    get_constraints,
     get_leader_unit_ip,
     wait_until,
 )
@@ -44,15 +43,12 @@ async def test_build_and_deploy(
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    constraints = await get_constraints(ops_test)
     os_deploy_kwargs = {
         "application_name": APP_NAME,
         "num_units": 2,
         "series": series,
         "config": CONFIG_OPTS,
     }
-    if constraints:
-        os_deploy_kwargs["constraints"] = constraints
     if substrate == "k8s":
         os_deploy_kwargs["resources"] = charm_resources
     await asyncio.gather(
@@ -94,15 +90,12 @@ async def test_multi_clusters_db_isolation(
     unit_ids = get_application_unit_ids(ops_test, app=app)
 
     # deploy new cluster
-    constraints = await get_constraints(ops_test)
     deploy_kwargs = {
         "application_name": SECOND_APP_NAME,
         "num_units": 1,
         "series": series,
         "config": CONFIG_OPTS,
     }
-    if constraints:
-        deploy_kwargs["constraints"] = constraints
     if substrate == "k8s":
         deploy_kwargs["resources"] = charm_resources
     await ops_test.model.deploy(charm, **deploy_kwargs)

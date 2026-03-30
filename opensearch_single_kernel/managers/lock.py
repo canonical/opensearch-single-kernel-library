@@ -397,7 +397,7 @@ class LockManager(PeerLockManager):
         # - OR, unit is leader & lock granted in this Juju event
         return super().acquired
 
-    def release(self) -> None:  # noqa: C901
+    def release(self) -> None:  # noqa C901
         """Release lock.
 
         Limitation: if lock acquired via OpenSearch document and all units offline, OpenSearch

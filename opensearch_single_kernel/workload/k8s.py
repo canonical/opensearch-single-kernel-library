@@ -656,8 +656,10 @@ class K8sWorkload(BaseWorkload):
             ):
                 missing_requirements.append(error_message)
 
-        # Soft requirement (warn-only): tcp_retries2 should be lowered for better stability.
-        # do not block charm execution if this is not set.
+        # Currently, soft requirement (warn-only): tcp_retries2 should be
+        # lowered for better stability. Do not block charm execution if this is not set.
+        # TODO: deploy the K8s admission webhook mutator to the K8s environment
+        #  and put the charm to blocked when tcp_retries2 values is not lowered
         tcp_retries2_config_method = (
             "recommended net.ipv4.tcp_retries2=5 (configure at kubelet/node level as appropriate)"
         )
@@ -677,7 +679,7 @@ class K8sWorkload(BaseWorkload):
         """Check if a kernel property meets the required value.
 
         Args:
-            property_name: Kernel property name (e.g., "vm.max_map_count").
+            property_name: Kernel property name (e.g. "vm.max_map_count").
             required_value: Required value for the property.
             comparison_op: Comparison operator ("<" or ">") to check
              if current value does not meet the requirement.
@@ -744,7 +746,7 @@ class K8sWorkload(BaseWorkload):
         return self._read_kernel_property_via_procfs(prop)
 
     def _read_kernel_property_via_sysctl_n(self, property_name: str) -> int | None:
-        """Read kernel property using 'sysctl -n' command.
+        """Read kernel property using sysctl -n command.
 
         Args:
             property_name: Kernel property name.
@@ -817,13 +819,13 @@ class K8sWorkload(BaseWorkload):
         """Run command in the container.
 
         Args:
-            command: Command to run, can contain arguments
-            args: Additional command line arguments
-            stdin: String input to be passed on the standard input
-            use_errors_replace: Ignored in K8s (kept for interface compatibility)
+            command: command to run, can contain arguments
+            args: additional command line arguments
+            stdin: string input to be passed on the standard input
+            use_errors_replace: ignored in K8s (kept for interface compatibility)
 
         Returns:
-            SimpleNamespace with cmd, out, err, returncode attributes
+            SimpleNamespace with cmd, out, err, return code attributes
 
         Raises:
             OpenSearchCmdError: If command execution fails or container is not ready

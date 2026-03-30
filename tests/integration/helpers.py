@@ -6,7 +6,6 @@ import asyncio
 import base64
 import json
 import logging
-import os
 import random
 import shlex
 import socket
@@ -103,28 +102,6 @@ async def get_cloud_type(ops_test: OpsTest) -> str:
     controller = await ops_test.model.get_controller()
     cloud = await controller.cloud()
     return cloud.cloud.type_
-
-
-async def get_constraints(ops_test: OpsTest, mem_gb: int = 4) -> Optional[str]:
-    """Return optional memory constraints for VM integration deployments.
-
-    Constraints are disabled by default and enabled only when
-    OPENSEARCH_ENABLE_CONSTRAINTS is set to a truthy value.
-    """
-    enable_constraints = os.getenv("OPENSEARCH_ENABLE_CONSTRAINTS", "").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not enable_constraints:
-        return None
-
-    cloud_type = await get_cloud_type(ops_test)
-    # localhost controller typically uses LXD; lxd is the cloud type when added explicitly
-    if cloud_type in ("lxd", "localhost"):
-        return f"mem={mem_gb}G"
-    return None
 
 
 def now() -> str:

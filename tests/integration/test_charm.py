@@ -27,7 +27,6 @@ from .helpers import (
     deploy_opensearch,
     get_application_unit_ids,
     get_conf_as_dict,
-    get_constraints,
     get_leader_unit_id,
     get_leader_unit_ip,
     get_secrets,
@@ -64,7 +63,6 @@ async def test_deploy_and_remove_single_unit(
         1,
         series=series,
         config=CONFIG_OPTS,
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
     # Deploy TLS Certificates operator.
@@ -116,7 +114,6 @@ async def test_build_and_deploy(
         units,
         series=series,
         config=config_opts_for_deployment(substrate, units),
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
     await wait_until(

@@ -537,7 +537,7 @@ class TlsManager(BaseManager):
                 owner = f"{OPENSEARCH_RUN_AS_USER}:{ROOT_GID}"
                 cmd = f"chown {owner} {store_path_str}"
             else:
-                # Snap services run as snap_daemon on VM, so 640 files must be handed off.
+                # Snap services run as snap_daemon on VM, so 640 files must be transferred.
                 owner = "snap_daemon:root"
                 cmd = f"sudo chown {owner} {store_path_str}"
 

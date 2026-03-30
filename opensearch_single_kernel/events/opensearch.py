@@ -864,9 +864,6 @@ class OpenSearchEventsHandler(Object):
                 computed_roles, cm_names, cm_ips
             )
         except OpenSearchHttpError as e:
-            # We might be starting with a partially-formed cluster (or temporary API issues).
-            # Fall back: use nodes_config from peer relation if available (leader already
-            # pushed topology), so we still set initial_cluster_manager_nodes and seeds for VM.
             logger.debug("Error getting nodes before start: %s", e)
 
         try:
@@ -994,9 +991,6 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             event.defer()
             return
-
-        logger.debug("Setting WAITING_TO_START from _on_restart_opensearch")
-        self.charm.status.set(CharmStatuses.WAITING_TO_START)
 
         # Ignore the lock if you are the only data node and restarting
         deployment_desc = self.charm.state.application.deployment_desc

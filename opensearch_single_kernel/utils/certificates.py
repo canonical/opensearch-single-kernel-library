@@ -256,7 +256,7 @@ def store_ca_chain(  # noqa: C901
 def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
     """Return True if the exception indicates the keystore file does not exist."""
     msg = (exc.out or "") + (exc.err or "")
-    # keytool messages change a bit between JDKs, keep this intentionally.
+    # keytool messages change a bit between JDKs, we keep this intentionally.
     return (
         "Keystore file does not exist" in msg
         or ("FileNotFoundException" in msg and keystore_path in msg)

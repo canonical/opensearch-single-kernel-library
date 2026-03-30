@@ -33,7 +33,6 @@ from tests.integration.helpers import (
     get_application_unit_ids_hostnames,
     get_application_unit_ids_ips,
     get_application_unit_names,
-    get_constraints,
     get_controller_hostname,
     get_leader_unit_ip,
     is_up,
@@ -66,10 +65,6 @@ async def test_build_and_deploy(
     }
     if substrate == "k8s":
         os_deploy_kwargs["resources"] = charm_resources
-    else:
-        constraints = await get_constraints(ops_test)
-        if constraints:
-            os_deploy_kwargs["constraints"] = constraints
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config

@@ -19,7 +19,6 @@ from tests.integration.conftest import (
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.helpers import (
     deploy_opensearch,
-    get_constraints,
     get_leader_unit_ip,
     get_secret_by_label,
     wait_until,
@@ -73,7 +72,6 @@ async def test_build_and_deploy_active(
         len(unit_ids),
         series=series,
         config=CONFIG_OPTS,
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
 

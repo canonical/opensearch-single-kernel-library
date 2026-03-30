@@ -11,7 +11,6 @@ from pytest_operator.plugin import OpsTest
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, get_unit_ids
 from tests.integration.helpers import (
     deploy_opensearch,
-    get_constraints,
     wait_until,
 )
 from tests.integration.tls.helpers_manual_tls import (
@@ -39,7 +38,6 @@ async def test_build_and_deploy_with_manual_tls(
         len(unit_ids),
         series=series,
         config=CONFIG_OPTS,
-        constraints=await get_constraints(ops_test),
         resources=charm_resources,
     )
     os_app: Application = ops_test.model.applications[APP_NAME]

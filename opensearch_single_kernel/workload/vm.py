@@ -55,7 +55,7 @@ class VMWorkload(BaseWorkload):
         """Check if the snap is installed."""
         try:
             return self.opensearch_snap.present
-        except (snap.SnapError, AttributeError):
+        except SnapError:
             return False
 
     @retry(
