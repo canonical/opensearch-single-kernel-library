@@ -7,6 +7,7 @@
 import logging
 import time
 from datetime import datetime
+from typing import Any
 
 from shortuuid import ShortUUID
 from tenacity import (
@@ -382,6 +383,31 @@ class ClusterManager(BaseManager):
         )
         logger.info("securityadmin.sh execution completed successfully")
         self._put_security_index_initialised()
+
+    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
+        """Run the security_admin script for specified config file, avoiding changes to others."""
+        if not file.startswith("opensearch-security"):
+            raise ValueError("security config is expected")
+
+        args = [
+            f"-f {self.workload.paths.conf}/{file}",
+            f"-cn {self.state.application.deployment_desc.config.cluster_name}",
+            f"-h {self.state.host_ip}",
+            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-tspass {admin_secrets['truststore-password']}",
+            "-tst PKCS12",
+            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-kspass {admin_secrets['keystore-password']}",
+            "-kst PKCS12",
+        ]
+
+        admin_key_pwd = admin_secrets.get("key-password", None)
+        if admin_key_pwd is not None:
+            args.append(f"-keypass {admin_key_pwd}")
+
+        self.workload.run_script(
+            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+        )
 
     def check_if_can_start(self) -> bool:
         """Apply the directives computed by the opensearch peer cluster manager."""

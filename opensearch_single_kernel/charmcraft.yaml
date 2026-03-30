@@ -18,3 +18,5 @@ bases:
 charm-libs:
   - lib: grafana_agent.cos_agent
     version: "0"
+  - lib: hydra.oauth
+    version: "0"

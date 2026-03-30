@@ -278,3 +278,14 @@ class PeerCluster(RelationState):
 
     def __init__(self, relation, data_interface, component):
         super().__init__(relation, data_interface, component)
+
+
+class JwtData(RequirerData):
+    """Data Interface to JWT relation on requirer side."""
+
+    def __init__(self, model, relation_name: str):
+        super().__init__(
+            model,
+            relation_name,
+            additional_secret_fields=["signing-key"],
+        )
