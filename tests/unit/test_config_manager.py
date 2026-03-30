@@ -13,8 +13,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentState,
     PeerClusterConfig,
 )
-from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import get_nested_value
+from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
 from tests.unit.helpers import (
     config_path,
     opensearch_yml,
@@ -34,11 +33,11 @@ def test_set_client_auth(harness, mocker, substrate):
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     security_conf = yaml_conf_setter.load(sec_conf_yml)
 
-    # check initial stage
+    # Fixture opensearch.yml does not define plugins.security.ssl.http.clientauth_mode.
     assert get_nested_value(opensearch_conf, "plugins.security.ssl.http.clientauth_mode") is None
     assert authc()["basic_internal_auth_domain"]["http_enabled"]
-    assert not authc()["clientcert_auth_domain"]["http_enabled"]
-    assert not authc()["clientcert_auth_domain"]["transport_enabled"]
+    assert authc()["clientcert_auth_domain"]["http_enabled"] is False
+    assert authc()["clientcert_auth_domain"]["transport_enabled"] is False
 
     mocker.patch(
         "opensearch_single_kernel.workload.base.Paths.seed_hosts",
@@ -108,11 +107,17 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
         state=DeploymentState(value=State.ACTIVE),
         promotion_time=None,
     )
-    workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
-    mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip",
-        return_value="30.30.30.30",
-    )
+    if substrate == "vm":
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host",
+            return_value="30.30.30.30",
+        )
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn",
+            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+            new_callable=PropertyMock,
+        )
 
     mocker.patch(
         "opensearch_single_kernel.managers.config.ConfigManager.yaml_setter",
@@ -149,7 +154,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     harness.charm.config_manager.update_opensearch_config(
         roles=["cluster_manager", "data"],
         cm_names=["cm1"],
-        cm_ips=["20.20.20.20"],
+        seed_hosts=["20.20.20.20"],
     )
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     assert opensearch_conf["cluster.name"] == "opensearch-dev"
@@ -161,13 +166,16 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     assert opensearch_conf["node.attr.app_id"] == app.id
     assert opensearch_conf["network.host"] == ["_site_", "_local_", "10.10.10.10"]
     assert opensearch_conf["network.publish_host"] == "20.20.20.20"
-    assert opensearch_conf["http.publish_host"] == "30.30.30.30"
+    expected_publish_host = (
+        "30.30.30.30"
+        if substrate == "vm"
+        else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
+    )
+    assert opensearch_conf["http.publish_host"] == expected_publish_host
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
 
-    # K8s: single-unit start, only this node. VM: 3-node start, sorted(cm_names).
-    expected_bootstrap_names = [expected_node_name] if substrate == "k8s" else ["cm1"]
-    assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == expected_bootstrap_names
+    assert opensearch_conf["cluster.initial_cluster_manager_nodes"] == ["cm1"]
 
     # test cleanup_conf_if_bootstrapped
     is_bootstrap_contributor.return_value = False

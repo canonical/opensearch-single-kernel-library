@@ -30,7 +30,6 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
     OpenSearchProvidedRolesException,
@@ -330,10 +329,6 @@ class ClusterManager(BaseManager):
             logger.info("Failed to get online nodes")
             raise e
 
-        if not self.state.application.deployment_desc:
-            raise OpenSearchNotFullyReadyError(
-                "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
-            )
         if not (expected_name := self.state.unit_name):
             raise OpenSearchNotFullyReadyError(
                 "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
@@ -355,42 +350,22 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
-        if not (
-            admin_secrets := self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
-        ):
-            raise OpenSearchError("Cannot initialize security index: admin secrets not found")
+        admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
 
-        keystore_path = path_as_posix(self.workload.paths.certs / f"{CertType.APP_ADMIN.val}.p12")
-        keystore_password = admin_secrets.get("keystore-password")
-        truststore_password = admin_secrets.get("truststore-password")
-        alias = CertType.APP_ADMIN.val
-
-        if not keystore_password:
-            raise OpenSearchError(
-                "Cannot initialize security index: keystore-password not found in admin secrets"
-            )
-        if not truststore_password:
-            raise OpenSearchError(
-                "Cannot initialize security index: truststore-password not found in admin secrets"
-            )
         # Use a connectable host for the securityadmin CLI.
-        securityadmin_host = (
-            self.state.node_name or self.workload.get_host_public_ip() or self.state.host_ip
-        )
+        securityadmin_host = self.state.node_host
 
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {securityadmin_host}",
             f"-ts {self.workload.paths.certs}/ca.p12",
-            f"-tspass {truststore_password}",
+            f"-tspass {admin_secrets['truststore-password']}",
             "-tsalias ca",
             "-tst PKCS12",
-            f"-ks {keystore_path}",
-            f"-kspass {keystore_password}",
-            f"-ksalias {alias}",
+            f"-ks {path_as_posix(self.workload.paths.certs / f'{CertType.APP_ADMIN.val}.p12')}",
+            f"-kspass {admin_secrets['keystore-password']}",
+            f"-ksalias {CertType.APP_ADMIN.val}",
             "-kst PKCS12",
         ]
 
@@ -550,13 +525,6 @@ class ClusterManager(BaseManager):
         """
         contribute_to_bootstrap = False
         if "cluster_manager" in computed_roles:
-            if self.state.application.deployment_desc is None:
-                # If we can't determine the OpenSearch node identity yet, we can't correctly
-                # contribute to cluster.initial_cluster_manager_nodes.
-                raise OpenSearchNotFullyReadyError(
-                    "Cannot configure bootstrap contributors yet (unit_name unavailable)."
-                )
-
             cm_names.append(self.state.unit_name)
             cm_ips.append(self.state.host_ip)
 
@@ -587,9 +555,6 @@ class ClusterManager(BaseManager):
     @property
     def roles(self) -> list[str]:
         """Get the list of the roles assigned to this node."""
-        if self.state.application.deployment_desc is None:
-            return self.yaml_setter.load("opensearch.yml")["node.roles"]
-
         try:
             return self.opensearch_client.get_roles_by_unit_name(
                 self.state.unit_name, self.alt_hosts

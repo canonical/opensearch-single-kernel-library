@@ -2,7 +2,6 @@ summary: test_charm.py
 environment:
   TEST_MODULE: test_charm.py
 execute: |
-  juju switch concierge-microk8s
   tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate k8s --model testing --alluredir="$SPREAD_TASK/allure-results"
 artifacts:
   - allure-results

@@ -4,19 +4,17 @@
 
 """A set of helpers functions."""
 
-import base64
 import json
 import logging
-import math
 import re
 import secrets
+import socket
 import string
-from datetime import datetime
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import bcrypt
 from charmlibs.pathops import PathProtocol
-from cryptography import x509
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
@@ -102,62 +100,42 @@ def deployment_type(
     )
 
 
-def normalize_k8s_bootstrap_name(value: str | None) -> str:
-    """Normalize bootstrap names to match K8s container hostnames.
-
-    Typical inputs:
-    - "app-0.c67" (formatted unit name)
-    - "app-0" (pod hostname)
-    - "app-0.namespace.svc.cluster.local" (DNS)
-    """
-    return (value or "").split(".", 1)[0]
-
-
-def split_ca_chain(pem_content: str) -> list[str]:
-    """Split PEM chain into individual certificates."""
-    end_cert_marker = "-----END CERTIFICATE-----"
-    parts = [part.strip() for part in pem_content.split(end_cert_marker) if part.strip()]
-    return [f"{part}\n{end_cert_marker}" for part in parts]
+def is_srv_dns_record(value: str) -> bool:
+    """Return True when value looks like an SRV-style DNS record."""
+    pattern = (
+        r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+        r"\.([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+srv"
+        r"(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?){2,}\.?$"
+    )
+    return bool(re.match(pattern, value, re.IGNORECASE))
 
 
-def normalized_tls_subject(subject: str) -> str:
-    """Removes any / character from a subject."""
-    if subject.startswith("/"):
-        subject = subject[1:]
-    return subject.replace("/", ",")
+def get_k8s_fqdn(name: str) -> str:
+    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+    try:
+        info = socket.getaddrinfo(
+            name,
+            None,
+            family=socket.AF_UNSPEC,
+            flags=socket.AI_CANONNAME,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as e:
+        raise RuntimeError(f"Failed to resolve canonical name for {name}") from e
+
+    for entry in info:
+        if (canonname := entry[3]) and is_srv_dns_record(canonname):
+            return canonname
+
+    raise RuntimeError(f"Could not determine canonical name for {name}")
 
 
-def cert_expiration_remaining_hours(cert: str) -> int:
-    """Returns the remaining hours for the cert to expire."""
-    certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
-    time_difference = certificate_object.not_valid_after - datetime.utcnow()
-
-    return math.floor(time_difference.total_seconds() / 3600)
-
-
-def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
-    """Return True if keytool says that given alias does not exist.
-
-    Args:
-        exc: The OpenSearchCmdError to check.
-        alias: The alias that was attempted to be deleted.
-
-    Returns:
-        bool: True if the error message indicates that the alias does not exist.
-    """
-    msg = (exc.out or "") + (exc.err or "")
-    return f"Alias <{alias}> does not exist" in msg
-
-
-def parse_tls_file(raw_content: str) -> bytes:
-    """Parse TLS files from both plain text or base64 format."""
-    if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
-        return re.sub(
-            r"(-+(BEGIN|END) [A-Z ]+-+)",
-            "\\1",
-            raw_content,
-        ).encode("utf-8")
-    return base64.b64decode(raw_content)
+def get_k8s_seed_host(unit_name: str, app_name: str) -> str:
+    """Return the canonical K8s seed host for a unit."""
+    # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
+    pod_prefix = (unit_name or "").split(".", 1)[0]
+    service_name = f"{pod_prefix}.{app_name}-endpoints"
+    return get_k8s_fqdn(service_name)
 
 
 def validate_index_name(index_name: str) -> bool:
@@ -219,49 +197,6 @@ def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | 
         return None
 
 
-def build_command_with_args(command: str, args: str | None) -> str:
-    """Build command string with optional arguments.
-
-    Args:
-        command: Command to run.
-        args: Additional command line arguments.
-
-    Returns:
-        str: Command with arguments concatenated.
-    """
-    if args is not None:
-        return "%s %s" % (command, args)
-    return command
-
-
-def build_script_command(script_path: str, args: str | None) -> str:
-    """Build bash command to execute script.
-
-    Args:
-        script_path: Full path to the script file.
-        args: Optional arguments to pass to the script.
-
-    Returns:
-        str: Full bash command string.
-    """
-    return build_command_with_args("bash %s" % script_path, args)
-
-
-def needs_shell(command: str) -> bool:
-    """Check if command requires shell interpretation.
-
-    Shell metacharacters include: |, >, <, &&, ||, ;, $(), ${}, ``, 2>, >>, <<, &, etc.
-
-    Args:
-        command: Command string to check.
-
-    Returns:
-        bool: True if command contains shell metacharacters.
-    """
-    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
-    return any(char in command for char in shell_metachars)
-
-
 def build_command_list(command_with_args: str) -> list[str]:
     """Build command list for container.exec().
 
@@ -274,29 +209,12 @@ def build_command_list(command_with_args: str) -> list[str]:
     Returns:
         list[str]: Command list suitable for container.exec().
     """
-    if needs_shell(command_with_args):
+    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
+    if any(char in command_with_args for char in shell_metachars):
         return ["sh", "-c", command_with_args]
     if " " in command_with_args:
         return command_with_args.split()
     return [command_with_args]
-
-
-def parse_meminfo_output(output: str) -> dict[str, float]:
-    """Parse meminfo output into dictionary.
-
-    Args:
-        output: Raw output from /proc/meminfo or cat command.
-
-    Returns:
-        dict[str, float]: Parsed memory info values, empty dict if parsing fails.
-    """
-    try:
-        meminfo_lines = output.split("\n")
-        meminfo = [line.split() for line in meminfo_lines if line.strip()]
-        return {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
-    except (ValueError, IndexError, AttributeError) as parse_error:
-        logger.warning("Failed to parse meminfo output: %s", parse_error)
-        return {}
 
 
 def wait_for_process_output(
@@ -321,129 +239,15 @@ def wait_for_process_output(
         return stdout, stderr
     except Exception as e:
         error_string = str(e).lower()
-        if "does not exist" in error_string or "keystore file does not exist" in error_string:
-            logger.debug("wait_output() failed for %s (expected): %s", masked_command, e)
+        missing_keystore = (
+            "opensearch.keystore" in error_string and "does not exist" in error_string
+        ) or "keystore file does not exist" in error_string
+        if missing_keystore:
+            logger.debug(
+                "wait_output() failed for %s (expected missing opensearch.keystore): %s",
+                masked_command,
+                e,
+            )
         else:
             logger.warning("wait_output() failed for %s: %s", masked_command, e)
         raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
-
-
-def build_unreadable_property_error(property_name: str, config_method: str) -> str:
-    """Build error message for unreadable kernel property.
-
-    Args:
-        property_name: Kernel property name.
-        config_method: Description of how to configure this property.
-
-    Returns:
-        str: error message.
-    """
-    return (
-        "Cannot read %s from container. "
-        "This may indicate missing permissions or node-level configuration issue. "
-        "For K8s deployments, configure via %s."
-    ) % (property_name, config_method)
-
-
-def property_violates_requirement(
-    current_value: int, required_value: int, comparison_op: str
-) -> bool:
-    """Check if current property value violates the requirement.
-
-    Args:
-        current_value: Current property value.
-        required_value: Required property value.
-        comparison_op: Comparison operator (< or >).
-
-    Returns:
-        bool: True if requirement is violated, False otherwise.
-    """
-    if comparison_op == "<":
-        return current_value < required_value
-    if comparison_op == ">":
-        return current_value > required_value
-    return False
-
-
-def build_property_value_error(
-    property_name: str,
-    current_value: int,
-    required_value: int,
-    comparison_op: str,
-    config_method: str,
-) -> str:
-    """Build error message for property value that violates requirement.
-
-    Args:
-        property_name: Kernel property name.
-        current_value: Current property value.
-        required_value: Required property value.
-        comparison_op: Comparison operator ("<" or ">").
-        config_method: Description of how to configure this property.
-
-    Returns:
-        str: error message.
-    """
-    if comparison_op == "<":
-        comparison_text = "below"
-    else:
-        comparison_text = "above"
-
-    fix_instruction = "%s=%s" % (property_name, required_value)
-
-    error_message = (
-        "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
-    ) % (
-        property_name,
-        current_value,
-        comparison_text,
-        required_value,
-        config_method,
-        fix_instruction,
-    )
-    return error_message
-
-
-def get_nested_value(config: dict, key_path: str) -> Any:
-    """Get a nested value from config dict using dotted key path.
-
-    Handles both flat dicts (with dotted keys) and nested dicts.
-
-    Args:
-        config: Dictionary to search in.
-        key_path: Dotted key path such as "plugins.security.ssl.transport.keystore_filepath".
-
-    Returns:
-        The value at the nested path, or None if not found.
-
-    Example:
-        config = {"plugins": {"security": {"ssl": {"transport":
-            {"keystore_filepath": "/path/to/keystore"}}}}}
-        get_nested_value(config, "plugins.security.ssl.transport.keystore_filepath")
-        '/path/to/keystore'
-    """
-    if not isinstance(config, dict):
-        return None
-
-    # Fast-path for "flat" YAMLs where the full dotted key exists as-is.
-    if key_path in config:
-        return config.get(key_path)
-
-    keys = key_path.split(".")
-    value: Any = config
-
-    for idx, key in enumerate(keys):
-        if not isinstance(value, dict):
-            return None
-
-        # Support mixed representations where a prefix is flattened:
-        # such as {"plugins.security.disabled": false}
-        remaining = ".".join(keys[idx:])
-        if remaining in value:
-            return value.get(remaining)
-
-        value = value.get(key)
-        if value is None:
-            return None
-
-    return value

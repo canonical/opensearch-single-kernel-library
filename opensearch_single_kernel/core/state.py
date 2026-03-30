@@ -53,9 +53,10 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerUnitData,
     OpenSearchProvidesData,
 )
+from opensearch_single_kernel.utils.certificates import normalized_tls_subject
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
-    normalized_tls_subject,
+    get_k8s_fqdn,
 )
 
 if TYPE_CHECKING:
@@ -657,7 +658,7 @@ class ClusterState(Object):
         )
 
     @property
-    def node_name(self) -> str | None:
+    def node_host(self) -> str | None:
         """Return a connectable host for the current unit.
 
         On K8s this is the unit DNS name. On VM this is the unit IP address.
@@ -678,8 +679,30 @@ class ClusterState(Object):
         return str(address)
 
     @property
+    def fqdn(self) -> str:
+        """Return a stable FQDN for the current unit.
+
+        - VM: local host FQDN from the runtime environment.
+        - K8s: canonical endpoint FQDN for this unit service name.
+        """
+        if self.substrate == Substrates.K8S:
+            deployment_desc = self.application.deployment_desc
+            if deployment_desc:
+                unit_prefix = str(self.unit_name).split(".", 1)[0]
+                service_name = f"{unit_prefix}.{deployment_desc.app.name}-endpoints"
+                try:
+                    return get_k8s_fqdn(service_name)
+                except RuntimeError:
+                    # DNS may not be resolvable yet in early hooks.
+                    pass
+        return socket.getfqdn()
+
+    @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
+        if self.substrate == Substrates.K8S:
+            # K8s should bind on stable DNS identity.
+            return [self.fqdn]
         return [socket.getfqdn(), self.host_ip]
 
     @property

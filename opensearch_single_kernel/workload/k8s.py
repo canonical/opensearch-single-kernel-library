@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -7,9 +6,9 @@
 import logging
 import shlex
 import uuid
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
@@ -35,28 +34,19 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchContainerPrepareError,
     OpenSearchFileOperationError,
-    OpenSearchInstallError,
     OpenSearchStartError,
     OpenSearchStopError,
 )
 from opensearch_single_kernel.utils.helpers import (
     build_command_list,
-    build_command_with_args,
-    build_property_value_error,
-    build_script_command,
-    build_unreadable_property_error,
     mask_sensitive_information,
-    parse_meminfo_output,
     path_as_posix,
-    property_violates_requirement,
     wait_for_process_output,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 from opensearch_single_kernel.workload.base import Paths as BasePaths
-
-if TYPE_CHECKING:
-    from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -94,72 +84,48 @@ class K8sPaths(BasePaths):
         Returns:
             PathProtocol: path to OpenSearch config directory.
         """
-        return self.root / "etc" / "opensearch"
+        return self.root / OpenSearchPaths.CONF.val
 
     @property
     def data(self) -> PathProtocol:
         """Return path to OpenSearch data directory.
 
         For K8s rock image: /var/lib/opensearch
-        The actual data subdirectory is /var/lib/opensearch/data
 
         Returns:
             PathProtocol: path to OpenSearch data directory.
         """
-        return self.root / "var" / "lib" / "opensearch"
-
-    @property
-    def data_dir(self) -> PathProtocol:
-        """Return the directory OpenSearch should use for data on K8s.
-
-        For the ROCK image, `/var/lib/opensearch` is the mount point and OpenSearch expects
-        the concrete data dir at `/var/lib/opensearch/data`.
-        """
-        return self.data / "data"
+        return self.root / OpenSearchPaths.DATA.val
 
     @property
     def logs(self) -> PathProtocol:
         """Return path to OpenSearch logs directory.
 
         For K8s rock image: /var/log/opensearch
-        Note: The actual logs subdirectory is /var/log/opensearch/logs
-
-        Returns:
-            PathProtocol: path to OpenSearch logs directory.
         """
-        return self.root / "var" / "log" / "opensearch"
-
-    @property
-    def logs_dir(self) -> PathProtocol:
-        """Return the directory OpenSearch should use for logs on K8s.
-
-        For the ROCK image, `/var/log/opensearch` is the mount point and OpenSearch expects
-        the concrete logs dir at `/var/log/opensearch/logs`.
-        """
-        return self.logs / "logs"
+        return self.root / OpenSearchPaths.LOGS.val
 
     @property
     def jdk(self) -> PathProtocol:
         """Return path to the jdk directory.
 
         For K8s containers, JDK is installed at /usr/lib/jvm/java-21-openjdk-amd64
-        Hardcoded to ensure correct path regardless of OpenSearchPaths.JDK.val value.
 
         Returns:
             PathProtocol: path to JDK installation directory.
         """
-        return self.root / "usr" / "lib" / "jvm" / "java-21-openjdk-amd64"
+        return self.root / OpenSearchPaths.JDK.val
 
     @property
     def tmp(self) -> PathProtocol:
         """Return path to the tmp directory.
 
-        For K8s rock image: /tmp
+        For K8s rock image: /usr/share/tmp
 
         Returns:
-            PathProtocol: path to /tmp directory.
+            PathProtocol: path to temp directory.
         """
-        return self.root / "tmp"
+        return self.root / OpenSearchPaths.TMP.val
 
     @property
     def bin(self) -> PathProtocol:
@@ -170,7 +136,7 @@ class K8sPaths(BasePaths):
         Returns:
             PathProtocol: path to OpenSearch bin directory.
         """
-        return self.home / "bin"
+        return self.root / OpenSearchPaths.BIN.val
 
 
 class K8sWorkload(BaseWorkload):
@@ -178,7 +144,7 @@ class K8sWorkload(BaseWorkload):
 
     SERVICE_NAME = OPENSEARCH_PEBBLE_SERVICE_NAME
 
-    def __init__(self, container_getter: Optional["Callable[[], Container]"] = None):
+    def __init__(self, container_getter: Callable[[], Container] | None = None):
         """Initialize K8s workload.
 
         Args:
@@ -187,7 +153,7 @@ class K8sWorkload(BaseWorkload):
         """
         super().__init__()
         self._container_getter = container_getter
-        self._paths: Optional[BasePaths] = None
+        self._paths: BasePaths | None = None
 
     def _get_service(self) -> ServiceInfo | None:
         """Return current service info, if present."""
@@ -197,10 +163,8 @@ class K8sWorkload(BaseWorkload):
             return None
 
         target = OPENSEARCH_PEBBLE_SERVICE_NAME
-        for svc in services:
-            # ServiceInfo has .name
-            if getattr(svc, "name", None) == target:
-                return svc
+        if isinstance(services, Mapping):
+            return services.get(target)
         return None
 
     @property
@@ -243,9 +207,7 @@ class K8sWorkload(BaseWorkload):
         root_group = "root"
         required_dirs: list[tuple[PathProtocol, int]] = [
             (self.paths.data, DIR_PERMISSIONS_SECURE),
-            (self.paths.data_dir, DIR_PERMISSIONS_SECURE),
-            (self.paths.logs, DIR_PERMISSIONS_READONLY),
-            (self.paths.logs_dir, DIR_PERMISSIONS_SECURE),
+            (self.paths.logs, DIR_PERMISSIONS_SECURE),
             (self.paths.conf, DIR_PERMISSIONS_READONLY),
             (self.paths.certs, DIR_PERMISSIONS_CERTIFICATES),
             (self.paths.home / "logs", DIR_PERMISSIONS_READONLY),
@@ -270,10 +232,7 @@ class K8sWorkload(BaseWorkload):
         """
         try:
             # The K8s image exposes the OpenSearch launcher directly as `opensearch`.
-            opensearch_cmd = path_as_posix(self.paths.bin / "opensearch")
-            layer_dict = self._build_pebble_layer_dict(opensearch_cmd)
-
-            layer = Layer(layer_dict)
+            layer = self._build_pebble_layer()
             self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
 
             logger.info("Configured pebble plan for %s service", self.SERVICE_NAME)
@@ -294,17 +253,11 @@ class K8sWorkload(BaseWorkload):
             self._configure_pebble_plan(enable_checks=False)
         except ModelError as e:
             logger.error("Failed to prepare container on pebble-ready: %s", e)
-            raise OpenSearchInstallError() from e
+            raise OpenSearchContainerPrepareError() from e
 
-    def _build_pebble_layer_dict(self, opensearch_cmd: str) -> dict:
-        """Build Pebble layer dictionary with OpenSearch service configuration.
-
-        Args:
-            opensearch_cmd: command to execute OpenSearch.
-
-        Returns:
-            dict: pebble layer dictionary ready for Layer() constructor.
-        """
+    def _build_pebble_layer(self) -> Layer:
+        """Build Pebble layer for OpenSearch service."""
+        opensearch_cmd = path_as_posix(self.paths.bin / "opensearch")
         opensearch_home = path_as_posix(self.paths.home)
         opensearch_conf = path_as_posix(self.paths.conf)
         java_home = path_as_posix(self.paths.jdk)
@@ -339,24 +292,12 @@ class K8sWorkload(BaseWorkload):
             },
         }
 
-        return layer_dict
+        return Layer(layer_dict)
 
     @override
     def install(self) -> None:
-        """Install the workload.
-
-        For K8s, installation is handled by the container image.
-        This method ensures the container is ready and configures the pebble plan.
-
-        Raises:
-            OpenSearchInstallError: if container readiness verification fails.
-        """
-        try:
-            # configure pebble plan so the service can be started
-            self._configure_pebble_plan(enable_checks=False)
-        except ModelError as e:
-            logger.error("Failed to verify container readiness: %s", e)
-            raise OpenSearchInstallError() from e
+        """No-op for K8s where workload bits come from the container image."""
+        return
 
     @contextmanager
     def temp_file(
@@ -389,14 +330,12 @@ class K8sWorkload(BaseWorkload):
         """
         # PathProtocol exposes text operations.
         temp_dir_path = dir or self.paths.tmp
-        try:
-            temp_dir_path.mkdir(
-                mode=DIR_PERMISSIONS_READONLY,
-                parents=True,
-                exist_ok=True,
-            )
-        except (PebbleError, ModelError, OSError, ValueError) as e:
-            raise OpenSearchFileOperationError(e) from e
+        self.mkdir(
+            temp_dir_path,
+            mode=DIR_PERMISSIONS_READONLY,
+            parents=True,
+            exist_ok=True,
+        )
 
         temp_filename = "temp_%s%s" % (uuid.uuid4().hex, suffix or "")
         file_path = temp_dir_path / temp_filename
@@ -431,7 +370,8 @@ class K8sWorkload(BaseWorkload):
             OpenSearchCmdError: if container is not connected or script execution fails.
         """
         script_path = "%s/%s" % (self.paths.home, script_name)
-        full_command = build_script_command(script_path, args)
+        bash_cmd = "bash %s" % script_path
+        full_command = "%s %s" % (bash_cmd, args) if args is not None else bash_cmd
         env_setup = self._build_script_environment(full_command)
         quoted = shlex.quote(env_setup)
         result = self.run_cmd(f"bash -c {quoted}")
@@ -475,22 +415,14 @@ class K8sWorkload(BaseWorkload):
         ) % (opensearch_home, opensearch_conf, java_home, path_value, command)
 
     @override
-    def get_host_public_ip(self) -> str | None:
-        """Fetches the Public IP address of the current unit.
+    def get_publish_host(self) -> str | None:
+        """Return the pod DNS name used for OpenSearch `http.publish_host`.
 
-        For K8s, this returns the pods DNS name instead of IP address.
+        For K8s, this returns the pod DNS name instead of an IP address.
         DNS names are stable and resolve to the current pod IP via K8s DNS.
-
-        This DNS name is used for:
-        - OpenSearch http.publish_host configuration
-        - TLS certificate SANs (Subject Alternative Names)
-        - Any other configuration requiring a stable address
-
-        Returns:
-            str | None: dns name (FQDN or hostname) for K8s, or None if unavailable.
         """
         # Only attempt container-derived names when the workload container is connectable.
-        # In unit tests run_cmd is patched with a bare MagicMock.
+        # In unit tests run_cmd is patched with a MagicMock.
         # When we can't obtain a real string value,
         # return None so callers fall back to state.host_ip / ingress address.
         try:
@@ -505,6 +437,12 @@ class K8sWorkload(BaseWorkload):
 
         # fallback: try to get pod hostname
         return self._get_pod_hostname_with_fallback()
+
+    @property
+    @override
+    def keytool_cmd(self) -> str:
+        """Return keytool command path from the workload JDK."""
+        return path_as_posix(self.paths.jdk / "bin" / "keytool")
 
     def _get_pod_fqdn(self) -> str | None:
         """Get pod FQDN using hostname -f command.
@@ -670,11 +608,11 @@ class K8sWorkload(BaseWorkload):
         """
         try:
             result = self.run_cmd("cat /proc/meminfo")
-            return parse_meminfo_output(result.out)
+            return self._parse_meminfo_output(result.out)
         except OpenSearchCmdError as e:
             # try to parse output from error message if it exists
             if e.out:
-                if parsed := parse_meminfo_output(e.out):
+                if parsed := self._parse_meminfo_output(e.out):
                     logger.debug(
                         "Successfully parsed meminfo from command output despite non-zero exit code: %s",
                         parsed,
@@ -751,11 +689,30 @@ class K8sWorkload(BaseWorkload):
         current_value = self._get_kernel_property_value(property_name)
 
         if current_value is None:
-            return build_unreadable_property_error(property_name, config_method)
+            return (
+                "Cannot read %s from container. "
+                "This may indicate missing permissions or node-level configuration issue. "
+                "For K8s deployments, configure via %s."
+            ) % (property_name, config_method)
 
-        if property_violates_requirement(current_value, required_value, comparison_op):
-            return build_property_value_error(
-                property_name, current_value, required_value, comparison_op, config_method
+        violates = False
+        if comparison_op == "<":
+            violates = current_value < required_value
+        elif comparison_op == ">":
+            violates = current_value > required_value
+
+        if violates:
+            comparison_text = "below" if comparison_op == "<" else "above"
+            fix_instruction = "%s=%s" % (property_name, required_value)
+            return (
+                "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
+            ) % (
+                property_name,
+                current_value,
+                comparison_text,
+                required_value,
+                config_method,
+                fix_instruction,
             )
 
         return None
@@ -871,7 +828,7 @@ class K8sWorkload(BaseWorkload):
         Raises:
             OpenSearchCmdError: If command execution fails or container is not ready
         """
-        command_with_args = build_command_with_args(command, args)
+        command_with_args = "%s %s" % (command, args) if args is not None else command
         masked_command = mask_sensitive_information(command_with_args)
         logger.debug("Executing command in container: %s", masked_command)
 
@@ -958,28 +915,6 @@ class K8sWorkload(BaseWorkload):
             )
             path.write_text(content)
         except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
-            raise OpenSearchFileOperationError(e) from e
-
-    @override
-    def read_text(self, path: pathops.PathProtocol) -> str:  # type: ignore[override]
-        """K8s-safe read with proper pebble error handling.
-
-        Overrides BaseWorkload.read_text() to handle PebbleConnectionError
-        gracefully, allowing event handlers to defer when container is not ready.
-
-        Args:
-            path: PathProtocol object representing the file path
-
-        Returns:
-            str: content read from the file
-
-        Raises:
-            PebbleConnectionError: if container is not ready (callers may defer).
-            OpenSearchFileOperationError: for other file operation errors.
-        """
-        try:
-            return path.read_text()
-        except (PebbleError, ModelError, OSError, ValueError) as e:
             raise OpenSearchFileOperationError(e) from e
 
     @property

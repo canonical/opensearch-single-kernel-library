@@ -63,10 +63,16 @@ def test_get_sans(harness, mocker, substrate):
 
     assert harness.charm.tls_manager._get_sans(CertType.APP_ADMIN) == {"sans_oid": ["1.2.3.4.5.5"]}
 
-    workload_class = _workload_class_name(substrate)
-    get_host_public_ip = mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip"
-    )
+    if substrate == "vm":
+        get_publish_host = mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host"
+        )
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn",
+            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+            new_callable=PropertyMock,
+        )
     getfqdn = mocker.patch("socket.getfqdn")
     gethostname = mocker.patch("socket.gethostname")
     gethostbyaddr = mocker.patch("socket.gethostbyaddr")
@@ -80,11 +86,8 @@ def test_get_sans(harness, mocker, substrate):
     getfqdn.return_value = "nebula"
     # For VM: returns IP address
     # For K8s: returns DNS name
-    get_host_public_ip.return_value = (
-        "192.168.1.100"
-        if substrate == "vm"
-        else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
-    )
+    if substrate == "vm":
+        get_publish_host.return_value = "192.168.1.100"
 
     base_ips = ["1.1.1.1", "address1", "address2"]
     base_dns_entries = [harness.charm.state.unit_name, "nebula", "alias"]
@@ -120,7 +123,13 @@ def test_get_sans(harness, mocker, substrate):
         else {
             "sans_oid": ["1.2.3.4.5.5"],
             "sans_ip": [],
-            "sans_dns": sorted([harness.charm.state.unit_name, "nebula"]),
+            "sans_dns": sorted(
+                [
+                    harness.charm.state.unit_name,
+                    "nebula",
+                    "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+                ]
+            ),
         }
     )
     assert (
@@ -289,10 +298,14 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
-    workload_class = _workload_class_name(substrate)
-    mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip"
-    )
+    if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host")
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn",
+            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+            new_callable=PropertyMock,
+        )
     request_certificate_creation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
@@ -379,10 +392,14 @@ def test_on_certificate_expiring(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
-    workload_class = _workload_class_name(substrate)
-    mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip"
-    )
+    if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host")
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn",
+            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+            new_callable=PropertyMock,
+        )
     csr = "csr_12345"
     cert = "cert_12345"
     key = create_utf8_encoded_private_key()
@@ -418,10 +435,14 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
-    workload_class = _workload_class_name(substrate)
-    mocker.patch(
-        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.get_host_public_ip"
-    )
+    if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host")
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn",
+            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
+            new_callable=PropertyMock,
+        )
     csr = "csr_12345"
     cert = "cert_12345"
     key = create_utf8_encoded_private_key()
@@ -812,7 +833,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     update_request_ca_bundle = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle"
     )
-    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.helpers.split_ca_chain")
+    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
     workload_class = _workload_class_name(substrate)
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd"
@@ -1046,6 +1067,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     request_certificate_creation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.wait_opensearch_part_of_cluster"
+    )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
     mocker.patch(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
@@ -1213,6 +1238,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     )
     mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
+    )
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.wait_opensearch_part_of_cluster"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
@@ -1689,7 +1718,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.helpers.split_ca_chain")
+    split_ca_chain = mocker.patch("opensearch_single_kernel.utils.certificates.split_ca_chain")
 
     mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
     read_stored_ca = mocker.patch(
@@ -1745,7 +1774,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
     if leader:
         # extra commands are expected due to post-write permission/ownership normalization.
-        assert run_cmd.call_count == (6 if substrate == "vm" else 11)
+        assert run_cmd.call_count == (6 if substrate == "vm" else 5)
         if substrate == "vm":
             assert any(
                 "sudo chown snap_daemon:root "

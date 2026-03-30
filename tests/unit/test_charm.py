@@ -37,11 +37,13 @@ def test_on_install_error(harness, substrate):
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
     ) as install:
         install.side_effect = OpenSearchInstallError()
-        harness.charm.on.install.emit()
         # For K8s, install is not operational, container preparation is handled in pebble-ready.
         if substrate == "vm":
+            with pytest.raises(OpenSearchInstallError):
+                harness.charm.on.install.emit()
             assert isinstance(harness.model.unit.status, BlockedStatus)
         else:
+            harness.charm.on.install.emit()
             assert not isinstance(harness.model.unit.status, BlockedStatus)
 
 
@@ -50,30 +52,15 @@ def test_k8s_pebble_plan_uses_opensearch_binary(harness, substrate, mocker):
     if substrate == "vm":
         pytest.skip("K8s-only workload launcher test")
 
-    build_layer = mocker.patch(
-        "opensearch_single_kernel.workload.k8s.K8sWorkload._build_pebble_layer_dict",
-        return_value={
-            "summary": "OpenSearch service layer",
-            "description": "Pebble plan layer for OpenSearch",
-            "services": {
-                "opensearch": {
-                    "override": "replace",
-                    "summary": "OpenSearch service",
-                    "command": "/usr/share/opensearch/bin/opensearch",
-                    "startup": "disabled",
-                    "user": "_daemon_",
-                    "group": "_daemon_",
-                    "environment": {},
-                }
-            },
-        },
-    )
     add_layer = mocker.patch.object(harness.charm.workload.container, "add_layer")
 
     harness.charm.workload._configure_pebble_plan()
 
-    build_layer.assert_called_once_with("/usr/share/opensearch/bin/opensearch")
     add_layer.assert_called_once()
+    added_layer = add_layer.call_args.args[1]
+    assert added_layer.to_dict()["services"]["opensearch"]["command"] == (
+        "/usr/share/opensearch/bin/opensearch"
+    )
 
 
 def test_unit_allowed_to_start_non_leader_not_allowed_when_no_alt_hosts(

@@ -143,6 +143,8 @@ prepare-each: |
   cd "$SPREAD_PATH"
 
   # Switch to the backend required by this job (vm -> LXD, k8s -> microk8s)
+  # Keep backend/controller switching centralized.
+  # `juju switch` directly.
   if [[ "$SPREAD_TASK" == *"/vm/"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml

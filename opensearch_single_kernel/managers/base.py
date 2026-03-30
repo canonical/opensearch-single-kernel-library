@@ -8,9 +8,14 @@ import random
 from typing import Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+    Scope,
+    Substrates,
+)
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.utils.helpers import get_k8s_seed_host
 from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -32,8 +37,14 @@ class BaseManager:
         """Initialize an opensearch client"""
         admin_field = password_key("admin")
         admin_secret = self.state.secrets.get(Scope.APP, admin_field)
-        # use a stable address for TLS hostname verification (DNS on K8s, public-address on VM).
-        host = self.workload.get_host_public_ip() or self.state.host_ip
+        # Keep substrate-specific host policy explicit:
+        # - K8s: canonical DNS identity.
+        # - VM: advertised public host, fallback to internal bind IP.
+        host = (
+            self.state.fqdn
+            if self.state.substrate == Substrates.K8S
+            else (self.workload.get_publish_host() or self.state.host_ip)
+        )
 
         return OpenSearchClient(
             self.workload,
@@ -71,6 +82,19 @@ class BaseManager:
         result = []
         for node in nodes:
             if node.is_cm_eligible():
+                result.append(node.ip)
+
+        return result
+
+    def get_cluster_managers_seed_hosts(self, nodes: list[Node]) -> list[str]:
+        """Get the seed hosts of cluster manager eligible nodes."""
+        result = []
+        for node in nodes:
+            if not node.is_cm_eligible():
+                continue
+            if self.state.substrate == Substrates.K8S:
+                result.append(get_k8s_seed_host(node.name, node.app.name))
+            else:
                 result.append(node.ip)
 
         return result

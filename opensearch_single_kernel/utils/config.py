@@ -12,7 +12,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from enum import Enum
 from io import StringIO
-from typing import Any, Dict, List
 
 from charmlibs.pathops import PathProtocol
 from overrides import override
@@ -23,6 +22,45 @@ from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def get_nested_value(config: dict, key_path: str) -> object | None:
+    """Get a nested value from config dict using dotted key path.
+
+    Handles both flat dicts (with dotted keys) and nested dicts.
+
+    Args:
+        config: Dictionary to search in.
+        key_path: Dotted key path such as "plugins.security.ssl.transport.keystore_filepath".
+
+    Returns:
+        The value at the nested path, or None if not found.
+    """
+    if not isinstance(config, dict):
+        return None
+
+    # Fast-path for "flat" YAMLs where the full dotted key exists as-is.
+    if key_path in config:
+        return config.get(key_path)
+
+    keys = key_path.split(".")
+    value: object = config
+
+    for idx, key in enumerate(keys):
+        if not isinstance(value, dict):
+            return None
+
+        # Support mixed representations where a prefix is flattened:
+        # such as {"plugins.security.disabled": false}
+        remaining = ".".join(keys[idx:])
+        if remaining in value:
+            return value.get(remaining)
+
+        value = value.get(key)
+        if value is None:
+            return None
+
+    return value
 
 
 class OutputType(Enum):
@@ -57,7 +95,7 @@ class ConfigSetter(ABC):
         self.base_path = self.__clean_base_path(base_path)
 
     @abstractmethod
-    def load(self, config_file: str) -> Dict[str, Any]:
+    def load(self, config_file: str) -> dict[str, object]:
         """Load the content of a YAML file."""
         pass
 
@@ -66,12 +104,12 @@ class ConfigSetter(ABC):
         self,
         config_file: str,
         key_path: str,
-        val: Any,
+        val: object,
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
         output_file: str = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
         """Add or update the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -87,12 +125,12 @@ class ConfigSetter(ABC):
             output_file: Target file for the result config, by default same as config_file
 
         Returns:
-            Dict[str, any]: The final version of the YAML config.
+            dict[str, object]: The final version of the YAML config.
         """
         pass
 
     @abstractmethod
-    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+    def rewrite(self, config_file: str, val: dict[str, object]) -> bool:
         """Rewrite a config file with new configuration while preserving formatting and comments.
 
         Args:
@@ -112,7 +150,7 @@ class ConfigSetter(ABC):
         sep="/",
         output_type: OutputType = OutputType.file,
         output_file: str = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
         """Delete the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -124,7 +162,7 @@ class ConfigSetter(ABC):
             output_file: Target file for the result config, by default same as config_file
 
         Returns:
-            Dict[str, any]: The final version of the YAML config.
+            dict[str, object]: The final version of the YAML config.
         """
         pass
 
@@ -133,7 +171,7 @@ class ConfigSetter(ABC):
         self,
         config_file: str,
         old_val: str,
-        new_val: Any,
+        new_val: object,
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
@@ -191,7 +229,7 @@ class YamlConfigSetter(ConfigSetter):
         self.yaml = YAML()
 
     @override
-    def load(self, config_file: str) -> Dict[str, Any]:
+    def load(self, config_file: str) -> dict[str, object]:
         """Load the content of a YAML file.
 
         Raises:
@@ -214,13 +252,10 @@ class YamlConfigSetter(ConfigSetter):
         lines.append(f"{random_id}: {random_id}")
 
         data = self.yaml.load(StringIO("\n".join(lines)))
-
-        # handle case where yaml.load() returns None
         if data is None:
-            data = {}
-        else:
-            del data[random_id]
+            return {}
 
+        data.pop(random_id, None)
         return data
 
     @override
@@ -228,20 +263,14 @@ class YamlConfigSetter(ConfigSetter):
         self,
         config_file: str,
         key_path: str,
-        val: Any,
+        val: object,
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
         output_file: str = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
         """Add or update the value of a key (or content of array at index / key) if it exists."""
-        path = self.base_path / config_file
-        try:
-            data = self.load(config_file)
-        except FileNotFoundError:
-            # If file doesn't exist, start with empty dict and ensure parent dir exists.
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
+        data = self.load(config_file)
 
         self.__deep_update(data, key_path.split(sep), val)
 
@@ -257,66 +286,22 @@ class YamlConfigSetter(ConfigSetter):
         return data
 
     @override
-    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+    def rewrite(self, config_file: str, val: dict[str, object]) -> bool:
         """Rewrite a config file with new configuration while preserving formatting and comments.
-
-        Returns True only when the config content has semantically changed, so that callers
-        (peer relation handler) do not restart the service on every hook due to
-        YAML formatting or key-order differences.
 
         Args:
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
 
         Returns:
-            whether config file was changed (semantic comparison).
+            whether config file was changed.
         """
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
         old_content = path.read_text()
-        # Semantic comparison: avoid write (and restart) when only formatting/order changed
-        try:
-            old_data = self.yaml.load(StringIO(old_content))
-            if old_data is None:
-                old_data = {}
-            if YamlConfigSetter._normalized_config_equal(target, old_data):
-                return False
-        except Exception:
-            # If comparison fails (invalid YAML), fall back to write
-            pass
         self.__dump(target, OutputType.file, config_file)
-        return True
-
-    @staticmethod
-    def _normalized_config_equal(a: Any, b: Any) -> bool:
-        """Compare two config structures for semantic equality (ignore key/list order)."""
-        return YamlConfigSetter._normalize_for_compare(
-            a
-        ) == YamlConfigSetter._normalize_for_compare(b)
-
-    @staticmethod
-    def _normalize_for_compare(obj: Any) -> Any:
-        """Normalize config structure for comparison.
-
-        Sort dict keys and order-independent lists so that two semantically equal
-        configs compare equal regardless of key or list order.
-        """
-        if obj is None:
-            return None
-        if isinstance(obj, Mapping):
-            # Sort keys so dict order (from YAML load) does not affect equality.
-            return tuple(
-                (k, YamlConfigSetter._normalize_for_compare(v)) for k, v in sorted(obj.items())
-            )
-        if isinstance(obj, list):
-            normalized = tuple(YamlConfigSetter._normalize_for_compare(x) for x in obj)
-            # Sort lists of primitives (node.roles) so order does not affect equality.
-            primitives = (str, int, float, bool, type(None))
-            if normalized and all(isinstance(x, primitives) for x in normalized):
-                return tuple(sorted(normalized))
-            return normalized
-        return obj
+        return old_content != path.read_text()
 
     @override
     def delete(
@@ -326,7 +311,7 @@ class YamlConfigSetter(ConfigSetter):
         sep="/",
         output_type: OutputType = OutputType.file,
         output_file: str = None,
-    ) -> Dict[str, any]:
+    ) -> dict[str, object]:
         """Delete the value of a key (or content of array at index / key) if it exists."""
         data = self.load(config_file)
 
@@ -341,15 +326,15 @@ class YamlConfigSetter(ConfigSetter):
         return data
 
     @override
-    def replace(  # noqa: C901
+    def replace(
         self,
         config_file: str,
         old_val: str,
-        new_val: Any,
+        new_val: object,
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
-        output_file: PathProtocol = None,
+        output_file: str = None,
     ) -> None:
         """Replace any substring in a text file.
 
@@ -364,10 +349,10 @@ class YamlConfigSetter(ConfigSetter):
             output_file: Target file for the result config, by default same as config_file
         """
         path = self.base_path / config_file
-        try:
-            data = path.read_text()
-        except FileNotFoundError:
-            raise
+        if not path.exists():
+            raise FileNotFoundError(f"{path} not found.")
+
+        data = self.workload.read_text(path)
 
         if regex and old_val and re.compile(old_val, re.MULTILINE).findall(data):
             data = re.sub(r"{}".format(old_val), f"{new_val}", data)
@@ -380,12 +365,9 @@ class YamlConfigSetter(ConfigSetter):
             logger.info(data)
 
         if output_file is None:
-            output_path = path
-        else:
-            output_path = output_file
+            output_file = path
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(data)
+        self.workload.write_text(data, output_file)
 
     @override
     def append(
@@ -412,7 +394,7 @@ class YamlConfigSetter(ConfigSetter):
             data = data + "\n" + text_to_append
             self.workload.write_text(data, path)
 
-    def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
+    def __dump(self, data: dict[str, object], output_type: OutputType, target_file: str):
         """Write the YAML data on the corresponding "output_type" stream.
 
         Always writes YAML even if data is empty ({}), to ensure file exists
@@ -435,7 +417,7 @@ class YamlConfigSetter(ConfigSetter):
             yaml_content = buffer.getvalue()
             target_path.write_text(yaml_content)
 
-    def __deep_update(self, source, node_keys: List[str], val: Any):
+    def __deep_update(self, source, node_keys: list[str], val: object):
         """Recursively traverses the tree of nodes, and writes the value accordingly.
 
         Arg:
@@ -498,7 +480,7 @@ class YamlConfigSetter(ConfigSetter):
 
         return source
 
-    def __deep_delete(self, source, node_keys: List[str]):
+    def __deep_delete(self, source, node_keys: list[str]):
         if not node_keys:
             return
 
@@ -527,7 +509,7 @@ class YamlConfigSetter(ConfigSetter):
             logger.debug("Target element not found.")
             pass
 
-    def __leaf_container(self, current, node_names: List[str]):
+    def __leaf_container(self, current, node_names: list[str]):
         if len(node_names) == 1:
             return current
 
@@ -565,7 +547,9 @@ class YamlConfigSetter(ConfigSetter):
 
         return int(str_index) if index is None else index
 
-    def __inline_array_format(self, data, node_keys: List[str], val: List[Any]) -> Dict[str, Any]:
+    def __inline_array_format(
+        self, data, node_keys: list[str], val: list[object]
+    ) -> dict[str, object]:
         """Reformat a multiline YAML array into one with square braces."""
         leaf_k = node_keys[-1]
 

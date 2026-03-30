@@ -69,17 +69,6 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         # State
         self.state = ClusterState(self, self.substrate)
 
-        # Initialize managers and events
-        # K8s charm provides a lazy workload property so managers can be initialized
-        # even before the workload container is ready.
-        self._initialize_managers_and_events()
-
-    def _initialize_managers_and_events(self):
-        """Initialize managers and events.
-
-        This method will be called by subclasses (e.g. K8s) after setting up workload.
-        Managers will check workload.workload_present when they actually need to use it.
-        """
         # Managers
         self.tls_manager = TlsManager(self.state, self.workload)
         self.internal_users_manager = InternalUsersManager(self.state, self.workload)

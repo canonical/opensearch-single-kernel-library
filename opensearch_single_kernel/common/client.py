@@ -419,7 +419,7 @@ class OpenSearchClient:
         )
         return "acknowledged" in response
 
-    def _get_chain_pem_path(self) -> str | bool:  # noqa: C901
+    def _get_chain_pem_path(self) -> str:  # noqa: C901
         """Get the path to chain.pem file for certificate verification.
 
         For both VM and K8s, requests runs in the charm container, so we stage a copy of the
@@ -430,8 +430,10 @@ class OpenSearchClient:
         # and pass it to requests without persisting it on disk.
 
         Returns:
-            str | bool: Path to chain.pem file accessible from the charm container, or
-            False / raises when the CA chain is not available yet.
+            str: Path to chain.pem file accessible from the charm container.
+
+        Raises:
+            OpenSearchHttpError: if the CA chain is not available yet.
         """
         staged_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
         staged_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -440,22 +442,21 @@ class OpenSearchClient:
         chain_path = self.workload.paths.certs / "chain.pem"
         chain_path_str = path_as_posix(chain_path)
 
-        if self.workload.workload_present:
-            try:
-                if chain_path.exists():
-                    chain_content = self.workload.read_text(chain_path)
-                    if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
-                        staged_path.write_text(chain_content)
-                        staged_path.chmod(0o644)
-                        return path_as_posix(staged_path)
-            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
-                logger.warning(
-                    "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
-                    chain_path_str,
-                    e,
-                )
+        try:
+            if chain_path.exists():
+                chain_content = self.workload.read_text(chain_path)
+                if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
+                    staged_path.write_text(chain_content)
+                    staged_path.chmod(0o644)
+                    return path_as_posix(staged_path)
+        except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+            logger.warning(
+                "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
+                chain_path_str,
+                e,
+            )
 
-        # workload not ready/unreachable or chain.pem missing, fall back to last staged copy.
+        # workload-side chain.pem unavailable, use last staged copy.
         if staged_path.exists():
             try:
                 cached = staged_path.read_text()
@@ -464,13 +465,7 @@ class OpenSearchClient:
             if "BEGIN CERTIFICATE" in cached:
                 return path_as_posix(staged_path)
 
-        # wait until workload becomes available again.
-        if not self.workload.workload_present:
-            raise OpenSearchHttpError(
-                response_text="Workload not ready and no staged chain.pem available yet"
-            )
-
-        return False
+        raise OpenSearchHttpError(response_text="chain.pem not available yet")
 
     def get_node_id(self, unit_name: str) -> str | None:
         """Get the OpenSearch node id corresponding to the unit.
@@ -615,7 +610,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.error(f"Error reloading TLS certificates via API: {e}")
+            logger.error("Error reloading TLS certificates via API: %s", e)
             raise
 
     def get_allocation_explain(

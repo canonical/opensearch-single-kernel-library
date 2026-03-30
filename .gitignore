@@ -18,9 +18,6 @@ cloudinit-userdata.yaml
 /requirements.txt
 /requirements-last-build.txt
 
-# uv (optional local alternative to Poetry); project uses poetry.lock
-uv.lock
-
 ########################################################
 #
 # Terraform .gitignore

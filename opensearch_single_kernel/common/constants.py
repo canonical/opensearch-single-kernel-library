@@ -303,19 +303,11 @@ OPENSEARCH_PEBBLE_SERVICE_NAME = "opensearch"
 # File permissions as octal
 # standard directory permissions
 DIR_PERMISSIONS_READONLY = 0o755
-# writable directory permissions (logs)
-DIR_PERMISSIONS_WRITABLE = 0o777
 # certificates directory permissions
 # minimum permissions: daemon can write, root can list/read.
 DIR_PERMISSIONS_CERTIFICATES = 0o750
 # secure directory permissions
 DIR_PERMISSIONS_SECURE = 0o775
-
-# File permissions as decimal for chmod commands
-CHMOD_READONLY = "755"
-CHMOD_WRITABLE = "777"
-CHMOD_CERTIFICATES = "750"
-CHMOD_SECURE = "775"
 
 # Pebble service user/group
 PEBBLE_SERVICE_USER = "_daemon_"

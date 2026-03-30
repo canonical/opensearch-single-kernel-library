@@ -13,6 +13,8 @@ from typing import List, Optional
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
+from ops import ModelError
+from ops.pebble import Error as PebbleError
 
 from opensearch_single_kernel.common.constants import (
     BASE_SNAP_DIR,
@@ -89,27 +91,9 @@ class Paths:
         return self.snap_common / OpenSearchPaths.DATA.val
 
     @property
-    def data_dir(self) -> PathProtocol:
-        """Return the directory OpenSearch should use for data.
-
-        By default (VM/snap), this is the same as data.
-        K8s workloads may override this if OpenSearch expects a subdirectory.
-        """
-        return self.data
-
-    @property
     def logs(self) -> PathProtocol:
         """Return path to the logs snap directory."""
         return self.snap_common / OpenSearchPaths.LOGS.val
-
-    @property
-    def logs_dir(self) -> PathProtocol:
-        """Return the directory OpenSearch should use for logs.
-
-        By default (VM/snap), this is the same as logs.
-        K8s workloads may override this if OpenSearch expects a subdirectory.
-        """
-        return self.logs
 
     @property
     def jdk(self) -> PathProtocol:
@@ -216,23 +200,32 @@ class BaseWorkload(ABC):
             FileNotFoundError,
             UnicodeError,
             PermissionError,
+            PebbleError,
+            ModelError,
             pathops.PebbleConnectionError,
         ) as e:
             raise OpenSearchFileOperationError(e)
 
     def mkdir(
-        self, path: pathops.PathProtocol, parents: bool = False, exist_ok: bool = False
+        self,
+        path: pathops.PathProtocol,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
     ) -> None:
         """Create a directory on disk.
 
         Args:
             path (str): The directory path to create.
+            mode (int): The mode/permissions to use for the new directory.
             parents (bool): Whether to create parent directories if they do not exist.
             exist_ok (bool): Whether to ignore the error if the directory already exists.
         """
         try:
-            path.mkdir(parents=parents, exist_ok=exist_ok)
+            path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
         except (
+            PebbleError,
+            ModelError,
             FileExistsError,
             FileNotFoundError,
             LookupError,
@@ -267,8 +260,14 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def get_host_public_ip(self) -> Optional[str]:
-        """Fetches the Public IP address of the current unit."""
+    def get_publish_host(self) -> Optional[str]:
+        """Return the host to use for OpenSearch `http.publish_host`."""
+        pass
+
+    @property
+    @abstractmethod
+    def keytool_cmd(self) -> str:
+        """Return the keytool command appropriate for this workload substrate."""
         pass
 
     @abstractmethod
@@ -305,6 +304,16 @@ class BaseWorkload(ABC):
     def meminfo(self) -> dict[str, float]:
         """Read the /proc/meminfo file and return the values."""
         pass
+
+    def _parse_meminfo_output(self, output: str) -> dict[str, float]:
+        """Parse meminfo output into a dictionary."""
+        try:
+            meminfo_lines = output.split("\n")
+            meminfo = [line.split() for line in meminfo_lines if line.strip()]
+            return {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
+        except (ValueError, IndexError, AttributeError) as parse_error:
+            logger.warning("Failed to parse meminfo output: %s", parse_error)
+            return {}
 
     @abstractmethod
     def is_failed(self) -> bool:

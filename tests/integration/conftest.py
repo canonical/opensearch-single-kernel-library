@@ -35,6 +35,7 @@ PRODUCTION_CONFIG_OPTS = {"profile": "production"}
 
 def get_unit_ids(substrate: str) -> list[int]:
     """Return the unit ids supported by the test topology for a substrate."""
+    # TODO: Expand K8s integration topology to multi-unit and remove this special-case.
     return [0] if substrate == "k8s" else UNIT_IDS
 
 

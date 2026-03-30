@@ -107,6 +107,7 @@ async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
     """Wait for blocked cluster with cluster topology error.
 
     (VM only: production profile with 1 unit)
+    TODO: Add equivalent K8s profile coverage once base capabilities are implemented.
     """
     await wait_until(
         ops_test,

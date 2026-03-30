@@ -3,19 +3,54 @@
 # See LICENSE file for licensing details.
 
 """Utilities for reading / writing certificates."""
+import base64
 import logging
+import math
+import re
+from datetime import datetime
 
 from charmlibs.pathops import PathProtocol
+from cryptography import x509
 
 from opensearch_single_kernel.common.constants import KEYTOOL
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.utils.helpers import is_alias_missing_error
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def normalized_tls_subject(subject: str) -> str:
+    """Removes any / character from a subject."""
+    if subject.startswith("/"):
+        subject = subject[1:]
+    return subject.replace("/", ",")
+
+
+def cert_expiration_remaining_hours(cert: str) -> int:
+    """Returns the remaining hours for the cert to expire."""
+    certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
+    time_difference = certificate_object.not_valid_after - datetime.utcnow()
+    return math.floor(time_difference.total_seconds() / 3600)
+
+
+def parse_tls_file(raw_content: str) -> bytes:
+    """Parse TLS files from both plain text or base64 format."""
+    if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
+        return re.sub(
+            r"(-+(BEGIN|END) [A-Z ]+-+)",
+            "\\1",
+            raw_content,
+        ).encode("utf-8")
+    return base64.b64decode(raw_content)
+
+
+def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
+    """Return True if keytool says that given alias does not exist."""
+    msg = (exc.out or "") + (exc.err or "")
+    return f"Alias <{alias}> does not exist" in msg
 
 
 def read_ca(
@@ -168,22 +203,6 @@ def store_ca_chain(  # noqa: C901
                 )
             except OpenSearchCmdError as e:
                 msg = (e.out or "") + (e.err or "")
-                if "Destination alias" in msg and "already exists" in msg:
-                    try:
-                        workload.run_cmd(
-                            f"{keytool_cmd} -delete "
-                            f"-alias {old_internal_alias} -keystore {store_path} -storetype PKCS12",
-                            f"-storepass {store_pwd}",
-                        )
-                        workload.run_cmd(
-                            f"{keytool_cmd} -changealias "
-                            f"-alias {internal_alias} -destalias {old_internal_alias} "
-                            f"-keystore {store_path} -storetype PKCS12",
-                            f"-storepass {store_pwd}",
-                        )
-                        msg = ""
-                    except OpenSearchCmdError:
-                        pass
                 if ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
                     return False
 

@@ -46,12 +46,6 @@ class ProfilesManager(BaseManager):
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
         meminfo_data = self.workload.meminfo()
-        if "MemTotal" not in meminfo_data:
-            logger.warning(
-                "Could not read MemTotal from meminfo. Skipping memory requirement check."
-            )
-            return []
-
         memory_size = meminfo_data["MemTotal"]
 
         if (
@@ -74,9 +68,6 @@ class ProfilesManager(BaseManager):
         """Check the cluster topology requirements."""
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         current_app = self.state.current_peer_cluster_app
-        if current_app is None:
-            logger.debug("Deployment description not available yet, skipping topology check.")
-            return []
         # backwards compatibility for revisions that do not set generated roles
         # in cluster_fleet_apps
         if not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps:

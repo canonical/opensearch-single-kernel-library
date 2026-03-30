@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import random
 import shlex
 import socket
@@ -63,13 +64,6 @@ def _get_unit_address(raw_unit: dict[str, Any]) -> Optional[str]:
     return raw_unit.get("public-address") or raw_unit.get("address")
 
 
-def _format_config_value(value: Any) -> str:
-    """Format a config value for `juju deploy --config key=value`."""
-    if isinstance(value, bool):
-        return str(value).lower()
-    return str(value)
-
-
 async def deploy_opensearch(  # noqa: C901
     ops_test: OpsTest,
     charm: str,
@@ -83,38 +77,13 @@ async def deploy_opensearch(  # noqa: C901
     resources: Optional[Dict[str, str]] = None,
     storage: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Deploy the OpenSearch charm.
-
-    For local K8s charms, use the Juju CLI so the OCI image resource is attached reliably.
-    """
-    if substrate == "k8s":
-        cmd = [
-            "deploy",
-            "--model",
-            ops_test.model.info.name,
-            charm,
-            application_name,
-            "--num-units",
-            str(num_units),
-        ]
-        if config:
-            for key, value in config.items():
-                cmd.extend(["--config", f"{key}={_format_config_value(value)}"])
-        if constraints:
-            cmd.extend(["--constraints", constraints])
-        if resources:
-            for name, value in resources.items():
-                cmd.extend(["--resource", f"{name}={value}"])
-
-        return_code, stdout, stderr = await ops_test.juju(*cmd)
-        assert return_code == 0, stderr or stdout
-        return
-
+    """Deploy the OpenSearch charm."""
     deploy_kwargs = {
         "application_name": application_name,
         "num_units": num_units,
     }
-    if series:
+    # Juju does not use `series` for K8s applications.
+    if series and substrate != "k8s":
         deploy_kwargs["series"] = series
     if config:
         deploy_kwargs["config"] = config
@@ -137,7 +106,20 @@ async def get_cloud_type(ops_test: OpsTest) -> str:
 
 
 async def get_constraints(ops_test: OpsTest, mem_gb: int = 4) -> Optional[str]:
-    """Return memory constraints for OpenSearch charm on VM to avoid OOM in integration tests."""
+    """Return optional memory constraints for VM integration deployments.
+
+    Constraints are disabled by default and enabled only when
+    OPENSEARCH_ENABLE_CONSTRAINTS is set to a truthy value.
+    """
+    enable_constraints = os.getenv("OPENSEARCH_ENABLE_CONSTRAINTS", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not enable_constraints:
+        return None
+
     cloud_type = await get_cloud_type(ops_test)
     # localhost controller typically uses LXD; lxd is the cloud type when added explicitly
     if cloud_type in ("lxd", "localhost"):

@@ -45,6 +45,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchContainerPrepareError,
     OpenSearchError,
     OpenSearchFileOperationError,
     OpenSearchHAError,
@@ -159,6 +160,9 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        if not self._ensure_k8s_workload_ready(event, "peer relation changed"):
+            return
+
         if is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up():
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
 
@@ -228,6 +232,9 @@ class OpenSearchEventsHandler(Object):
             # that happens in the very last stages of the application removal
             return
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
+            return
+
+        if not self._ensure_k8s_workload_ready(event, "peer relation departed"):
             return
 
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -329,6 +336,9 @@ class OpenSearchEventsHandler(Object):
         if self.check_profile_missing_requirements():
             return
 
+        if not self._ensure_k8s_workload_ready(event, "update status"):
+            return
+
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
@@ -372,10 +382,12 @@ class OpenSearchEventsHandler(Object):
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
-        if (
-            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-        ):
+        try:
+            old_ca_present = self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+        except PebbleConnectionError as e:
+            logger.debug("Skipping old CA check in update-status; container not ready: %s", e)
+            old_ca_present = None
+        if old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster():
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
         # If relation not broken - leave
@@ -414,9 +426,13 @@ class OpenSearchEventsHandler(Object):
             self.charm.status.clear(CharmStatuses.INSTALL_IN_PROGRESS)
         except OpenSearchInstallError:
             self.charm.status.set(CharmStatuses.INSTALL_ERROR)
+            raise
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
+        if not self._ensure_k8s_workload_ready(event, "config-changed event"):
+            return
+
         if (
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
@@ -424,12 +440,6 @@ class OpenSearchEventsHandler(Object):
             self.charm.config_manager.update_opensearch_config()
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
-        # For K8s, check container readiness before filesystem operations
-        if self.charm.state.substrate == Substrates.K8S:
-            if not self.charm.workload.workload_present:
-                logger.info("Container not ready for config-changed event, deferring")
-                event.defer()
-                return
 
         if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
             if (
@@ -483,22 +493,38 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
-    def reconcile_tls_resources(self) -> None:
-        """Reconcile TLS resources on the workload runtime.
-
-        On K8s, TLS material can be present in Juju secrets while the workload container filesystem
-        is empty (after pod restart) or not yet prepared (early hook ordering).
-        This reconciliation:
-        - prepares the container (permissions + Pebble layer)
-        - restores TLS artifacts on disk from Juju secrets
-
-        On VM, this is a not operational.
-        """
+    def _ensure_k8s_workload_ready(self, event, context: str) -> bool:
+        """Defer until the K8s workload container is connectable."""
         if self.charm.state.substrate != Substrates.K8S:
-            return
+            return True
+        if self.charm.workload.workload_present:
+            return True
 
-        self.charm.workload.prepare_container()
-        self.charm.tls_manager.restore_tls_files_from_secrets()
+        logger.info("Container not ready for %s, deferring", context)
+        event.defer()
+        return False
+
+    def _ensure_k8s_runtime_ready(self, event, context: str) -> bool:
+        """Prepare the K8s runtime before continuing with the hook."""
+        if not self._ensure_k8s_workload_ready(event, context):
+            return False
+
+        try:
+            self.charm.tls_manager.reconcile_k8s_runtime_resources()
+        except PebbleConnectionError as e:
+            logger.info("Container not ready to %s: %s", context, e)
+            event.defer()
+            return False
+        except (
+            OpenSearchContainerPrepareError,
+            OpenSearchFileOperationError,
+            OpenSearchError,
+        ) as e:
+            logger.warning("Failed to %s: %s", context, e)
+            event.defer()
+            return False
+
+        return True
 
     def _on_pebble_ready(self, event) -> None:
         """Handle pebble-ready for K8s workload container.
@@ -506,15 +532,7 @@ class OpenSearchEventsHandler(Object):
         We do the K8s container preparation:
             filesystem permissions, pebble plan, restore tls files from Juju secret.
         """
-        try:
-            self.reconcile_tls_resources()
-        except PebbleConnectionError as e:
-            logger.info("Container not ready on pebble-ready: %s", e)
-            event.defer()
-            return
-        except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
-            logger.warning("Failed to reconcile TLS resources on pebble-ready: %s", e)
-            event.defer()
+        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime on pebble-ready"):
             return
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
@@ -528,13 +546,7 @@ class OpenSearchEventsHandler(Object):
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
-        # K8s: defer leader-elected until we can talk to the workload container.
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.workload.workload_present
-        ):
-            logger.info("Container not ready for leader election, deferring")
-            event.defer()
+        if not self._ensure_k8s_workload_ready(event, "leader election"):
             return
 
         if self.charm.state.application.is_security_index_initialised:
@@ -561,7 +573,7 @@ class OpenSearchEventsHandler(Object):
                 if restart_needed:
                     logger.debug(
                         "Leader election reconfigured node roles; emitting restart."
-                        " WAITING_TO_START will be set by _on_start_opensearch once restart begins."
+                        " WAITING_TO_START will be set by _on_restart_opensearch."
                     )
                     self.charm.restart_opensearch_event.emit()
             return
@@ -603,14 +615,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
-        # K8s: start might fire before pebble-ready. Defer until we can talk to the container
-        # and apply the pebble plan/permissions in pebble-ready.
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.workload.workload_present
-        ):
-            logger.info("Container not ready for start event, deferring")
-            event.defer()
+        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime for start"):
             return
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -755,13 +760,7 @@ class OpenSearchEventsHandler(Object):
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
-        # K8s: this event can be emitted before pebble-ready after agent restart/pod recreation.
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.workload.workload_present
-        ):
-            logger.info("Container not ready for start opensearch, deferring")
-            event.defer()
+        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime for start"):
             return
 
         if (
@@ -803,69 +802,17 @@ class OpenSearchEventsHandler(Object):
             # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
             return
 
-        # K8s: start / custom start events can run before pebble-ready
-        # after an agent restart. Ensure the container is prepared and TLS files are
-        # restored from Juju secrets before attempting to start OpenSearch,
-        # otherwise the security plugin can crash-loop due to
-        # missing keystores/truststores.
         if self.charm.state.substrate == Substrates.K8S:
             try:
-                self.reconcile_tls_resources()
+                self.charm.config_manager.ensure_k8s_tls_config_present()
             except PebbleConnectionError as e:
-                logger.info("Container not ready to prepare for start: %s", e)
+                logger.info("Container not ready to ensure TLS config for start: %s", e)
                 event.defer()
                 return
-            except (OpenSearchInstallError, OpenSearchFileOperationError, OpenSearchError) as e:
-                logger.warning("Failed to reconcile TLS resources for start: %s", e)
+            except (OpenSearchFileOperationError, OpenSearchError) as e:
+                logger.warning("Failed to ensure TLS config for start: %s", e)
                 event.defer()
                 return
-
-            # Pod deletes mean /etc/opensearch/opensearch.yml is recreated
-            # from the image. Ensure TLS config is rewritten from Juju secrets before
-            # starting OpenSearch, otherwise the security plugin will fail at bootstrap.
-            admin_secrets = (
-                self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-                or {}
-            )
-            transport_secrets = (
-                self.charm.state.secrets.get_object(
-                    Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-                )
-                or {}
-            )
-            http_secrets = (
-                self.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val, peek=True)
-                or {}
-            )
-
-            truststore_pwd = admin_secrets.get("truststore-password")
-            transport_keystore_pwd = transport_secrets.get("keystore-password")
-            http_keystore_pwd = http_secrets.get("keystore-password")
-
-            if truststore_pwd and transport_keystore_pwd and http_keystore_pwd:
-                # Only rewrite if TLS config is missing. /etc/opensearch comes from the
-                # image, but any runtime writes can be lost on container recreation.
-                # Use full config reconcile so admin_dn and node
-                # TLS come from state (same path as config-changed),
-                # instead of targeted set_admin_tls_conf/set_node_tls_conf.
-                if not (
-                    self.charm.config_manager.is_transport_tls_configured()
-                    and self.charm.config_manager.is_http_tls_configured()
-                ):
-                    try:
-                        self.charm.config_manager.update_opensearch_config()
-                    except PebbleConnectionError as e:
-                        logger.info("Container not ready to rewrite TLS config for start: %s", e)
-                        event.defer()
-                        return
-                    except (
-                        OpenSearchInstallError,
-                        OpenSearchFileOperationError,
-                        OpenSearchError,
-                    ) as e:
-                        logger.warning("Failed to rewrite TLS config for start: %s", e)
-                        event.defer()
-                        return
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -901,74 +848,49 @@ class OpenSearchEventsHandler(Object):
             self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
             event.defer()
             return
-
-        logger.debug("Setting WAITING_TO_START from _on_start_opensearch")
         self.charm.status.set(CharmStatuses.WAITING_TO_START)
 
-        # Set the configuration of the node
-        # Retrieve the nodes of the cluster, needed to configure this node
+        cm_names = None
+        seed_hosts = None
         try:
+            # Set the configuration of the node. Retrieve the cluster nodes first,
+            # since they are needed to compute bootstrap contributors and config.
             nodes = self.charm.cluster_manager.get_nodes(False)
             computed_roles = self.charm.state.computed_roles()
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
             cm_ips = self.charm.cluster_manager.get_cluster_managers_ips(nodes)
+            seed_hosts = self.charm.cluster_manager.get_cluster_managers_seed_hosts(nodes)
             self.charm.cluster_manager.configure_bootstrap_contributors(
                 computed_roles, cm_names, cm_ips
             )
-
-            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_ips=cm_ips)
-        except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
-            logger.debug("Error getting the nodes: %s", e)
-            self.charm.lock_manager.release()
-            event.defer()
-            return
         except OpenSearchHttpError as e:
             # We might be starting with a partially-formed cluster (or temporary API issues).
             # Fall back: use nodes_config from peer relation if available (leader already
             # pushed topology), so we still set initial_cluster_manager_nodes and seeds for VM.
             logger.debug("Error getting nodes before start: %s", e)
-            try:
-                self.charm.config_manager.update_opensearch_config()
-            except (PebbleConnectionError, OpenSearchFileOperationError, OpenSearchError) as e2:
-                logger.info("Unable to write base config before start: %s", e2)
-                self.charm.lock_manager.release()
-                event.defer()
-                return
-        else:
-            try:
-                self.charm.config_manager.update_opensearch_config(
-                    cm_names=cm_names, cm_ips=cm_ips
-                )
-            except PebbleConnectionError as e:
-                logger.info("Container not ready to configure node before start: %s", e)
-                self.charm.lock_manager.release()
-                event.defer()
-                return
-            except (OpenSearchFileOperationError, OpenSearchError) as e:
-                logger.info("Unable to write OpenSearch config before start: %s", e)
-                self.charm.lock_manager.release()
-                event.defer()
-                return
 
         try:
-            try:
-                self.charm.cluster_manager.start(
-                    wait_until_http_200=(
-                        not self.charm.unit.is_leader()
-                        or self.charm.state.application.is_security_index_initialised
-                    )
-                )
-            except PebbleConnectionError as e:
-                logger.info("Container not ready for start opensearch: %s", e)
-                event.defer()
-                return
+            self.charm.config_manager.update_opensearch_config(
+                cm_names=cm_names, seed_hosts=seed_hosts
+            )
+        except (PebbleConnectionError, OpenSearchFileOperationError, OpenSearchError) as e:
+            logger.info("Unable to configure OpenSearch node before start: %s", e)
+            self.charm.lock_manager.release()
+            event.defer()
+            return
 
-            try:
-                self._post_start_init(event)
-            except PebbleConnectionError as e:
-                logger.info("Container not ready for post-start init: %s", e)
-                event.defer()
-                return
+        try:
+            self.charm.cluster_manager.start(
+                wait_until_http_200=(
+                    not self.charm.unit.is_leader()
+                    or self.charm.state.application.is_security_index_initialised
+                )
+            )
+            self._post_start_init(event)
+        except PebbleConnectionError as e:
+            logger.info("Container not ready during start flow: %s", e)
+            event.defer()
+            return
         except (
             OpenSearchHttpError,
             OpenSearchStartTimeoutError,
@@ -1027,10 +949,8 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.lock_manager.release()
 
-        # Mark unit as started. Use a stable value so we do not trigger relation-changed on
-        # every _post_start_init
-        if not self.charm.state.server.started:
-            self.charm.state.server.update({"started": "true"})
+        # Add a timestamp to always trigger relation changed
+        self.charm.state.server.update({"started": str(time_ns())})
 
         # Apply OpenSearch upstream recommended settings
         self.charm.cluster_manager.apply_upstream_fixes()
@@ -1045,7 +965,6 @@ class OpenSearchEventsHandler(Object):
 
         # clear waiting to start status
         self.charm.status.clear(CharmStatuses.REQUEST_LOCK_ON_START)
-        logger.debug("Clearing WAITING_TO_START from _post_start_init")
         self.charm.status.clear(CharmStatuses.WAITING_TO_START)
         self.charm.status.clear(CharmStatuses.SERVICE_START_ERROR)
         self.charm.status.clear(CharmStatuses.PEER_CLUSTER_NO_DATA_NODE)
@@ -1075,6 +994,9 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             event.defer()
             return
+
+        logger.debug("Setting WAITING_TO_START from _on_restart_opensearch")
+        self.charm.status.set(CharmStatuses.WAITING_TO_START)
 
         # Ignore the lock if you are the only data node and restarting
         deployment_desc = self.charm.state.application.deployment_desc
@@ -1326,10 +1248,12 @@ class OpenSearchEventsHandler(Object):
         # If the reload through API failed, we restart the service
         # We remove the old CA and update the chain to only include the new one
         # if all certs are stored and CA rotation is complete in the cluster
-        if (
-            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-        ):
+        try:
+            old_ca_present = self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+        except PebbleConnectionError as e:
+            logger.info("Container not ready while checking old CA in post_start_init: %s", e)
+            return
+        if old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster():
             logger.info("post_start_init: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
 
@@ -1350,11 +1274,7 @@ class OpenSearchEventsHandler(Object):
             secret_obj = (
                 self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
             )
-            csr_str = secret_obj.get("csr")
-            if not csr_str:
-                logger.warning("Missing CSR for %s, skipping revocation", cert_type.val)
-                continue
-            csr = csr_str.encode("utf-8")
+            csr = secret_obj["csr"].encode("utf-8")
             self.charm.tls_events.certs.request_certificate_revocation(csr)
 
         # doing this sequentially (revoking -> requesting new ones), to avoid triggering

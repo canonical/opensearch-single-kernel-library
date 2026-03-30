@@ -231,13 +231,6 @@ class LockManager(PeerLockManager):
         self.name = "lock_manager"
         super().__init__(state, workload)
 
-    def _local_opensearch_host(self) -> str | None:
-        """Get host to reach OpenSearch on this unit.
-
-        A stable address for TLS hostname verification (DNS on K8s, public-address on VM).
-        """
-        return self.workload.get_host_public_ip() or self.state.host_ip
-
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
@@ -290,7 +283,7 @@ class LockManager(PeerLockManager):
         Returns:
             Whether lock was acquired
         """
-        local_host = self._local_opensearch_host()
+        local_host = self.state.host_ip
         host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
@@ -415,7 +408,7 @@ class LockManager(PeerLockManager):
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
 
-        local_host = self._local_opensearch_host()
+        local_host = self.state.host_ip
         host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
@@ -428,7 +421,7 @@ class LockManager(PeerLockManager):
                 unit_with_lock = self.unit_with_lock(host)
             except OpenSearchHttpError as e:
                 # On K8s only: do not crash the hook when OpenSearch is temporarily unreachable
-                # (pod IP changes, DNS not ready). On VM we re-raise so the lock doc is not left
+                # behind the stable DNS endpoint. On VM we re-raise so the lock doc is not left
                 # behind and the next unit can acquire.
                 if self.state.substrate == Substrates.K8S:
                     logger.warning("[Node lock] Could not check lock holder: %s", e)

@@ -16,7 +16,6 @@ from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_HTTP_PORT,
     OPENSEARCH_SNAP_REVISION,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -125,10 +124,23 @@ class VMWorkload(BaseWorkload):
         self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
     @override
+    def get_publish_host(self) -> str | None:
+        """Fetch the public address used for OpenSearch `http.publish_host`."""
+        return self.get_host_public_ip()
+
+    @property
+    @override
+    def keytool_cmd(self) -> str:
+        """Return VM keytool command via snap wrapper."""
+        return "opensearch.keytool"
+
     def get_host_public_ip(self) -> str | None:
-        """Fetches the Public IP address of the current unit."""
+        """Return unit public address from Juju."""
         cmd = "unit-get public-address"
-        output = self.run_cmd(cmd)
+        try:
+            output = self.run_cmd(cmd)
+        except OpenSearchCmdError:
+            return None
         if output.returncode != 0:
             return None
 
@@ -203,21 +215,8 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            logger.info("The opensearch.%s service is already started.", self.SERVICE_NAME)
+            logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
             return
-            # Only skip starting if the process is actually listening (avoids stuck state
-            # where systemd reports active but the process crashed or never bound to port).
-            host = self.get_host_public_ip()
-            if host and self.is_reachable(host, OPENSEARCH_HTTP_PORT):
-                logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
-                return
-            logger.debug(
-                "Snap reports opensearch.daemon active but not reachable; restarting service."
-            )
-            try:
-                self.opensearch_snap.stop([self.SERVICE_NAME])
-            except snap.SnapError as e:
-                logger.warning("Stop before restart failed: %s", e)
 
         logger.debug("Starting OpenSearch snap service opensearch.%s", self.SERVICE_NAME)
         try:
@@ -236,11 +235,12 @@ class VMWorkload(BaseWorkload):
         Returns:
             meminfo: The memory info values.
         """
-        with open("/proc/meminfo") as f:
-            meminfo = f.read().split("\n")
-            meminfo = [line.split() for line in meminfo if line.strip()]
-
-        return {line[0][:-1]: float(line[1]) for line in meminfo}
+        try:
+            with open("/proc/meminfo") as f:
+                return self._parse_meminfo_output(f.read())
+        except OSError as e:
+            logger.warning("Failed to read meminfo: %s", e)
+            return {}
 
     @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:

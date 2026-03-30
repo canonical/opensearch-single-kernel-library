@@ -16,6 +16,10 @@ class OpenSearchInstallError(OpenSearchError):
     """Exception thrown when OpenSearch fails to be installed."""
 
 
+class OpenSearchContainerPrepareError(OpenSearchError):
+    """Exception thrown when the K8s workload container cannot be prepared."""
+
+
 class OpenSearchMissingError(OpenSearchError):
     """Exception thrown when an action is attempted on OpenSearch when it's not installed."""
 

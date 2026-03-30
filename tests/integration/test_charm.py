@@ -44,6 +44,7 @@ DEFAULT_VM_NUM_UNITS = 2
 
 def default_num_units(substrate: str) -> int:
     """Return the default unit count for the tested substrate."""
+    # TODO: Revisit when K8s supported multi-unit topology
     return 1 if substrate == "k8s" else DEFAULT_VM_NUM_UNITS
 
 
@@ -356,6 +357,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
 @pytest.mark.skip_if_substrate("k8s")
 async def test_all_units_have_all_local_users(ops_test: OpsTest) -> None:
     """Compare the internal_users.yaml of all units."""
+    # TODO: Add K8s equivalent when multi-unit K8s is supported.
     # Get the leader's version of internal_users.yml
     leader_id = await get_leader_unit_id(ops_test)
     leader_name = f"{APP_NAME}/{leader_id}"
@@ -373,6 +375,7 @@ async def test_all_units_have_all_local_users(ops_test: OpsTest) -> None:
 @pytest.mark.skip_if_substrate("k8s")
 async def test_all_units_have_internal_users_synced(ops_test: OpsTest) -> None:
     """Compare the internal_users.yaml of all units."""
+    # TODO: Add K8s equivalent when multi-unit K8s is supported.
     # Get the leader's version of internal_users.yml
     leader_id = await get_leader_unit_id(ops_test)
     leader_name = f"{APP_NAME}/{leader_id}"

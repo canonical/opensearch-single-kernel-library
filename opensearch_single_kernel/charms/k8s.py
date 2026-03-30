@@ -6,6 +6,7 @@
 
 import logging
 
+from ops import Container
 from ops.model import ModelError
 
 from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -26,7 +27,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         """Initialize the OpenSearch Kubernetes Charm."""
         super().__init__(*args)
 
-    def _get_container(self):
+    def _get_container(self) -> Container | None:
         """Return the workload container if available, else None."""
         try:
             return self.unit.get_container(CONTAINER_NAME)

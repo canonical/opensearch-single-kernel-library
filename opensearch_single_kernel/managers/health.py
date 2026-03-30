@@ -50,9 +50,7 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = (
-            (self.workload.get_host_public_ip() or self.state.host_ip) if use_localhost else None
-        )
+        host = self.state.host_ip if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)

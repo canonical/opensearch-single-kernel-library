@@ -23,6 +23,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Scope,
     StoreType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
@@ -117,53 +118,52 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.workload.workload_present
+        ):
+            logger.info("Container not ready for TLS relation created, deferring.")
+            event.defer()
+            return
+
         admin_cert = (
             self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
 
         if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            try:
-                # create passwords for both ca trust_store/admin key_store
-                self.charm.tls_manager.create_store_pwd_if_not_exists(
-                    Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
-                )
-                self.charm.tls_manager.create_store_pwd_if_not_exists(
-                    Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE
-                )
-                csr = self.charm.tls_manager.create_certificate_signing_request(
-                    Scope.APP, CertType.APP_ADMIN
-                )
-                self.certs.request_certificate_creation(certificate_signing_request=csr)
-            except PebbleConnectionError as e:
-                logger.info("Container not ready for TLS relation created: %s", e)
-                event.defer()
-                return
+            # create passwords for both ca trust_store/admin key_store
+            self.charm.tls_manager.create_store_pwd_if_not_exists(
+                Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
+            )
+            self.charm.tls_manager.create_store_pwd_if_not_exists(
+                Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE
+            )
+            csr = self.charm.tls_manager.create_certificate_signing_request(
+                Scope.APP, CertType.APP_ADMIN
+            )
+            self.certs.request_certificate_creation(certificate_signing_request=csr)
         elif not admin_cert.get("truststore-password"):
             logger.debug("Truststore-password from main-orchestrator not available yet.")
             event.defer()
             return
 
-        try:
-            # create passwords for both unit-http/transport key_stores
-            self.charm.tls_manager.create_store_pwd_if_not_exists(
-                Scope.UNIT, CertType.UNIT_TRANSPORT, StoreType.KEYSTORE
-            )
-            self.charm.tls_manager.create_store_pwd_if_not_exists(
-                Scope.UNIT, CertType.UNIT_HTTP, StoreType.KEYSTORE
-            )
+        # create passwords for both unit-http/transport key_stores
+        self.charm.tls_manager.create_store_pwd_if_not_exists(
+            Scope.UNIT, CertType.UNIT_TRANSPORT, StoreType.KEYSTORE
+        )
+        self.charm.tls_manager.create_store_pwd_if_not_exists(
+            Scope.UNIT, CertType.UNIT_HTTP, StoreType.KEYSTORE
+        )
 
-            unit_transport_csr = self.charm.tls_manager.create_certificate_signing_request(
-                Scope.UNIT, CertType.UNIT_TRANSPORT
-            )
-            unit_http_csr = self.charm.tls_manager.create_certificate_signing_request(
-                Scope.UNIT, CertType.UNIT_HTTP
-            )
-            self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
-            self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
-        except PebbleConnectionError as e:
-            logger.info("Container not ready for TLS relation created: %s", e)
-            event.defer()
-            return
+        unit_transport_csr = self.charm.tls_manager.create_certificate_signing_request(
+            Scope.UNIT, CertType.UNIT_TRANSPORT
+        )
+        unit_http_csr = self.charm.tls_manager.create_certificate_signing_request(
+            Scope.UNIT, CertType.UNIT_HTTP
+        )
+
+        self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
+        self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
@@ -199,8 +199,6 @@ class TLSEventsHandler(Object):
         old_cert = secrets.get("cert", None)
         ca_chain = "\n".join(event.chain[::-1])
 
-        # variables for better readability
-        is_unit_leader = self.charm.unit.is_leader()
         is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
         self.charm.tls_manager.update_certificate_secret_if_needed(
@@ -222,7 +220,7 @@ class TLSEventsHandler(Object):
             try:
                 stored = self.charm.tls_manager.store_new_ca(
                     self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
-                    create_store_pwd=is_unit_leader and is_main_orchestrator,
+                    create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
                 )
             except PebbleConnectionError as e:
                 logger.info("Container not ready for certificate available: %s", e)
@@ -262,9 +260,13 @@ class TLSEventsHandler(Object):
         admin_secrets = (
             self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
-        if admin_secrets.get("chain") and not self.charm.tls_manager.read_stored_ca(
-            alias=OLD_CA_ALIAS
-        ):
+        try:
+            old_ca_present = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
+        except PebbleConnectionError as e:
+            logger.info("Container not ready while reading old CA: %s", e)
+            event.defer()
+            return
+        if admin_secrets.get("chain") and not old_ca_present:
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
             except (PebbleConnectionError, OpenSearchFileOperationError) as e:
@@ -305,7 +307,7 @@ class TLSEventsHandler(Object):
         # if self.charm.unit.is_leader() and self.charm.opensearch_peer_cm.is_provider(typ="main"):
         # self.charm.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
 
-        renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
+        renewal = old_ca_present is not None or (
             old_cert is not None and old_cert != event.certificate
         )
 
@@ -338,26 +340,21 @@ class TLSEventsHandler(Object):
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
-        try:
-            old_csr = secrets["csr"].encode("utf-8")
-            new_csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope=scope, cert_type=cert_type, secrets=secrets, tls_file=False
-            )
-            self.certs.request_certificate_renewal(
-                old_certificate_signing_request=old_csr,
-                new_certificate_signing_request=new_csr,
-            )
-        except PebbleConnectionError as e:
-            logger.info(f"Container not ready for certificate expiring: {e}")
-            event.defer()
-            return
+        old_csr = secrets["csr"].encode("utf-8")
+        new_csr = self.charm.tls_manager.create_certificate_signing_request(
+            scope=scope, cert_type=cert_type, secrets=secrets, tls_file=False
+        )
+        self.certs.request_certificate_renewal(
+            old_certificate_signing_request=old_csr,
+            new_certificate_signing_request=new_csr,
+        )
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
         """Handle a cert that was revoked or has expired"""
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
-    def on_tls_conf_set(  # noqa: C901
+    def on_tls_conf_set(
         self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
     ) -> None:
         """Called after certificate ready and stored on the corresponding scope databag.
@@ -366,15 +363,12 @@ class TLSEventsHandler(Object):
         - Update the corresponding yaml conf files
         - Run the security admin script
         """
-        admin_secrets = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
         if scope == Scope.UNIT:
             admin_secrets = (
                 self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
                 or {}
             )
-            if not (truststore_pwd := admin_secrets.get("truststore-password")):
+            if not admin_secrets.get("truststore-password"):
                 event.defer()
                 return
 
@@ -382,23 +376,6 @@ class TLSEventsHandler(Object):
             # write the admin cert conf on all units, in case there is a leader loss + cert renewal
             if not admin_secrets.get("subject"):
                 return
-            unit_secrets = (
-                self.charm.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
-            )
-            if not (keystore_pwd := unit_secrets.get("keystore-password")):
-                event.defer()
-                return
-
-            # node http or transport cert
-            self.charm.config_manager.set_node_tls_conf(
-                cert_type,
-                truststore_pwd=truststore_pwd,
-                keystore_pwd=keystore_pwd,
-            )
-
-        # write the admin cert conf on all units, in case there is a leader loss + cert renewal
-        if admin_secrets.get("subject"):
-            self.charm.config_manager.set_admin_tls_conf(admin_secrets)
 
         self.charm.tls_manager.store_admin_tls_secrets_if_applies()
 
