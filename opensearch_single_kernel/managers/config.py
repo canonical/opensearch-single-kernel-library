@@ -10,6 +10,7 @@ from typing import Any
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CA_TRUSTSTORE_P12,
+    JDK_CACERTS_STORE_PASSWORD,
     CertType,
     Scope,
     Substrates,
@@ -264,7 +265,7 @@ class ConfigManager(BaseManager):
         self.yaml_setter.append(self.JVM_OPTIONS, "-Djdk.tls.client.protocols=TLSv1.2")
         # K8s: Pebble overrides the rock entrypoint, so start.sh never creates cacert.p12.
         if self.state.substrate == Substrates.K8S:
-            if truststore_pwd := (
+            if (
                 self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
             ).get("truststore-password"):
                 truststore_path = path_as_posix(self.workload.paths.certs / CA_TRUSTSTORE_P12)
@@ -273,7 +274,7 @@ class ConfigManager(BaseManager):
                 )
                 self.yaml_setter.append(
                     self.JVM_OPTIONS,
-                    f"-Djavax.net.ssl.trustStorePassword={truststore_pwd}",
+                    f"-Djavax.net.ssl.trustStorePassword={JDK_CACERTS_STORE_PASSWORD}",
                 )
 
     @staticmethod

@@ -276,6 +276,17 @@ class LockManager(PeerLockManager):
             raise
         return document_data["unit-name"]
 
+    def _preferred_local_https_host(self) -> str | None:
+        """Return the verified local HTTPS host for this substrate.
+
+        K8s certificates are issued for stable DNS identities, not pod IPs, so
+        internal HTTPS checks must target the unit FQDN. VM certificates still
+        use the unit IP.
+        """
+        if self.state.substrate == Substrates.K8S:
+            return self.state.fqdn
+        return self.state.host_ip
+
     @property
     def acquired(self) -> bool:  # noqa: C901
         """Attempt to acquire lock.
@@ -283,7 +294,7 @@ class LockManager(PeerLockManager):
         Returns:
             Whether lock was acquired
         """
-        local_host = self.state.host_ip
+        local_host = self._preferred_local_https_host()
         host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
@@ -408,7 +419,7 @@ class LockManager(PeerLockManager):
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
 
-        local_host = self.state.host_ip
+        local_host = self._preferred_local_https_host()
         host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:

@@ -139,6 +139,28 @@ def test_get_sans(harness, mocker, substrate):
     )
 
 
+def test_get_certificate_subject_uses_short_unit_identity_on_k8s(harness, mocker, substrate):
+    """K8s CSR common name should stay within X.509 limits."""
+    if substrate == "vm":
+        pytest.skip("K8s-only certificate subject behavior")
+
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.unit_name",
+        new_callable=PropertyMock,
+        return_value="opensearch-k8s-0.a03",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.fqdn",
+        new_callable=PropertyMock,
+        return_value="opensearch-k8s-0.opensearch-k8s-endpoints.ktest1.svc.cluster.local",
+    )
+
+    assert harness.charm.tls_manager._get_certificate_subject(CertType.UNIT_TRANSPORT) == (
+        "opensearch-k8s-0"
+    )
+    assert len(harness.charm.tls_manager._get_certificate_subject(CertType.UNIT_HTTP)) <= 64
+
+
 def test_find_secret(harness):
     """Test the secrets lookup depending on the event data."""
     event_data_cert = "cert_abcd12345"
@@ -911,6 +933,11 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
             for call in run_cmd.call_args_list
         )
     else:
+        assert not any(
+            f"chown snap_daemon:root {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12"
+            in call.args[0]
+            for call in run_cmd.call_args_list
+        )
         assert any(
             f"chown 584792:0 {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12"
             in call.args[0]

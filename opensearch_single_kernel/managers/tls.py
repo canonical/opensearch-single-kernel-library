@@ -182,7 +182,9 @@ class TlsManager(BaseManager):
             return "admin"
 
         if self.state.substrate == Substrates.K8S:
-            return self.state.fqdn
+            # X.509 common names are limited to 64 characters. Use the stable per-unit
+            # identity as CN and keep the full service FQDN in SANs for TLS hostname checks.
+            return str(self.state.unit_name).split(".", 1)[0]
 
         # VM: use unit IP from peer binding.
         return str(self.state.host_ip)

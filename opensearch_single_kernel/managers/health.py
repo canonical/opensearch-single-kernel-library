@@ -8,7 +8,11 @@ import time
 
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from opensearch_single_kernel.common.constants import HealthColors, StartMode
+from opensearch_single_kernel.common.constants import (
+    HealthColors,
+    StartMode,
+    Substrates,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
@@ -26,6 +30,10 @@ class HealthManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload)
         self.name = "health_manager"
+
+    def _preferred_local_https_host(self) -> str:
+        """Return the local HTTPS identity that matches the unit certificate."""
+        return self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
 
     def get(  # noqa: C901
         self,
@@ -50,7 +58,7 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = self.state.host_ip if use_localhost else None
+        host = self._preferred_local_https_host() if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)

@@ -179,6 +179,7 @@ def store_ca_chain(  # noqa: C901
     tmpdir = store_path.parent
     starter_mode = "0664"
     snap_user = "snap_daemon:root"
+    should_restore_snap_owner = snap_user_with_write_permission and use_sudo
     final_mode = "0640"
     # import root first, then intermediates
     certs = list(reversed(split_ca_chain(ca)))
@@ -238,11 +239,15 @@ def store_ca_chain(  # noqa: C901
     # post-actions
     try:
         command = ""
-        if snap_user_with_write_permission:
+        # Only the VM/snap path needs ownership restored to snap_daemon after keytool rewrites
+        # the PKCS12 file. K8s uses direct container ownership and should only normalize mode.
+        if should_restore_snap_owner:
             command = (
                 f"{sudo_prefix}chown {snap_user} {store_path}; "
                 f"{sudo_prefix}chmod {final_mode} {store_path};"
             )
+        elif snap_user_with_write_permission:
+            command = f"{sudo_prefix}chmod {final_mode} {store_path};"
         if add_read_perm:
             command += f"{sudo_prefix}chmod +r {store_path}"
         if command:
