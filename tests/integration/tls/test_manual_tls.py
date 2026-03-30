@@ -8,11 +8,12 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, get_unit_ids
+from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.helpers import (
     deploy_opensearch,
     wait_until,
 )
+from tests.integration.tls.conftest import get_unit_ids
 from tests.integration.tls.helpers_manual_tls import (
     MANUAL_TLS_CERTIFICATES_APP_NAME,
     ManualTLSAgent,

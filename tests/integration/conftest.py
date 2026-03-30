@@ -33,16 +33,8 @@ CONFIG_OPTS = {"profile": "testing"}
 PRODUCTION_CONFIG_OPTS = {"profile": "production"}
 
 
-def get_unit_ids(substrate: str) -> list[int]:
-    """Return the unit ids supported by the test topology for a substrate."""
-    # TODO: Expand K8s integration topology to multi-unit and remove this special-case.
-    return [0] if substrate == "k8s" else UNIT_IDS
-
-
 def config_opts_for_deployment(substrate: str, num_units: int) -> dict[str, str]:
     """Return profile config matching the intended deployment topology."""
-    if substrate == "k8s":
-        return CONFIG_OPTS.copy()
     if num_units >= 3:
         return PRODUCTION_CONFIG_OPTS.copy()
     return CONFIG_OPTS.copy()

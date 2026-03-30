@@ -149,6 +149,10 @@ class ConfigManager(BaseManager):
     def _network_hosts(self) -> list[str]:
         """Compute network.host entries for opensearch.yml."""
         # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
+        if self.state.substrate == Substrates.K8S:
+            # Omit _site_: it resolves to the pod IP; nodes may then publish that address for
+            # transport, and TLS hostname verification fails against DNS-only certificate SANs.
+            return ["_local_", *sorted(self.state.network_hosts)]
         return ["_site_", "_local_", *sorted(self.state.network_hosts)]
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
@@ -176,6 +180,15 @@ class ConfigManager(BaseManager):
 
     def _opensearch_host_config(self) -> dict[str, Any]:
         """Network publish host settings written to opensearch.yml."""
+        if self.state.substrate == Substrates.K8S:
+            # Advertise the same DNS identity as TLS certs (headless service FQDN). Using pod IP
+            # here makes peers connect via IP; transport TLS then fails because SANs are DNS-only.
+            # transport.publish_host is set explicitly: transport can still publish an IP when
+            # network.host includes _site_ or similar unless overridden.
+            if self.state.fqdn:
+                fqdn = self.state.fqdn
+                return {"network.publish_host": fqdn, "transport.publish_host": fqdn}
+            return {}
         return {"network.publish_host": self.state.host_ip} if self.state.host_ip else {}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
@@ -512,6 +525,11 @@ class ConfigManager(BaseManager):
         logger.debug("current profile: %s, config profile: %s", current_profile, profile)
         if current_profile is None or current_profile != profile:
             meminfo = self.workload.meminfo()
+            if "MemTotal" not in meminfo:
+                logger.warning(
+                    "Could not read MemTotal from meminfo. Skipping profile configuration."
+                )
+                return False
             self._update_jvm_heap_size(profile.get_jvm_heap_size(meminfo["MemTotal"]))
             self.state.server.profile = profile
             return True

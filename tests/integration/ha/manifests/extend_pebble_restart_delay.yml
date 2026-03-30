@@ -1,0 +1,7 @@
+# Pebble layer merge to widen the restart window.
+# Used by full-cluster crash/restart HA tests on Kubernetes.
+services:
+  opensearch:
+    override: merge
+    backoff-delay: 360s
+    backoff-limit: 360s

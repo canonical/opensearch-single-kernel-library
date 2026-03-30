@@ -27,7 +27,7 @@ from tests.integration.helpers import (
     http_request,
     wait_until,
 )
-from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
+from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 

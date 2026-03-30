@@ -17,6 +17,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from tests.integration.ha.continuous_writes import ContinuousWrites
+from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, config_opts_for_deployment
 from .ha.helpers import (
@@ -34,17 +35,10 @@ from .helpers import (
     run_action,
     wait_until,
 )
-from .tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VM_NUM_UNITS = 2
-
-
-def default_num_units(substrate: str) -> int:
-    """Return the default unit count for the tested substrate."""
-    # TODO: Revisit when K8s supported multi-unit topology
-    return 1 if substrate == "k8s" else DEFAULT_VM_NUM_UNITS
+DEFAULT_NUM_UNITS = 2
 
 
 @pytest.mark.abort_on_fail
@@ -102,8 +96,6 @@ async def test_build_and_deploy(
     """Build and deploy a couple of OpenSearch units."""
     model_config = MODEL_CONFIG
     model_config["update-status-hook-interval"] = "1m"
-    units = default_num_units(substrate)
-
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await deploy_opensearch(
@@ -111,26 +103,25 @@ async def test_build_and_deploy(
         charm,
         substrate,
         APP_NAME,
-        units,
+        DEFAULT_NUM_UNITS,
         series=series,
-        config=config_opts_for_deployment(substrate, units),
+        config=config_opts_for_deployment(substrate, DEFAULT_NUM_UNITS),
         resources=charm_resources,
     )
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=units,
+        wait_for_exact_units=DEFAULT_NUM_UNITS,
         apps_full_statuses={
             APP_NAME: {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]}
         },
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == units
+    assert len(ops_test.model.applications[APP_NAME].units) == DEFAULT_NUM_UNITS
 
 
 @pytest.mark.abort_on_fail
-async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
+async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
     """Test the retrieval of admin secrets."""
-    units = default_num_units(substrate)
     leader_id = await get_leader_unit_id(ops_test)
 
     # 1. run the action prior to finishing the config of TLS
@@ -149,7 +140,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
         apps=[APP_NAME],
         apps_statuses=["active"],
         units_statuses=["active"],
-        wait_for_exact_units=units,
+        wait_for_exact_units=DEFAULT_NUM_UNITS,
     )
 
     leader_ip = await get_leader_unit_ip(ops_test)

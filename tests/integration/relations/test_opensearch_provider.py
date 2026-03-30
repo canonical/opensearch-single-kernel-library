@@ -31,7 +31,7 @@ from tests.integration.relations.helpers import (
     run_request,
     wait_for_relation_joined_between,
 )
-from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
+from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 

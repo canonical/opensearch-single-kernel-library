@@ -1,0 +1,18 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+# Chaos Mesh simulates total packet loss for a pod (HA network test).
+# Namespace and pod name are substituted by tests.integration.ha.k8s_chaos_mesh.
+metadata:
+  name: network-loss-primary
+  namespace: $namespace
+spec:
+  action: loss
+  mode: one
+  selector:
+    pods:
+      $namespace:
+        - $pod
+  loss:
+    loss: "100"
+    correlation: "100"
+  duration: "60m"

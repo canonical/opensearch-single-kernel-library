@@ -4,17 +4,24 @@
 
 import dataclasses
 import logging
+from collections.abc import Generator
+from typing import Any
 
 import pytest
 from pytest_operator.plugin import OpsTest
 
+from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.continuous_writes import ContinuousWrites, ReplicationMode
 from tests.integration.ha.helpers import update_restart_delay
+from tests.integration.ha.k8s_chaos_mesh import deploy_chaos_mesh, destroy_chaos_mesh
 from tests.integration.helpers import (
     app_name,
     get_application_unit_ids,
 )
+
+# Wait after full-cluster kill before asserting recovery.
+MEDIAN_REELECTION_TIME = 12
 
 
 @dataclasses.dataclass(frozen=True)
@@ -32,12 +39,12 @@ RESTART_DELAY = 360
 
 
 @pytest.fixture(scope="function")
-async def reset_restart_delay(ops_test: OpsTest):
-    """Resets service file delay on all units."""
+async def reset_restart_delay(ops_test: OpsTest, substrate: Substrate):
+    """Resets systemd (VM) or Pebble (K8s) restart delay on all units."""
     yield
     app = (await app_name(ops_test)) or APP_NAME
     for unit_id in get_application_unit_ids(ops_test, app):
-        await update_restart_delay(ops_test, app, unit_id, ORIGINAL_RESTART_DELAY)
+        await update_restart_delay(ops_test, app, unit_id, ORIGINAL_RESTART_DELAY, substrate)
 
 
 @pytest.fixture(scope="function")
@@ -73,3 +80,14 @@ async def c_balanced_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites
     yield
     await c_writes.clear()
     logger.info("\n\n\n\nThe writes have been cleared.\n\n\n\n")
+
+
+@pytest.fixture(scope="module")
+def chaos_mesh(ops_test: OpsTest, substrate: Substrate) -> Generator[None, Any, Any]:
+    """Install Chaos Mesh on MicroK8s for k8s HA network tests."""
+    if substrate == "k8s":
+        deploy_chaos_mesh(ops_test.model.info.name)
+        yield
+        destroy_chaos_mesh(ops_test.model.info.name)
+    else:
+        yield

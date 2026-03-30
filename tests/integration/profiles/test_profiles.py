@@ -16,6 +16,8 @@ from opensearch_single_kernel.common.statuses import CharmStatuses
 from tests.integration.conftest import (
     APP_NAME,
     MODEL_CONFIG,
+    TLS_CERTIFICATES_APP_NAME,
+    TLS_STABLE_CHANNEL,
 )
 from tests.integration.helpers import (
     deploy_opensearch,
@@ -23,7 +25,6 @@ from tests.integration.helpers import (
     get_leader_unit_ip,
     wait_until,
 )
-from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 _3CM_AND_3DATA_MISSING_STATUS = (
     "Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required."
@@ -65,11 +66,10 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_build_and_deploy(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
-    """Build and deploy one unit of OpenSearch."""
+    """Build and deploy one production-profile unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
@@ -94,13 +94,8 @@ async def test_build_and_deploy(
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
-    """Wait for blocked cluster with cluster topology error.
-
-    (VM only: production profile with 1 unit)
-    TODO: Add equivalent K8s profile coverage once base capabilities are implemented.
-    """
+    """Wait for blocked cluster with cluster topology error."""
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -111,9 +106,8 @@ async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_scale_to_active(ops_test: OpsTest) -> None:
-    """Scale the OpenSearch cluster to the active state."""
+    """Scale the production-profile OpenSearch cluster to the active state."""
     os_app = ops_test.model.applications[APP_NAME]
     await os_app.add_units(count=2)
     await wait_until(
@@ -203,9 +197,8 @@ async def test_testing_profile(
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_config_changed_to_production(ops_test: OpsTest) -> None:
-    """Switch to production profile and expect blocked (VM only, K8s stays at 1 unit)."""
+    """Switch to production profile and expect blocked until topology requirements are met."""
     os_app = ops_test.model.applications[APP_NAME]
     await os_app.set_config({"profile": "production"})
     await wait_until(

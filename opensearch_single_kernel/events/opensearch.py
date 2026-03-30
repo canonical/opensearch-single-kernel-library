@@ -206,7 +206,14 @@ class OpenSearchEventsHandler(Object):
             # self.peer_cluster_requirer.apply_orchestrator_status()
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            if self.charm.config_manager.update_opensearch_config():
+            try:
+                restart_needed = self.charm.config_manager.update_opensearch_config()
+            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+                logger.info("Container not ready to update config from peer relation: %s", e)
+                event.defer()
+                return
+
+            if restart_needed:
                 self.charm.status.set(CharmStatuses.WAITING_TO_START)
                 logger.debug("Restarting opensearch due to reconfiguring node roles")
                 self.charm.restart_opensearch_event.emit()
@@ -273,7 +280,9 @@ class OpenSearchEventsHandler(Object):
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
         )
 
-    def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent) -> None:
+    def _on_opensearch_data_storage_detaching(  # noqa: C901
+        self, event: StorageDetachingEvent
+    ) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
         # TODO: Warning in case of upgrade in progress
         planned_units = self.charm.app.planned_units()
@@ -298,7 +307,16 @@ class OpenSearchEventsHandler(Object):
         self.charm.cluster_manager.flush_translog_to_disk()
 
         try:
-            self.charm.stop_opensearch()
+            if (
+                self.charm.state.substrate == Substrates.K8S
+                and not self.charm.workload.workload_present
+            ):
+                logger.info("Container not ready during storage detaching, skipping local stop")
+            else:
+                try:
+                    self.charm.stop_opensearch()
+                except PebbleConnectionError as e:
+                    logger.info("Container not ready during storage detaching: %s", e)
             if self.charm.cluster_manager.alt_hosts:
                 # There is enough peers available for us to try removing the unit
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
@@ -441,7 +459,12 @@ class OpenSearchEventsHandler(Object):
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
         ):
-            self.charm.config_manager.update_opensearch_config()
+            try:
+                self.charm.config_manager.update_opensearch_config()
+            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+                logger.info("Container not ready for config-changed IP update: %s", e)
+                event.defer()
+                return
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
 
@@ -479,9 +502,15 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        profile_restart_needed = self.charm.config_manager.update_profile_configuration(
-            config_profile
-        )
+        try:
+            profile_restart_needed = self.charm.config_manager.update_profile_configuration(
+                config_profile
+            )
+        except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+            logger.info("Container not ready to update profile configuration: %s", e)
+            event.defer()
+            return
+
         if self.charm.unit.is_leader():
             try:
                 self.charm.external_clients_manager.update_relations_roles_mapping()
@@ -569,7 +598,7 @@ class OpenSearchEventsHandler(Object):
                 # Nodes Config updated, we would need to reconfigure and restart
                 try:
                     restart_needed = self.charm.config_manager.update_opensearch_config()
-                except PebbleConnectionError as e:
+                except (PebbleConnectionError, OpenSearchFileOperationError) as e:
                     logger.info("Container not ready for leader election: %s", e)
                     event.defer()
                     return
@@ -773,10 +802,12 @@ class OpenSearchEventsHandler(Object):
                 self._post_start_init(event)
             except PebbleConnectionError as e:
                 logger.info("Container not ready for post-start init: %s", e)
+                self.charm.lock_manager.release()
                 event.defer()
             except (OpenSearchHttpError, OpenSearchNotFullyReadyError):
                 # check if cluster should have started but is blocked
                 logger.debug("OpenSearch already started, but post-start init failed.")
+                self.charm.lock_manager.release()
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
@@ -879,12 +910,18 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
-            self.charm.cluster_manager.start(
-                wait_until_http_200=(
+            # On K8s, follower units can legitimately return HTTP 503 for a while during
+            # security/plugin warm-up even though the process is running and still joining.
+            # Avoid treating that as a hard start timeout; post-start checks will keep retrying.
+            wait_until_http_200 = (
+                False
+                if self.charm.state.substrate == Substrates.K8S
+                else (
                     not self.charm.unit.is_leader()
                     or self.charm.state.application.is_security_index_initialised
                 )
             )
+            self.charm.cluster_manager.start(wait_until_http_200=wait_until_http_200)
             self._post_start_init(event)
         except PebbleConnectionError as e:
             logger.info("Container not ready during start flow: %s", e)
@@ -975,6 +1012,14 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.workload.workload_present
+        ):
+            logger.info("Container not ready for restart event, deferring")
+            event.defer()
+            return
+
         if not self.charm.lock_manager.acquired:
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
@@ -985,6 +1030,7 @@ class OpenSearchEventsHandler(Object):
             logger.info("Restarting OpenSearch.")
         except PebbleConnectionError as e:
             logger.info("Container not ready for restart: %s", e)
+            self.charm.lock_manager.release()
             event.defer()
             return
         except OpenSearchStopError as e:

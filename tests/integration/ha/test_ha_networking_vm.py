@@ -84,6 +84,7 @@ async def test_build_and_deploy(
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_with_ip_change_node_with_elected_cm(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner
 ) -> None:
@@ -185,6 +186,7 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner
 ) -> None:
@@ -302,6 +304,7 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_without_ip_change_node_with_elected_cm(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner
 ) -> None:
@@ -389,6 +392,7 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner
 ) -> None:

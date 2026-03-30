@@ -66,11 +66,16 @@ async def test_deploy(ops_test: OpsTest, charm, series, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_deployed
 async def test_deploy_identity_bundle(
     ops_test: OpsTest, ops_test_microk8s: OpsTest, ext_idp_service: ExternalIdpService
 ):
     """Deploy identity platform on K8s and wait for both models to complete deployments."""
+    required_apps = {"hydra", "self-signed-certificates", "traefik-public"}
+    existing_apps = set(ops_test_microk8s.model.applications)
+    if required_apps.issubset(existing_apps):
+        logger.info("Identity platform already present in microk8s model, skipping redeploy")
+        return
+
     await deploy_identity_bundle(
         ops_test=ops_test_microk8s,
         bundle_url="./tests/integration/bundle-iam.yaml",

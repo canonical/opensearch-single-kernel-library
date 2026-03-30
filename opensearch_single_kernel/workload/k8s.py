@@ -27,6 +27,7 @@ from opensearch_single_kernel.common.constants import (
     DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
     DIR_PERMISSIONS_SECURE,
+    OPENSEARCH_HTTP_PORT,
     OPENSEARCH_PEBBLE_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
@@ -166,6 +167,13 @@ class K8sWorkload(BaseWorkload):
         if isinstance(services, Mapping):
             return services.get(target)
         return None
+
+    def _service_http_reachable(self) -> bool:
+        """Check whether the OpenSearch HTTP endpoint is reachable from the unit."""
+        for host in ("127.0.0.1", "localhost"):
+            if self.is_reachable(host, OPENSEARCH_HTTP_PORT):
+                return True
+        return False
 
     @property
     def container(self) -> Container:
@@ -525,7 +533,17 @@ class K8sWorkload(BaseWorkload):
                 return False
 
             if service.current == ServiceStatus.ACTIVE:
-                return True
+                # Pebble can report the process as active before OpenSearch is
+                # actually accepting HTTP traffic, so verify the API is reachable
+                # before treating the service as started.
+                if self._service_http_reachable():
+                    return True
+
+                logger.debug(
+                    "Pebble reports %s active but HTTP endpoint is not reachable",
+                    self.SERVICE_NAME,
+                )
+                return False
             if paused and service.current == ServiceStatus.INACTIVE:
                 return True
 
@@ -547,6 +565,20 @@ class K8sWorkload(BaseWorkload):
 
             # ensure plan is present and readiness checks are enabled when starting intentionally.
             self._configure_pebble_plan(enable_checks=True)
+            service = self._get_service()
+            if service is not None and service.current == ServiceStatus.ACTIVE:
+                if self._service_http_reachable():
+                    logger.info("The %s service is already started.", self.SERVICE_NAME)
+                    return
+
+                # A Pebble-active process can still be stuck before OpenSearch
+                # starts serving HTTP, so stop it and let Pebble restart from a
+                # clean state.
+                logger.debug(
+                    "Pebble reports %s active but HTTP endpoint is not reachable; restarting service.",
+                    self.SERVICE_NAME,
+                )
+                self.container.stop(OPENSEARCH_PEBBLE_SERVICE_NAME)
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
@@ -591,8 +623,17 @@ class K8sWorkload(BaseWorkload):
 
             service = self._get_service()
             if service is not None and service.current == ServiceStatus.ACTIVE:
-                logger.info("The %s service is already started.", self.SERVICE_NAME)
-                return
+                if self._service_http_reachable():
+                    logger.info("The %s service is already started.", self.SERVICE_NAME)
+                    return
+                # A Pebble-active process can still be stuck before OpenSearch
+                # starts serving HTTP, so stop it and let Pebble restart from a
+                # clean state.
+                logger.debug(
+                    "Pebble reports %s active but HTTP endpoint is not reachable; restarting service.",
+                    self.SERVICE_NAME,
+                )
+                self.container.stop(OPENSEARCH_PEBBLE_SERVICE_NAME)
 
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:

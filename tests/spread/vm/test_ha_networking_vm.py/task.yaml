@@ -1,6 +1,6 @@
-summary: test_ha_networking.py
+summary: test_ha_networking_vm.py
 environment:
-  TEST_MODULE: ha/test_ha_networking.py
+  TEST_MODULE: ha/test_ha_networking_vm.py
 systems:
   - self-hosted-linux-amd64-noble-large
 execute: |

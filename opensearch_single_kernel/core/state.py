@@ -61,7 +61,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 from opensearch_single_kernel.utils.certificates import normalized_tls_subject
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
-    get_k8s_fqdn,
+    get_k8s_seed_host,
 )
 
 if TYPE_CHECKING:
@@ -776,18 +776,23 @@ class ClusterState(Object):
         """Return a stable FQDN for the current unit.
 
         - VM: local host FQDN from the runtime environment.
-        - K8s: canonical endpoint FQDN for this unit service name.
+        - K8s: canonical endpoint FQDN for this unit service name (must match TLS SANs;
+          never rely on socket.getfqdn() alone, which can return the pod IP and break HTTPS).
         """
         if self.substrate == Substrates.K8S:
             deployment_desc = self.application.deployment_desc
-            if deployment_desc:
-                unit_prefix = str(self.unit_name).split(".", 1)[0]
-                service_name = f"{unit_prefix}.{deployment_desc.app.name}-endpoints"
-                try:
-                    return get_k8s_fqdn(service_name)
-                except RuntimeError:
-                    # DNS may not be resolvable yet in early hooks.
-                    pass
+            app_name = (
+                deployment_desc.app.name
+                if deployment_desc and deployment_desc.app.name
+                else self.model.app.name
+            )
+            if app_name:
+                unit_key = (
+                    str(self.unit_name)
+                    if deployment_desc
+                    else self.model.unit.name.replace("/", "-")
+                )
+                return get_k8s_seed_host(unit_key, app_name)
         return socket.getfqdn()
 
     @property

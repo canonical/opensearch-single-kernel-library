@@ -30,6 +30,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
     StartMode,
     State,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
@@ -573,7 +574,8 @@ class ClusterManager(BaseManager):
     @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
+        host = self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
+        reachable = self.workload.is_reachable(host, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -701,7 +703,8 @@ class ClusterManager(BaseManager):
 
     def is_started(self) -> bool:
         """Return whether the opensearch service is started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
+        host = self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
+        reachable = self.workload.is_reachable(host, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 

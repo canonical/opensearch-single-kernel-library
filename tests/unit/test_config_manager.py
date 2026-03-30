@@ -12,8 +12,11 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentState,
     PeerClusterConfig,
+    ProductionProfile,
+    TestingProfile,
 )
 from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
+from tests.helpers import patch_workload_meminfo
 from tests.unit.helpers import (
     config_path,
     opensearch_yml,
@@ -164,8 +167,17 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
 
     assert opensearch_conf["node.attr.temp"] == "hot"
     assert opensearch_conf["node.attr.app_id"] == app.id
-    assert opensearch_conf["network.host"] == ["_site_", "_local_", "10.10.10.10"]
-    assert opensearch_conf["network.publish_host"] == "20.20.20.20"
+    assert opensearch_conf["network.host"] == (
+        ["_site_", "_local_", "10.10.10.10"] if substrate == "vm" else ["_local_", "10.10.10.10"]
+    )
+    expected_network_publish = (
+        "20.20.20.20"
+        if substrate == "vm"
+        else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
+    )
+    assert opensearch_conf["network.publish_host"] == expected_network_publish
+    if substrate != "vm":
+        assert opensearch_conf["transport.publish_host"] == expected_network_publish
     expected_publish_host = (
         "30.30.30.30"
         if substrate == "vm"
@@ -200,3 +212,54 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
     with open(config_path / ("tmp/" + seed_unicast_hosts), "r") as f:
         stored = {line.strip() for line in f.readlines()}
     assert stored == {"20.20.20.20"}
+
+
+def test_update_profile_configuration_updates_heap_and_state(harness, mocker, substrate):
+    """Changing profile should update JVM heap and persist the new runtime profile."""
+    update_heap = mocker.patch.object(harness.charm.config_manager, "_update_jvm_heap_size")
+    # MemTotal is in kB; 8 GiB → heap 50% capped by MAX_HEAP (here 4 GiB = 4194304 kB).
+    patch_workload_meminfo(mocker, substrate, {"MemTotal": 8 * 1024 * 1024})
+    server_profile = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchServer.profile",
+        new_callable=PropertyMock,
+        return_value=None,
+    )
+
+    restart_needed = harness.charm.config_manager.update_profile_configuration(ProductionProfile())
+
+    assert restart_needed is True
+    update_heap.assert_called_once_with(4194304)
+    server_profile.assert_called()
+    server_profile.return_value = ProductionProfile()
+
+
+def test_update_profile_configuration_is_noop_when_profile_unchanged(harness, mocker):
+    """Reapplying the same profile should not rewrite JVM settings."""
+    update_heap = mocker.patch.object(harness.charm.config_manager, "_update_jvm_heap_size")
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchServer.profile",
+        new_callable=PropertyMock,
+        return_value=TestingProfile(),
+    )
+
+    restart_needed = harness.charm.config_manager.update_profile_configuration(TestingProfile())
+
+    assert restart_needed is False
+    update_heap.assert_not_called()
+
+
+def test_update_profile_configuration_skips_when_memtotal_missing(harness, mocker, substrate):
+    """Profile updates should be skipped when memory information is unavailable."""
+    update_heap = mocker.patch.object(harness.charm.config_manager, "_update_jvm_heap_size")
+    patch_workload_meminfo(mocker, substrate, {})
+    server_profile = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchServer.profile",
+        new_callable=PropertyMock,
+        return_value=None,
+    )
+
+    restart_needed = harness.charm.config_manager.update_profile_configuration(ProductionProfile())
+
+    assert restart_needed is False
+    update_heap.assert_not_called()
+    server_profile.assert_called()

@@ -2,6 +2,8 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+"""Juju storage pool integration tests for OpenSearch (VM / LXD substrate)."""
+
 import asyncio
 import logging
 import subprocess

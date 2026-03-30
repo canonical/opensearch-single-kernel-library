@@ -6,6 +6,7 @@ import asyncio
 import logging
 import subprocess
 import time
+from pathlib import Path
 
 from pytest_operator.plugin import OpsTest
 from tenacity import (
@@ -17,7 +18,9 @@ from tenacity import (
     wait_random,
 )
 
+from opensearch_single_kernel.common.constants import CONTAINER_NAME
 from opensearch_single_kernel.core.models import App, Node
+from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.helpers import (
     get_application_unit_ids,
@@ -35,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 
 OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch.daemon.service"
+
+HA_DIR = Path(__file__).resolve().parent
+EXTEND = HA_DIR / "manifests" / "extend_pebble_restart_delay.yml"
+RESTORE = HA_DIR / "manifests" / "restore_pebble_restart_delay.yml"
 
 
 def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:
@@ -293,13 +300,16 @@ def storage_id(ops_test: OpsTest, app: str, unit_id: int):
             return entry.split()[1]
 
 
-async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
-    """Check if all processes are down."""
+async def all_processes_down(ops_test: OpsTest, app: str, substrate: Substrate = "vm") -> bool:
+    """Check if all OpenSearch processes are down (no listener on 9200) on every unit."""
     bin_cmd = "exec" if juju_version_major() > 2 else "run"
 
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
-        get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+        if substrate == "k8s":
+            get_pid_cmd = f"ssh --container {CONTAINER_NAME} {unit_name} -- sudo lsof -ti:9200"
+        else:
+            get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
         _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
         if opensearch_pid.strip():
             return False
@@ -308,20 +318,34 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
 
 
 async def send_kill_signal_to_process(
-    ops_test: OpsTest, app: str, unit_id: int, signal: str, opensearch_pid: int | None = None
+    ops_test: OpsTest,
+    app: str,
+    unit_id: int,
+    signal: str,
+    opensearch_pid: int | None = None,
+    substrate: Substrate = "vm",
 ) -> int | None:
-    """Run kill with signal in specific unit."""
+    """Run kill with signal in specific unit (VM machine or K8s workload container)."""
     unit_name = f"{app}/{unit_id}"
 
     bin_cmd = "exec" if juju_version_major() > 2 else "run"
     if opensearch_pid is None:
-        get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+        if substrate == "k8s":
+            get_pid_cmd = f"ssh --container {CONTAINER_NAME} {unit_name} -- sudo lsof -ti:9200"
+        else:
+            get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
         _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
 
-    if not opensearch_pid.strip():
+    if not str(opensearch_pid).strip():
         raise Exception("Could not fetch PID for process listening on port 9200.")
 
-    kill_cmd = f"ssh {unit_name} -- sudo kill -{signal.upper()} {opensearch_pid}"
+    pid = str(opensearch_pid).strip()
+    if substrate == "k8s":
+        kill_cmd = (
+            f"ssh --container {CONTAINER_NAME} {unit_name} -- sudo kill -{signal.upper()} {pid}"
+        )
+    else:
+        kill_cmd = f"ssh {unit_name} -- sudo kill -{signal.upper()} {pid}"
     return_code, stdout, stderr = await ops_test.juju(*kill_cmd.split(), check=False)
     if return_code != 0:
         raise Exception(f"{kill_cmd} failed -- rc: {return_code} - out: {stdout} - err: {stderr}")
@@ -329,13 +353,27 @@ async def send_kill_signal_to_process(
     return opensearch_pid
 
 
-async def update_restart_delay(ops_test: OpsTest, app: str, unit_id: int, delay: int):
-    """Updates the restart delay in the DB service file."""
+async def update_restart_delay(
+    ops_test: OpsTest, app: str, unit_id: int, delay: int, substrate: Substrate = "vm"
+):
+    """Widen or restore restart delay: systemd (VM) or Pebble layer merge (K8s, Mongo-style)."""
+    from tests.integration.ha.pebble_restart import modify_pebble_restart_delay
+
     unit_name = f"{app}/{unit_id}"
+
+    if substrate == "k8s":
+        # Big delay (>=200s) -> extend manifest. Smaller delay -> restore manifest (defaults).
+        manifest = EXTEND if delay >= 200 else RESTORE
+        modify_pebble_restart_delay(
+            ops_test,
+            unit_name,
+            manifest,
+            ensure_replan=True,
+        )
+        return
 
     bin_cmd = "exec" if juju_version_major() > 2 else "run"
 
-    # load the service file from the unit and update it with the new delay
     replace_delay_cmd = (
         f"{bin_cmd} --unit {unit_name} -- "
         f"sudo sed -i -e s/^RestartSec=[0-9]\\+/RestartSec={delay}/g "
@@ -343,7 +381,6 @@ async def update_restart_delay(ops_test: OpsTest, app: str, unit_id: int, delay:
     )
     await ops_test.juju(*replace_delay_cmd.split(), check=True)
 
-    # reload the daemon for systemd to reflect changes
     reload_cmd = f"{bin_cmd} --unit {unit_name} -- sudo systemctl daemon-reload"
     await ops_test.juju(*reload_cmd.split(), check=True)
 

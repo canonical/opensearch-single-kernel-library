@@ -4,6 +4,7 @@
 
 """A set of helpers functions."""
 
+import ipaddress
 import json
 import logging
 import re
@@ -100,6 +101,18 @@ def deployment_type(
     )
 
 
+def _is_literal_ip(host: str) -> bool:
+    """Return True if host is only an IPv4/IPv6 address (not a DNS name)."""
+    h = host.strip()
+    if "%" in h:
+        h = h.split("%", 1)[0]
+    try:
+        ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return True
+
+
 def is_srv_dns_record(value: str) -> bool:
     """Return True when value looks like an SRV-style DNS record."""
     pattern = (
@@ -136,16 +149,25 @@ def get_k8s_seed_host(unit_name: str, app_name: str) -> str:
     pod_prefix = (unit_name or "").split(".", 1)[0]
     service_name = f"{pod_prefix}.{app_name}-endpoints"
     try:
-        return get_k8s_fqdn(service_name)
+        resolved = get_k8s_fqdn(service_name)
     except RuntimeError:
-        # Seed hosts follow the stable pod-headless-service DNS pattern. If the charm
-        # container cannot obtain a canonical DNS answer for a peer pod, derive the
-        # namespace/domain suffix from the current unit FQDN and keep progressing.
-        local_fqdn = socket.getfqdn()
-        local_parts = local_fqdn.split(".")
-        if len(local_parts) > 2:
-            return f"{service_name}.{'.'.join(local_parts[2:])}"
+        resolved = None
+    else:
+        if not _is_literal_ip(resolved):
+            return resolved
+        resolved = None
+
+    # Seed hosts follow the stable pod-headless-service DNS pattern. If the charm
+    # container cannot obtain a canonical DNS answer for a peer pod, derive the
+    # namespace/domain suffix from the current unit FQDN and keep progressing.
+    local_fqdn = socket.getfqdn()
+    if _is_literal_ip(local_fqdn):
+        # socket.getfqdn() often returns the pod IP on K8s, never use it as HTTPS host.
         return service_name
+    local_parts = local_fqdn.split(".")
+    if len(local_parts) > 2:
+        return f"{service_name}.{'.'.join(local_parts[2:])}"
+    return service_name
 
 
 def validate_index_name(index_name: str) -> bool:

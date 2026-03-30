@@ -496,10 +496,15 @@ class LockManager(PeerLockManager):
                     indices,
                 )
                 if self.state.application.app.planned_units() > 1:
+                    # Prefer the selected node for the health check, but allow
+                    # peer nodes as fallbacks because the lock index is cluster-scoped
+                    # and the preferred node may be temporarily unreachable.
                     self.opensearch_client.request(
                         "GET",
                         endpoint=f"/_cluster/health/{self.OPENSEARCH_INDEX}?wait_for_status=green",
                         resp_status_code=True,
+                        host=host,
+                        alt_hosts=alt_hosts,
                     )
                 return True
         except OpenSearchHttpError:

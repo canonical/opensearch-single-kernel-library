@@ -905,8 +905,9 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     harness.charm.tls_events._on_certificate_available(event_mock)
     update_request_ca_bundle.assert_called_once()
 
-    # Old CA cert is saved with corresponding alias, new CA cert added to keystore
-    # extra commands are expected due to post-write permission/ownership normalization.
+    # Old CA cert is saved with corresponding alias, new CA cert added to keystore.
+    # VM temporarily widens truststore permissions before keytool updates it, K8s does not
+    # exercise that extra workload command in this mocked unit-test path.
     assert run_cmd.call_count == (6 if substrate == "vm" else 5)
     assert any(
         re.search(r"keytool -changealias -alias ca-0 -destalias old-ca-0", call.args[0])
@@ -1804,7 +1805,8 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     harness.charm.tls_events._on_certificate_available(harness.charm.on.certificate_available)
 
     if leader:
-        # extra commands are expected due to post-write permission/ownership normalization.
+        # VM performs one extra pre-write permission adjustment before restoring
+        # ownership/mode afterwards; K8s runs fewer workload commands on this path.
         assert run_cmd.call_count == (6 if substrate == "vm" else 5)
         if substrate == "vm":
             assert any(

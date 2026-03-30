@@ -9,13 +9,7 @@ import pytest
 import requests
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import (
-    APP_NAME,
-    CONFIG_OPTS,
-    IDLE_PERIOD,
-    MODEL_CONFIG,
-    get_unit_ids,
-)
+from tests.integration.conftest import APP_NAME, CONFIG_OPTS, IDLE_PERIOD, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.helpers import (
     deploy_opensearch,
@@ -23,7 +17,11 @@ from tests.integration.helpers import (
     get_secret_by_label,
     wait_until,
 )
-from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
+from tests.integration.tls.conftest import (
+    TLS_CERTIFICATES_APP_NAME,
+    TLS_STABLE_CHANNEL,
+    get_unit_ids,
+)
 
 logger = logging.getLogger(__name__)
 

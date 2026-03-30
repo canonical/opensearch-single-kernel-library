@@ -9,13 +9,7 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import (
-    APP_NAME,
-    CONFIG_OPTS,
-    MODEL_CONFIG,
-    UNIT_IDS,
-    get_unit_ids,
-)
+from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.helpers import (
     check_cluster_formation_successful,
     cluster_health,
@@ -29,6 +23,12 @@ from tests.integration.helpers import (
     run_action,
     wait_until,
 )
+from tests.integration.tls.conftest import (
+    TLS_CERTIFICATES_APP_NAME,
+    TLS_STABLE_CHANNEL,
+    UNIT_IDS,
+    get_unit_ids,
+)
 from tests.integration.tls.helpers import (
     check_security_index_initialised,
     check_unit_tls_configured,
@@ -37,10 +37,6 @@ from tests.integration.tls.helpers import (
 
 logger = logging.getLogger(__name__)
 
-
-TLS_CERTIFICATES_APP_NAME = "self-signed-certificates"
-# TODO update the docs to reflect the new channel once released
-TLS_STABLE_CHANNEL = "1/stable"
 # The expiry time of the secret carrying the certificate is set to 3 minutes for testing
 SECRET_EXPIRY_TIME = 180
 # Wait time for the secret to expire and be renewed
@@ -114,7 +110,9 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
 async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
     """Test that renewed TLS certificates are reloaded immediately without restarting."""
     if substrate == "k8s":
-        pytest.skip("Skipping TLS renewal test on k8s until scale up/down is implemented")
+        pytest.skip(
+            "Skipping TLS renewal test on k8s until K8s-specific renewal assertions are added"
+        )
 
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     leader_id = await get_leader_unit_id(ops_test)

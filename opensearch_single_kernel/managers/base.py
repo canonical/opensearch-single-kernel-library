@@ -56,11 +56,23 @@ class BaseManager:
     @property
     def alt_hosts(self) -> Optional[list[str]]:
         """Return an alternative host (of another node)in case the current is offline."""
-        all_units_ips = self.state.units_ips
-        all_hosts = list(all_units_ips.values())
+        all_hosts: list[str] = []
+        if self.state.substrate == Substrates.K8S:
+            for unit in self.state.all_units:
+                if unit.name == self.state.server.unit.name:
+                    continue
+                app_name = unit.name.split("/")[0]
+                all_hosts.append(get_k8s_seed_host(unit.name.replace("/", "-"), app_name))
 
-        if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([node.ip for node in nodes_conf.values()])
+            if nodes_conf := self.state.application.nodes_config:
+                all_hosts.extend(
+                    [get_k8s_seed_host(node.name, node.app.name) for node in nodes_conf.values()]
+                )
+        else:
+            all_units_ips = self.state.units_ips
+            all_hosts.extend(all_units_ips.values())
+            if nodes_conf := self.state.application.nodes_config:
+                all_hosts.extend([node.ip for node in nodes_conf.values()])
 
         # TODO: Add getting relation data form state
         # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
@@ -73,9 +85,10 @@ class BaseManager:
 
         client = self.opensearch_client
 
-        return [
-            host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
-        ]
+        local_host = (
+            self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
+        )
+        return [host for host in all_hosts if host != local_host and client.is_node_up(host)]
 
     def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""

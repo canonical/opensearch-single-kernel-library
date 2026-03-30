@@ -11,7 +11,13 @@ from typing import Any
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
+from tests.integration.conftest import (
+    APP_NAME,
+    CONFIG_OPTS,
+    MODEL_CONFIG,
+    TLS_CERTIFICATES_APP_NAME,
+    TLS_STABLE_CHANNEL,
+)
 from tests.integration.ha.helpers_data import (
     bulk_insert,
     create_index,
@@ -41,7 +47,6 @@ from ..plugins.helpers import (
     poll_until,
     run_knn_training,
 )
-from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 

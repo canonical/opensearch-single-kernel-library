@@ -7,11 +7,16 @@ from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 from ops import ActiveStatus, BlockedStatus
+from ops.pebble import ConnectionError as PebbleConnectionError
 
+from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInstallError,
+    OpenSearchNotFullyReadyError,
 )
+from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.events.custom_events import StartOpenSearch
 from tests.unit.helpers import deployment_descriptions
 
@@ -106,6 +111,34 @@ def test_unit_allowed_to_start_non_leader_not_allowed_when_no_alt_hosts(
     is_cluster_healthy.assert_not_called()
 
 
+def test_alt_hosts_uses_dns_for_k8s(harness, mocker, substrate):
+    """K8s alt_hosts should use DNS identities, not pod IPs."""
+    if substrate == "vm":
+        pytest.skip("K8s-only host selection test")
+
+    peer_rel_id = harness.charm.state.peer_relation.id
+    harness.add_relation_unit(peer_rel_id, f"{harness.charm.app.name}/1")
+    harness.add_relation_unit(peer_rel_id, f"{harness.charm.app.name}/2")
+
+    app_name = harness.charm.app.name
+    dns_hosts = {
+        f"{app_name}-1": f"{app_name}-1.{app_name}-endpoints.ktest1.svc.cluster.local",
+        f"{app_name}-2": f"{app_name}-2.{app_name}-endpoints.ktest1.svc.cluster.local",
+    }
+    mocker.patch(
+        "opensearch_single_kernel.managers.base.get_k8s_seed_host",
+        side_effect=lambda unit_name, app_name: dns_hosts[unit_name],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        return_value=True,
+    )
+
+    alt_hosts = harness.charm.cluster_manager.alt_hosts
+
+    assert set(alt_hosts) == set(dns_hosts.values())
+
+
 def test_on_leader_elected(harness, mocker):
     """Test on leader elected event."""
     mocker.patch(
@@ -151,6 +184,33 @@ def test_on_leader_elected(harness, mocker):
         ],
         any_order=True,
     )
+
+
+def test_start_opensearch_releases_lock_when_post_start_init_not_ready(harness, mocker):
+    """Release lock if post-start init defers on an already-started node."""
+    mocker.patch.object(
+        harness.charm.opensearch_events,
+        "_ensure_k8s_runtime_ready",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(harness.charm.workload, "is_failed", return_value=False)
+    mocker.patch.object(
+        harness.charm.opensearch_events,
+        "_post_start_init",
+        side_effect=OpenSearchNotFullyReadyError("not ready"),
+    )
+    release_lock = mocker.patch.object(harness.charm.lock_manager, "release")
+    event = MagicMock()
+
+    harness.charm.opensearch_events._on_start_opensearch(event)
+
+    release_lock.assert_called_once()
+    event.defer.assert_called_once()
 
 
 def test_on_leader_elected_index_initialised(harness, mocker):
@@ -307,6 +367,260 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     start.assert_called_once()
     _post_start_init.assert_called_once()
     update_opensearch_config.assert_called()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_peer_relation_changed_defers_when_k8s_container_not_ready(harness, mocker):
+    """K8s peer relation changes should defer until Pebble is connectable."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        return_value=False,
+    )
+    update_seeds_config = mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.update_seeds_config"
+    )
+    event = MagicMock()
+
+    harness.charm.state.server.update({"started": "true"})
+    harness.set_can_connect("opensearch", False)
+
+    harness.charm.opensearch_events._on_peer_relation_changed(event)
+
+    event.defer.assert_called_once()
+    update_seeds_config.assert_not_called()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_restart_opensearch_defers_before_lock_when_k8s_container_not_ready(harness, mocker):
+    """K8s restart should not hold the lock when the container is unavailable."""
+    acquired = mocker.patch(
+        "opensearch_single_kernel.managers.lock.LockManager.acquired",
+        new_callable=PropertyMock,
+    )
+    event = MagicMock()
+
+    harness.set_can_connect("opensearch", False)
+
+    harness.charm.opensearch_events._on_restart_opensearch(event)
+
+    event.defer.assert_called_once()
+    acquired.assert_not_called()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_restart_opensearch_releases_lock_on_k8s_pebble_error(harness, mocker):
+    """K8s restart should release the node lock if Pebble disconnects mid-restart."""
+    mocker.patch(
+        "opensearch_single_kernel.managers.lock.LockManager.acquired",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    release = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.release")
+    mocker.patch.object(
+        harness.charm,
+        "stop_opensearch",
+        side_effect=PebbleConnectionError(),
+    )
+    event = MagicMock()
+
+    harness.charm.opensearch_events._on_restart_opensearch(event)
+
+    event.defer.assert_called_once()
+    release.assert_called_once()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_storage_detaching_skips_local_stop_when_k8s_container_not_ready(harness, mocker):
+    """K8s unit removal should keep remote cleanup working if the container is already gone."""
+    mocker.patch.object(harness.charm.app, "planned_units", return_value=2)
+    mocker.patch(
+        "opensearch_single_kernel.managers.lock.LockManager.acquired",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.alt_hosts",
+        new_callable=PropertyMock,
+        return_value=["10.0.0.2"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.reconcile_before_unit_removal"
+    )
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.flush_translog_to_disk")
+    delete_current = mocker.patch(
+        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
+    )
+    apply_health = mocker.patch(
+        "opensearch_single_kernel.utils.status.Status.apply_health",
+        return_value=HealthColors.GREEN,
+    )
+    release = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.release")
+    stop_opensearch = mocker.patch.object(harness.charm, "stop_opensearch")
+
+    harness.set_leader(True)
+    harness.set_can_connect("opensearch", False)
+
+    harness.charm.opensearch_events._on_opensearch_data_storage_detaching(MagicMock())
+
+    stop_opensearch.assert_not_called()
+    delete_current.assert_called_once()
+    apply_health.assert_called_once()
+    release.assert_called_once()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_config_changed_defers_before_ip_rewrite_when_k8s_container_not_ready(harness, mocker):
+    """K8s config-changed should not touch files before Pebble is connectable."""
+    update_opensearch_config = mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config"
+    )
+    event = MagicMock()
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchServer.last_host_ip",
+        new_callable=PropertyMock,
+        return_value="10.0.0.1",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.host_ip",
+        new_callable=PropertyMock,
+        return_value="10.0.0.2",
+    )
+
+    harness.set_can_connect("opensearch", False)
+    harness.charm.opensearch_events._on_config_changed(event)
+
+    event.defer.assert_called_once()
+    update_opensearch_config.assert_not_called()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_config_changed_defers_when_k8s_profile_update_hits_file_error(harness, mocker):
+    """K8s config-changed should defer if profile writes lose container connectivity."""
+    event = MagicMock()
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.config_profile",
+        new_callable=PropertyMock,
+        return_value=MagicMock(),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_missing_requirements",
+        return_value=False,
+    )
+    update_profile_configuration = mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        side_effect=OpenSearchFileOperationError("container disconnected"),
+    )
+
+    harness.charm.opensearch_events._on_config_changed(event)
+
+    event.defer.assert_called_once()
+    update_profile_configuration.assert_called_once()
+
+
+def test_check_profile_missing_requirements_sets_invalid_profile_status(harness, mocker):
+    """Invalid profile config should set blocked status and skip requirement checks."""
+    get_missing_requirements = mocker.patch.object(
+        harness.charm.profiles_manager, "get_missing_requirements"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.config_profile",
+        new_callable=PropertyMock,
+        side_effect=ValueError("invalid profile"),
+    )
+
+    missing_requirements = harness.charm.opensearch_events.check_profile_missing_requirements()
+
+    assert missing_requirements == [CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message]
+    get_missing_requirements.assert_not_called()
+    assert (
+        harness.model.unit.status.message
+        == CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message
+    )
+
+
+def test_config_changed_sets_invalid_profile_status_and_returns(harness, mocker):
+    """Config-changed should stop before profile updates when profile config is invalid."""
+    event = MagicMock()
+    update_profile_configuration = mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.config_profile",
+        new_callable=PropertyMock,
+        side_effect=ValueError("invalid profile"),
+    )
+
+    harness.charm.opensearch_events._on_config_changed(event)
+
+    update_profile_configuration.assert_not_called()
+    assert (
+        harness.model.unit.status.message
+        == CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message
+    )
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_reconcile_tls_resources_restores_tls_files_on_k8s(harness, mocker):
+    """K8s TLS reconciliation should prepare the container and restore TLS files."""
+    mocker.patch.object(
+        harness.charm.tls_manager,
+        "_k8s_runtime_tls_artifacts_ready",
+        return_value=False,
+    )
+    prepare_container = mocker.patch.object(harness.charm.workload, "prepare_container")
+    restore_tls_files = mocker.patch.object(
+        harness.charm.tls_manager, "restore_tls_files_from_secrets"
+    )
+
+    harness.charm.tls_manager.reconcile_k8s_runtime_resources()
+
+    prepare_container.assert_called_once()
+    restore_tls_files.assert_called_once()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_pebble_ready_defers_when_tls_reconcile_fails_on_k8s(harness, mocker):
+    """K8s pebble-ready should defer when TLS material cannot be restored yet."""
+    event = MagicMock()
+    reconcile_k8s = mocker.patch.object(
+        harness.charm.tls_manager,
+        "reconcile_k8s_runtime_resources",
+        side_effect=OpenSearchFileOperationError("container disconnected"),
+    )
+
+    harness.charm.opensearch_events._on_pebble_ready(event)
+
+    reconcile_k8s.assert_called_once()
+    event.defer.assert_called_once()
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_pebble_ready_reconciles_tls_resources_on_k8s(harness, mocker):
+    """K8s pebble-ready should run TLS reconciliation when the container is ready."""
+    event = MagicMock()
+    reconcile_k8s = mocker.patch.object(
+        harness.charm.tls_manager, "reconcile_k8s_runtime_resources"
+    )
+
+    harness.charm.opensearch_events._on_pebble_ready(event)
+
+    reconcile_k8s.assert_called_once()
+    event.defer.assert_not_called()
 
 
 def test_app_peers_data(harness):

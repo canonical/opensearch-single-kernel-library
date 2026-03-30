@@ -1,0 +1,6 @@
+# Restore shorter Pebble backoff after HA tests (approximate defaults).
+services:
+  opensearch:
+    override: merge
+    backoff-delay: 500ms
+    backoff-limit: 30s
