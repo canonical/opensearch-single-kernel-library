@@ -200,6 +200,8 @@ GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
 # TLS
 CA_ALIAS = "ca"
+CA_TRUSTSTORE_P12 = "cacert.p12"
+JDK_CACERTS_STORE_PASSWORD = "changeit"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
 KEYTOOL = "opensearch.keytool"
 OLD_CA_PREFIX = "old-"

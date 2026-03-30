@@ -16,8 +16,10 @@ from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
+    CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
     DIR_PERMISSIONS_CERTIFICATES,
+    JDK_CACERTS_STORE_PASSWORD,
     OLD_CA_ALIAS,
     OPENSEARCH_RUN_AS_USER,
     PEBBLE_SERVICE_USER,
@@ -546,6 +548,39 @@ class TlsManager(BaseManager):
             # Expected to fail if running as non-root, or if the runtime fixes ownership later.
             logger.debug("Could not change ownership of %s: %s", store_path_str, e)
 
+    def _ensure_jvm_cacerts_truststore(self) -> None:
+        """Create cacert.p12 for the JVM."""
+        if self.state.substrate != Substrates.K8S:
+            return
+
+        dest = self.workload.paths.certs / CA_TRUSTSTORE_P12
+        if dest.exists():
+            return
+
+        jdk_cacerts = self.workload.paths.jdk / "lib/security/cacerts"
+        if not jdk_cacerts.exists():
+            logger.warning("JDK cacerts not found at %s; skipping %s", jdk_cacerts, dest)
+            return
+
+        dest_str = path_as_posix(dest)
+        src_str = path_as_posix(jdk_cacerts)
+        keytool = self.workload.keytool_cmd
+        pwd = JDK_CACERTS_STORE_PASSWORD
+        cmd = (
+            f"{keytool} -importkeystore -noprompt "
+            f"-srckeystore {src_str} -srcstoretype JKS -srcstorepass {pwd} "
+            f"-destkeystore {dest_str} -deststoretype PKCS12 -deststorepass {pwd}"
+        )
+
+        try:
+            self.workload.run_cmd(cmd)
+        except OpenSearchCmdError as e:
+            logger.error("Failed to create %s from JDK cacerts: %s", dest_str, e)
+            return
+
+        self._set_tls_store_permissions(dest_str)
+        self._best_effort_set_tls_store_ownership(dest_str)
+
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
         # In the case of the first units before TLS is initialized,
@@ -601,6 +636,8 @@ class TlsManager(BaseManager):
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
+            if not (certs_dir / CA_TRUSTSTORE_P12).exists():
+                return False
             if not (certs_dir / f"{CA_ALIAS}.p12").exists():
                 return False
             if not (certs_dir / "chain.pem").exists():
@@ -635,6 +672,7 @@ class TlsManager(BaseManager):
 
         # ensure certs directory exists before writing CA truststore/keystores.
         self._ensure_certificates_directory(self.workload.paths.certs)
+        self._ensure_jvm_cacerts_truststore()
 
         # ensure CA truststore + chain.pem (if secrets available).
         admin_secrets = (
@@ -798,6 +836,11 @@ class TlsManager(BaseManager):
             store_path=trust_store_path,
             keytool_cmd=self.workload.keytool_cmd,
         )
+        # keytool/store_ca may rewrite the PKCS12 on disk, so restore the expected
+        # mode/owner for the workload after updating ca.p12.
+        ca_store_path_str = path_as_posix(trust_store_path)
+        self._set_tls_store_permissions(ca_store_path_str)
+        self._best_effort_set_tls_store_ownership(ca_store_path_str)
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 

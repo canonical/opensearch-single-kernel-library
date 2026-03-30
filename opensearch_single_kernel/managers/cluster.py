@@ -17,6 +17,7 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
     CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN,
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
     GENERATED_ROLES,
@@ -360,7 +361,7 @@ class ClusterManager(BaseManager):
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {securityadmin_host}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tsalias ca",
             "-tst PKCS12",
@@ -393,7 +394,7 @@ class ClusterManager(BaseManager):
             f"-f {self.workload.paths.conf}/{file}",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {self.state.host_ip}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tst PKCS12",
             f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",

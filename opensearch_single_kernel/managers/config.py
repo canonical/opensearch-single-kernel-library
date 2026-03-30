@@ -7,7 +7,13 @@
 import logging
 from typing import Any
 
-from opensearch_single_kernel.common.constants import CertType, Scope, Substrates
+from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
+    CA_TRUSTSTORE_P12,
+    CertType,
+    Scope,
+    Substrates,
+)
 from opensearch_single_kernel.core.models import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -219,7 +225,7 @@ class ConfigManager(BaseManager):
             f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
             f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
             f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
-            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
+            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/{CA_ALIAS}.p12",
             f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
             f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
             f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
@@ -256,6 +262,19 @@ class ConfigManager(BaseManager):
         logs_path = path_as_posix(self.workload.paths.logs)
         self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={logs_path}/")
         self.yaml_setter.append(self.JVM_OPTIONS, "-Djdk.tls.client.protocols=TLSv1.2")
+        # K8s: Pebble overrides the rock entrypoint, so start.sh never creates cacert.p12.
+        if self.state.substrate == Substrates.K8S:
+            if truststore_pwd := (
+                self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+            ).get("truststore-password"):
+                truststore_path = path_as_posix(self.workload.paths.certs / CA_TRUSTSTORE_P12)
+                self.yaml_setter.append(
+                    self.JVM_OPTIONS, f"-Djavax.net.ssl.trustStore={truststore_path}"
+                )
+                self.yaml_setter.append(
+                    self.JVM_OPTIONS,
+                    f"-Djavax.net.ssl.trustStorePassword={truststore_pwd}",
+                )
 
     @staticmethod
     def _security_authc_static_config() -> dict[str, Any]:
@@ -528,8 +547,9 @@ class ConfigManager(BaseManager):
                     return False
 
             keystore_path = self.workload.paths.certs / keystore_filename
-            truststore_path = self.workload.paths.certs / "ca.p12"
-            return keystore_path.exists() and truststore_path.exists()
+            truststore_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
+            cacert_path = self.workload.paths.certs / CA_TRUSTSTORE_P12
+            return keystore_path.exists() and truststore_path.exists() and cacert_path.exists()
         except Exception:
             return False
 

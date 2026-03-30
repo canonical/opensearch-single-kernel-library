@@ -571,10 +571,8 @@ class OpenSearchEventsHandler(Object):
                     return
 
                 if restart_needed:
-                    logger.debug(
-                        "Leader election reconfigured node roles; emitting restart."
-                        " WAITING_TO_START will be set by _on_restart_opensearch."
-                    )
+                    self.charm.status.set(CharmStatuses.WAITING_TO_START)
+                    logger.debug("Leader election reconfigured node roles; emitting restart.")
                     self.charm.restart_opensearch_event.emit()
             return
 

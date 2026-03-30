@@ -13,6 +13,7 @@ import responses
 from ops import MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
     CertType,
     DeploymentType,
     Scope,
@@ -894,23 +895,25 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
         for call in run_cmd.call_args_list
     )
     assert any(
-        f"chmod +r {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+        f"chmod +r {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12" in call.args[0]
         for call in run_cmd.call_args_list
     )
     expected_mode = "640"
     assert any(
-        f"chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+        f"chmod {expected_mode} {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12"
+        in call.args[0]
         for call in run_cmd.call_args_list
     )
     if substrate == "vm":
         assert any(
-            f"sudo chown snap_daemon:root {str(harness.charm.workload.paths.certs)}/ca.p12"
+            f"sudo chown snap_daemon:root {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12"
             in call.args[0]
             for call in run_cmd.call_args_list
         )
     else:
         assert any(
-            f"chown 584792:0 {str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+            f"chown 584792:0 {str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12"
+            in call.args[0]
             for call in run_cmd.call_args_list
         )
     assert str(harness.charm.workload.paths.conf) in str(tempfile.call_args_list[0][1]["dir"])
@@ -1640,9 +1643,9 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     # Note: the high number of operations come from the fact that on each certificate received
     # the 'issuer' is checked on each certificate that is saved on the disk.
     if harness.charm.unit.is_leader():
-        assert run_cmd.call_count == (16 if substrate == "vm" else 8)
+        assert run_cmd.call_count == (18 if substrate == "vm" else 10)
     else:
-        assert run_cmd.call_count == (19 if substrate == "vm" else 11)
+        assert run_cmd.call_count == (21 if substrate == "vm" else 13)
 
     certs_dir = str(harness.charm.workload.paths.certs)
     conf_dir = str(harness.charm.workload.paths.conf)
@@ -1778,7 +1781,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         if substrate == "vm":
             assert any(
                 "sudo chown snap_daemon:root "
-                f"{str(harness.charm.workload.paths.certs)}/ca.p12" in call.args[0]
+                f"{str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12" in call.args[0]
                 for call in run_cmd.call_args_list
             )
         assert harness.model.unit.status == MaintenanceStatus("Applying new CA certificate...")
