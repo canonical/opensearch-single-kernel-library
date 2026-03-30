@@ -10,6 +10,9 @@ from _pytest.config.argparsing import Parser
 
 from tests.helpers import Substrate
 
+# Repo root is the parent of this file's directory (tests/).
+_TESTS_DIR = Path(__file__).resolve().parent
+
 
 def pytest_addoption(parser: Parser):
     parser.addoption(
@@ -69,5 +72,5 @@ def skip_if_deployed(request):
 def opensearch_base_path(substrate) -> Path:
     """The base path for the files of the opensearch charms, according to the substrate."""
     if substrate == "k8s":
-        return Path("tests/charms/opensearch_k8s_test_charm")
-    return Path("tests/charms/opensearch_test_charm")
+        return _TESTS_DIR / "charms/opensearch_k8s_test_charm"
+    return _TESTS_DIR / "charms/opensearch_test_charm"

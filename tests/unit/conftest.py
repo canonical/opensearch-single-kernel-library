@@ -11,10 +11,6 @@ from ops.testing import Harness
 from opensearch_single_kernel.common.constants import PEER_RELATION, TLS_RELATION
 from tests.helpers import Substrate
 
-CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
-ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
-METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
-
 
 @pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
