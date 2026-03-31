@@ -163,14 +163,18 @@ class OpenSearchEventsHandler(Object):
         if not self._ensure_k8s_workload_ready(event, "peer relation changed"):
             return
 
-        if is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up():
-            health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
+        if not (is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()):
+            logger.debug("Node is not up. Deferring event.")
+            event.defer()
+            return
 
-            if health in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]:
-                # we defer because we want the temporary status to be updated
-                logger.debug("Cluster health temp yellow or unknown. Deferring event.")
-                event.defer()
-                return
+        health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
+
+        if health in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]:
+            # we defer because we want the temporary status to be updated
+            logger.debug("Cluster health temp yellow or unknown. Deferring event.")
+            event.defer()
+            return
 
         # we want to have the most up-to-date info broadcasted to related sub-clusters
         # if self.opensearch_peer_cm.is_provider():

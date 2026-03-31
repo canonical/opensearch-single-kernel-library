@@ -1694,10 +1694,11 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         (
             "-delete" in call.args[0]
             and "-keystore" in call.args[0]
-            and "-alias old-ca" in call.args[0]
+            and "-alias old-ca-0" in call.args[0]
         )
         for call in run_cmd.call_args_list
     )
+    assert not any("-alias old-ca " in call.args[0] for call in run_cmd.call_args_list)
     assert conf_dir in str(tempfile.call_args_list[0][1]["dir"])
 
     assert not harness.charm.state.server.tls_ca_renewing

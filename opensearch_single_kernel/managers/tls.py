@@ -44,6 +44,7 @@ from opensearch_single_kernel.utils.certificates import (
     parse_tls_file,
     read_ca,
     remove_ca,
+    split_ca_chain,
     store_ca,
 )
 from opensearch_single_kernel.utils.helpers import (
@@ -831,13 +832,22 @@ class TlsManager(BaseManager):
         trust_store_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
 
         old_ca = self.read_stored_ca(alias=OLD_CA_ALIAS)
-        remove_ca(
-            workload=self.workload,
-            alias=OLD_CA_ALIAS,
-            store_pwd=trust_store_pwd,
-            store_path=trust_store_path,
-            keytool_cmd=self.workload.keytool_cmd,
+        # store_ca() persists each certificate in a chain under indexed aliases
+        # like old-ca-0, old-ca-1 rather than a single old-ca entry, so
+        # CA rotation cleanup must remove the same indexed aliases one by one.
+        old_ca_aliases = (
+            [f"{OLD_CA_ALIAS}-{i}" for i, _ in enumerate(split_ca_chain(old_ca))]
+            if old_ca
+            else [OLD_CA_ALIAS]
         )
+        for alias in old_ca_aliases:
+            remove_ca(
+                workload=self.workload,
+                alias=alias,
+                store_pwd=trust_store_pwd,
+                store_path=trust_store_path,
+                keytool_cmd=self.workload.keytool_cmd,
+            )
         # keytool/store_ca may rewrite the PKCS12 on disk, so restore the expected
         # mode/owner for the workload after updating ca.p12.
         ca_store_path_str = path_as_posix(trust_store_path)
