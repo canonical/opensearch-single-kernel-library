@@ -26,7 +26,10 @@ import os
 from ops import Relation
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchLockError,
+)
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -51,23 +54,23 @@ class PeerLockManager(BaseManager):
         if not self.state.lock_relation:
             return False
 
-        self.state.lock_server.lock_requested = True
+        self.state.server_lock.lock_requested = True
 
         if self.state.server.is_app_leader:
             logger.debug("[Node lock] Requested peer lock as leader unit")
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
-        if self.state.lock_application.unit_with_lock != self.state.unit_name:
+        if self.state.application_lock.unit_with_lock != self.state.unit_name:
             logger.debug(
                 "[Node lock] Not acquired. Unit with peer databag lock: %s",
-                self.state.lock_application.unit_with_lock,
+                self.state.application_lock.unit_with_lock,
             )
             return False
 
         if (
             self.state.server.is_app_leader
-            and self.state.lock_application.leader_acquired_after_juju_event_id
+            and self.state.application_lock.leader_acquired_after_juju_event_id
             == os.environ["JUJU_CONTEXT_ID"]
         ):
             # `unit-with-lock` was set in this Juju event
@@ -101,7 +104,7 @@ class PeerLockManager(BaseManager):
         if not self.state.lock_relation:
             return
 
-        self.state.lock_server.lock_requested = False
+        self.state.server_lock.lock_requested = False
         if self.state.server.is_app_leader:
             logger.debug("[Node lock] Released peer lock as leader unit")
             # A separate relation-changed event won't get fired
@@ -109,17 +112,18 @@ class PeerLockManager(BaseManager):
 
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
-        assert self.state.lock_relation
+        if not self.state.lock_relation:
+            raise OpenSearchLockError("Failed to refresh lock due to lock relation absence")
 
         if not (deployment_desc := self.state.application.deployment_desc):
             return
 
         if not self.state.server.is_app_leader:
-            if self.state.lock_application.leader_acquired_after_juju_event_id:
+            if self.state.application_lock.leader_acquired_after_juju_event_id:
                 # Trigger peer relation changed event on leader unit
                 # Without this, the leader unit might not receive another event (to use the lock it
                 # holds) until the next update status event
-                self.state.lock_server.trigger_relation_changed()
+                self.state.server_lock.trigger_relation_changed()
             return
 
         if (granted_unit := self.state.lock_granted_server) and granted_unit.lock_requested:
@@ -131,16 +135,16 @@ class PeerLockManager(BaseManager):
         # During initial startup, leader unit must start first
         # Give priority to leader unit
 
-        for unit in self.state.lock_servers:
+        for unit in self.state.server_locks:
             if unit.lock_requested:
-                self.state.lock_application.unit_with_lock = format_unit_name(
+                self.state.application_lock.unit_with_lock = format_unit_name(
                     unit.unit, app=deployment_desc.app
                 )
                 logger.debug("[Node lock] (leader) granted peer lock to %s", unit.unit.name)
                 break
         else:
             logger.debug("[Node lock] (leader) cleared peer lock")
-            del self.state.lock_application.unit_with_lock
+            del self.state.application_lock.unit_with_lock
 
 
 class LockManager(PeerLockManager):
@@ -194,9 +198,10 @@ class LockManager(PeerLockManager):
                 return False
 
             logger.debug("[Node lock] Opensearch %s", online_nodes)
-            assert online_nodes > 0
+            if not online_nodes:
+                raise OpenSearchLockError("Failed to acquire lock due to absence of online nodes")
             try:
-                unit = self.opensearch_client.get_unit_with_lock(host, self.alt_hosts)
+                unit_with_lock = self.opensearch_client.get_unit_with_lock(host, self.alt_hosts)
             except OpenSearchHttpError:
                 logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock
@@ -211,7 +216,7 @@ class LockManager(PeerLockManager):
             # to release the OpenSearch lock. For example, when scaling to 0.
             # Then, when 1+ OpenSearch nodes are online, a unit that no longer exists could hold
             # the lock.
-            if not unit and online_nodes > 0:
+            if not unit_with_lock and online_nodes > 0:
                 logger.debug("[Node lock] Attempting to acquire opensearch lock")
                 # Acquire opensearch lock
                 # Create index if it doesn't exist
@@ -231,9 +236,9 @@ class LockManager(PeerLockManager):
                     # in this case, try to acquire peer databag lock as fallback
                     return super().acquire()
 
-                unit = self.state.unit_name
+                unit_with_lock = self.state.unit_name
 
-            if unit == self.state.unit_name:
+            if unit_with_lock == self.state.unit_name:
                 # Lock acquired
                 # Release peer databag lock, if any
                 logger.debug("[Node lock] Acquired via opensearch")
@@ -241,12 +246,15 @@ class LockManager(PeerLockManager):
                 logger.debug("[Node lock] Released redundant peer lock (if held)")
                 return True
 
-            if unit:
+            if unit_with_lock:
                 # Another unit has lock
-                logger.debug("[Node lock] Not acquired. Unit with opensearch lock: %s", unit)
+                logger.debug(
+                    "[Node lock] Not acquired. Unit with opensearch lock: %s", unit_with_lock
+                )
                 return False
 
-            assert online_nodes == 1
+            if online_nodes != 1:
+                raise OpenSearchLockError("Single online node expected to acquire lock")
             logger.debug("[Node lock] No unit has opensearch lock")
         logger.debug("[Node lock] Using peer databag for lock")
         # Request peer databag lock

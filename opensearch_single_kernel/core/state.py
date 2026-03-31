@@ -1129,7 +1129,7 @@ class ClusterState(Object):
         return self.model.get_relation(OAUTH_RELATION)
 
     @property
-    def lock_server(self) -> LockServerState:
+    def server_lock(self) -> LockServerState:
         """Get state of lock relation for current unit."""
         return LockServerState(
             relation=self.lock_relation,
@@ -1148,12 +1148,12 @@ class ClusterState(Object):
                 ),
                 component=self.get_unit(lock_unit_name(granted_unit_name)),
             )
-            if (granted_unit_name := self.lock_application.unit_with_lock)
+            if (granted_unit_name := self.application_lock.unit_with_lock)
             else None
         )
 
     @property
-    def lock_servers(self) -> list[LockServerState]:
+    def server_locks(self) -> list[LockServerState]:
         """Get state of lock relation for all units in it."""
         return (
             [
@@ -1171,7 +1171,7 @@ class ClusterState(Object):
         )
 
     @property
-    def lock_application(self) -> LockAppState:
+    def application_lock(self) -> LockAppState:
         """Get application state of lock relation."""
         return LockAppState(
             relation=self.lock_relation,
