@@ -86,7 +86,7 @@ class TlsManager(BaseManager):
 
             if cert_issuer != ca_issuer:
                 return False
-
+        logger.info("All TLS resources are stored on disk and valid.")
         return True
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:

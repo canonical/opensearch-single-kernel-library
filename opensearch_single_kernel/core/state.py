@@ -140,7 +140,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation_data.get("tls_ca_renewing", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewing", "") == "True"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -150,7 +150,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation_data.get("tls_ca_renewed", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewed", "") == "True"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -160,7 +160,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation_data.get("tls_configured", "") == "True"
+        return self.relation.data[self.unit].get("tls_configured", "") == "True"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -868,7 +868,6 @@ class ClusterState(Object):
             #    flag="tls_ca_renewed", operation="remove"
             # )
             return
-
         # this means only the CA rotation completed, still need to create certificates
         self.server.tls_ca_renewed = True
         # TODO: Handle large deployment
