@@ -666,7 +666,7 @@ class LockServerState(RelationState):
     @lock_requested.setter
     def lock_requested(self, value: bool) -> None:
         """Set whether the lock is requested by unit."""
-        self.update({"lock_requested": str(value)})
+        self.update({"lock_requested": str(value) if value else ""})
 
     def trigger_relation_changed(self) -> None:
         """Trigger relation changed event on other units by writing to dummy field."""
