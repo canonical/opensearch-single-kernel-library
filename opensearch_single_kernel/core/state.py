@@ -113,7 +113,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation_data.get("bootstrap_contributor", "") == "True"
+        return self.relation_data.get("bootstrap_contributor", "").lower() == "true"
 
     @is_bootstrap_contributor.setter
     def is_bootstrap_contributor(self, value: bool):
@@ -123,7 +123,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "") == "True"
+        return self.relation_data.get("cluster_manager_removed", "").lower() == "true"
 
     @is_cluster_manager_removed.setter
     def is_cluster_manager_removed(self, value: bool):
@@ -138,7 +138,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation_data.get("tls_ca_renewing", "") == "True"
+        return self.relation_data.get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -148,7 +148,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation_data.get("tls_ca_renewed", "") == "True"
+        return self.relation_data.get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -158,7 +158,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation_data.get("tls_configured", "") == "True"
+        return self.relation_data.get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -276,7 +276,7 @@ class OpenSearchServer(RelationState):
         When current leader is unit oauth relation isn't breaking
         even if unit receives oauth relation broken event.
         """
-        return self.relation_data.get("oauth_departing", "") == "True"
+        return self.relation_data.get("oauth_departing", "").lower() == "true"
 
     @oauth_departing.setter
     def oauth_departing(self, value: bool):
@@ -312,7 +312,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_admin_user_initialized(self) -> bool:
         """Return the value of 'admin_user_initialized' in application state."""
-        return self.relation_data.get("admin_user_initialized", "") == "True"
+        return self.relation_data.get("admin_user_initialized", "").lower() == "true"
 
     @property
     def bootstrap_contributors_count(self) -> int:
@@ -332,7 +332,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "") == "True"
+        return self.relation_data.get("security_index_initialised", "").lower() == "true"
 
     @is_security_index_initialised.setter
     def is_security_index_initialised(self, value: bool):
@@ -350,7 +350,7 @@ class OpenSearchApplication(RelationState):
     @property
     def bootstrapped(self) -> bool:
         """Return the value of 'bootstrapped' in application state"""
-        return self.relation_data.get("bootstrapped", "") == "True"
+        return self.relation_data.get("bootstrapped", "").lower() == "true"
 
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
@@ -661,7 +661,7 @@ class LockServerState(RelationState):
     @property
     def lock_requested(self) -> bool:
         """Get whether the lock is requested by unit."""
-        return self.relation_data.get("lock_requested", "") == "True"
+        return self.relation_data.get("lock_requested", "").lower() == "true"
 
     @lock_requested.setter
     def lock_requested(self, value: bool) -> None:
@@ -882,7 +882,7 @@ class ClusterState(Object):
             return False
         for unit in self.all_units:
             if (
-                self.peer_relation.data[unit].get("tls_configured") != "True"
+                self.peer_relation.data[unit].get("tls_configured", "").lower() != "true"
                 or "tls_ca_renewing" in self.peer_relation.data[unit]
                 or "tls_ca_renewed" in self.peer_relation.data[unit]
             ):
