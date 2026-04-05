@@ -352,6 +352,7 @@ class TLSEventsHandler(Object):
                 try:
                     self.charm.tls_manager.reload_tls_certificates()
                 except OpenSearchHttpError:
+                    logger.error("Could not reload TLS certificates via API, will restart.")
                     self.charm.restart_opensearch_event.emit()
                 else:
                     self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)

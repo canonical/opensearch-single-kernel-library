@@ -94,7 +94,7 @@ class OpenSearchServer(RelationState):
     @property
     def profile(self) -> OpenSearchProfile | None:
         """Current profile of the unit"""
-        if profile_str := self.relation_data.get(PERFORMANCE_PROFILE, None):
+        if profile_str := self.relation.data[self.unit].get(PERFORMANCE_PROFILE, None):
             return (
                 ProductionProfile()
                 if PerformanceType(profile_str) == PerformanceType.PRODUCTION
@@ -115,7 +115,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation_data.get("bootstrap_contributor", "") == "True"
+        return self.relation.data[self.unit].get("bootstrap_contributor", "") == "True"
 
     @is_bootstrap_contributor.setter
     def is_bootstrap_contributor(self, value: bool):
@@ -125,7 +125,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "") == "True"
+        return self.relation.data[self.unit].get("cluster_manager_removed", "") == "True"
 
     @is_cluster_manager_removed.setter
     def is_cluster_manager_removed(self, value: bool):
@@ -135,7 +135,7 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return self.relation_data.get("started", "")
+        return self.relation.data[self.unit].get("started", "")
 
     @property
     def tls_ca_renewing(self) -> bool:
@@ -170,7 +170,7 @@ class OpenSearchServer(RelationState):
     @property
     def update_ts(self) -> str:
         """Get the value of 'update-ts' from the unit databag."""
-        return self.relation_data.get("update-ts", "")
+        return self.relation.data[self.unit].get("update-ts", "")
 
     @update_ts.setter
     def update_ts(self, timestamp: int):
@@ -180,7 +180,7 @@ class OpenSearchServer(RelationState):
     @property
     def certs_exp_checked_at(self) -> str:
         """Get the value of 'certs_exp_checked_at' from unit data bag."""
-        return self.relation_data.get("certs_exp_checked_at", "1970-01-01 00:00:00")
+        return self.relation.data[self.unit].get("certs_exp_checked_at", "1970-01-01 00:00:00")
 
     @certs_exp_checked_at.setter
     def certs_exp_checked_at(self, value: str):
@@ -193,7 +193,7 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+                self.relation.data[self.unit].get("allocation-exclusions-to-delete", "").split(","),
             )
         )
 
@@ -208,7 +208,7 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("delete-voting-exclusions", "").split(","),
+                self.relation.data[self.unit].get("delete-voting-exclusions", "").split(","),
             )
         )
 
@@ -220,7 +220,7 @@ class OpenSearchServer(RelationState):
     @property
     def last_host_ip(self) -> str | None:
         """Get the last configured IP for the unit. Used for tracking the IP change."""
-        return self.relation_data.get("last_host_ip")
+        return self.relation.data[self.unit].get("last_host_ip")
 
     @last_host_ip.setter
     def last_host_ip(self, value: str) -> None:
@@ -264,7 +264,7 @@ class OpenSearchServer(RelationState):
     @property
     def oauth_openid_connect_url(self) -> str | None:
         """Return OAuth openid_connect_url if configured."""
-        return self.relation_data.get("oauth_openid_connect_url")
+        return self.relation.data[self.unit].get("oauth_openid_connect_url")
 
     @oauth_openid_connect_url.setter
     def oauth_openid_connect_url(self, value: str | None) -> None:
@@ -278,7 +278,7 @@ class OpenSearchServer(RelationState):
         When current leader is unit oauth relation isn't breaking
         even if unit receives oauth relation broken event.
         """
-        return self.relation_data.get("oauth_departing", "") == "True"
+        return self.relation.data[self.unit].get("oauth_departing", "") == "True"
 
     @oauth_departing.setter
     def oauth_departing(self, value: bool):

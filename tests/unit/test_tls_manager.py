@@ -1543,7 +1543,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         f"chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
         in run_cmd.call_args_list[1].args[0]
     )
-    # Keytool won't find any ca so it don't make sense to check if delete is called
+    # Keytool won't find any ca so it doesn't make sense to check if delete is called
     assert "/var/snap/opensearch/current/etc/opensearch" in str(
         tempfile.call_args_list[0][1]["dir"]
     )

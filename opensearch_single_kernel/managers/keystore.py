@@ -93,7 +93,7 @@ class KeystoreManager(BaseManager):
                 "No keystore entries defined for object storage type %s. Skipping cleanup.",
                 object_storage_type,
             )
-            return
+            return None
         try:
             self.remove_entries(keystore_entries)
             logger.info("Removed keystore entries for %s", object_storage_type)
@@ -111,7 +111,7 @@ class KeystoreManager(BaseManager):
                     object_storage_type,
                     msg,
                 )
-                return
+                return None
 
             logger.warning(
                 "Keystore cleanup attempt failed for %s: %s",

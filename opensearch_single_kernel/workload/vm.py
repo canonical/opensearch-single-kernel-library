@@ -124,10 +124,7 @@ class VMWorkload(BaseWorkload):
 
     def is_started(self) -> bool:
         """Check if OpenSearch is started."""
-        if not (reachable := self.is_reachable(self.host, self.port)):
-            logger.debug("Cannot connect to the OpenSearch server...")
-
-        return reachable
+        return self.is_reachable(self.host, self.port)
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:

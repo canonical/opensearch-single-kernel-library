@@ -88,7 +88,6 @@ class OpenSearchClient:
                 "region": object_storage_config.s3.region,
                 "endpoint": object_storage_config.s3.endpoint,
             }
-
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
                 "container": object_storage_config.azure.container,
@@ -365,7 +364,6 @@ class OpenSearchClient:
             timeout=10 * 60,
             retries=3,
             wait_strategy=wait_fixed(3),
-            retry_strategy=retry_if_exception_type(OpenSearchHttpError),
         )
         logger.info("Restore of snapshot '%s' response: %s", snapshot_id, restore_resp)
 
@@ -1206,7 +1204,6 @@ class OpenSearchClient:
         ignore_retry_on: list | None = None,
         timeout: int = 5,
         cert_files: tuple[str, str] | None = None,
-        retry_strategy: RetryBaseT | None = None,
     ) -> dict[str, Any] | list[Any] | int:
         """Make an HTTP request.
 
@@ -1235,8 +1232,6 @@ class OpenSearchClient:
             retry = retry_if_exception_type(requests.RequestException) | retry_if_exception_type(
                 urllib3.exceptions.HTTPError
             )
-            if retry_strategy:
-                retry = retry | retry_strategy
             for attempt in Retrying(
                 retry=retry,
                 stop=stop_after_attempt(retries),

@@ -5,6 +5,7 @@
 """Handler for OpenSearch Backup and Restore events."""
 
 import logging
+import json
 from typing import TYPE_CHECKING
 
 from ops import ActionEvent, Object
@@ -116,9 +117,7 @@ class BackupEventsHandler(Object):
         # block non-main orchestrators only when they are in a multi-app topology.
         # TODO: Handle once large deployments are implemented
 
-        object_storage_type = self.charm.state.storage_type
-
-        if not object_storage_type:
+        if not (object_storage_type:= self.charm.state.storage_type):
             logger.warning("No object storage type could be determined.")
             return
 
@@ -139,6 +138,7 @@ class BackupEventsHandler(Object):
             if self.charm.unit.is_leader():
                 self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return
+
         # Get config using the connection info
         try:
             object_storage_config = self.charm.backup_manager.storage_config_from_connection_info(
@@ -165,7 +165,6 @@ class BackupEventsHandler(Object):
             if self.charm.unit.is_leader():
                 self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return
-
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
             if self.charm.unit.is_leader():
@@ -181,7 +180,6 @@ class BackupEventsHandler(Object):
         # Catch file operation exceptions
         try:
             self.update_stored_credentials(object_storage_type, object_storage_config)
-
         except OpenSearchFileOperationError:
             logger.error("Failed to update stored backup credentials.")
             return
@@ -255,7 +253,7 @@ class BackupEventsHandler(Object):
                 pattern=Status.CheckPattern.Interpolated,
             )
 
-        if not self.cleanup(
+        if not self._remove_credentials(
             object_storage_type=object_storage_type,
             remove_repository=True,
         ):
@@ -266,7 +264,20 @@ class BackupEventsHandler(Object):
                     app=True,
                 )
             event.defer()
-            return
+            return None
+
+        if self.charm.unit.is_leader() and not self.charm.backup_manager.remove_repository(object_storage_type):
+            logger.warning(
+                "Failed to remove snapshot repository for %s during credentials cleanup.",
+                object_storage_type,
+            )
+            self.charm.status.set(
+                CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED,
+                app=True,
+            )
+            event.defer()
+            return None
+
         if (
             object_storage_type == ObjectStorageType.S3
             and self.charm.backup_manager.is_custom_s3_ca_stored()
@@ -286,12 +297,12 @@ class BackupEventsHandler(Object):
         self, event: VerifyBackupCredentialsEvent
     ) -> None:
         """Verify that stored backup credentials are still valid."""
-        object_storage_type = self.charm.state.storage_type
-        if not object_storage_type:
+        if not (object_storage_type:= self.charm.state.storage_type):
             logger.warning(
                 "No object storage type could be determined for backup credentials verification."
             )
             return
+
         # Get connection info
         try:
             connection_info = self.get_storage_connection_info_from_relation(object_storage_type)
@@ -300,6 +311,7 @@ class BackupEventsHandler(Object):
             if self.charm.unit.is_leader():
                 self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
             return
+
         # Get config using the connection info
         if not (
             object_storage_config := self.charm.backup_manager.storage_config_from_connection_info(
@@ -334,6 +346,7 @@ class BackupEventsHandler(Object):
             )
             event.defer()
             return
+
         self.charm.status.clear(
             CharmStatuses.BACKUP_REPOSITORY_MISCONFIGURED,
             pattern=Status.CheckPattern.Interpolated,
@@ -343,24 +356,32 @@ class BackupEventsHandler(Object):
 
     def _on_create_backup_action(self, event: ActionEvent) -> None:
         """Handler for create backup action event."""
-        object_storage_type = self.charm.state.storage_type
-
-        if not object_storage_type:
+        if not (object_storage_type := self.charm.state.storage_type):
             self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
+            logger.warning("Missing object storage type for create backup action.")
             event.fail("Missing relation with an object storage integrator.")
             return
 
         if error_message := self._action_missing_pre_requisites(object_storage_type):
+            logger.warning("Pre-requisites not met for creating backup: %s", error_message)
             event.fail(error_message)
             return
 
         self.charm.status.set(CharmStatuses.BACKUP_IN_PROGRESS)
         try:
-            result = self.charm.backup_manager.create_snapshot()
-            event.set_results(result)
-        except OpenSearchCreateBackupError as e:
-            event.fail(str(e))
-            return
+            snapshot_id = self.charm.backup_manager.create_snapshot()
+        except OpenSearchHttpError as e:
+            logger.error("Failed to create backup: %s", e)
+            event.fail(f"Backup request failed with: {str(e)}") 
+
+        # Fetch the new snapshot for sanity check
+        try:
+            snapshot = self.charm.backup_manager.get_snapshot_status(snapshot_id)
+            status = str(snapshot.get("state", "unknown")).lower()
+            event.set_results({"backup-id": snapshot_id, "status": status})
+        except OpenSearchHttpError as e:
+            logger.error("Unknown state for snapshot %s: %s", snapshot_id, e)
+            event.fail(f"Unknown state for backup {snapshot_id}: {str(e)}")
         finally:
             self.charm.status.clear(CharmStatuses.BACKUP_IN_PROGRESS)
 
@@ -375,18 +396,35 @@ class BackupEventsHandler(Object):
         if error_message := self._action_missing_pre_requisites(
             object_storage_type, report_running_operations=False
         ):
+            logger.warning("Pre-requisites not met for listing backups: %s", error_message)
             event.fail(error_message)
             return
 
         if (output_format := event.params.get("output", "").lower()) not in {"json", "table"}:
+            logger.error("Invalid output format for listing backups: %s", output_format)
             event.fail("Failed: invalid output format, must be either 'json' or 'table'.")
             return
-
         try:
-            result = self.charm.backup_manager.list_snapshots(output_format)
-            event.set_results(result)
-        except OpenSearchListBackupsError as e:
-            event.fail(str(e))
+            snapshots = self.charm.backup_manager.list_snapshots(output_format)
+        except OpenSearchHttpError as e:
+            logger.error("Could not fetch the list of snapshots: %s", e)
+            event.fail(f"Backup request failed with: {str(e)}")
+
+        if output_format == "json":
+            return {"backups": json.dumps(snapshots)}
+
+        # Format table output
+        table_output = []
+
+        header = "{:<20s} | {:s}".format("backup-id", "backup-status")
+        table_output.append(header)
+        table_output.append("-" * len(header))
+
+        for _id, _snapshot in snapshots.items():
+            line = "{:<20s} | {:s}".format(_id, _snapshot["state"])
+            table_output.append(line)
+
+        event.set_results({"backups": "\n".join(table_output)})
 
     def _on_restore_action(self, event: ActionEvent) -> None:  # noqa C901
         """Handler for the restore action."""
@@ -401,6 +439,7 @@ class BackupEventsHandler(Object):
         if error_message := self._action_missing_pre_requisites(
             object_storage_type, report_running_operations=False
         ):
+            logger.warning("Pre-requisites not met for restoring backup: %s", error_message)
             event.fail(error_message)
             return
 
@@ -409,13 +448,13 @@ class BackupEventsHandler(Object):
             try:
                 self.charm.backup_manager.restore_snapshot(snapshot_id)
             except OpenSearchRestoreBackupError as e:
+                logger.error("Failed to restore backup %s: %s", snapshot_id, e)
                 event.fail(str(e))
                 return
             # Once restore finishes successfully , we wait for cluster health
-            final_status = self.charm.status.apply_health(
+            if self.charm.status.apply_health(
                 wait_for_green_first=True, app=self.charm.unit.is_leader()
-            )
-            if final_status == "green":
+            ) == "green":
                 event.set_results({"restored-backup-id": snapshot_id, "status": "success"})
             else:
                 event.set_results(
@@ -425,7 +464,6 @@ class BackupEventsHandler(Object):
                         "note": "restore completed; cluster didn't reach GREEN within 30s",
                     }
                 )
-            return
         finally:
             self.charm.status.clear(CharmStatuses.RESTORE_IN_PROGRESS)
 
@@ -495,7 +533,7 @@ class BackupEventsHandler(Object):
                 return f"Action failed with: {str(e)}."
 
         if not report_running_operations:
-            return
+            return None
 
         match self.charm.health_manager.get(wait_for_green_first=True):
             case HealthColors.RED:
@@ -511,7 +549,7 @@ class BackupEventsHandler(Object):
         except OpenSearchHttpError as e:
             return f"Action failed with: {str(e)}."
 
-        return
+        return None
 
     def get_storage_connection_info_from_relation(
         self, object_storage_type: ObjectStorageType
@@ -541,9 +579,6 @@ class BackupEventsHandler(Object):
             service_account_path = self.charm.backup_manager.write_gcs_service_account_json(
                 secret_key=object_storage_config.gcs.credentials.secret_key
             )
-        self.charm.keystore_manager.put_object_storage_credentials(
-            object_storage_type, object_storage_config, service_account_path
-        )
         if object_storage_type == ObjectStorageType.S3:
             if object_storage_config.s3.tls_ca_chain:
                 if not self.charm.backup_manager.is_custom_s3_ca_stored(
@@ -555,8 +590,12 @@ class BackupEventsHandler(Object):
             else:
                 self.charm.backup_manager.remove_s3_ca()
 
-    def cleanup(
-        self, object_storage_type: ObjectStorageType, remove_repository: bool = False
+        self.charm.keystore_manager.put_object_storage_credentials(
+            object_storage_type, object_storage_config, service_account_path
+        )
+
+    def _remove_credentials(
+        self, object_storage_type: ObjectStorageType
     ) -> bool:
         """Cleanup stored credentials and related config for a given object storage type."""
         try:
@@ -575,10 +614,4 @@ class BackupEventsHandler(Object):
         except OpenSearchFileOperationError as e:
             logger.warning("Failed to remove GCS service account JSON file during cleanup: %s", e)
             # Not critical, continue with cleanup
-
-        if remove_repository:
-            if not self.charm.unit.is_leader():
-                return True
-            return self.charm.backup_manager.remove_repository(object_storage_type)
-
         return True

@@ -8,6 +8,7 @@ import logging
 
 from charmlibs.pathops import PathProtocol
 from pydantic import ValidationError
+from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     S3_CA_ALIAS,
@@ -86,7 +87,7 @@ class BackupManager(BaseManager):
         except ValidationError as e:
             raise OpenSearchObjectStorageConfigValidationError(e) from e
         return (
-            ObjectStorageConfig(**{object_storage_type.value.lower(): rel_data})
+            ObjectStorageConfig(**{object_storage_type.value: rel_data})
             if rel_data
             else None
         )
@@ -138,8 +139,7 @@ class BackupManager(BaseManager):
         Returns:
             True if the given CA chain is stored in the stored cacerts, else False
         """
-        current_chain = self.find_s3_chain_in_store()
-        if not current_chain:
+        if not (current_chain:= self.get_s3_chain_from_cacerts()):
             # Nothing stored at all: definitely no custom S3 CA
             return False
 
@@ -153,7 +153,7 @@ class BackupManager(BaseManager):
 
         return stored_blocks == new_blocks
 
-    def find_s3_chain_in_store(self) -> str:
+    def get_s3_chain_from_cacerts(self) -> str:
         """Return the currently stored S3 CA chain from cacerts, or ''.
 
         Returns:
@@ -315,77 +315,58 @@ class BackupManager(BaseManager):
             )
             return False
 
-    def create_snapshot(self) -> dict[str, str]:
+    def create_snapshot(self) -> str:
         """Create a snapshot in the repository for the given storage type.
 
-        Args:
-            object_storage_type (ObjectStorageType): Object storage type
-
         Returns:
-            dict[str, str]: Snapshot ID and status.
+            str: The ID of the created snapshot.
         """
         object_storage_type = self.state.storage_type
         # Create a new snapshot
-        try:
-            snapshot_id = self.opensearch_client.create_snapshot(
-                object_storage_type=object_storage_type,
-                alt_hosts=self.alt_hosts,
-            )
-        except OpenSearchHttpError as e:
-            logger.error("Could not create a new snapshot: %s", e)
-            raise OpenSearchCreateBackupError("Backup request failed with: %s" % str(e))
+        snapshot_id = self.opensearch_client.create_snapshot(
+            object_storage_type=object_storage_type,
+            alt_hosts=self.alt_hosts,
+        )
+        return snapshot_id
 
+    def get_snapshot_status(self, snapshot_id: str) -> str:
+        """Get the status of a snapshot by its ID.
+
+        Args:
+            snapshot_id (str): The ID of the snapshot to check.
+
+        Returns:
+            str: The status of the snapshot.
+        Raises:
+            OpenSearchCreateBackupError: If the snapshot status cannot be determined.
+        """
+        object_storage_type = self.state.storage_type
         # Fetch the new snapshot for sanity check
-        try:
-            snapshot = self.opensearch_client.get_snapshot(
-                object_storage_type=object_storage_type,
-                snapshot_id=snapshot_id,
-                alt_hosts=self.alt_hosts,
-            )
-            status = str(snapshot.get("state", "unknown")).lower()
-            return {"backup-id": snapshot_id, "status": status}
-        except OpenSearchHttpError as e:
-            logger.error("Unknown state for snapshot %s: %s", snapshot_id, e)
-            raise OpenSearchCreateBackupError(
-                "Unknown state for backup %s: %s" % (snapshot_id, str(e))
-            )
+        snapshot = self.opensearch_client.get_snapshot(
+            object_storage_type=object_storage_type,
+            snapshot_id=snapshot_id,
+            alt_hosts=self.alt_hosts,
+        )
+        status = str(snapshot.get("state", "unknown")).lower()
+        return status
 
-    def list_snapshots(self, output_format: str) -> dict[str, str]:
+    def list_snapshots(self) -> dict[Any, dict[str, Any]]:
         """List snapshots in the repository for the given storage type.
 
         Args:
             output_format (str): The format to return the snapshot list in supported formats.
 
         Returns:
-            dict[str, str]: The result containing the list of snapshots in the requested format.
+            dict: A dictionary of snapshots with their details.
 
         Raises:
             OpenSearchListBackupsError: If the snapshot listing fails.
         """
-        try:
-            object_storage_type = self.state.storage_type
-            snapshots = self.opensearch_client.list_snapshots(
-                object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
-            )
-        except OpenSearchHttpError as e:
-            logger.error("Could not fetch the list of snapshots: %s", e)
-            raise OpenSearchListBackupsError("Backup request failed with: %s" % str(e))
+        object_storage_type = self.state.storage_type
+        return self.opensearch_client.list_snapshots(
+            object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
+        )
 
-        if output_format == "json":
-            return {"backups": json.dumps(snapshots)}
-
-        # Format table output
-        table_output = []
-
-        header = "{:<20s} | {:s}".format("backup-id", "backup-status")
-        table_output.append(header)
-        table_output.append("-" * len(header))
-
-        for _id, _snapshot in snapshots.items():
-            line = "{:<20s} | {:s}".format(_id, _snapshot["state"])
-            table_output.append(line)
-
-        return {"backups": "\n".join(table_output)}
 
     def restore_snapshot(self, snapshot_id: str) -> None:
         """Restore a snapshot from the repository for the given storage type.
@@ -419,20 +400,7 @@ class BackupManager(BaseManager):
             )
 
         # close indices that were snapshotted if they still exist, so they can be restored
-        try:
-            closed_indices, indices_failed_to_close = (
-                self.opensearch_client.close_snapshot_indices_open_in_cluster(
-                    snapshot, alt_hosts=self.alt_hosts
-                )
-            )
-            if indices_failed_to_close:
-                raise OpenSearchRestoreBackupError(
-                    "Failed to close %d open indices. Check logs for details."
-                    % len(indices_failed_to_close)
-                )
-        except OpenSearchHttpError as e:
-            raise OpenSearchRestoreBackupError("Failed to close open indices. Error: %s." % str(e))
-
+        self.close_snapshot_indices(snapshot_id)
         # start the restore
         logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
@@ -457,6 +425,29 @@ class BackupManager(BaseManager):
             raise OpenSearchRestoreBackupError(
                 f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
             )
+
+    def close_snapshot_indices(self, snapshot: str) -> None:
+        """Close the given indices.
+        
+        Args:
+            snapshot (str): The snapshot containing the indices to close.
+
+        Raises:
+            OpenSearchRestoreBackupError: If closing the indices fails.
+        """
+        try:
+            closed_indices, indices_failed_to_close = (
+                self.opensearch_client.close_snapshot_indices_open_in_cluster(
+                    snapshot, alt_hosts=self.alt_hosts
+                )
+            )
+            if indices_failed_to_close:
+                raise OpenSearchRestoreBackupError(
+                    "Failed to close %d open indices. Check logs for details."
+                    % len(indices_failed_to_close)
+                )
+        except OpenSearchHttpError as e:
+            raise OpenSearchRestoreBackupError("Failed to close open indices. Error: %s." % str(e))
 
     def verify_stored_credentials(
         self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
