@@ -113,14 +113,6 @@ class OpenSearchBackupCredentialsIncorrectError(OpenSearchError):
     """Exception thrown when the backup credentials provided are incorrect."""
 
 
-class OpenSearchCreateBackupError(OpenSearchError):
-    """Exception thrown when the backup creation fails."""
-
-
-class OpenSearchListBackupsError(OpenSearchError):
-    """Exception thrown when listing backups fails."""
-
-
 class OpenSearchRestoreBackupError(OpenSearchError):
     """Exception thrown when restoring a backup fails."""
 

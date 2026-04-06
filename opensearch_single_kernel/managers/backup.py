@@ -18,9 +18,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
-    OpenSearchCreateBackupError,
     OpenSearchHttpError,
-    OpenSearchListBackupsError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
 )
@@ -333,6 +331,7 @@ class BackupManager(BaseManager):
 
         Returns:
             str: The status of the snapshot.
+
         Raises:
             OpenSearchCreateBackupError: If the snapshot status cannot be determined.
         """

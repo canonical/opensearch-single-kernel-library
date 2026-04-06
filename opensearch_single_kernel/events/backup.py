@@ -21,11 +21,9 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
     OpenSearchCmdError,
-    OpenSearchCreateBackupError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
-    OpenSearchListBackupsError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
 )
@@ -379,8 +377,7 @@ class BackupEventsHandler(Object):
 
         # Fetch the new snapshot for sanity check
         try:
-            snapshot = self.charm.backup_manager.get_snapshot_status(snapshot_id)
-            status = str(snapshot.get("state", "unknown")).lower()
+            status = self.charm.backup_manager.get_snapshot_status(snapshot_id)
             event.set_results({"backup-id": snapshot_id, "status": status})
         except OpenSearchHttpError as e:
             logger.error("Unknown state for snapshot %s: %s", snapshot_id, e)
@@ -408,7 +405,7 @@ class BackupEventsHandler(Object):
             event.fail("Failed: invalid output format, must be either 'json' or 'table'.")
             return
         try:
-            snapshots = self.charm.backup_manager.list_snapshots(output_format)
+            snapshots = self.charm.backup_manager.list_snapshots()
         except OpenSearchHttpError as e:
             logger.error("Could not fetch the list of snapshots: %s", e)
             event.fail(f"Backup request failed with: {str(e)}")

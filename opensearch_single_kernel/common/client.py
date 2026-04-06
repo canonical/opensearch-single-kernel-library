@@ -21,7 +21,6 @@ from tenacity import (
     wait_exponential,
     wait_fixed,
 )
-from tenacity.retry import RetryBaseT
 from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.constants import (
