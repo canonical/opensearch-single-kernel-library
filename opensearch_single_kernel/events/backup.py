@@ -580,7 +580,7 @@ class BackupEventsHandler(Object):
         if object_storage_type == ObjectStorageType.GCS:
             with self.charm.workload.temp_file(dir=self.charm.workload.paths.conf) as temp_path:
                 self.charm.backup_manager.write_gcs_service_account_json(
-                    content=object_storage_config.gcs.credentials.secret_key, path=temp_path
+                    secret_key=object_storage_config.gcs.credentials.secret_key, path=temp_path
                 )
                 self.charm.keystore_manager.put_object_storage_credentials(
                     object_storage_type, object_storage_config, service_account_path=temp_path
