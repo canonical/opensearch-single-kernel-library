@@ -382,7 +382,7 @@ class BackupManager(BaseManager):
             )
 
         # close indices that were snapshotted if they still exist, so they can be restored
-        self.close_snapshot_indices(snapshot_id)
+        self.close_snapshot_indices(snapshot)
         # start the restore
         logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
@@ -408,11 +408,11 @@ class BackupManager(BaseManager):
                 f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
             )
 
-    def close_snapshot_indices(self, snapshot: str) -> None:
+    def close_snapshot_indices(self, snapshot: dict) -> None:
         """Close the given indices.
 
         Args:
-            snapshot (str): The snapshot containing the indices to close.
+            snapshot (dict): The snapshot containing the indices to close.
 
         Raises:
             OpenSearchRestoreBackupError: If closing the indices fails.

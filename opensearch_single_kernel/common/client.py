@@ -854,41 +854,39 @@ class OpenSearchClient:
         )
         return "acknowledged" in response
 
-    def get_node_id(self, unit_name: str) -> str | None:
-        """Get the OpenSearch node id corresponding to the unit.
+    def get_current_node(self, unit_name: str, unit_id: int, alt_hosts: list[str] | None) -> Node | None:
+        """Get the current OpenSearch node information.
 
         Args:
             unit_name: The name of opensearch unit.
+            unit_id: The id of the unit.
+            alt_hosts: (Optional[List[str]]): List of alternative hosts.
 
-        Returns:
-            node_id (Optional[str]): The opensearch unit id.
+        Returns: 
+            node (Node | None): Current opensearch node information. 
         """
+
         nodes = self.request(
             "GET",
             "/_nodes",
             retries=3,
+            alt_hosts=alt_hosts,
         ).get("nodes")
 
-        for n_id, node in nodes.items():
+        for node in nodes.values():
             if node["name"] == unit_name:
-                return n_id
+                return Node(
+                    name=node["name"],
+                    roles=node["roles"],
+                    ip=node["ip"],
+                    app=App(id=node.get("attributes", {}).get("app_id")),
+                    unit_number=unit_id,
+                    temperature=node.get("attributes", {}).get("temp"),
+                )
         return None
 
-    def get_current_node(self, node_id: str, unit_id: int, alt_hosts: list[str] | None) -> Node:
-        """Get the current OpenSearch node information."""
-        nodes = self.request("GET", f"/_nodes/{node_id}", retries=3, alt_hosts=alt_hosts)
 
-        current_node = nodes["nodes"][node_id]
-        return Node(
-            name=current_node["name"],
-            roles=current_node["roles"],
-            ip=current_node["ip"],
-            app=App(id=current_node["attributes"]["app_id"]),
-            unit_number=unit_id,
-            temperature=current_node.get("attributes", {}).get("temp"),
-        )
-
-    def get_roles_by_unit_name(self, unit_name: str, alt_hosts: list[str] | None) -> list[str]:
+    def get_roles_by_unit_name(self, unit_name: str, unit_number: int, alt_hosts: list[str] | None) -> list[str]:
         """Get the list of the roles assigned to this node.
 
         Args:
@@ -898,17 +896,8 @@ class OpenSearchClient:
         Returns:
             roles (List[str]): List of opensearch unit roles.
         """
-        node_id = self.get_node_id(unit_name)
-        if not node_id:
-            return []
-        nodes = self.request(
-            "GET",
-            f"/_nodes/{node_id}",
-            retries=3,
-            wait_strategy=wait_exponential(min=2),
-            alt_hosts=alt_hosts,
-        )
-        return nodes["nodes"][node_id]["roles"]
+        node = self.get_current_node(unit_name, unit_id=unit_number, alt_hosts=alt_hosts)
+        return node.roles if node else []
 
     def get_shards(
         self,
