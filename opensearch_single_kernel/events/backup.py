@@ -406,25 +406,25 @@ class BackupEventsHandler(Object):
             return
         try:
             snapshots = self.charm.backup_manager.list_snapshots()
+            if output_format == "json":
+                event.set_results({"backups": json.dumps(snapshots)})
+                return
+
+            # Format table output
+            table_output = []
+
+            header = "{:<20s} | {:s}".format("backup-id", "backup-status")
+            table_output.append(header)
+            table_output.append("-" * len(header))
+
+            for _id, _snapshot in snapshots.items():
+                line = "{:<20s} | {:s}".format(_id, _snapshot["state"])
+                table_output.append(line)
+
+            event.set_results({"backups": "\n".join(table_output)})
         except OpenSearchHttpError as e:
             logger.error("Could not fetch the list of snapshots: %s", e)
             event.fail(f"Backup request failed with: {str(e)}")
-
-        if output_format == "json":
-            return {"backups": json.dumps(snapshots)}
-
-        # Format table output
-        table_output = []
-
-        header = "{:<20s} | {:s}".format("backup-id", "backup-status")
-        table_output.append(header)
-        table_output.append("-" * len(header))
-
-        for _id, _snapshot in snapshots.items():
-            line = "{:<20s} | {:s}".format(_id, _snapshot["state"])
-            table_output.append(line)
-
-        event.set_results({"backups": "\n".join(table_output)})
 
     def _on_restore_action(self, event: ActionEvent) -> None:  # noqa C901
         """Handler for the restore action."""
@@ -577,11 +577,16 @@ class BackupEventsHandler(Object):
         self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
     ) -> None:
         """Update the stored credentials."""
-        service_account_path = None
         if object_storage_type == ObjectStorageType.GCS:
-            service_account_path = self.charm.backup_manager.write_gcs_service_account_json(
-                secret_key=object_storage_config.gcs.credentials.secret_key
-            )
+            with self.charm.workload.temp_file(dir=self.charm.workload.paths.conf) as temp_path:
+                self.charm.backup_manager.write_gcs_service_account_json(
+                    content=object_storage_config.gcs.credentials.secret_key, path=temp_path
+                )
+                self.charm.keystore_manager.put_object_storage_credentials(
+                    object_storage_type, object_storage_config, service_account_path=temp_path
+                )
+            return
+
         if object_storage_type == ObjectStorageType.S3:
             if object_storage_config.s3.tls_ca_chain:
                 if not self.charm.backup_manager.is_custom_s3_ca_stored(
@@ -592,9 +597,8 @@ class BackupEventsHandler(Object):
                     logger.info("S3 CA stored/updated.")
             else:
                 self.charm.backup_manager.remove_s3_ca()
-
         self.charm.keystore_manager.put_object_storage_credentials(
-            object_storage_type, object_storage_config, service_account_path
+            object_storage_type, object_storage_config
         )
 
     def _remove_credentials(self, object_storage_type: ObjectStorageType) -> bool:
@@ -608,11 +612,4 @@ class BackupEventsHandler(Object):
                 e,
             )
             return False
-        try:
-            # If the storage type is gcs, also remove the service account json file
-            if object_storage_type == ObjectStorageType.GCS:
-                self.charm.backup_manager.remove_gcs_service_account_json()
-        except OpenSearchFileOperationError as e:
-            logger.warning("Failed to remove GCS service account JSON file during cleanup: %s", e)
-            # Not critical, continue with cleanup
         return True

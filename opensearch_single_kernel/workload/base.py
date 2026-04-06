@@ -133,11 +133,6 @@ class Paths:
         """Returns path to the Opensearch seed hosts config file."""
         return self.conf / "unicast_hosts.txt"
 
-    @property
-    def gcs_service_account_json(self) -> PathProtocol:
-        """Return path to the gcs service account json file."""
-        return self.snap_common / "home/snap_daemon/gcs_service_account.json"
-
 
 # --- Base Workload
 class BaseWorkload(ABC):

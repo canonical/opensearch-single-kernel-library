@@ -218,14 +218,13 @@ class BackupManager(BaseManager):
     def write_gcs_service_account_json(
         self,
         secret_key: str,
+        path: PathProtocol,
     ) -> PathProtocol:
         """Write GCS service account JSON (from relation secret_key) to a file.
 
         Args:
             secret_key: JSON string content of the service account.
-
-        Returns:
-            Path to the written file.
+            path: Path to write the service account JSON file to.
 
         Raises:
             ValueError: if secret_key is empty or not valid JSON.
@@ -241,18 +240,7 @@ class BackupManager(BaseManager):
         except json.JSONDecodeError as e:
             raise ValueError("GCS secret_key is not valid JSON.") from e
 
-        self.workload.write_text(content, self.workload.paths.gcs_service_account_json)
-        return self.workload.paths.gcs_service_account_json
-
-    def remove_gcs_service_account_json(
-        self,
-    ) -> None:
-        """Remove the GCS service account JSON file.
-
-        Raises:
-            OSError: if deletion fails for other reasons.
-        """
-        self.workload.unlink(self.workload.paths.gcs_service_account_json, missing_ok=True)
+        self.workload.write_text(content, path)
 
     def ensure_repository(
         self, storage_type: ObjectStorageType, storage_cfg: ObjectStorageConfig
