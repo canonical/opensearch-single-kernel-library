@@ -321,7 +321,7 @@ class BackupManager(BaseManager):
             str: The status of the snapshot.
 
         Raises:
-            OpenSearchCreateBackupError: If the snapshot status cannot be determined.
+            OpenSearchHttpError: If the snapshot status cannot be fetched.
         """
         object_storage_type = self.state.storage_type
         # Fetch the new snapshot for sanity check

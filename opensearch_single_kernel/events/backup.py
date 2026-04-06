@@ -356,13 +356,7 @@ class BackupEventsHandler(Object):
 
     def _on_create_backup_action(self, event: ActionEvent) -> None:
         """Handler for create backup action event."""
-        if not (object_storage_type := self.charm.state.storage_type):
-            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
-            logger.warning("Missing object storage type for create backup action.")
-            event.fail("Missing relation with an object storage integrator.")
-            return
-
-        if error_message := self._action_missing_pre_requisites(object_storage_type):
+        if error_message := self._action_missing_pre_requisites():
             logger.warning("Pre-requisites not met for creating backup: %s", error_message)
             event.fail(error_message)
             return
@@ -387,15 +381,7 @@ class BackupEventsHandler(Object):
 
     def _on_list_backups_action(self, event: ActionEvent) -> None:
         """Handler for list backups changes."""
-        object_storage_type = self.charm.state.storage_type
-
-        if not object_storage_type:
-            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
-            event.fail("Missing relation with an object storage integrator.")
-
-        if error_message := self._action_missing_pre_requisites(
-            object_storage_type, report_running_operations=False
-        ):
+        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
             logger.warning("Pre-requisites not met for listing backups: %s", error_message)
             event.fail(error_message)
             return
@@ -429,16 +415,8 @@ class BackupEventsHandler(Object):
     def _on_restore_action(self, event: ActionEvent) -> None:  # noqa C901
         """Handler for the restore action."""
         snapshot_id = event.params.get("backup-id")
-        object_storage_type = self.charm.state.storage_type
 
-        if not object_storage_type:
-            self.charm.status.set(CharmStatuses.BACKUP_RELATION_DATA_INCOMPLETE, app=True)
-            event.fail("Missing relation with an object storage integrator.")
-            return
-
-        if error_message := self._action_missing_pre_requisites(
-            object_storage_type, report_running_operations=False
-        ):
+        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
             logger.warning("Pre-requisites not met for restoring backup: %s", error_message)
             event.fail(error_message)
             return
@@ -454,7 +432,8 @@ class BackupEventsHandler(Object):
             # Once restore finishes successfully , we wait for cluster health
             if (
                 self.charm.status.apply_health(
-                    wait_for_green_first=True, app=self.charm.unit.is_leader()
+                    wait_for_green_first=True,
+                    app=True,
                 )
                 == "green"
             ):
@@ -472,7 +451,6 @@ class BackupEventsHandler(Object):
 
     def _action_missing_pre_requisites(  # noqa C901
         self,
-        object_storage_type: ObjectStorageType,
         report_running_operations: bool = True,
     ) -> str | None:
         """Compute the missing prerequisites for running a snapshot/restore action.
@@ -483,6 +461,10 @@ class BackupEventsHandler(Object):
         Returns:
             A string representing the missing prerequisites.
         """
+        if not (object_storage_type := self.charm.state.storage_type):
+            logger.warning("Missing object storage type for create backup action.")
+            return "Missing relation with an object storage integrator."
+
         if not self.charm.unit.is_leader():
             return "Backup/Restore related actions must be run on the juju leader unit."
 
@@ -578,7 +560,9 @@ class BackupEventsHandler(Object):
     ) -> None:
         """Update the stored credentials."""
         if object_storage_type == ObjectStorageType.GCS:
-            with self.charm.workload.temp_file(chown="snap_daemon:root",dir=self.charm.workload.paths.conf) as temp_path:
+            with self.charm.workload.temp_file(
+                chown="snap_daemon:root", dir=self.charm.workload.paths.conf
+            ) as temp_path:
                 self.charm.backup_manager.write_gcs_service_account_json(
                     secret_key=object_storage_config.gcs.credentials.secret_key, path=temp_path
                 )
