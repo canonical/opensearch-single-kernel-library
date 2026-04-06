@@ -76,6 +76,7 @@ class VMWorkload(BaseWorkload):
         encoding: str | None = None,
         dir: PathProtocol | None = None,
         delete: bool = True,
+        chown: str | None = None,
         *,
         errors: str | None = None,
         suffix: str | None = None,
@@ -84,6 +85,9 @@ class VMWorkload(BaseWorkload):
         f = tempfile.NamedTemporaryFile(
             mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
         )
+        if chown is not None:
+            command = "sudo chown {} {}".format(chown, f.name)
+            self.run_cmd(command)
         file_path: PathProtocol = self.root / f.name
         try:
             if data:

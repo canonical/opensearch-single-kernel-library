@@ -578,12 +578,12 @@ class BackupEventsHandler(Object):
     ) -> None:
         """Update the stored credentials."""
         if object_storage_type == ObjectStorageType.GCS:
-            with self.charm.workload.temp_file(dir=self.charm.workload.paths.conf) as temp_path:
+            with self.charm.workload.temp_file(chown="snap_daemon:root",dir=self.charm.workload.paths.conf) as temp_path:
                 self.charm.backup_manager.write_gcs_service_account_json(
                     secret_key=object_storage_config.gcs.credentials.secret_key, path=temp_path
                 )
                 self.charm.keystore_manager.put_object_storage_credentials(
-                    object_storage_type, object_storage_config, service_account_path=temp_path
+                    object_storage_type, object_storage_config, gcs_file_path=temp_path
                 )
             return
 
