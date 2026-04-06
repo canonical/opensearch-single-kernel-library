@@ -4,8 +4,8 @@
 
 """Handler for OpenSearch Backup and Restore events."""
 
-import logging
 import json
+import logging
 from typing import TYPE_CHECKING
 
 from ops import ActionEvent, Object
@@ -117,7 +117,7 @@ class BackupEventsHandler(Object):
         # block non-main orchestrators only when they are in a multi-app topology.
         # TODO: Handle once large deployments are implemented
 
-        if not (object_storage_type:= self.charm.state.storage_type):
+        if not (object_storage_type := self.charm.state.storage_type):
             logger.warning("No object storage type could be determined.")
             return
 
@@ -266,7 +266,9 @@ class BackupEventsHandler(Object):
             event.defer()
             return None
 
-        if self.charm.unit.is_leader() and not self.charm.backup_manager.remove_repository(object_storage_type):
+        if self.charm.unit.is_leader() and not self.charm.backup_manager.remove_repository(
+            object_storage_type
+        ):
             logger.warning(
                 "Failed to remove snapshot repository for %s during credentials cleanup.",
                 object_storage_type,
@@ -297,7 +299,7 @@ class BackupEventsHandler(Object):
         self, event: VerifyBackupCredentialsEvent
     ) -> None:
         """Verify that stored backup credentials are still valid."""
-        if not (object_storage_type:= self.charm.state.storage_type):
+        if not (object_storage_type := self.charm.state.storage_type):
             logger.warning(
                 "No object storage type could be determined for backup credentials verification."
             )
@@ -372,7 +374,8 @@ class BackupEventsHandler(Object):
             snapshot_id = self.charm.backup_manager.create_snapshot()
         except OpenSearchHttpError as e:
             logger.error("Failed to create backup: %s", e)
-            event.fail(f"Backup request failed with: {str(e)}") 
+            event.fail(f"Backup request failed with: {str(e)}")
+            return
 
         # Fetch the new snapshot for sanity check
         try:
@@ -452,9 +455,12 @@ class BackupEventsHandler(Object):
                 event.fail(str(e))
                 return
             # Once restore finishes successfully , we wait for cluster health
-            if self.charm.status.apply_health(
-                wait_for_green_first=True, app=self.charm.unit.is_leader()
-            ) == "green":
+            if (
+                self.charm.status.apply_health(
+                    wait_for_green_first=True, app=self.charm.unit.is_leader()
+                )
+                == "green"
+            ):
                 event.set_results({"restored-backup-id": snapshot_id, "status": "success"})
             else:
                 event.set_results(
@@ -594,9 +600,7 @@ class BackupEventsHandler(Object):
             object_storage_type, object_storage_config, service_account_path
         )
 
-    def _remove_credentials(
-        self, object_storage_type: ObjectStorageType
-    ) -> bool:
+    def _remove_credentials(self, object_storage_type: ObjectStorageType) -> bool:
         """Cleanup stored credentials and related config for a given object storage type."""
         try:
             self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type)

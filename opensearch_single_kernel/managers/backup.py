@@ -5,10 +5,10 @@
 """OpenSearch Backup manager."""
 import json
 import logging
+from typing import Any
 
 from charmlibs.pathops import PathProtocol
 from pydantic import ValidationError
-from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     S3_CA_ALIAS,
@@ -86,11 +86,7 @@ class BackupManager(BaseManager):
             rel_data = data_model.from_relation(connection_info) if connection_info else None
         except ValidationError as e:
             raise OpenSearchObjectStorageConfigValidationError(e) from e
-        return (
-            ObjectStorageConfig(**{object_storage_type.value: rel_data})
-            if rel_data
-            else None
-        )
+        return ObjectStorageConfig(**{object_storage_type.value: rel_data}) if rel_data else None
 
     def validate_storage_config(
         self, config: ObjectStorageConfig, storage_type: ObjectStorageType
@@ -139,7 +135,7 @@ class BackupManager(BaseManager):
         Returns:
             True if the given CA chain is stored in the stored cacerts, else False
         """
-        if not (current_chain:= self.get_s3_chain_from_cacerts()):
+        if not (current_chain := self.get_s3_chain_from_cacerts()):
             # Nothing stored at all: definitely no custom S3 CA
             return False
 
@@ -367,7 +363,6 @@ class BackupManager(BaseManager):
             object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
         )
 
-
     def restore_snapshot(self, snapshot_id: str) -> None:
         """Restore a snapshot from the repository for the given storage type.
 
@@ -428,7 +423,7 @@ class BackupManager(BaseManager):
 
     def close_snapshot_indices(self, snapshot: str) -> None:
         """Close the given indices.
-        
+
         Args:
             snapshot (str): The snapshot containing the indices to close.
 

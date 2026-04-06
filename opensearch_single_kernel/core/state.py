@@ -94,7 +94,7 @@ class OpenSearchServer(RelationState):
     @property
     def profile(self) -> OpenSearchProfile | None:
         """Current profile of the unit"""
-        if profile_str := self.relation.data[self.unit].get(PERFORMANCE_PROFILE, None):
+        if profile_str := self.relation_data.get(PERFORMANCE_PROFILE, None):
             return (
                 ProductionProfile()
                 if PerformanceType(profile_str) == PerformanceType.PRODUCTION
@@ -193,7 +193,9 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation.data[self.unit].get("allocation-exclusions-to-delete", "").split(","),
+                self.relation.data[self.unit]
+                .get("allocation-exclusions-to-delete", "")
+                .split(","),
             )
         )
 
