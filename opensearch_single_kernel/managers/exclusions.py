@@ -273,7 +273,9 @@ class NodesExclusionsManager(BaseManager):
         unit_id = self.state.server.unit_id
         node = None
         try:
-            node = self.opensearch_client.get_current_node(self.state.unit_name, unit_id, self.alt_hosts)
+            node = self.opensearch_client.get_current_node(
+                self.state.unit_name, unit_id, self.alt_hosts
+            )
             if not node:
                 node = self.state.node_config
         except OpenSearchHttpError:

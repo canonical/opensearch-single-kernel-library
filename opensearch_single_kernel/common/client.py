@@ -854,7 +854,9 @@ class OpenSearchClient:
         )
         return "acknowledged" in response
 
-    def get_current_node(self, unit_name: str, unit_id: int, alt_hosts: list[str] | None) -> Node | None:
+    def get_current_node(
+        self, unit_name: str, unit_id: int, alt_hosts: list[str] | None
+    ) -> Node | None:
         """Get the current OpenSearch node information.
 
         Args:
@@ -862,10 +864,9 @@ class OpenSearchClient:
             unit_id: The id of the unit.
             alt_hosts: (Optional[List[str]]): List of alternative hosts.
 
-        Returns: 
-            node (Node | None): Current opensearch node information. 
+        Returns:
+            node (Node | None): Current opensearch node information.
         """
-
         nodes = self.request(
             "GET",
             "/_nodes",
@@ -885,8 +886,9 @@ class OpenSearchClient:
                 )
         return None
 
-
-    def get_roles_by_unit_name(self, unit_name: str, unit_number: int, alt_hosts: list[str] | None) -> list[str]:
+    def get_roles_by_unit_name(
+        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None
+    ) -> list[str]:
         """Get the list of the roles assigned to this node.
 
         Args:
