@@ -16,8 +16,9 @@ METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.ya
 
 
 @pytest.fixture
-def harness(substrate: Substrate, opensearch_base_path: Path) -> Harness:
+def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
     if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )

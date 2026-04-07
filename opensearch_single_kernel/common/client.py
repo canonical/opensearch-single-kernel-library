@@ -952,7 +952,7 @@ class OpenSearchClient:
         try:
             self.request(
                 "PUT",
-                endpoint=f"/{OPENSEARCH_LOCK_INDEX}?wait_for_active_shards=all",
+                endpoint=f"/{OPENSEARCH_LOCK_INDEX}?wait_for_active_shards=all&refresh=true",
                 host=host,
                 alt_hosts=alt_hosts,
                 retries=3,
@@ -969,7 +969,7 @@ class OpenSearchClient:
                 # Index already created
                 return True
             else:
-                logger.exception("Error creating OpenSearch lock index")
+                logger.error("Could not create OpenSearch lock index: %s", e)
                 return False
 
     def delete_lock_document(self, host: str, alt_hosts: list[str] | None) -> None:
