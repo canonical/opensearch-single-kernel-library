@@ -76,7 +76,7 @@ class PluginEventsHandler(Object):
                     self.charm.keystore_manager.remove_entries(items)
 
         # reload keystore
-        self.charm.keystore_events.reload_event.emit()
+        self.charm.reload_keystore_event.emit()
 
         for label in removed:
             self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)

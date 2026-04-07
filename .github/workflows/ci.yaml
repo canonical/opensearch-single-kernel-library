@@ -97,7 +97,7 @@ jobs:
           #- k8s
     name: Unit test charm (${{ matrix.env }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -148,7 +148,8 @@ jobs:
           sudo iptables -F FORWARD
           sudo iptables -P FORWARD ACCEPT
 
-          sudo snap install charmcraft --classic
+          # Remove this once this is fixed: https://github.com/canonical/charmcraft/issues/2620
+          sudo snap install charmcraft --classic --revision=7517
           pipx install charmcraftcache
       - name: Set up python environment
         uses: actions/setup-python@v5
