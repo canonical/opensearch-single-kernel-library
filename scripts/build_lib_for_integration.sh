@@ -46,7 +46,7 @@ fi
 pack_charm() {
     # Store arguments in an array to safely handle spaces or empty strings
     local pack_args=("-v")
-    
+
     # Inject platform argument if one was provided
     if [ -n "$PLATFORM" ]; then
         pack_args+=("--platform" "$PLATFORM")
@@ -75,7 +75,7 @@ for directory in "${TEST_CHARMS[@]}"; do
         directory_lib_path="${directory}/${LIB_PATH}"
         rm -rf "$directory_lib_path"
         mkdir "$directory_lib_path"
-        
+
         echo "copying over libs from single kernel charm"
         cp -r "${LIB_PATH}/" "$directory_lib_path/"
         cp "pyproject.toml" "$directory_lib_path"
