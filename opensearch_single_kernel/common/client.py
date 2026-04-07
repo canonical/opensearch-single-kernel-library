@@ -33,7 +33,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
-from opensearch_single_kernel.utils.cloud_storage import (
+from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     repository_type,
 )
@@ -568,8 +568,7 @@ class OpenSearchClient:
                     "status": "OK",
                     "response": "role does not exist, and therefore has not been removed",
                 }
-            else:
-                raise e
+            raise e
 
         if resp.get("status") != "OK":
             raise OpenSearchHttpError(f"removing role {role_name} failed")
@@ -629,8 +628,7 @@ class OpenSearchClient:
                     "status": "OK",
                     "response": "user does not exist, and therefore has not been removed",
                 }
-            else:
-                raise e
+            raise e
 
         logger.debug(resp)
         if resp.get("status") != "OK":
@@ -712,7 +710,7 @@ class OpenSearchClient:
         if resp.get("status") != "OK":
             raise OpenSearchHttpError(f"removing role mapping {role} failed")
 
-    def update_user_password(self, username: str, hashed_pwd: str):
+    def patch_user_password(self, username: str, hashed_pwd: str):
         """Change user hashed password."""
         resp = self.request(
             "PATCH",

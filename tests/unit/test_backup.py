@@ -20,7 +20,7 @@ from opensearch_single_kernel.common.constants import (
     ObjectStorageType,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.utils import cloud_storage
+from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 
@@ -42,7 +42,7 @@ def _mock_backup(
         return_value=True,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.backup.BackupManager.alt_hosts",
+        "opensearch_single_kernel.managers.backup.SnapshotsManager.alt_hosts",
         new_callable=PropertyMock,
         return_value=[],
     )
@@ -302,7 +302,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
     st = testing.State(leader=True, relations=rels)
 
     mocker.patch(
-        "opensearch_single_kernel.events.backup.BackupEventsHandler._action_missing_pre_requisites",
+        "opensearch_single_kernel.events.backup.SnapshotsEventsHandler._action_missing_pre_requisites",
         return_value="cluster not ready",
     )
 
@@ -812,7 +812,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_but_no_aws_endpoint_then_doe
     bucket.wait_until_exists = Mock()
 
     get_bucket = Mock(return_value=bucket)
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", get_bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", get_bucket)
 
     params = {
         "access-key": "a",
@@ -823,7 +823,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_but_no_aws_endpoint_then_doe
     }
 
     # When
-    cloud_storage.create_s3_bucket(params, verify=True)
+    object_storage.create_s3_bucket(params, verify=True)
 
     # Assert
     get_bucket.assert_called_once()
@@ -839,7 +839,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_with_aws_endpoint_then_call_
     bucket.wait_until_exists = Mock()
 
     get_bucket = Mock(return_value=bucket)
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", get_bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", get_bucket)
 
     params = {
         "access-key": "a",
@@ -849,7 +849,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_with_aws_endpoint_then_call_
         "region": "eu-north-1",
     }
     # When
-    cloud_storage.create_s3_bucket(params, verify=True)
+    object_storage.create_s3_bucket(params, verify=True)
 
     # Assert
     get_bucket.assert_called_once()
@@ -866,7 +866,7 @@ def test_create_s3_bucket_when_region_us_east_1_then_calls_create_without_locati
     bucket = Mock()
     bucket.wait_until_exists = Mock()
 
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
 
     params = {
         "access-key": "a",
@@ -876,7 +876,7 @@ def test_create_s3_bucket_when_region_us_east_1_then_calls_create_without_locati
         "region": "us-east-1",
     }
     # When
-    cloud_storage.create_s3_bucket(params, verify=True)
+    object_storage.create_s3_bucket(params, verify=True)
     # Assert
     bucket.create.assert_called_once_with()
     bucket.wait_until_exists.assert_called_once()
@@ -892,7 +892,7 @@ def test_create_s3_bucket_when_bucket_already_exists_then_it_does_not_raise(
     bucket = Mock()
     bucket.create.side_effect = _client_error(code)
 
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
 
     params = {
         "access-key": "a",
@@ -902,7 +902,7 @@ def test_create_s3_bucket_when_bucket_already_exists_then_it_does_not_raise(
         "region": "us-east-1",
     }
     # When
-    cloud_storage.create_s3_bucket(params, verify=True)
+    object_storage.create_s3_bucket(params, verify=True)
 
 
 def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
@@ -912,7 +912,7 @@ def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
     bucket = Mock()
     bucket.create.side_effect = _client_error("AccessDenied", status=403)
 
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
 
     params = {
         "access-key": "a",
@@ -923,7 +923,7 @@ def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
     }
     # When
     with pytest.raises(ClientError):
-        cloud_storage.create_s3_bucket(params, verify=True)
+        object_storage.create_s3_bucket(params, verify=True)
 
 
 def test_verify_s3_credentials_when_bucket_missing_then_triggers_create_and_probe(
@@ -952,12 +952,12 @@ def test_verify_s3_credentials_when_bucket_missing_then_triggers_create_and_prob
     bucket.put_object = Mock()
     bucket.Object.return_value.delete = Mock()
 
-    monkeypatch.setattr(cloud_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
 
     mock_create = Mock(return_value=None)
-    monkeypatch.setattr(cloud_storage, "create_s3_bucket", mock_create)
+    monkeypatch.setattr(object_storage, "create_s3_bucket", mock_create)
     # When
-    ok = cloud_storage.verify_s3_credentials(cfg)
+    ok = object_storage.verify_s3_credentials(cfg)
     # Assert
     assert ok is True
 
@@ -971,7 +971,7 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
 ):
     # Given
     client = Mock()
-    monkeypatch.setattr(cloud_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
 
     params = {
         "storage-account": "acc",
@@ -980,7 +980,7 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
         "account-url": "https://acc.blob.core.windows.net",
     }
     # When
-    cloud_storage.create_azure_container(params)
+    object_storage.create_azure_container(params)
     # Assert
     client.create_container.assert_called_once()
 
@@ -991,7 +991,7 @@ def test_create_azure_container_when_container_exists_and_we_run_create_containe
     # Given
     client = Mock()
     client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(cloud_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
 
     params = {
         "storage-account": "acc",
@@ -1001,7 +1001,7 @@ def test_create_azure_container_when_container_exists_and_we_run_create_containe
     }
     # When/Assert
     with pytest.raises(AzureError):
-        cloud_storage.create_azure_container(params)
+        object_storage.create_azure_container(params)
 
 
 def test_create_azure_container_when_create_container_then_other_azure_error_raises(
@@ -1009,7 +1009,7 @@ def test_create_azure_container_when_create_container_then_other_azure_error_rai
 ):
     client = Mock()
     client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(cloud_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
 
     params = {
         "storage-account": "acc",
@@ -1019,7 +1019,7 @@ def test_create_azure_container_when_create_container_then_other_azure_error_rai
     }
 
     with pytest.raises(AzureError):
-        cloud_storage.create_azure_container(params)
+        object_storage.create_azure_container(params)
 
 
 def test_create_azure_container_when_container_missing_then_triggers_create_and_probe(
@@ -1043,13 +1043,13 @@ def test_create_azure_container_when_container_missing_then_triggers_create_and_
     container_client.get_blob_client.return_value = blob_client
 
     monkeypatch.setattr(
-        cloud_storage, "get_azure_container_client", lambda _params: container_client
+        object_storage, "get_azure_container_client", lambda _params: container_client
     )
 
     mock_create = Mock(return_value=None)
-    monkeypatch.setattr(cloud_storage, "create_azure_container", mock_create)
+    monkeypatch.setattr(object_storage, "create_azure_container", mock_create)
     # When
-    ok = cloud_storage.verify_azure_credentials(cfg)
+    ok = object_storage.verify_azure_credentials(cfg)
     # Assert
     assert ok is True
 
@@ -1074,22 +1074,22 @@ def test_create_gcs_bucket_when_credentials_block_missing_then_return_false():
     cfg.gcs = Mock()
     cfg.gcs.credentials = None
 
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
 
 
 def test_create_gcs_bucket_when_secret_key_empty_then_return_false():
     cfg = _cfg(secret_key="")
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
 
 
 def test_create_gcs_bucket_when_bucket_name_empty_then_return_false():
     cfg = _cfg(bucket="")
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
 
 
 def test_create_gcs_bucket_when_secret_key_is_invalid_json_then_return_false():
     cfg = _cfg(secret_key="not-json")
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
 
 
 def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(monkeypatch):
@@ -1107,14 +1107,14 @@ def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_acc
     bucket.blob.return_value = blob
 
     client.bucket.return_value = bucket
-    monkeypatch.setattr(cloud_storage, "get_gcs_client", lambda _json: client)
+    monkeypatch.setattr(object_storage, "get_gcs_client", lambda _json: client)
 
     create_bucket = Mock(return_value=None)
-    monkeypatch.setattr(cloud_storage, "create_gcs_bucket", create_bucket)
+    monkeypatch.setattr(object_storage, "create_gcs_bucket", create_bucket)
 
-    monkeypatch.setattr(cloud_storage.uuid, "uuid4", lambda: Mock(hex="abc"))
+    monkeypatch.setattr(object_storage.uuid, "uuid4", lambda: Mock(hex="abc"))
 
-    ok = cloud_storage.verify_gcs_credentials(cfg)
+    ok = object_storage.verify_gcs_credentials(cfg)
     assert ok is True
 
     create_bucket.assert_called_once_with(client, bucket)
@@ -1134,12 +1134,12 @@ def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(mo
     bucket.blob.return_value = blob
 
     client.bucket.return_value = bucket
-    monkeypatch.setattr(cloud_storage, "get_gcs_client", lambda _json: client)
+    monkeypatch.setattr(object_storage, "get_gcs_client", lambda _json: client)
 
     create_bucket = Mock(return_value=None)
-    monkeypatch.setattr(cloud_storage, "create_gcs_bucket", create_bucket)
+    monkeypatch.setattr(object_storage, "create_gcs_bucket", create_bucket)
 
-    ok = cloud_storage.verify_gcs_credentials(cfg)
+    ok = object_storage.verify_gcs_credentials(cfg)
     assert ok is True
     create_bucket.assert_called_once_with(client, bucket)
 
@@ -1153,14 +1153,14 @@ def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(monkeypa
     bucket.exists.return_value = False
 
     client.bucket.return_value = bucket
-    monkeypatch.setattr(cloud_storage, "get_gcs_client", lambda _json: client)
+    monkeypatch.setattr(object_storage, "get_gcs_client", lambda _json: client)
 
     def _raise(*_a, **_k):
         raise exc
 
-    monkeypatch.setattr(cloud_storage, "create_gcs_bucket", _raise)
+    monkeypatch.setattr(object_storage, "create_gcs_bucket", _raise)
 
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
 
 
 def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeypatch):
@@ -1177,7 +1177,7 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
     blob.upload_from_string.side_effect = Forbidden("no objects.create")
 
     client.bucket.return_value = bucket
-    monkeypatch.setattr(cloud_storage, "get_gcs_client", lambda _json: client)
+    monkeypatch.setattr(object_storage, "get_gcs_client", lambda _json: client)
 
-    assert cloud_storage.verify_gcs_credentials(cfg) is False
+    assert object_storage.verify_gcs_credentials(cfg) is False
     blob.delete.assert_not_called()

@@ -2,7 +2,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""OpenSearch Backup manager."""
+"""OpenSearch Snapshots manager."""
 import json
 import logging
 from typing import Any
@@ -36,19 +36,19 @@ from opensearch_single_kernel.utils.certificates import (
     remove_ca,
     store_ca_chain,
 )
-from opensearch_single_kernel.utils.cloud_storage import (
+from opensearch_single_kernel.utils.helpers import hash_credentials
+from opensearch_single_kernel.utils.object_storage import (
     verify_azure_credentials,
     verify_gcs_credentials,
     verify_s3_credentials,
 )
-from opensearch_single_kernel.utils.helpers import hash_credentials
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
 
-class BackupManager(BaseManager):
-    """OpenSearch Backup Manager.
+class SnapshotsManager(BaseManager):
+    """OpenSearch Snapshots Manager.
 
     This manager will handle backup and restore operations, as well as backup
     credentials management.
