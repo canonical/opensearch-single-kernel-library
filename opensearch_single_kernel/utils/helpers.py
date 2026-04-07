@@ -5,6 +5,7 @@
 """A set of helpers functions."""
 
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -186,3 +187,15 @@ def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | 
     except json.JSONDecodeError as e:
         logger.error("Malformed JSON in secret %s: %s", label, e)
         return None
+
+
+def hash_credentials(credentials: dict[str, str]) -> str:
+    """Return a hash of the given credentials.
+
+    Args:
+        credentials: credentials in a dict
+
+    Returns:
+        hash of the credentials
+    """
+    return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()

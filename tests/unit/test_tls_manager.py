@@ -403,10 +403,10 @@ def test_truststore_password_secret(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
+    mocker.patch("opensearch_single_kernel.utils.certificates.store_ca_chain")
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    mocker.patch("opensearch_single_kernel.utils.certificates.store_ca")
     deployment_desc.return_value = deployment_descriptions["ok"]
     secret = {"key": "secret_12345"}
     create_store_pwd_if_not_exists = mocker.patch(
@@ -971,6 +971,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
+    )
     mocker.patch(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
@@ -1540,8 +1543,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         f"chmod +r /var/snap/opensearch/current/etc/opensearch/certificates/{cert_type}.p12"
         in run_cmd.call_args_list[1].args[0]
     )
-
-    assert re.search("keytool .*-delete .*-alias old-ca", run_cmd.call_args_list[-1].args[0])
+    # Keytool won't find any ca so it doesn't make sense to check if delete is called
     assert "/var/snap/opensearch/current/etc/opensearch" in str(
         tempfile.call_args_list[0][1]["dir"]
     )

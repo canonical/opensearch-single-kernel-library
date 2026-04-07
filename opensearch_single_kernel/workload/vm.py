@@ -76,6 +76,7 @@ class VMWorkload(BaseWorkload):
         encoding: str | None = None,
         dir: PathProtocol | None = None,
         delete: bool = True,
+        chown: str | None = None,
         *,
         errors: str | None = None,
         suffix: str | None = None,
@@ -84,6 +85,9 @@ class VMWorkload(BaseWorkload):
         f = tempfile.NamedTemporaryFile(
             mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
         )
+        if chown is not None:
+            command = "sudo chown {} {}".format(chown, f.name)
+            self.run_cmd(command)
         file_path: PathProtocol = self.root / f.name
         try:
             if data:
@@ -121,6 +125,10 @@ class VMWorkload(BaseWorkload):
             return None
 
         return output.out.strip()
+
+    def is_started(self) -> bool:
+        """Check if OpenSearch is started."""
+        return self.is_reachable(self.host, self.port)
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -295,7 +303,6 @@ class VMWorkload(BaseWorkload):
             run_kwargs["input"] = stdin
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
-
             if output.returncode != 0:
                 logger.debug(
                     "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout

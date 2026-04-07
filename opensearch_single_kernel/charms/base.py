@@ -27,6 +27,7 @@ from opensearch_single_kernel.events.custom_events import (
     ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
+    VerifySnapshotsCredentialsEvent,
 )
 from opensearch_single_kernel.events.external_clients import (
     ExternalClientsEventsHandler,
@@ -36,6 +37,7 @@ from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
 from opensearch_single_kernel.events.notifications import NotificationsEvents
 from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
+from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
@@ -48,6 +50,7 @@ from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
 from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
+from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
 from opensearch_single_kernel.utils.status import Status
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -58,8 +61,10 @@ logger = logging.getLogger(__name__)
 class OpenSearchBaseCharm(ops.CharmBase, ABC):
     """Base OpenSearch Charm, this will include base structure for both machine and k8s charms."""
 
+    # Custom Events
     restart_opensearch_event = EventSource(RestartOpenSearch)
     start_opensearch_event = EventSource(StartOpenSearch)
+    verify_snapshots_credentials_event = EventSource(VerifySnapshotsCredentialsEvent)
     reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
     def __init__(self, *args):
@@ -84,12 +89,14 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.keystore_manager = KeystoreManager(self.state, self.workload)
         self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
+        self.snapshots_manager = SnapshotsManager(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
         self.external_clients_events = ExternalClientsEventsHandler(self)
         self.keystore_events = KeystoreEventsHandler(self)
+        self.snapshots_events = SnapshotsEventsHandler(self)
         self.notifications_events = NotificationsEvents(self)
         self.cos_events = CosEventsHandler(self)
         self.jwt_events = JWTEventsHandler(self)

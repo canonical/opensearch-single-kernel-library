@@ -7,6 +7,8 @@
 import json
 from typing import Optional
 
+from pydantic import ValidationError
+
 
 class OpenSearchError(Exception):
     """Base exception class for OpenSearch errors."""
@@ -93,6 +95,30 @@ class OpenSearchIndexError(OpenSearchError):
 
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
+
+
+class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
+    """Raise when relation data is present but fails validation."""
+
+    def __init__(self, error: ValidationError):
+        super().__init__(str(error))
+        self.error = error
+
+
+class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):
+    """Exception thrown when the backup relation data is incomplete or invalid."""
+
+
+class OpenSearchBackupCredentialsIncorrectError(OpenSearchError):
+    """Exception thrown when the backup credentials provided are incorrect."""
+
+
+class OpenSearchRestoreBackupError(OpenSearchError):
+    """Exception thrown when restoring a backup fails."""
+
+
+class OpenSearchInvalidStorageTypeError(OpenSearchError):
+    """Exception thrown when an invalid storage type is provided for backup/restore operations."""
 
 
 class OpenSearchSmtpMissingParametersError(OpenSearchError):
