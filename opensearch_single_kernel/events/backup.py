@@ -253,7 +253,6 @@ class BackupEventsHandler(Object):
 
         if not self._remove_credentials(
             object_storage_type=object_storage_type,
-            remove_repository=True,
         ):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
             if self.charm.unit.is_leader():
