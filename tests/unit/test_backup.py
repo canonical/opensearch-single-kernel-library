@@ -42,7 +42,7 @@ def _mock_backup(
         return_value=True,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.backup.SnapshotsManager.alt_hosts",
+        "opensearch_single_kernel.managers.snapshots.SnapshotsManager.alt_hosts",
         new_callable=PropertyMock,
         return_value=[],
     )
@@ -302,7 +302,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
     st = testing.State(leader=True, relations=rels)
 
     mocker.patch(
-        "opensearch_single_kernel.events.backup.SnapshotsEventsHandler._action_missing_pre_requisites",
+        "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler._action_missing_pre_requisites",
         return_value="cluster not ready",
     )
 
