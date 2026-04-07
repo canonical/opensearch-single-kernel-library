@@ -4,34 +4,70 @@
 
 set -e
 
-# Helper function to avoid code duplication
-pack_charm() {
-    if ${CI_CACHE:-false}; then
-        ccc pack -v
-    else
-        charmcraft pack -v
-    fi
-}
-
-git_hash=$(git describe --always --dirty)
+# --- Variables ---
+PLATFORM=""
+declare -a TEST_CHARMS=()
 
 LIB_PATH="./opensearch_single_kernel"
-
 CHARMS_PATH="./tests/charms"
 THIRD_PARTY_CHARMS=("./tests/integration/relations/opensearch_provider/application-charm")
 
-if [ $# -ge 1 ]; then
-    declare -a TEST_CHARMS=("$1")
-else
-    declare -a TEST_CHARMS=("${CHARMS_PATH}/opensearch_test_charm" )
+# --- Argument Parsing ---
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -p|--platform)
+            PLATFORM="$2"
+            shift 2
+            ;;
+        -c|--charm)
+            TEST_CHARMS+=("$2")
+            shift 2
+            ;;
+        *)
+            # Maintain backward compatibility for an unnamed first parameter as the charm
+            if [[ "$1" != -* ]] && [ ${#TEST_CHARMS[@]} -eq 0 ]; then
+                TEST_CHARMS+=("$1")
+                shift
+            else
+                echo "Unknown parameter passed: $1"
+                echo "Usage: $0 [-p|--platform <platform>] [-c|--charm <charm_path>] [charm_path]"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Default to opensearch_test_charm if no charms were specified
+if [ ${#TEST_CHARMS[@]} -eq 0 ]; then
+    TEST_CHARMS=("${CHARMS_PATH}/opensearch_test_charm")
 fi
+
+# --- Helper Functions ---
+pack_charm() {
+    # Store arguments in an array to safely handle spaces or empty strings
+    local pack_args=("-v")
+    
+    # Inject platform argument if one was provided
+    if [ -n "$PLATFORM" ]; then
+        pack_args+=("--platform" "$PLATFORM")
+    fi
+
+    if ${CI_CACHE:-false}; then
+        ccc pack "${pack_args[@]}"
+    else
+        charmcraft pack "${pack_args[@]}"
+    fi
+}
+
+# --- Main Logic ---
+git_hash=$(git describe --always --dirty)
 
 for directory in "${TEST_CHARMS[@]}"; do
 
     # Pack the third party charms
     if [[ " ${THIRD_PARTY_CHARMS[*]} " =~ ${directory} ]]; then
-        echo "Packing third party charm ${directory}\n"
-        pushd $directory
+        echo -e "Packing third party charm ${directory}\n"
+        pushd "$directory"
         pack_charm
         popd
     else
@@ -39,15 +75,15 @@ for directory in "${TEST_CHARMS[@]}"; do
         directory_lib_path="${directory}/${LIB_PATH}"
         rm -rf "$directory_lib_path"
         mkdir "$directory_lib_path"
+        
         echo "copying over libs from single kernel charm"
-        cp -r "${LIB_PATH}" "$directory_lib_path"
+        cp -r "${LIB_PATH}/" "$directory_lib_path/"
         cp "pyproject.toml" "$directory_lib_path"
         cp "README.md" "$directory_lib_path"
 
-        echo "Building charm ${directory}\n"
+        echo -e "Building charm ${directory}\n"
 
-
-        pushd $directory
+        pushd "$directory"
 
         # Backup files
         cp pyproject.toml pyproject.toml.backup
@@ -69,7 +105,7 @@ for directory in "${TEST_CHARMS[@]}"; do
 
         # Cleanup
         echo "removing copied files from single kernel charm."
-        rm ${LIB_PATH} -rf
+        rm -rf "${LIB_PATH}"
         mv charm_version.backup charm_version
         mv pyproject.toml.backup pyproject.toml
         mv poetry.lock.backup poetry.lock
