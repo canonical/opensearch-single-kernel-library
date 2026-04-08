@@ -11,7 +11,6 @@ import responses
 from opensearch_single_kernel.common.constants import NODE_LOCK_RELATION
 from tests.unit.helpers import (
     deployment_descriptions,
-    get_relation_unit,
     mock_response_lock_not_requested,
     mock_response_nodes,
     mock_response_root,
@@ -128,16 +127,11 @@ def test_node_lock_no_online_nodes_departing_node_doesnt_break(
     harness.set_leader(is_leader=True)
     harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
 
-    # We simulate that a departing node is still part of the relation
-    # but has no more data in the databag.
-    relation = harness.charm.model.get_relation(NODE_LOCK_RELATION)
-    unit1 = get_relation_unit(
-        harness.charm.model, NODE_LOCK_RELATION, f"{harness.charm.app.name}/1"
-    )
-    relation.data._data.pop(unit1)
+    # We simulate a departing node by removing it from the relation.
+    harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")
 
     # The property function executes healthy
-    # instead of breaking over the unit missing from the databag.
+    # instead of breaking over the departing unit.
     assert not harness.charm.lock_manager.acquire()
 
 
@@ -169,13 +163,8 @@ def test_node_lock_has_online_nodes_departing_node_doesnt_break(
     harness.set_leader(is_leader=True)
     harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
 
-    # We simulate that a departing node is still part of the relation
-    # but has no more data in the databag.
-    relation = harness.charm.model.get_relation(NODE_LOCK_RELATION)
-    unit1 = get_relation_unit(
-        harness.charm.model, NODE_LOCK_RELATION, f"{harness.charm.app.name}/1"
-    )
-    relation.data._data.pop(unit1)
+    # We simulate a departing node by removing it from the relation.
+    harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")
 
-    # The lock acquisition executes without breaking over the unit missing from the databag.
+    # The lock acquisition executes without breaking over the departing unit.
     assert harness.charm.lock_manager.acquire()
