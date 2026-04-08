@@ -1384,7 +1384,7 @@ class OpenSearchClient:
         try:
             self.request(
                 "PUT",
-                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_active_shards=all&refresh=true",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_active_shards=all",
                 host=host,
                 alt_hosts=alt_hosts,
                 retries=3,
