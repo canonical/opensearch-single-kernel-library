@@ -5,6 +5,7 @@
 """A set of helpers functions."""
 
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -193,3 +194,15 @@ def lock_unit_name(full_unit_id: str) -> str:
     # we first take out the app id suffix
     full_unit_id_split = full_unit_id.split(".")[0].rsplit("-")
     return "{}/{}".format("-".join(full_unit_id_split[:-1]), full_unit_id_split[-1])
+
+
+def hash_credentials(credentials: dict[str, str]) -> str:
+    """Return a hash of the given credentials.
+
+    Args:
+        credentials: credentials in a dict
+
+    Returns:
+        hash of the credentials
+    """
+    return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()

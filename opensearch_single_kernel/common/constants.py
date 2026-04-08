@@ -11,6 +11,18 @@ from enum import Enum
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
+class ObjectStorageType(BaseStrEnum):
+    """The object storage types."""
+
+    S3 = "s3"
+    AZURE = "azure"
+    GCS = "gcs"
+    S3_PCLUSTER = "s3-pcluster"
+    AZURE_PCLUSTER = "azure-pcluster"
+    GCS_PCLUSTER = "gcs-pcluster"
+    CONFLICT = "conflict"
+
+
 class Substrates(BaseStrEnum):
     """Possible substrates."""
 
@@ -198,6 +210,13 @@ COS_ROLE = "readall_and_monitor"
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
+# OpenSearch indices
+OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
+SYSTEM_INDICES = {
+    ".opendistro_security",
+    ".opensearch-sap-log-types-config",
+    OPENSEARCH_NODE_LOCK_INDEX,
+}
 # TLS
 CA_ALIAS = "ca"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
@@ -221,9 +240,17 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detector*",
     ".opendistro-anomaly-checkpoints",
     ".opendistro-anomaly-detection-state",
+    OPENSEARCH_NODE_LOCK_INDEX,
 ]
+# TLS
+CA_ALIAS = "ca"
+OLD_CA_ALIAS = f"old-{CA_ALIAS}"
+KEYTOOL = "opensearch.keytool"
+OLD_CA_PREFIX = "old-"
+CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
 DEFAULT_EXTRA_USER_ROLE = "default"
-OPENSEARCH_LOCK_INDEX = ".charm_node_lock"
 
 
 # OpenSearch default port
@@ -240,6 +267,9 @@ TLS_RELATION = "certificates"
 NODE_LOCK_RELATION = "node-lock-fallback"
 PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
+S3_RELATION = "s3-credentials"
+AZURE_RELATION = "azure-credentials"
+GCS_RELATION = "gcs-credentials"
 CLIENT_RELATION = "opensearch-client"
 COS_RELATION = "cos-agent"
 JWT_CONFIG_RELATION = "jwt-configuration"
@@ -259,6 +289,8 @@ HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
 SECRETS_LABEL_SEPARATOR = ":"
+
+# Backup
 S3_CREDENTIALS = "s3-creds"
 S3_PEER_SECRET_KEYS = [
     "secret-key",
@@ -276,6 +308,14 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+S3_CA_ALIAS = "s3-snapshots-gateway"
+STORE_PASSWORD = "changeit"
+S3_REPOSITORY = "s3-repository"
+AZURE_REPOSITORY = "azure-repository"
+GCS_REPOSITORY = "gcs-repository"
+OPENSEARCH_BACKUP_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# SMTP
 SMTP_SECRET_LABEL = "plugin-notifications"
 
 

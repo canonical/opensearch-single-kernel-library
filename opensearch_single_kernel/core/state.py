@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING
 from ops import Application, JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
+    AZURE_RELATION,
     CLIENT_RELATION,
+    GCS_RELATION,
     GENERATED_ROLES,
     JWT_CONFIG_RELATION,
     KIBANA_SERVER_ROLE,
@@ -26,8 +28,10 @@ from opensearch_single_kernel.common.constants import (
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
     PERFORMANCE_PROFILE,
+    S3_RELATION,
     TLS_RELATION,
     CertType,
+    ObjectStorageType,
     Scope,
     StartMode,
     Substrates,
@@ -113,7 +117,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation_data.get("bootstrap_contributor", "").lower() == "true"
+        return self.relation.data[self.unit].get("bootstrap_contributor", "").lower() == "true"
 
     @is_bootstrap_contributor.setter
     def is_bootstrap_contributor(self, value: bool):
@@ -123,7 +127,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "").lower() == "true"
+        return self.relation.data[self.unit].get("cluster_manager_removed", "").lower() == "true"
 
     @is_cluster_manager_removed.setter
     def is_cluster_manager_removed(self, value: bool):
@@ -133,12 +137,12 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return self.relation_data.get("started", "")
+        return self.relation.data[self.unit].get("started", "")
 
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation_data.get("tls_ca_renewing", "").lower() == "true"
+        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -148,7 +152,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation_data.get("tls_ca_renewed", "").lower() == "true"
+        return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -158,7 +162,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation_data.get("tls_configured", "").lower() == "true"
+        return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -168,7 +172,7 @@ class OpenSearchServer(RelationState):
     @property
     def update_ts(self) -> str:
         """Get the value of 'update-ts' from the unit databag."""
-        return self.relation_data.get("update-ts", "")
+        return self.relation.data[self.unit].get("update-ts", "")
 
     @update_ts.setter
     def update_ts(self, timestamp: int):
@@ -178,7 +182,7 @@ class OpenSearchServer(RelationState):
     @property
     def certs_exp_checked_at(self) -> str:
         """Get the value of 'certs_exp_checked_at' from unit data bag."""
-        return self.relation_data.get("certs_exp_checked_at", "1970-01-01 00:00:00")
+        return self.relation.data[self.unit].get("certs_exp_checked_at", "1970-01-01 00:00:00")
 
     @certs_exp_checked_at.setter
     def certs_exp_checked_at(self, value: str):
@@ -191,7 +195,9 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+                self.relation.data[self.unit]
+                .get("allocation-exclusions-to-delete", "")
+                .split(","),
             )
         )
 
@@ -206,7 +212,7 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("delete-voting-exclusions", "").split(","),
+                self.relation.data[self.unit].get("delete-voting-exclusions", "").split(","),
             )
         )
 
@@ -218,7 +224,7 @@ class OpenSearchServer(RelationState):
     @property
     def last_host_ip(self) -> str | None:
         """Get the last configured IP for the unit. Used for tracking the IP change."""
-        return self.relation_data.get("last_host_ip")
+        return self.relation.data[self.unit].get("last_host_ip")
 
     @last_host_ip.setter
     def last_host_ip(self, value: str) -> None:
@@ -262,7 +268,7 @@ class OpenSearchServer(RelationState):
     @property
     def oauth_openid_connect_url(self) -> str | None:
         """Return OAuth openid_connect_url if configured."""
-        return self.relation_data.get("oauth_openid_connect_url")
+        return self.relation.data[self.unit].get("oauth_openid_connect_url")
 
     @oauth_openid_connect_url.setter
     def oauth_openid_connect_url(self, value: str | None) -> None:
@@ -276,7 +282,7 @@ class OpenSearchServer(RelationState):
         When current leader is unit oauth relation isn't breaking
         even if unit receives oauth relation broken event.
         """
-        return self.relation_data.get("oauth_departing", "").lower() == "true"
+        return self.relation.data[self.unit].get("oauth_departing", "").lower() == "true"
 
     @oauth_departing.setter
     def oauth_departing(self, value: bool):
@@ -661,7 +667,7 @@ class LockServerState(RelationState):
     @property
     def lock_requested(self) -> bool:
         """Get whether the lock is requested by unit."""
-        return self.relation_data.get("lock_requested", "").lower() == "true"
+        return self.relation.data[self.unit].get("lock_requested", "").lower() == "true"
 
     @lock_requested.setter
     def lock_requested(self, value: bool) -> None:
@@ -674,7 +680,7 @@ class LockServerState(RelationState):
         # (Value should never be read)
         # (If we set the same value that is currently in the databag, a peer relation
         # changed event will not be triggered)
-        self.relation_data.update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})
+        self.relation.data[self.unit].update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})
 
 
 class ClusterState(Object):
@@ -721,6 +727,21 @@ class ClusterState(Object):
     def peer_cluster_orchestrator_relation(self) -> Relation | None:
         """The 'peer-cluster-orchestrator' relation that the charm is requiring."""
         return self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION)
+
+    @property
+    def s3_relation(self) -> Relation | None:
+        """Get S3 relation."""
+        return self.model.get_relation(S3_RELATION)
+
+    @property
+    def azure_relation(self) -> Relation | None:
+        """Get Azure relation."""
+        return self.model.get_relation(AZURE_RELATION)
+
+    @property
+    def gcs_relation(self) -> Relation | None:
+        """Get GCS relation."""
+        return self.model.get_relation(GCS_RELATION)
 
     @property
     def external_client_relations(self) -> set[Relation]:
@@ -944,7 +965,6 @@ class ClusterState(Object):
             #    flag="tls_ca_renewed", operation="remove"
             # )
             return
-
         # this means only the CA rotation completed, still need to create certificates
         self.server.tls_ca_renewed = True
         # TODO: Handle large deployment
@@ -988,6 +1008,41 @@ class ClusterState(Object):
     def model_uuid(self):
         """UUID of the Charm Model."""
         return self.model.uuid
+
+    @property
+    def storage_type(self) -> ObjectStorageType | None:  # noqa: C901
+        """Get the active object storage type from relations/peer-cluster.
+
+        Returns:
+            Optional[ObjectStorageType]: the active object storage type.
+        """
+        if not (deployment_desc := self.application.deployment_desc):
+            logger.debug("Deployment description missing; storage type unknown.")
+            return None
+
+        if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+            active = [
+                r
+                for r in [
+                    self.s3_relation,
+                    self.azure_relation,
+                    self.gcs_relation,
+                ]
+                if r
+            ]
+            if len(active) == 0:
+                return None
+            if len(active) > 1:
+                return ObjectStorageType.CONFLICT
+            if self.s3_relation:
+                return ObjectStorageType.S3
+            if self.azure_relation:
+                return ObjectStorageType.AZURE
+            if self.gcs_relation:
+                return ObjectStorageType.GCS
+
+        # non-main orchestrator
+        # TODO: Handle once large deployments are implemented
 
     # TODO: Once we handle large deployment we will add a separate
     # state object for peer cluster and peer cluster orchestrator

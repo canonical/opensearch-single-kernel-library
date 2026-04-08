@@ -29,9 +29,7 @@ repos:
       - id: debug-statements
       - id: check-toml
       - id: detect-private-key
-        exclude: |
-          (?x)^(
-           )$
+        exclude: ^tests/
       - id: check-merge-conflict
       - id: end-of-file-fixer
         exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
