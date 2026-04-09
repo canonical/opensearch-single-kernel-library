@@ -4,7 +4,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from parameterized import parameterized
 
 from opensearch_single_kernel.common.constants import Scope
 
