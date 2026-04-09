@@ -221,9 +221,9 @@ class ConfigManager(BaseManager):
             layer = "transport"
             keystore_pwd = self.state.server.transport_keystore_password
 
-        if not (
-            (truststore_pwd := self.state.application.tls_truststore_password) and keystore_pwd
-        ):
+        truststore_pwd = self.state.application.tls_truststore_password
+
+        if not (truststore_pwd and keystore_pwd):
             return {}
 
         return {
@@ -512,13 +512,13 @@ class ConfigManager(BaseManager):
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{heap_size_in_kb!s}k",
+            f"-Xms{heap_size_in_kb}k",
             regex=True,
         )
 
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{heap_size_in_kb!s}k",
+            f"-Xmx{heap_size_in_kb}k",
             regex=True,
         )
