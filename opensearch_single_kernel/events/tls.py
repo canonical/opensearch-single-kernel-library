@@ -428,6 +428,6 @@ class TLSEventsHandler(Object):
             {
                 "username": user_name,
                 "password": password,
-                "ca-chain": self.charm.state.application.admin_secrets.get("chain"),
+                "ca-chain": self.charm.state.application.admin_secrets["chain"],
             }
         )
