@@ -1,10 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from parameterized import parameterized
+
 from opensearch_single_kernel.common.constants import Scope
-from unittest.mock import MagicMock, patch
 
 
 def test_on_secret_changed_app(mocker, harness, context):
