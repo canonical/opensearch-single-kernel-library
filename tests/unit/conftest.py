@@ -57,7 +57,7 @@ def context(substrate):
     return testing.Context(charm_type=charm_type, config=CONFIG, meta=METADATA, actions=ACTIONS)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     """Mock Filesystem interactions."""
     if request.node.get_closest_marker("real_fs"):
@@ -66,6 +66,7 @@ def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     mocker.patch("charmlibs.pathops.PathProtocol.write_text")
     mocker.patch("charmlibs.pathops.PathProtocol.mkdir")
     mocker.patch("charmlibs.pathops.PathProtocol.unlink")
+
     mocker.patch("charmlibs.pathops.LocalPath.read_text")
     mocker.patch("charmlibs.pathops.LocalPath.write_text")
     mocker.patch("charmlibs.pathops.LocalPath.mkdir")

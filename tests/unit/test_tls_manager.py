@@ -423,12 +423,12 @@ def test_truststore_password_secret(harness, mocker, substrate):
     )
 
     harness.set_leader(is_leader=False)
-    harness.charm.tls_manager.store_new_ca(secret, False)
+    harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, False)
 
     create_store_pwd_if_not_exists.assert_not_called()
 
     harness.set_leader(is_leader=True)
-    harness.charm.tls_manager.store_new_ca(secret, True)
+    harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, True)
 
     create_store_pwd_if_not_exists.assert_called_once()
 
