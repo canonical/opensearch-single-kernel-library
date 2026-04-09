@@ -1391,7 +1391,6 @@ class OpenSearchClient:
                 ignore_retry_on=[400],
                 payload={"settings": {"index": {"auto_expand_replicas": "0-all"}}},
             )
-            return True
         except OpenSearchHttpError as e:
             if (
                 e.response_code == 400
@@ -1403,6 +1402,19 @@ class OpenSearchClient:
             else:
                 logger.error("Could not create OpenSearch lock index: %s", e)
                 return False
+
+        try:
+            self.request(
+                "POST",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_refresh",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=3,
+            )
+        except OpenSearchHttpError as e:
+            logger.error("Could not refresh OpenSearch lock index: %s", e)
+
+        return True
 
     def delete_lock_document(self, host: str, alt_hosts: list[str] | None) -> None:
         """Delete lock document from lock index."""
