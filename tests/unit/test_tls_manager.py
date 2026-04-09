@@ -498,10 +498,10 @@ def test_truststore_password_secret(harness, mocker, substrate):
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
     )
+    mocker.patch("opensearch_single_kernel.utils.certificates.store_ca_chain")
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    mocker.patch("opensearch_single_kernel.utils.certificates.store_ca")
     deployment_desc.return_value = deployment_descriptions["ok"]
     secret = {"key": "secret_12345"}
     create_store_pwd_if_not_exists = mocker.patch(
@@ -1102,6 +1102,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         "opensearch_single_kernel.managers.cluster.ClusterManager.wait_opensearch_part_of_cluster"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
+    )
     mocker.patch(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )

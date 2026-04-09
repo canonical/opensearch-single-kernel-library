@@ -45,7 +45,7 @@ from opensearch_single_kernel.utils.certificates import (
     read_ca,
     remove_ca,
     split_ca_chain,
-    store_ca,
+    store_ca_chain,
 )
 from opensearch_single_kernel.utils.helpers import (
     generate_password,
@@ -107,7 +107,7 @@ class TlsManager(BaseManager):
 
             if cert_issuer != ca_issuer:
                 return False
-
+        logger.info("All TLS resources are stored on disk and valid.")
         return True
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
@@ -869,7 +869,7 @@ class TlsManager(BaseManager):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
-        if not store_ca(
+        if not store_ca_chain(
             workload=self.workload,
             alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),

@@ -1,100 +1,116 @@
 #!/bin/bash
 
-## This builds the whl and then copies it to test charms and updates their dependencies.
+## This builds the whl and then copies it to all 4 test charms and updates the requirements file.
 
 set -e
 
-pack_charm() {
-    if [ "${CI_CACHE:-false}" = "true" ] && command -v ccc >/dev/null 2>&1; then
-        ccc pack -v
-    else
-        charmcraft pack -v
-    fi
-}
+# --- Variables ---
+PLATFORM=""
+declare -a TEST_CHARMS=()
 
 LIB_PATH="./opensearch_single_kernel"
-
 CHARMS_PATH="./tests/charms"
 THIRD_PARTY_CHARMS=("./tests/integration/relations/opensearch_provider/application-charm")
 
-if [ $# -ge 1 ]; then
-    declare -a TEST_CHARMS=("$1")
-else
-    # Build for both VM and K8s test charms
-    declare -a TEST_CHARMS=(
-        "${CHARMS_PATH}/opensearch_test_charm"
-        "${CHARMS_PATH}/opensearch_k8s_test_charm"
-    )
+# --- Argument Parsing ---
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -p|--platform)
+            PLATFORM="$2"
+            shift 2
+            ;;
+        -c|--charm)
+            TEST_CHARMS+=("$2")
+            shift 2
+            ;;
+        *)
+            # Maintain backward compatibility for an unnamed first parameter as the charm
+            if [[ "$1" != -* ]] && [ ${#TEST_CHARMS[@]} -eq 0 ]; then
+                TEST_CHARMS+=("$1")
+                shift
+            else
+                echo "Unknown parameter passed: $1"
+                echo "Usage: $0 [-p|--platform <platform>] [-c|--charm <charm_path>] [charm_path]"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Default to opensearch_test_charm if no charms were specified
+if [ ${#TEST_CHARMS[@]} -eq 0 ]; then
+    TEST_CHARMS=("${CHARMS_PATH}/opensearch_test_charm")
 fi
 
+# --- Helper Functions ---
+pack_charm() {
+    # Store arguments in an array to safely handle spaces or empty strings
+    local pack_args=("-v")
+
+    # Inject platform argument if one was provided
+    if [ -n "$PLATFORM" ]; then
+        pack_args+=("--platform" "$PLATFORM")
+    fi
+
+    if ${CI_CACHE:-false}; then
+        ccc pack "${pack_args[@]}"
+    else
+        charmcraft pack "${pack_args[@]}"
+    fi
+}
+
+# --- Main Logic ---
+git_hash=$(git describe --always --dirty)
+
 for directory in "${TEST_CHARMS[@]}"; do
+
+    # Pack the third party charms
     if [[ " ${THIRD_PARTY_CHARMS[*]} " =~ ${directory} ]]; then
-        echo "Packing third party charm ${directory}"
-        pushd "$directory" >/dev/null
+        echo -e "Packing third party charm ${directory}\n"
+        pushd "$directory"
         pack_charm
-        popd >/dev/null
-        continue
-    fi
+        popd
+    else
+        echo "clearing out libs for charm"
+        directory_lib_path="${directory}/${LIB_PATH}"
+        rm -rf "$directory_lib_path"
+        mkdir "$directory_lib_path"
 
-    echo "Clearing out libs for charm ${directory}"
-    directory_lib_path="${directory}/${LIB_PATH}"
-    rm -rf "$directory_lib_path"
-    mkdir -p "$directory_lib_path"
+        echo "copying over libs from single kernel charm"
+        cp -r "${LIB_PATH}/" "$directory_lib_path/"
+        cp "pyproject.toml" "$directory_lib_path"
+        cp "README.md" "$directory_lib_path"
 
-    echo "Copying over libs from single kernel charm"
-    cp -r "${LIB_PATH}" "$directory_lib_path"
-    # Copy pyproject.toml and README.md to the library directory as it is needed for poetry
-    cp "pyproject.toml" "$directory_lib_path"
-    cp "README.md" "$directory_lib_path"
+        echo -e "Building charm ${directory}\n"
 
-    echo "Building charm ${directory}"
-    pushd "$directory" >/dev/null
+        pushd "$directory"
 
-    # Backup files if they exist in the charm directory
-    if [ -f pyproject.toml ]; then
+        # Backup files
         cp pyproject.toml pyproject.toml.backup
-    fi
-    if [ -f poetry.lock ]; then
         cp poetry.lock poetry.lock.backup
-    fi
 
-    # Disable strict mode for the copied test library.
-    pushd "${LIB_PATH}" >/dev/null
-    git init >/dev/null 2>&1
-    sed -i 's/strict = true/strict = false/' "pyproject.toml"
-    popd >/dev/null
+        # Disable strict mode for build test lib.
+        pushd "${LIB_PATH}"
+        git init
+        sed 's/strict = true/strict = false/' -i "pyproject.toml"
+        popd
 
-    # Add library and lock dependencies if pyproject.toml exists in charm directory
-    if [ -f pyproject.toml ]; then
         poetry add "${LIB_PATH}/"
         poetry lock
-    else
-        echo "Info: pyproject.toml not found in ${directory}, skipping poetry operations."
-    fi
 
-    # Update charm_version with git hash if charm_version file exists
-    if [ -f charm_version ]; then
-        python3 -c 'import pathlib, shutil, subprocess; git_hash = subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout.strip(); file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
-    fi
+        python3 -c 'import pathlib; import shutil; import subprocess; git_hash=subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout; file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
 
-    # Pack the charm only if charmcraft.yaml exists
-    if [ -f charmcraft.yaml ]; then
+        # Pack the charm
         pack_charm
-    else
-        echo "Info: charmcraft.yaml not found in ${directory}, skipping charm packing."
-    fi
 
-    echo "Removing copied files from single kernel charm."
-    rm -rf "${LIB_PATH}"
-    if [ -f charm_version.backup ]; then
+        # Cleanup
+        echo "removing copied files from single kernel charm."
+        rm -rf "${LIB_PATH}"
         mv charm_version.backup charm_version
-    fi
-    if [ -f pyproject.toml.backup ]; then
         mv pyproject.toml.backup pyproject.toml
-    fi
-    if [ -f poetry.lock.backup ]; then
         mv poetry.lock.backup poetry.lock
-    fi
 
-    popd >/dev/null
+        # Go back to root directory
+        popd
+    fi
 done

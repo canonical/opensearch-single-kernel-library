@@ -4,6 +4,7 @@
 
 """A set of helpers functions."""
 
+import hashlib
 import json
 import logging
 import re
@@ -261,3 +262,15 @@ def wait_for_process_output(
         else:
             logger.warning("wait_output() failed for %s: %s", masked_command, e)
         raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
+
+
+def hash_credentials(credentials: dict[str, str]) -> str:
+    """Return a hash of the given credentials.
+
+    Args:
+        credentials: credentials in a dict
+
+    Returns:
+        hash of the credentials
+    """
+    return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()
