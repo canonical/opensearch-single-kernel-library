@@ -31,7 +31,6 @@ jobs:
       matrix:
         repo:
           - canonical/opensearch-operator
-          - canonical/opensearch-k8s-operator
 
     permissions:
       contents: write

@@ -504,6 +504,13 @@ async def wait_for_backup_system_to_settle(
                 raise Exception("Failed to retrieve backup list or list is empty")
 
             logger.debug(f"list-backups output: {action}")
+            # Check that no snapshot is still being created
+            in_progress = [
+                bid for bid, info in backups.items() if info.get("state") == "in_progress"
+            ]
+            if in_progress:
+                raise Exception(f"Snapshots still in progress: {in_progress}")
+
             # Now, check if we have finished the restore
             indices_status = await http_request(
                 ops_test,

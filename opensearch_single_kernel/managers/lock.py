@@ -150,9 +150,9 @@ class PeerLockManager(BaseManager):
         for unit in self.state.server_locks:
             if unit.lock_requested:
                 self.state.application_lock.unit_with_lock = format_unit_name(
-                    unit.unit, app=deployment_desc.app
+                    unit.component, app=deployment_desc.app
                 )
-                logger.debug("[Node lock] (leader) granted peer lock to %s", unit.unit.name)
+                logger.debug("[Node lock] (leader) granted peer lock to %s", unit.component.name)
                 break
         else:
             logger.debug("[Node lock] (leader) cleared peer lock")

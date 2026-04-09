@@ -175,10 +175,7 @@ class UpgradesManagerBase(BaseManager):
             )
 
             # Check if all units are marked as started in peer relation data
-            peer_relation = self.state.peer_relation
-            all_units_started = peer_relation is not None and all(
-                peer_relation.data[unit].get("started") for unit in self.state.all_units
-            )
+            all_units_started = all(server.started for server in self.state.application_servers)
 
             if (
                 not all_units_started
@@ -313,8 +310,8 @@ class UpgradesManagerBase(BaseManager):
         # 4. The version in application databag match the version in file
         return (
             self.in_progress
-            and self.state.server_upgrade.unit.name
-            == self.state.sorted_upgrades_units[0].unit.name
+            and self.state.server_upgrade.component.name
+            == self.state.sorted_upgrades_units[0].component.name
             and self.is_compatible
             and self.state.application_upgrade.versions.workload_parsed
             == self.current_versions.workload_parsed

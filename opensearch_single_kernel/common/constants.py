@@ -285,7 +285,14 @@ PW_POSTFIX = "password"
 HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
-SECRETS_LABEL_SEPARATOR = ":"
+SECRETS_LABEL_SEPARATOR = "."
+
+SECRET_APP_ADMIN = "app-admin"
+SECRET_UNIT_TRANSPORT = "unit-transport"
+SECRET_UNIT_HTTP = "unit-http"
+SECRET_PLUGIN = "plugins"
+SECRET_BACKUPS = "backups"
+SECRET_USERS = "user"
 
 # Backup
 S3_CREDENTIALS = "s3-creds"

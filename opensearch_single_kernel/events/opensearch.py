@@ -21,6 +21,8 @@ from ops import (
     RelationDepartedEvent,
     RelationJoinedEvent,
     SecretChangedEvent,
+    SecretNotFoundError,
+    SecretRemoveEvent,
     StartEvent,
     StopEvent,
     StorageDetachingEvent,
@@ -71,6 +73,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     UnitUpgradesState,
 )
+from opensearch_single_kernel.core.peer_relation import OpenSearchServer
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
     RestartOpenSearch,
@@ -80,9 +83,6 @@ from opensearch_single_kernel.managers.upgrades_k8s import UpgradesManagerK8s
 from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.secrets import (
     breakdown_label,
-    hash_key,
-    password_key,
-    user_from_hash_key,
 )
 from opensearch_single_kernel.utils.status import format_status
 
@@ -104,6 +104,7 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.on.start, self._on_start)
         self.framework.observe(self.charm.on.stop, self._on_stop)
         self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
+        self.framework.observe(self.charm.on.secret_remove, self._on_secret_remove)
         self.framework.observe(
             self.charm.on[NODE_LOCK_RELATION].relation_changed,
             self._on_node_lock_relation_changed,
@@ -186,10 +187,6 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
-            # Update all external clients with new endpoints
-            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
-                nodes
-            )
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
             if self.charm.state.server.started:
@@ -204,8 +201,7 @@ class OpenSearchEventsHandler(Object):
                 self.charm.peer_cluster_events.check_credentials_with_missing_relations()
                 if self.charm.state.peer_cluster_relations:
                     self.charm.peer_cluster_events.apply_orchestrator_status()
-
-        elif event.relation.data.get(event.app):
+        elif self.charm.state.application.nodes_config:
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
@@ -222,14 +218,17 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        if not (unit_data := event.relation.data.get(event.unit)):
-            return
+        event_server = OpenSearchServer(
+            relation=event.relation,
+            repository=self.charm.state.peer_unit_interface,
+            component=event.unit,
+        )
 
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
 
-        if self.charm.unit.is_leader() and unit_data.get("bootstrap_contributor"):
+        if self.charm.unit.is_leader() and event_server.is_bootstrap_contributor:
             contributor_count = self.charm.state.application.bootstrap_contributors_count
             self.charm.state.application.bootstrap_contributors_count = contributor_count + 1
 
@@ -376,7 +375,7 @@ class OpenSearchEventsHandler(Object):
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed")
             return
         if not self.charm.profiles_manager.check_profile_requirements():
@@ -407,25 +406,6 @@ class OpenSearchEventsHandler(Object):
 
             if health == HealthColors.UNKNOWN:
                 return
-
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug(
-                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
-            )
-        elif self.charm.unit.is_leader():
-            try:
-                nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-            except OpenSearchHttpError as e:
-                logger.error("unable to get nodes %s", str(e))
-                nodes = []
-            self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
-                nodes
-            )
-            if (
-                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                and not self.charm.upgrades_manager.in_progress
-            ):
-                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -560,6 +540,9 @@ class OpenSearchEventsHandler(Object):
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
+        if self.charm.unit.is_leader():
+            self.charm.state.application.initialize_empty_secrets()
+        self.charm.state.server.initialize_empty_secrets()
         # We check if the current unit is the leader, in case where the leader elected event
         # was deferred, then juju proceeded with a new leader election, and this now deferred-event
         # was emitted in a non-juju leader unit (previous leader)
@@ -1290,44 +1273,76 @@ class OpenSearchEventsHandler(Object):
         #
         # On a separate note: Handling for JWT-config related secrets (e.g. signing-key) happens
         # in the `JwtHandler` class, as it is a secret that is provided from another application
-        system_user_hash_keys = [hash_key(user) for user in OPENSEARCH_SYSTEM_USERS]
-        keys_to_process = system_user_hash_keys + [
-            CertType.APP_ADMIN.val,
-            password_key(KIBANA_SERVER_USER),
-        ]
-        # Variables for better readability
-        label_key = label_parts["key"]
-        is_leader = self.charm.unit.is_leader()
 
-        # Matching secrets by label
         if (
             label_parts["application_name"] != self.charm.app.name
             or label_parts["scope"] != Scope.APP
-            or label_key not in keys_to_process
+            or "admin-hashed-password" not in event.secret.get_content().keys()
+            or "kibana-server-hashed-password" not in event.secret.get_content().keys()
         ):
             logger.info("Secret %s was not relevant for us.", event.secret.label)
             return
 
-        logger.debug("Secret change for %s", str(label_key))
+        logger.debug("Secret change for user secrets, updating all users.")
 
-        if is_leader and label_key == password_key(KIBANA_SERVER_USER):
+        if self.charm.unit.is_leader():
             self.charm.external_clients_manager.update_dashboards_password()
 
         # Non-leader units need to maintain local users in internal_users.yml
-        elif not is_leader and label_key in system_user_hash_keys:
-            password = event.secret.get_content()[label_key]
-            if sys_user := user_from_hash_key(label_key):
+        else:
+            keys_to_update = {
+                "admin-hashed-password": ADMIN_USER,
+                "kibana-server-hashed-password": KIBANA_SERVER_USER,
+            }
+            for key in keys_to_update.keys():
+                password = event.secret.get_content().get(key)
                 try:
-                    self.charm.internal_users_manager.put_internal_user(sys_user, password)
+                    self.charm.internal_users_manager.put_internal_user(
+                        keys_to_update[key], password
+                    )
                 except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
                     logger.error("An error occurred while updating internal user: %s", str(e))
                     event.defer()
                     return
-
-        if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )
+
+    def _on_secret_remove(self, event: SecretRemoveEvent) -> None:
+        """Prune obsolete revisions of the charm's own peer secrets.
+
+        The v1 data_interfaces library observes secret-remove but only handles
+        secrets matching its own label scheme (`<relation>.<relation-id>...`).
+        Our internal peer secret labels (`<peer-relation>.<app>.<scope>.<group>`)
+        fail to parse there, so without this handler the obsolete revision is
+        never removed and Juju keeps re-delivering secret-remove indefinitely.
+        The v0 data_interfaces library did not observe secret-remove at all, so
+        this handler was not needed before the v1 migration.
+        """
+        if not event.secret.label:
+            return
+
+        try:
+            label_parts = breakdown_label(event.secret.label)
+        except ValueError:
+            # Not one of our internal secrets, leave it to other observers.
+            return
+
+        if (
+            label_parts["relation_name"] != PEER_RELATION
+            or label_parts["application_name"] != self.charm.app.name
+        ):
+            return
+
+        try:
+            event.secret.get_info()
+        except SecretNotFoundError:
+            logger.info("Secret-remove for %s ignored, we are not the owner.", event.secret.label)
+            return
+
+        logger.debug("Removing obsolete revision of secret %s.", event.secret.label)
+        event.remove_revision()
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
@@ -1423,36 +1438,33 @@ class OpenSearchEventsHandler(Object):
         for peer_cluster_server in peer_cluster_servers:
             del peer_cluster_server.tls_configured
 
-        for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secret = (
-                self.charm.state.server.transport_secrets
-                if cert_type == CertType.UNIT_TRANSPORT
-                else self.charm.state.server.http_secrets
-            )
-            self.charm.tls_events.certs.request_certificate_revocation(
-                secret["csr"].encode("utf-8")
-            )
+        self.charm.tls_events.certs.request_certificate_revocation(
+            self.charm.state.server.http_csr.encode("utf-8")
+        )
+        self.charm.tls_events.certs.request_certificate_revocation(
+            self.charm.state.server.transport_csr.encode("utf-8")
+        )
 
-        # doing this sequentially (revoking -> requesting new ones), to avoid triggering
-        # the "certificate available" callback with old certificates
-        for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secret = (
-                self.charm.state.server.transport_secrets
-                if cert_type == CertType.UNIT_TRANSPORT
-                else self.charm.state.server.http_secrets
-            )
-            old_csr = secret["csr"].encode("utf-8")
-            csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope=Scope.UNIT,
-                cert_type=cert_type,
-                secret=secret,
-                tls_file=False,
-            )
+        old_http_csr = self.charm.state.server.http_csr.encode("utf-8")
+        old_transport_csr = self.charm.state.server.transport_csr.encode("utf-8")
 
-            self.charm.tls_events.certs.request_certificate_renewal(
-                old_certificate_signing_request=old_csr,
-                new_certificate_signing_request=csr,
-            )
+        http_csr = self.charm.tls_manager.create_certificate_signing_request(
+            cert_type=CertType.UNIT_HTTP,
+            tls_file=False,
+        )
+        transport_csr = self.charm.tls_manager.create_certificate_signing_request(
+            cert_type=CertType.UNIT_TRANSPORT,
+            tls_file=False,
+        )
+
+        self.charm.tls_events.certs.request_certificate_renewal(
+            old_certificate_signing_request=old_http_csr,
+            new_certificate_signing_request=http_csr,
+        )
+        self.charm.tls_events.certs.request_certificate_renewal(
+            old_certificate_signing_request=old_transport_csr,
+            new_certificate_signing_request=transport_csr,
+        )
 
     def request_new_admin_certificate(self) -> None:
         """Request the generation of a new admin certificate."""
@@ -1460,26 +1472,11 @@ class OpenSearchEventsHandler(Object):
             return
 
         csr = self.charm.tls_manager.create_certificate_signing_request(
-            scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
-            secret=self.charm.state.application.admin_secrets,
             tls_file=False,
         )
 
         self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
-
-    def update_external_clients_endpoints(self) -> None:
-        """Update the endpoints of all the external clients relations."""
-        for external_client in self.charm.state.external_clients:
-            if self.charm.unit.is_leader():
-                try:
-                    nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-                except OpenSearchHttpError as e:
-                    logger.error("unable to get nodes: %s", str(e))
-                    nodes = []
-                self.charm.external_clients_manager.update_relation_endpoints(
-                    external_client, nodes
-                )
 
     def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
         """Triggered when the unit IP is changed."""

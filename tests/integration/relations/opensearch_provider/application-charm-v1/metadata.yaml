@@ -1,0 +1,19 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+name: v1-application
+description: |
+  Data platform libs application charm used in integration tests.
+summary: |
+  Data platform libs application meant to be used only for testing of the libs in this repository.
+series:
+  - jammy
+
+requires:
+  v1-first-index:
+    interface: opensearch_client
+  v1-second-index:
+    interface: opensearch_client
+  v1-admin:
+    interface: opensearch_client
+  v1-opensearch-dashboards:
+    interface: opensearch_client

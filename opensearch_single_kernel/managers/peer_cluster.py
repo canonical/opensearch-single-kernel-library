@@ -4,9 +4,7 @@
 
 """OpenSearch Peer Cluster manager."""
 
-import json
 import logging
-from typing import Any, MutableMapping
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -14,14 +12,9 @@ from overrides import override
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
-    ADMIN_USER,
-    COS_USER,
     GENERATED_ROLES,
-    KIBANA_SERVER_USER,
-    CertType,
     DeploymentType,
     Directive,
-    Scope,
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -37,7 +30,6 @@ from opensearch_single_kernel.core.models import (
     Node,
     PeerClusterApp,
     PeerClusterOrchestrators,
-    PeerClusterRelData,
     PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
@@ -46,7 +38,6 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
 )
-from opensearch_single_kernel.utils.secrets import hash_key, password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -78,10 +69,14 @@ class PeerClusterManager(BaseManager):
                 else GENERATED_ROLES
             ),
         )
+
         local_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=is_provider, relation_id=rel_id, remote=False
         )
-        local_peer_cluster.update({"app": current_app.to_str()})
+        if local_peer_cluster:
+            fleet_apps = local_peer_cluster.cluster_fleet_apps
+            fleet_apps[deployment_desc.app.id] = current_app
+            local_peer_cluster.cluster_fleet_apps = fleet_apps
 
         # update content of fleet in the current app's peer databag
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
@@ -89,10 +84,12 @@ class PeerClusterManager(BaseManager):
             is_provider=is_provider,
             remote=True,
         )
-        related_cluster_fleet_apps = remote_peer_cluster.cluster_fleet_apps
-        related_cluster_fleet_apps.update({deployment_desc.app.id: current_app})
+        related_cluster_fleet_apps = (
+            remote_peer_cluster.cluster_fleet_apps if remote_peer_cluster else {}
+        )
+        related_cluster_fleet_apps[deployment_desc.app.id] = current_app
 
-        # Update peer application databag
+        # Update the application peer databag
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.update(related_cluster_fleet_apps)
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
@@ -114,7 +111,7 @@ class PeerClusterManager(BaseManager):
             )
 
     def remove_main_orchestrator_registered(self, rel_id: int) -> None:
-        """Remove the main_orchestrator_registered key form relation data."""
+        """Remove the main_orchestrator_registered key from relation data."""
         if local_peer_cluster_data := self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=rel_id, remote=False
         ):
@@ -123,15 +120,17 @@ class PeerClusterManager(BaseManager):
     def reconcile_orchestrators_from_provider_data(
         self,
         remote_peer_cluster: PeerCluster,
-        data: MutableMapping[str, str],
         trigger: str | None,
         relation_id: str,
         relation_app_name: str,
         relation_units: int,
     ) -> PeerClusterOrchestrators:
         """Fetch related orchestrator IDs and App names."""
-        if not (remote_orchestrators := remote_peer_cluster.orchestrators):
-            remote_orchestrators = json.loads(data["orchestrators"])
+        remote_orchestrators = (
+            remote_peer_cluster.orchestrators.to_dict()
+            if remote_peer_cluster.orchestrators
+            else {}
+        )
         logger.debug(
             "Fetched orchestrators from provider %s with relation id %s are %s",
             relation_app_name,
@@ -139,11 +138,22 @@ class PeerClusterManager(BaseManager):
             remote_orchestrators,
         )
 
-        # fetch the (main/failover)-cluster-orchestrator relations
-        for remote_peer_cluster in self.state.peer_clusters(is_provider=False, remote=True):
-            remote_orchestrators.update(remote_peer_cluster.orchestrators)
+        # Capture the trigger app from the event relation before the loop can overwrite it.
+        # The loop merges orchestrators from all peer cluster relations, which may incorrectly
+        # replace the event relation's {trigger}_app with a stale value from another relation.
+        trigger_app = remote_orchestrators.get(f"{trigger}_app") if trigger else None
 
-        local_orchestrators = self.state.application.orchestrators_dict
+        for loop_cluster in self.state.peer_clusters(is_provider=False, remote=True):
+            if pc_orchestrators := loop_cluster.orchestrators:
+                remote_orchestrators.update(
+                    {
+                        k: v
+                        for k, v in pc_orchestrators.to_dict().items()
+                        if v is not None and v != -1
+                    }
+                )
+
+        local_orchestrators = self.state.application.orchestrators.to_dict()
 
         if (trigger in {"main", "failover"}) and (relation_units > 0):
             logger.debug(
@@ -163,7 +173,7 @@ class PeerClusterManager(BaseManager):
             local_orchestrators.update(
                 {
                     f"{trigger}_rel_id": relation_id,
-                    f"{trigger}_app": remote_orchestrators[f"{trigger}_app"],
+                    f"{trigger}_app": trigger_app,
                 }
             )
             self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
@@ -175,7 +185,6 @@ class PeerClusterManager(BaseManager):
     def error_set_from_providers(
         self,
         orchestrators: PeerClusterOrchestrators,
-        event_data: MutableMapping[str, Any] | None,
         event_rel_id: int,
     ) -> tuple[PeerClusterRelErrorData | None, int]:
         """Check if the providers are ready and set error if not."""
@@ -194,11 +203,9 @@ class PeerClusterManager(BaseManager):
                 is_provider=False,
                 remote=True,
             )
-            data = remote_peer_cluster.relation_data.get("data", {}) if remote_peer_cluster else {}
-            error_data = (
-                remote_peer_cluster.get_object("error_data") if remote_peer_cluster else {}
-            )
-            if not data and not error_data:  # relation data still incomplete
+            has_data = remote_peer_cluster and remote_peer_cluster.deployment_desc is not None
+            error_data = remote_peer_cluster.error_data if remote_peer_cluster else None
+            if not has_data and not error_data:  # relation data still incomplete
                 raise OpenSearchPeerClusterRelationDataIncompleteError(
                     f"Peer cluster relation data is incomplete for relation id {rel_id}"
                 )
@@ -208,21 +215,31 @@ class PeerClusterManager(BaseManager):
                 rel_error_id = rel_id
                 break
 
-        # we handle the case where the error came from the provider of a wrong relation
-        if not error and "error_data" in (event_data or {}):
-            error = json.loads(event_data["error_data"])
-            rel_error_id = event_rel_id
+        # handle the case where the error came from the provider of a wrong relation
+        if not error and event_rel_id not in orchestrator_rel_ids:
+            wrong_rel_peer_cluster = self.state.peer_cluster_by_relation_id(
+                relation_id=event_rel_id,
+                is_provider=False,
+                remote=True,
+            )
+            if wrong_rel_peer_cluster and wrong_rel_peer_cluster.error_data:
+                error = wrong_rel_peer_cluster.error_data
+                rel_error_id = event_rel_id
 
         if rel_error_id == -1:
             rel_error_id = event_rel_id
 
-        return (PeerClusterRelErrorData.from_dict(error) if error else None, rel_error_id)
+        if not error:
+            return (None, rel_error_id)
+        if isinstance(error, PeerClusterRelErrorData):
+            return (error, rel_error_id)
+        return (PeerClusterRelErrorData.from_dict(error), rel_error_id)
 
     def requirer_errors(  # noqa: C901
         self,
         orchestrators: PeerClusterOrchestrators,
         deployment_desc: DeploymentDescription,
-        peer_cluster_rel_data: PeerClusterRelData,
+        peer_cluster_rel_data: PeerCluster,
         event_rel_id: int | None,
     ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
@@ -296,43 +313,6 @@ class PeerClusterManager(BaseManager):
 
         local_peer_cluster.security_index_initialised = True
 
-    def update_admin_secrets_from_relation(
-        self, peer_cluster_rel_data: PeerClusterRelData
-    ) -> None:
-        """Update secrets based on the peer cluster relation data."""
-        # set admin secrets
-        self.state.secrets.put(
-            Scope.APP,
-            password_key(ADMIN_USER),
-            peer_cluster_rel_data.credentials.admin_password,
-        )
-        self.state.secrets.put(
-            Scope.APP,
-            hash_key(ADMIN_USER),
-            peer_cluster_rel_data.credentials.admin_password_hash,
-        )
-        self.state.secrets.put(
-            Scope.APP,
-            password_key(KIBANA_SERVER_USER),
-            peer_cluster_rel_data.credentials.kibana_password,
-        )
-        self.state.secrets.put(
-            Scope.APP,
-            hash_key(KIBANA_SERVER_USER),
-            peer_cluster_rel_data.credentials.kibana_password_hash,
-        )
-        self.state.secrets.put(
-            Scope.APP,
-            password_key(COS_USER),
-            peer_cluster_rel_data.credentials.monitor_password,
-        )
-
-        self.state.secrets.put_object(
-            Scope.APP, CertType.APP_ADMIN.val, peer_cluster_rel_data.credentials.admin_tls
-        )
-
-        self.state.application.is_admin_user_initialized = True
-
     def cm_nodes(self, orchestrators: PeerClusterOrchestrators) -> list[Node]:
         """Fetch the cm nodes passed from the peer cluster relation not api call."""
         cm_nodes = {}
@@ -345,10 +325,13 @@ class PeerClusterManager(BaseManager):
                 is_provider=False,
                 remote=True,
             )
-            if not (data := remote_peer_cluster.data()):  # not ready yet
+            if not remote_peer_cluster:  # not ready yet
                 continue
 
-            cm_nodes = {**cm_nodes, **{node.name: node for node in data.cm_nodes}}
+            cm_nodes = {
+                **cm_nodes,
+                **{node.name: node for node in remote_peer_cluster.nodes_config.values()},
+            }
 
         # attempt to have an opensearch reported list of CMs - the response
         # may be smaller or greater than previous list.
@@ -407,13 +390,24 @@ class PeerClusterManager(BaseManager):
 
     def cleanup_error_in_relation_data(self) -> None:
         """Clean up the error data in relation data when the error is resolved."""
-        for key, _ in self.state.application.relation_data.items():
-            if key.startswith("error_from_provider") or key.startswith("error_from_requirer"):
-                # get the relation id from key
-                rel_id = int(key.split("-")[-1])
-                relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
-                if rel_id not in relation_ids:
-                    self.state.application.relation_data.pop(key)
+        app_m = self.state.application.model
+        if not app_m:
+            return
+        relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
+        keys_to_remove = [
+            key
+            for key in app_m.model_extra
+            if (key.startswith("error_from_provider") or key.startswith("error_from_requirer"))
+            and int(key.split("-")[-1]) not in relation_ids
+        ]
+        if keys_to_remove:
+            for key in keys_to_remove:
+                error_message = app_m.model_extra.get(key, "")
+                status = PeerClusterRelErrorData.get_status_from_message(error_message)
+                if status:
+                    self.state.remove_status_if_present(status, scope="app", component=self.name)
+                app_m.model_extra.pop(key, None)
+            self.state.application.write(app_m)
 
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).
@@ -455,21 +449,22 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
+            self.cleanup_error_in_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                # check if there is an error
-                if error_data := peer_cluster.error_data:
-                    status_list.append(error_data.get_status())
+                # check if there is an error reported directly by the provider
+                if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
+                    status_list.append(status)
 
-                # requirer errors
-                if data := peer_cluster.data():
+                # requirer errors: only computable once the provider has posted its
+                # deployment description in the databag
+                if peer_cluster.deployment_desc is not None:
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
                         deployment_desc=self.state.application.deployment_desc,
-                        peer_cluster_rel_data=data,
+                        peer_cluster_rel_data=peer_cluster,
                         # only check if we have orchestrators in the data bag
                         event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
                     )
                     if requirer_errors and (status := requirer_errors.get_status()):
                         status_list.append(status)
-
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

@@ -7,38 +7,27 @@
 import logging
 
 from opensearch_single_kernel.common.constants import (
-    ADMIN_USER,
     COS_USER,
     GENERATED_ROLES,
-    KIBANA_SERVER_USER,
-    CertType,
     DeploymentType,
     Directive,
-    ObjectStorageType,
-    Scope,
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 from opensearch_single_kernel.core.models import (
-    AzureRelDataCredentials,
     DeploymentDescription,
-    GcsRelDataCredentials,
     Node,
     PeerClusterApp,
+    PeerClusterAppModel,
     PeerClusterOrchestrators,
-    PeerClusterRelData,
-    PeerClusterRelDataCredentials,
     PeerClusterRelErrorData,
-    PluginConfigInfo,
-    S3RelDataCredentials,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.peer_cluster import (
     update_cluster_fleet,
 )
-from opensearch_single_kernel.utils.secrets import hash_key, password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -64,17 +53,15 @@ class PeerClusterOrchestratorManager(BaseManager):
             whether the operation was completed. In case of negative result retry is preferred.
         """
         # get deployment descriptor of current app
-        deployment_desc = self.state.application.deployment_desc
+        deployment_description = self.state.application.deployment_desc
 
         # compute the data that needs to be broadcast to all related clusters (success or error)
-        rel_data = self.build_peer_cluster_rel_data(
-            deployment_desc=deployment_desc,
-        )
-        logger.debug("Built peer cluster relation data: %s", rel_data)
+        remote_peer_cluster = self.build_peer_cluster_rel_data()
+        logger.debug("Built peer cluster relation data: %s", remote_peer_cluster)
 
         orchestrators = self.state.application.orchestrators
         rel_err_data = self.build_peer_cluster_rel_err_data(
-            deployment_desc, orchestrators, rel_data
+            deployment_description, orchestrators, remote_peer_cluster
         )
 
         # exit if current cluster should not have been considered a provider
@@ -85,10 +72,12 @@ class PeerClusterOrchestratorManager(BaseManager):
             return True
 
         # store the main/failover-cm planned units count
-        self.save_cluster_fleet_apps(deployment_desc)
+        self.save_cluster_fleet_apps(deployment_description)
 
         cluster_type = (
-            "main" if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR else "failover"
+            "main"
+            if deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
+            else "failover"
         )
 
         # flag the trigger of the rel changed update on the consumer side
@@ -100,43 +89,53 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_peer_cluster.trigger = cluster_type
 
         # update reported orchestrators on local orchestrator
-        # fetch stored orchestrators
-        orchestrators_dict = orchestrators.to_dict()
-        orchestrators_dict[f"{cluster_type}_app"] = deployment_desc.app.to_dict()
-        self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
-            orchestrators_dict
-        )
+        if cluster_type == "main":
+            orchestrators.main_app = deployment_description.app
+        else:
+            orchestrators.failover_app = deployment_description.app
+        self.state.application.orchestrators = orchestrators
 
         should_wait = rel_err_data and rel_err_data.should_wait
 
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
+            local_peer_cluster.initialize_empty_secrets()
             orchestrators = local_peer_cluster.orchestrators
             logger.debug(
                 "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
                 local_peer_cluster.relation.app.name,
                 orchestrators,
                 cluster_type,
-                deployment_desc.app.to_dict(),
+                deployment_description.app.to_dict(),
             )
-            orchestrators.update(
-                {
-                    f"{cluster_type}_app": deployment_desc.app.to_dict() if has_units else None,
-                    f"{cluster_type}_rel_id": local_peer_cluster.relation.id if has_units else -1,
-                }
-            )
+
+            if cluster_type == "main":
+                orchestrators.main_app = deployment_description.app if has_units else None
+                orchestrators.main_rel_id = local_peer_cluster.relation.id if has_units else -1
+            else:
+                orchestrators.failover_app = deployment_description.app if has_units else None
+                orchestrators.failover_rel_id = local_peer_cluster.relation.id if has_units else -1
+
             # in case of demotion update the trigger
             local_peer_cluster.trigger = cluster_type
             local_peer_cluster.orchestrators = orchestrators
 
             # we add the hash of the rel_data to only emit a change event
             # if the data has actually changed
-            if rel_data:
-                local_peer_cluster.set_data(rel_data, is_provider=True)
+            if remote_peer_cluster:
+                local_peer_cluster.apply_rel_data(remote_peer_cluster)
             logger.debug(
                 f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
             )
+
+            if self.state.s3_relation and self.state.application.s3:
+                local_peer_cluster.s3 = self.state.application.marshal_s3_secrets()
+            if self.state.azure_relation and self.state.application.azure:
+                local_peer_cluster.azure = self.state.application.marshal_azure_secrets()
+            if self.state.gcs_relation and self.state.application.gcs:
+                local_peer_cluster.gcs = self.state.application.marshal_gcs_secrets()
+
             # there is no error to broadcast - we clear any previously broadcasted error
             if not rel_err_data:
                 logger.debug(
@@ -154,67 +153,37 @@ class PeerClusterOrchestratorManager(BaseManager):
                 del local_peer_cluster.error_data
         return not should_wait
 
-    def build_peer_cluster_rel_data(
-        self,
-        deployment_desc: DeploymentDescription | None,
-    ) -> PeerClusterRelData | None:
+    def build_peer_cluster_rel_data(self) -> PeerClusterAppModel | None:
         """Build and return the peer cluster rel data to be shared with requirer sub-clusters."""
         # returns None if this cluster is not fully ready, or if the admin user
         # is not initialized
-        if not deployment_desc:
+
+        deployment_description = self.state.application.deployment_desc
+        if not deployment_description:
             logger.debug("Cluster not ready to populate relation data")
             return None
 
-        s3_credentials = None
-        azure_credentials = None
-        gcs_credentials = None
-
-        if self.state.s3_relation:
-            connection_info = self.state.get_storage_connection_info_from_relation(
-                ObjectStorageType.S3
-            )
-            s3_credentials = self.state.s3_credentials(connection_info)
-        if self.state.azure_relation:
-            connection_info = self.state.get_storage_connection_info_from_relation(
-                ObjectStorageType.AZURE
-            )
-            azure_credentials = self.state.azure_credentials(connection_info)
-        if self.state.gcs_relation:
-            connection_info = self.state.get_storage_connection_info_from_relation(
-                ObjectStorageType.GCS
-            )
-            gcs_credentials = self.state.gcs_credentials(connection_info)
-
-        credentials = self.build_peer_cluster_rel_data_credentials(
-            s3_creds=s3_credentials,
-            azure_creds=azure_credentials,
-            gcs_creds=gcs_credentials,
-        )
-        if not credentials:
+        if not self.state.application.is_admin_user_initialized:
             logger.debug("Admin user not initialized. Relation data not ready")
             return None
 
-        cm_nodes = []
+        cm_nodes = {}
         try:
-            cm_nodes = self.fetch_current_app_cm_nodes(deployment_desc)
+            cm_nodes = self.fetch_current_app_cm_nodes(deployment_description)
         except OpenSearchHttpError:
-            logger.warning(f"Could not fetch nodes in related {deployment_desc.typ} sub-cluster")
+            logger.warning(
+                f"Could not fetch nodes in related {deployment_description.typ} sub-cluster"
+            )
 
-        return PeerClusterRelData(
-            cluster_name=deployment_desc.config.cluster_name,
+        return self.state.application.peer_cluster_rel_data_from_application_model(
             cm_nodes=cm_nodes,
-            credentials=credentials,
-            deployment_desc=deployment_desc,
             security_index_initialised=self.is_security_index_initialised_in_all_clusters,
             first_data_node=self.first_data_node_in_all_clusters,
-            plugins=(
-                self.plugin_config_info
-                if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                else None
-            ),
         )
 
-    def fetch_current_app_cm_nodes(self, deployment_desc: DeploymentDescription) -> list[Node]:
+    def fetch_current_app_cm_nodes(
+        self, deployment_desc: DeploymentDescription
+    ) -> dict[str, Node]:
         """Fetch the cluster_manager eligible node IPs in the current application."""
         nodes = self._nodes(
             use_localhost=self.opensearch_client.is_node_up(),
@@ -228,15 +197,15 @@ class PeerClusterOrchestratorManager(BaseManager):
             else:
                 computed_roles = GENERATED_ROLES
 
-            return [
-                Node(
+            return {
+                self.state.unit_name: Node(
                     name=self.state.unit_name,
                     roles=computed_roles,
                     ip=self.state.host_ip,
                     app=deployment_desc.app,
                     unit_number=self.state.server.unit_id,
                 )
-            ]
+            }
 
         if cluster_fleet_apps := self.state.application.cluster_fleet_apps:
             # only report nodes from apps with planned units
@@ -246,37 +215,11 @@ class PeerClusterOrchestratorManager(BaseManager):
             )
             nodes = [node for node in nodes if has_planned_units(node.app.id)]
 
-        return [
-            node
+        return {
+            node.name: node
             for node in nodes
             if node.is_cm_eligible() and node.app.id == deployment_desc.app.id
-        ]
-
-    def build_peer_cluster_rel_data_credentials(
-        self,
-        s3_creds: S3RelDataCredentials | None,
-        azure_creds: AzureRelDataCredentials | None,
-        gcs_creds: GcsRelDataCredentials | None,
-    ) -> PeerClusterRelDataCredentials | None:
-        """Build and return the rel data credentials to be shared with requirer sub-clusters."""
-        if self.state.application.is_admin_user_initialized:
-            return PeerClusterRelDataCredentials(
-                admin_username=ADMIN_USER,
-                admin_password=self.state.secrets.get(Scope.APP, password_key(ADMIN_USER)),
-                admin_password_hash=self.state.secrets.get(Scope.APP, hash_key(ADMIN_USER)),
-                kibana_password=self.state.secrets.get(
-                    Scope.APP, password_key(KIBANA_SERVER_USER)
-                ),
-                kibana_password_hash=self.state.secrets.get(
-                    Scope.APP, hash_key(KIBANA_SERVER_USER)
-                ),
-                monitor_password=self.state.secrets.get(Scope.APP, password_key(COS_USER)),
-                admin_tls=self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val),
-                s3=s3_creds,
-                azure=azure_creds,
-                gcs=gcs_creds,
-            )
-        return None
+        }
 
     @property
     def is_security_index_initialised_in_all_clusters(self) -> bool:
@@ -300,17 +243,6 @@ class PeerClusterOrchestratorManager(BaseManager):
             if remote_peer_cluster.first_data_node:
                 return remote_peer_cluster.first_data_node
         return None
-
-    @property
-    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
-        """Returns managed plugin configurations and grants related secrets to subclusters"""
-        plugins = self.state.application.plugin_config_info
-        return {
-            label: plugin
-            for label, plugin in plugins.items()
-            if plugin.secret_id
-            and self.state.secrets.grant_secret_to_subclusters(plugin.secret_id, is_provider=True)
-        }
 
     @property
     def is_every_unit_marked_as_started(self) -> bool:
@@ -338,7 +270,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         self,
         deployment_desc: DeploymentDescription | None,
         orchestrators: PeerClusterOrchestrators,
-        rel_data: PeerClusterRelData | None,
+        rel_data: PeerClusterAppModel | None,
     ) -> PeerClusterRelErrorData | None:
         """Build error peer relation data object."""
         should_sever_relation, should_retry, blocked_msg = False, True, None
@@ -372,6 +304,11 @@ class PeerClusterOrchestratorManager(BaseManager):
                 )
             )
         elif not self.state.is_tls_full_configured_in_cluster:
+            # During CA rotation tls_configured is transiently cleared on each unit.
+            # Skip writing error-data entirely to avoid blocking sub-clusters; they will
+            # retry on the next peer-changed event once all units restore tls_configured.
+            if not self.state.ca_rotation_complete_in_cluster:
+                return None
             blocked_msg = (
                 PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value.message.format(
                     message_suffix=message_suffix
@@ -398,7 +335,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 blocked_msg = PeerClusterErrorDataStatuses.WAITING_FOR_EVERY_UNIT_TO_START.value.message.format(
                     message_suffix=message_suffix
                 )
-            elif not self.state.secrets.get(Scope.APP, password_key(COS_USER)):
+            elif not self.state.application.cos_password:
                 blocked_msg = PeerClusterErrorDataStatuses.COS_USER_PASSWORD_NOT_AVAILABLE.value.message.format(
                     COS_USER=COS_USER
                 )
@@ -415,7 +352,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                             message_suffix=message_suffix
                         )
                     )
-        elif rel_data and not rel_data.cm_nodes:
+        elif rel_data and not rel_data.nodes_config:
             blocked_msg = PeerClusterErrorDataStatuses.COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER.value.message.format(
                 deployment_desc=deployment_desc
             )
@@ -496,9 +433,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         # check how many related apps are disconnected from main orchestrator
         remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
         n_disconnected = sum(
-            1
-            for p_cluster in remote_peer_clusters
-            if (p_cluster.main_orchestrator_registered.lower() == "false")
+            1 for p_cluster in remote_peer_clusters if not p_cluster.main_orchestrator_registered
         )
 
         # check if failover is disconnected from main orchestrator
@@ -536,9 +471,9 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_p_cluster.relation.id,
             )
             # Update the orchestrators
-            orchestrators = PeerClusterOrchestrators.from_dict(local_p_cluster.orchestrators)
+            orchestrators = local_p_cluster.orchestrators
             orchestrators.failover_app = candidate_failover_app
-            local_p_cluster.orchestrators = orchestrators.to_dict()
+            local_p_cluster.orchestrators = orchestrators
 
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""
@@ -551,9 +486,12 @@ class PeerClusterOrchestratorManager(BaseManager):
             is_provider=True, relation_id=rel_id, remote=False
         )
         if local_peer_cluster:
-            local_peer_cluster.delete_data()
+            local_peer_cluster.clear_rel_data()
             del local_peer_cluster.rel_data_hash
             del local_peer_cluster.error_data
             del local_peer_cluster.cluster_fleet_apps
             del local_peer_cluster.orchestrators
             del local_peer_cluster.trigger
+            del local_peer_cluster.gcs
+            del local_peer_cluster.azure
+            del local_peer_cluster.s3

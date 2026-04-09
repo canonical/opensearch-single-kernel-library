@@ -198,7 +198,7 @@ class ConfigManager(BaseManager):
         """
         return (
             {"plugins.security.authcz.admin_dn": [tls_subject]}
-            if (tls_subject := self.state.application.tls_subject)
+            if (tls_subject := self.state.application.admin_subject)
             else {}
         )
 
@@ -214,7 +214,7 @@ class ConfigManager(BaseManager):
             layer = "transport"
             keystore_pwd = self.state.server.transport_keystore_password
 
-        truststore_pwd = self.state.application.tls_truststore_password
+        truststore_pwd = self.state.application.admin_truststore_password
 
         if not (truststore_pwd and keystore_pwd):
             return {}
@@ -356,7 +356,28 @@ class ConfigManager(BaseManager):
 
         Intended for authc category in opensearch-security/config.yml config file.
         """
-        jwt_config = self.state.server.jwt_auth_configuration
+        jwt_config = self.state.jwt.auth_configuration
+        if jwt_config:
+            config_opts = {
+                "signing_key": jwt_config.signing_key,
+                "jwt_header": jwt_config.jwt_header,
+                "jwt_url_parameter": jwt_config.jwt_url_parameter,
+                "roles_key": jwt_config.roles_key,
+                "subject_key": jwt_config.subject_key,
+                "required_audience": jwt_config.required_audience,
+                "required_issuer": jwt_config.required_issuer,
+                "jwt_clock_skew_tolerance_seconds": jwt_config.jwt_clock_skew_tolerance_seconds,
+            }
+        else:
+            config_opts = {
+                "signing_key": "base64 encoded HMAC key or public RSA/ECDSA pem key",
+                "jwt_header": "Authorization",
+                "jwt_url_parameter": None,
+                "roles_key": None,
+                "subject_key": None,
+                "jwt_clock_skew_tolerance_seconds": 30,
+            }
+
         return {
             "jwt_auth_domain": {
                 "description": "Authenticate via Json Web Token",
@@ -366,27 +387,7 @@ class ConfigManager(BaseManager):
                 "http_authenticator": {
                     "type": "jwt",
                     "challenge": False,
-                    "config": (
-                        {
-                            "signing_key": jwt_config.signing_key,
-                            "jwt_header": jwt_config.jwt_header,
-                            "jwt_url_parameter": jwt_config.jwt_url_parameter,
-                            "roles_key": jwt_config.roles_key,
-                            "subject_key": jwt_config.subject_key,
-                            "required_audience": jwt_config.required_audience,
-                            "required_issuer": jwt_config.required_issuer,
-                            "jwt_clock_skew_tolerance_seconds": jwt_config.jwt_clock_skew_tolerance_seconds,
-                        }
-                        if jwt_config
-                        else {
-                            "signing_key": "base64 encoded HMAC key or public RSA/ECDSA pem key",
-                            "jwt_header": "Authorization",
-                            "jwt_url_parameter": None,
-                            "roles_key": None,
-                            "subject_key": None,
-                            "jwt_clock_skew_tolerance_seconds": 30,
-                        }
-                    ),
+                    "config": config_opts,
                 },
                 "authentication_backend": {"type": "noop"},
             }

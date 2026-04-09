@@ -27,11 +27,11 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
-from opensearch_single_kernel.core.external_clients_relation import (
-    ExternalOpenSearchClient,
-)
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+    ResourceProviderModel,
+)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     generate_hashed_password,
@@ -51,16 +51,16 @@ class ExternalClientsManager(BaseManager):
 
     def create_opensearch_users(
         self,
-        external_client: ExternalOpenSearchClient,
         index: str,
+        relation: Relation,
         extra_user_roles: str | None = None,
     ) -> tuple[str, str]:
         """Creates necessary opensearch users and permissions for this relation.
 
         Args:
-            external_client: the external opensearch client relation state.
             index: the index this relation will be using.
-
+            relation: relation of external client
+            extra_user_roles: the extra user roles for opensearch
         Raises:
             OpenSearchUserMgmtError if user creation fails
         """
@@ -71,14 +71,14 @@ class ExternalClientsManager(BaseManager):
             username = KIBANA_SERVER_USER
             pwd = self.state.application.kibana_server_password
         else:
-            username = external_client.relation_username
+            username = f"{relation.name}_{relation.id}"
             hashed_pwd, pwd = generate_hashed_password()
 
             # Create a new role for this relation, encapsulating the permissions we care about. We
             # can't create a "default" and an "admin" role once because the permissions need to be
             # set to this relation's specific index.
             permissions = self.get_extra_user_role_permissions(extra_user_roles, index)
-            self._put_relation_user(username, permissions, hashed_pwd, external_client.relation.id)
+            self._put_relation_user(username, permissions, hashed_pwd, relation.id)
             try:
                 self.opensearch_client.patch_user(
                     username,
@@ -164,68 +164,51 @@ class ExternalClientsManager(BaseManager):
         users[str(relation_id)] = user
         self.state.application.client_users_dict = users
 
-    def update_all_external_clients_relation_endpoints(self, nodes: list[Node]) -> None:
-        """Update the relation databags of all external clients with network endpoints."""
-        for external_client in self.state.external_clients:
-            self.update_relation_endpoints(external_client, nodes)
-
-    def update_relation_endpoints(
+    def get_relation_endpoints(
         self,
-        external_client: ExternalOpenSearchClient,
         nodes: list[Node],
         omit_endpoints: set[str] | None = None,
-    ) -> None:
-        """Update the relation databag with network endpoints.
-
-        Make sure to call this only when the unit is leader.
-        """
+    ) -> str:
+        """Calculates the active network endpoints for external clients."""
         if (
             not self.opensearch_client.is_node_up()
-            or not external_client.relation.app
             or not self.state.application.is_security_index_initialised
         ):
-            return
+            return ""
 
-        if not omit_endpoints:
-            omit_endpoints = set()
-
-        ips = set([node.ip for node in nodes])
+        omit_endpoints = omit_endpoints or set()
+        ips = {node.ip for node in nodes}
 
         port = OPENSEARCH_HTTP_PORT
-        endpoints = set(sorted([f"{ip}:{port}" for ip in ips - omit_endpoints]))
-        databag_endpoints = external_client.endpoints
+        endpoints = sorted([f"{ip}:{port}" for ip in ips - omit_endpoints])
 
-        if endpoints != databag_endpoints:
-            external_client.endpoints = endpoints
+        return ",".join(endpoints)
 
     def remove_lingering_relation_users_and_roles(  # noqa: C901
-        self, departed_external_client: ExternalOpenSearchClient | None = None
+        self, departed_relation: Relation | None = None
     ):
         """Removes lingering relation users and roles from opensearch.
 
         Make sure to call this only when the unit is leader.
 
         Args:
-            departed_external_client: if a relation is departing, pass in the
-            ExternalOpenSearchClient and its user will be deleted.
+            departed_relation: departing relation
         """
         if not self.opensearch_client.is_node_up():
             return
         relation_users = self.state.application.client_users_dict
 
-        if (
-            departed_external_client
-            and departed_external_client.relation
-            and (not relation_users or departed_external_client.relation.id not in relation_users)
+        if departed_relation and (
+            not relation_users or str(departed_relation.id) not in relation_users.keys()
         ):
-            logging.warning(
-                "User for relation %d wasn't registered in internal cham workflows.",
-                departed_external_client.relation.id,
+            logger.warning(
+                "User for relation %d wasn't registered in internal charm workflows.",
+                departed_relation.id,
             )
 
         cleanup_rel_ids = []
-        if departed_external_client:
-            cleanup_rel_ids = [str(departed_external_client.relation.id)]
+        if departed_relation:
+            cleanup_rel_ids = [str(departed_relation.id)]
 
         rel_ids = [str(relation.id) for relation in self.state.external_client_relations]
         cleanup_rel_ids += list(set(relation_users.keys()) - set(rel_ids))
@@ -271,12 +254,21 @@ class ExternalClientsManager(BaseManager):
             )
 
     def update_dashboards_password(self):
-        """Update each Opensearch Dashboards relation with the latest kibanaserver."""
-        # only get the secret once to optimize performance
+        """Update each Opensearch Dashboards relation with new password."""
         pwd = self.state.application.kibana_server_password
-        for dashboards_client in self.state.dashboards_clients:
-            dashboards_client.username = KIBANA_SERVER_USER
-            dashboards_client.password = pwd
+        for relation in self.state.get_dashboards_relations():
+            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            if not responses:
+                continue
+
+            updated = False
+            for response in responses:
+                response.username = KIBANA_SERVER_USER
+                response.password = pwd
+                updated = True
+
+            if updated:
+                self.state.opensearch_provides.set_responses(relation.id, responses)
 
     @override
     def get_statuses(
@@ -302,7 +294,6 @@ class ExternalClientsManager(BaseManager):
             not self.state.server.is_app_leader
             or not (index := relation.data[relation.app].get("index"))
             or not self.opensearch_client.is_node_up()
-            or not (external_client := self.state.external_client_by_relation(relation))
         ):
             return
 
@@ -329,15 +320,19 @@ class ExternalClientsManager(BaseManager):
             extra_user_roles = (
                 extra_user_roles.lower() if extra_user_roles else DEFAULT_EXTRA_USER_ROLE
             )
-            if extra_user_roles != KIBANA_SERVER_ROLE and not self.opensearch_client.get_user(
-                external_client.relation_username
+
+            for response in self.state.opensearch_provides.responses(
+                relation, ResourceProviderModel
             ):
-                status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
+                if extra_user_roles != KIBANA_SERVER_ROLE and not self.opensearch_client.get_user(
+                    response.username
+                ):
+                    status_list.append(
+                        format_status(
+                            ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
+                        )
                     )
-                )
-                return
+                    return
         except OpenSearchHttpError as e:
             logger.error("Failed to check external client status: %s", str(e))
             return

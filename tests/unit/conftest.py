@@ -140,7 +140,6 @@ def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None)
         "opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3.S3Requirer.get_s3_connection_info",
         return_value=DEFAULT_S3_INFO,
     )
-
     info = info or DEFAULT_S3_INFO
     if ca is not None:
         info["tls_ca_chain"] = ca

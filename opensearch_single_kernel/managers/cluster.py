@@ -7,7 +7,6 @@
 import logging
 import time
 from datetime import datetime
-from typing import Any
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -55,8 +54,8 @@ from opensearch_single_kernel.core.models import (
     DeploymentState,
     Node,
     PeerClusterConfig,
-    PeerClusterRelData,
 )
+from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -131,9 +130,7 @@ class ClusterManager(BaseManager):
         self.state.application.deployment_desc = deployment_desc
         return True
 
-    def reconcile_cluster_config_with_relation_data(
-        self, data: PeerClusterRelData
-    ) -> None:  # noqa: C901
+    def reconcile_cluster_config_with_relation_data(self, data: PeerCluster) -> None:  # noqa: C901
         """Update current peer cluster related config based on peer_cluster rel_data."""
         logger.debug("running with relation data")
         current_deployment_desc = self.state.application.deployment_desc
@@ -181,7 +178,7 @@ class ClusterManager(BaseManager):
 
         logger.debug("new_deployment_desc: %s", new_deployment_desc)
         self.state.application.deployment_desc = new_deployment_desc
-        self.state.application.nodes_config = {node.name: node for node in data.cm_nodes}
+        self.state.application.nodes_config = data.nodes_config
 
     def _new_cluster_setup(self, config: PeerClusterConfig) -> DeploymentDescription:
         """Build deployment description of a new cluster."""
@@ -414,22 +411,22 @@ class ClusterManager(BaseManager):
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
         # Use a connectable host for the securityadmin CLI.
-        admin_secrets = self.state.application.admin_secrets
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {self.state.node_host}",
             f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
-            f"-tspass {admin_secrets['truststore-password']}",
+            f"-tspass {self.state.application.admin_truststore_password}",
             "-tsalias ca",
             "-tst PKCS12",
             f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN.val}.p12",
-            f"-kspass {admin_secrets['keystore-password']}",
+            f"-kspass {self.state.application.admin_keystore_password}",
             f"-ksalias {CertType.APP_ADMIN.val}",
             "-kst PKCS12",
         ]
-
-        admin_key_pwd = admin_secrets.get("key-password", None)
+        # Strip is used for situation where admin password was not created but
+        # initialize_empty_secret created field with " "
+        admin_key_pwd = (self.state.application.admin_key_password or "").strip() or None
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
@@ -439,7 +436,7 @@ class ClusterManager(BaseManager):
         logger.info("securityadmin.sh execution completed successfully")
         self.state.application.is_security_index_initialised = True
 
-    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> bool:
+    def apply_security_config(self, file: str) -> bool:
         """Run the security_admin script for specified config file, avoiding changes to others.
 
         Returns:
@@ -453,14 +450,14 @@ class ClusterManager(BaseManager):
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {self.state.node_host}",
             f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
-            f"-tspass {admin_secrets['truststore-password']}",
+            f"-tspass {self.state.application.admin_truststore_password}",
             "-tst PKCS12",
             f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
-            f"-kspass {admin_secrets['keystore-password']}",
+            f"-kspass {self.state.application.admin_keystore_password}",
             "-kst PKCS12",
         ]
 
-        admin_key_pwd = admin_secrets.get("key-password", None)
+        admin_key_pwd = (self.state.application.admin_key_password or "").strip() or None
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
@@ -575,7 +572,7 @@ class ClusterManager(BaseManager):
         if self.state.application.nodes_config == updated_nodes:
             return False
 
-        self.state.application.put_object("nodes_config", updated_nodes)
+        self.state.application.nodes_config = updated_nodes
         return True
 
     def configure_bootstrap_contributors(
@@ -843,13 +840,12 @@ class ClusterManager(BaseManager):
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
-        peer_cluster_data = remote_peer_cluster.data()
-
-        logger.debug(f"get_cluster_first_data_node : data read: {peer_cluster_data}")
-
-        if not peer_cluster_data:
+        logger.debug(f"get_cluster_first_data_node : data read: {remote_peer_cluster}")
+        # main_rel_id can point to a relation that has since been removed (e.g. the
+        # main orchestrator departed), in which case there's no data to read.
+        if not remote_peer_cluster or not remote_peer_cluster.deployment_desc:
             return None
-        return peer_cluster_data.first_data_node
+        return remote_peer_cluster.first_data_node
 
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
@@ -942,7 +938,7 @@ class ClusterManager(BaseManager):
                 status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
         elif self.state.jwt_relation:
             try:
-                self.state.jwt.auth_configuration
+                _ = self.state.jwt.auth_configuration
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 

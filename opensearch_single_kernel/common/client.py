@@ -84,19 +84,19 @@ class OpenSearchClient:
         if object_storage_type == ObjectStorageType.S3:
             settings = {
                 "bucket": object_storage_config.s3.bucket,
-                "base_path": object_storage_config.s3.base_path,
+                "base_path": object_storage_config.s3.path,
                 "region": object_storage_config.s3.region,
                 "endpoint": object_storage_config.s3.endpoint,
             }
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
                 "container": object_storage_config.azure.container,
-                "base_path": object_storage_config.azure.base_path,
+                "base_path": object_storage_config.azure.path,
             }
         elif object_storage_type == ObjectStorageType.GCS:
             settings = {
                 "bucket": object_storage_config.gcs.bucket,
-                "base_path": object_storage_config.gcs.base_path,
+                "base_path": object_storage_config.gcs.path,
             }
 
         repo_type = repository_type(object_storage_type)

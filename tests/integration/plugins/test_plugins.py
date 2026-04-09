@@ -353,13 +353,13 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
     if not isinstance(relation_data, dict):
         relation_data = json.loads(relation_data)
     relation_data = relation_data["metrics_scrape_jobs"][0]
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.user")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
-    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
+    assert relation_data["basic_auth"]["password"] == secret["cos-password"]
 
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
-    assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
+    admin_secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.app-admin")
+    assert relation_data["tls_config"]["ca"] == admin_secret["admin-ca-cert"]
     assert relation_data["scheme"] == "https"
 
 
@@ -463,13 +463,13 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
     if not isinstance(relation_data, dict):
         relation_data = json.loads(relation_data)
     relation_data = relation_data["metrics_scrape_jobs"][0]
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.user")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
-    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
+    assert relation_data["basic_auth"]["password"] == secret["cos-password"]
 
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
-    assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
+    admin_secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.app-admin")
+    assert relation_data["tls_config"]["ca"] == admin_secret["admin-ca-cert"]
     assert relation_data["scheme"] == "https"
 
 
@@ -481,7 +481,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.user")
     response = await http_request(
         ops_test,
         "get",
@@ -489,7 +489,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
         app=APP_NAME,
         json_resp=False,
         user="monitor",
-        user_password=secret["monitor-password"],
+        user_password=secret["cos-password"],
     )
     response_str = response.content.decode("utf-8")
 
@@ -510,7 +510,7 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     )
     await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
 
-    new_password = result1.response.get("monitor-password")
+    new_password = result1.response.get("monitor")
     # Now, we compare the change in the action above with the opensearch's nodes.
     # In large deployments, that will mean checking if the change on main orchestrator
     # was sent down to the opensearch (data node) cluster.

@@ -15,6 +15,7 @@ from ops.charm import CharmEvents
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
+    CLIENT_RELATION,
     GCS_RELATION,
     PEER_RELATION,
     S3_RELATION,
@@ -57,6 +58,10 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage impor
     GcsStorageRequires,
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+    RequirerCommonModel,
+    ResourceProviderEventHandler,
+)
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
@@ -100,6 +105,36 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
     verify_snapshots_credentials_event = EventSource(VerifySnapshotsCredentialsEvent)
     reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
+    state: ClusterState
+    tls_manager: TlsManager
+    internal_users_manager: InternalUsersManager
+    cluster_manager: ClusterManager
+    exclusions_manager: NodesExclusionsManager
+    external_clients_manager: ExternalClientsManager
+    lock_manager: LockManager
+    profiles_manager: ProfilesManager
+    health_manager: HealthManager
+    config_manager: ConfigManager
+    peer_cluster_orchestrator_manager: PeerClusterOrchestratorManager
+    peer_cluster_manager: PeerClusterManager
+    keystore_manager: KeystoreManager
+    plugin_manager: PluginManager
+    notifications_manager: NotificationsManager
+    snapshots_manager: SnapshotsManager
+    upgrades_manager: UpgradesManagerVM
+    opensearch_events: OpenSearchEventsHandler
+    upgrade_events: UpgradesEventsHandler
+    tls_events: TLSEventsHandler
+    peer_cluster_events: PeerClusterEventsHandler
+    external_clients_events: ExternalClientsEventsHandler
+    keystore_events: KeystoreEventsHandler
+    snapshots_events: SnapshotsEventsHandler
+    notifications_events: NotificationsEvents
+    cos_events: CosEventsHandler
+    jwt_events: JWTEventsHandler
+    oauth_events: OAuthEventsHandler
+    status_handler: StatusHandler
+
     def __init__(self, *args):
         super().__init__(*args)
 
@@ -111,6 +146,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             S3Requirer(self, S3_RELATION),
             AzureStorageRequires(self, AZURE_RELATION),
             GcsStorageRequires(self, GCS_RELATION),
+            ResourceProviderEventHandler(
+                self, relation_name=CLIENT_RELATION, request_model=RequirerCommonModel
+            ),
         )
 
         # Managers

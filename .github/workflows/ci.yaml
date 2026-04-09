@@ -130,6 +130,7 @@ jobs:
           - tests/charms/opensearch_k8s_2.19.4_test_charm
           - tests/charms/dummy-client-charm
           - tests/integration/relations/opensearch_provider/application-charm
+          - tests/integration/relations/opensearch_provider/application-charm-v1
     steps:
       - name: Install CLI
         run: pipx install

@@ -110,6 +110,7 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
         ops_test,
         apps=[APP_NAME, JWT_APP_NAME],
         wait_for_exact_units={APP_NAME: DEFAULT_NUM_UNITS, JWT_APP_NAME: 1},
+        idle_period=30,
     )
 
     logger.info("Test access to `/_cat/nodes` with JWT")

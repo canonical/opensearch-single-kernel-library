@@ -75,7 +75,7 @@ def test_can_start(harness, mocker):
         ([Directive.SHOW_STATUS, Directive.WAIT_FOR_PEER_CLUSTER_RELATION], False),
         ([Directive.INHERIT_CLUSTER_NAME], False),
     ]:
-        deployment_desc = DeploymentDescription(
+        deployment_description = DeploymentDescription(
             config=PeerClusterConfig(
                 cluster_name="logs",
                 init_hold=False,
@@ -91,7 +91,7 @@ def test_can_start(harness, mocker):
         )
         mocker.patch(
             "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-            return_value=deployment_desc,
+            return_value=deployment_description,
             new_callable=PropertyMock,
         )
         can_start = harness.charm.cluster_manager.no_blocking_directives()

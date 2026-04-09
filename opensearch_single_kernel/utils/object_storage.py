@@ -172,12 +172,12 @@ def verify_s3_credentials(storage_config: ObjectStorageConfig) -> bool:  # noqa:
         verify_param = ca_tmp_path
 
     s3_params: dict[str, str] = {
-        "access-key": storage_config.s3.credentials.access_key,
-        "secret-key": storage_config.s3.credentials.secret_key,
+        "access-key": storage_config.s3.access_key,
+        "secret-key": storage_config.s3.secret_key,
         "bucket": storage_config.s3.bucket,
         "endpoint": storage_config.s3.endpoint,
         "region": storage_config.s3.region or "",
-        "path": (storage_config.s3.base_path or "").strip("/"),
+        "path": (storage_config.s3.path or "").strip("/"),
     }
 
     try:
@@ -304,8 +304,8 @@ def verify_azure_credentials(storage_config: ObjectStorageConfig) -> bool:
         return False
 
     try:
-        account_name = storage_config.azure.credentials.storage_account
-        account_key = storage_config.azure.credentials.secret_key
+        account_name = storage_config.azure.storage_account
+        account_key = storage_config.azure.secret_key
         container_name = storage_config.azure.container
 
         # Custom endpoint if present, else default public endpoint
@@ -333,7 +333,7 @@ def verify_azure_credentials(storage_config: ObjectStorageConfig) -> bool:
             container_client = get_azure_container_client(azure_params)
 
         # write/delete to validate RW access
-        prefix = (storage_config.azure.base_path or "").strip("/")
+        prefix = (storage_config.azure.path or "").strip("/")
         probe_name = (
             f"{prefix}/.opensearch-verify-{uuid.uuid4().hex}"
             if prefix
@@ -372,6 +372,9 @@ def get_gcs_client(service_account_json: str) -> storage.Client:
         service_account = json.loads(service_account_json)
     except (TypeError, ValueError) as e:
         raise ValueError("GCS secret_key is not valid JSON.") from e
+
+    if "private_key" in service_account:
+        service_account["private_key"] = service_account["private_key"].replace("\\n", "\n")
 
     client_kwargs: dict = {}
     if project_id := service_account.get("project_id"):
@@ -429,11 +432,11 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
         - If the configured bucket does not exist, try to create it.
         - Verify access via write and delete a small dummy blob.
     """
-    if not object_storage_config.gcs.credentials:
+    if not object_storage_config.gcs:
         logger.error("GCS credential validation failed: missing credentials block.")
         return False
 
-    service_account_json = object_storage_config.gcs.credentials.secret_key
+    service_account_json = object_storage_config.gcs.secret_key
     bucket_name = object_storage_config.gcs.bucket
 
     if not service_account_json:
@@ -469,7 +472,7 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
                 return False
 
         # write/delete to validate RW access
-        prefix = (object_storage_config.gcs.base_path or "").strip("/")
+        prefix = (object_storage_config.gcs.path or "").strip("/")
         probe_name = (
             f"{prefix}/.opensearch-verify-{uuid.uuid4().hex}"
             if prefix

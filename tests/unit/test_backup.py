@@ -1061,17 +1061,15 @@ def _cfg(*, secret_key: str = "{}", bucket: str = "bkt", base_path: str = "base/
     """Build an ObjectStorageConfig mock for GCS."""
     cfg = Mock()
     cfg.gcs = Mock()
-    cfg.gcs.credentials = Mock()
-    cfg.gcs.credentials.secret_key = secret_key
+    cfg.gcs.secret_key = secret_key
     cfg.gcs.bucket = bucket
-    cfg.gcs.base_path = base_path
+    cfg.gcs.path = base_path
     return cfg
 
 
 def test_create_gcs_bucket_when_credentials_block_missing_then_return_false():
     cfg = Mock()
-    cfg.gcs = Mock()
-    cfg.gcs.credentials = None
+    cfg.gcs = None
 
     assert object_storage.verify_gcs_credentials(cfg) is False
 

@@ -7,7 +7,6 @@
 
 import json
 import logging
-from typing import Any
 
 from ops.model import Application, Relation, Unit
 
@@ -15,30 +14,31 @@ from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_USER,
     KIBANA_SERVER_USER,
-    PERFORMANCE_PROFILE,
-    CertType,
-    Scope,
+    DeploymentType,
 )
 from opensearch_single_kernel.core.models import (
-    DeploymentDescription,
-    JWTAuthConfiguration,
+    AzureRelData,
+    GcsRelData,
+    ModelProperty,
     Node,
+    OpenSearchAppPeerModel,
     OpenSearchProfile,
+    OpenSearchServerPeerModel,
     PeerClusterApp,
+    PeerClusterAppModel,
     PeerClusterOrchestrators,
     PerformanceType,
-    PluginConfigInfo,
     ProductionProfile,
+    S3RelData,
     TestingProfile,
 )
+from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.relations import RelationState
-from opensearch_single_kernel.core.secrets import OpenSearchSecrets
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
-    DataPeerData,
-    DataPeerUnitData,
+from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+    OpsOtherPeerUnitRepositoryInterface,
+    OpsPeerRepositoryInterface,
+    OpsPeerUnitRepositoryInterface,
 )
-from opensearch_single_kernel.utils.helpers import normalized_tls_subject
-from opensearch_single_kernel.utils.secrets import hash_key, password_key
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +46,71 @@ logger = logging.getLogger(__name__)
 class OpenSearchServer(RelationState):
     """State/Relation data collection for an opensearch unit"""
 
+    # State flags
+    is_bootstrap_contributor = ModelProperty("bootstrap_contributor", default=False)
+    is_cluster_manager_removed = ModelProperty("cluster_manager_removed", default=False)
+    started = ModelProperty("started", default="")
+    unit_dying = ModelProperty("unit_dying", default=False)
+    pebble_observer_pid = ModelProperty("pebble_observer_pid", default=None)
+
+    # TLS Status & Timestamps
+    tls_ca_renewing = ModelProperty("tls_ca_renewing", default=False)
+    tls_ca_renewed = ModelProperty("tls_ca_renewed", default=False)
+    tls_configured = ModelProperty("tls_configured", default=False)
+    certs_exp_checked_at = ModelProperty("certs_exp_checked_at", default="1970-01-01 00:00:00")
+
+    # Networking & Auth
+    last_host_ip = ModelProperty("last_host_ip", default="")
+    oauth_openid_connect_url = ModelProperty("oauth_openid_connect_url", default="")
+    plugin_config_info = ModelProperty("plugin_config_info", default_factory=dict)
+
+    # Passwords
+    transport_keystore_password = ModelProperty("transport_keystore_password", default="")
+    http_keystore_password = ModelProperty("http_keystore_password", default="")
+    transport_truststore_password = ModelProperty("transport_truststore_password", default="")
+    http_truststore_password = ModelProperty("http_truststore_password", default="")
+
+    # Transport TLS Properties
+    transport_key = ModelProperty("transport_key", default="")
+    transport_key_password = ModelProperty("transport_key_password", default="")
+    transport_csr = ModelProperty("transport_csr", default="")
+    transport_chain = ModelProperty("transport_chain", default="")
+    transport_cert = ModelProperty("transport_cert", default="")
+    transport_ca_cert = ModelProperty("transport_ca_cert", default="")
+    transport_subject = ModelProperty("transport_subject", default="")
+
+    # HTTP TLS Properties
+    http_key = ModelProperty("http_key", default="")
+    http_key_password = ModelProperty("http_key_password", default="")
+    http_csr = ModelProperty("http_csr", default="")
+    http_chain = ModelProperty("http_chain", default="")
+    http_cert = ModelProperty("http_cert", default="")
+    http_ca_cert = ModelProperty("http_ca_cert", default="")
+    http_subject = ModelProperty("http_subject", default="")
+
     def __init__(
         self,
         relation: Relation | None,
-        data_interface: DataPeerUnitData,
+        repository: (
+            OpsPeerUnitRepositoryInterface[OpenSearchServerPeerModel]
+            | OpsOtherPeerUnitRepositoryInterface[OpenSearchServerPeerModel]
+        ),
         component: Unit,
-        secrets: OpenSearchSecrets,
     ):
-        super().__init__(relation, data_interface, component)
+        super().__init__(relation, repository, component)
         self.unit = component
-        self.secrets = secrets
+
+    @property
+    def model(self) -> OpenSearchServerPeerModel | None:
+        """Internal helper to retrieve the peer model state."""
+        if not self.relation:
+            return None
+        return self.repository.build_model(self.relation.id, component=self.unit)
+
+    def write(self, model: OpenSearchServerPeerModel):
+        """Internal helper to write the modified peer model back to the databag."""
+        if self.relation:
+            self.repository.write_model(self.relation.id, model)
 
     @property
     def unit_id(self) -> int:
@@ -63,312 +118,144 @@ class OpenSearchServer(RelationState):
         return int(self.unit.name.split("/")[1])
 
     @property
-    def profile(self) -> OpenSearchProfile | None:
-        """Current profile of the unit"""
-        if profile_str := self.relation_data.get(PERFORMANCE_PROFILE, None):
-            return (
-                ProductionProfile()
-                if PerformanceType(profile_str) == PerformanceType.PRODUCTION
-                else TestingProfile()
-            )
-        return None
-
-    @profile.setter
-    def profile(self, profile_value: OpenSearchProfile):
-        """Set current profile of the unit."""
-        self.relation_data.update({PERFORMANCE_PROFILE: profile_value.type.value})
-
-    @property
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""
         return self.unit.is_leader()
 
     @property
-    def is_bootstrap_contributor(self) -> bool:
-        """Get value of 'bootstrap_contributor'"""
-        return self.relation_data.get("bootstrap_contributor", "").lower() == "true"
-
-    @is_bootstrap_contributor.setter
-    def is_bootstrap_contributor(self, value: bool):
-        """Set the value of 'bootstrap_contributor' in application state."""
-        self.update({"bootstrap_contributor": str(value)})
-
-    @is_bootstrap_contributor.deleter
-    def is_bootstrap_contributor(self):
-        """Remove the value of 'bootstrap_contributor' from application state."""
-        self.relation.data[self.unit].pop("bootstrap_contributor", None)
-
-    @property
-    def is_cluster_manager_removed(self) -> bool:
-        """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "").lower() == "true"
-
-    @is_cluster_manager_removed.setter
-    def is_cluster_manager_removed(self, value: bool):
-        """Set value of 'cluster_manager_removed'"""
-        self.update({"cluster_manager_removed": str(value)})
-
-    @is_cluster_manager_removed.deleter
-    def is_cluster_manager_removed(self):
-        """Remove value of 'cluster_manager_removed'"""
-        self.relation.data[self.unit].pop("cluster_manager_removed", None)
-
-    @property
-    def started(self) -> str:
-        """Get the value of 'started' key from unit data bag"""
-        return self.relation_data.get("started", "")
-
-    @started.setter
-    def started(self, value: str) -> None:
-        """Set the value of 'started' key in unit data bag"""
-        self.relation.data[self.unit].update({"started": value})
-
-    @started.deleter
-    def started(self) -> None:
-        """Remove the value of 'started' key from unit data bag"""
-        self.relation.data[self.unit].pop("started", None)
-
-    @property
-    def tls_ca_renewing(self) -> bool:
-        """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
-
-    @tls_ca_renewing.setter
-    def tls_ca_renewing(self, value: bool) -> None:
-        """Update value of tls_ca_renewing from unit state."""
-        self.update({"tls_ca_renewing": str(value)})
-
-    @tls_ca_renewing.deleter
-    def tls_ca_renewing(self) -> None:
-        """Remove value of 'tls_ca_renewing' from unit state."""
-        self.relation.data[self.unit].pop("tls_ca_renewing", None)
-
-    @property
-    def tls_ca_renewed(self) -> bool:
-        """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
-
-    @tls_ca_renewed.setter
-    def tls_ca_renewed(self, value: bool) -> None:
-        """Update value of 'tls_ca_renewed'"""
-        self.update({"tls_ca_renewed": str(value)})
-
-    @tls_ca_renewed.deleter
-    def tls_ca_renewed(self) -> None:
-        """Remove value of 'tls_ca_renewed' from unit state."""
-        self.relation.data[self.unit].pop("tls_ca_renewed", None)
-
-    @property
-    def tls_configured(self) -> bool:
-        """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
-
-    @tls_configured.setter
-    def tls_configured(self, value: bool) -> None:
-        """Update the value of 'tls_configured'"""
-        self.update({"tls_configured": str(value)})
-
-    @tls_configured.deleter
-    def tls_configured(self) -> None:
-        """Delete the 'tls_configured' field to notify related clusters."""
-        self.relation.data[self.unit].pop("tls_configured", None)
-
-    @property
-    def update_ts(self) -> str:
-        """Get the value of 'update-ts' from the unit databag."""
-        return self.relation_data.get("update-ts", "")
-
-    @update_ts.setter
-    def update_ts(self, timestamp: int) -> None:
-        """Update the value of 'update-ts' in the unit databag."""
-        self.update({"update-ts": str(timestamp)})
-
-    @property
-    def certs_exp_checked_at(self) -> str:
-        """Get the value of 'certs_exp_checked_at' from unit data bag."""
-        return self.relation_data.get("certs_exp_checked_at", "1970-01-01 00:00:00")
-
-    @certs_exp_checked_at.setter
-    def certs_exp_checked_at(self, value: str) -> None:
-        """Update the value of 'certs_exp_checked_at'"""
-        self.update({"certs_exp_checked_at": value})
-
-    @property
-    def pebble_observer_pid(self) -> int | None:
-        """PID of the running pebble observer subprocess, or None."""
-        if not self.relation:
+    def profile(self) -> OpenSearchProfile | None:
+        """Current profile of the unit"""
+        if not (m := self.model) or not m.profile:
             return None
-        val = self.relation.data[self.unit].get("pebble-observer-pid")
-        return int(val) if val else None
+        return ProductionProfile() if m.profile == PerformanceType.PRODUCTION else TestingProfile()
 
-    @pebble_observer_pid.setter
-    def pebble_observer_pid(self, value: str) -> None:
-        """Store the pebble observer PID."""
-        self.update({"pebble-observer-pid": value})
-
-    @pebble_observer_pid.deleter
-    def pebble_observer_pid(self) -> None:
-        """Clear the stored pebble observer PID."""
-        self.relation.data[self.unit].pop("pebble-observer-pid", None)
+    @profile.setter
+    def profile(self, profile_value: OpenSearchProfile):
+        """Set current profile of the unit."""
+        if m := self.model:
+            m.profile = profile_value.type
+            self.write(m)
 
     @property
     def allocation_exclusions_to_delete(self) -> set[str]:
-        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
-        return set(
-            filter(
-                None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+        """Return the value of 'allocation_exclusion_to_delete' from databag."""
+        if m := self.model:
+            return (
+                set(m.allocation_exclusions_to_delete)
+                if m.allocation_exclusions_to_delete
+                else set()
             )
-        )
+        return set()
 
     @allocation_exclusions_to_delete.setter
-    def allocation_exclusions_to_delete(self, value: set[str]) -> None:
-        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
-        self.update({"allocation-exclusions-to-delete": ",".join(value)})
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in databag."""
+        if m := self.model:
+            m.allocation_exclusions_to_delete = list(value)
+            self.write(m)
 
     @property
-    def voting_exclusions_to_delete(self) -> set[str]:
-        """Return the value of 'delete_voting_exclusions' from application databag."""
-        return set(
-            filter(
-                None,
-                self.relation_data.get("delete-voting-exclusions", "").split(","),
-            )
-        )
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from databag."""
+        if m := self.model:
+            return set(m.delete_voting_exclusions) if m.delete_voting_exclusions else set()
+        return set()
 
-    @voting_exclusions_to_delete.setter
-    def voting_exclusions_to_delete(self, value: set[str]) -> None:
-        """Set the value of 'delete_voting_exclusions' in application databag."""
-        self.update({"delete-voting-exclusions": ",".join(value)})
-
-    @property
-    def last_host_ip(self) -> str | None:
-        """Get the last configured IP for the unit. Used for tracking the IP change."""
-        return self.relation_data.get("last_host_ip")
-
-    @last_host_ip.setter
-    def last_host_ip(self, value: str) -> None:
-        """Set the value of last configured IP for the unit. Used for tracking the IP change."""
-        self.update({"last_host_ip": value})
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in databag."""
+        if m := self.model:
+            m.delete_voting_exclusions = list(value)
+            self.write(m)
 
     @property
-    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
-        """Returns configuration information for plugins this unit is managing"""
-        plugin_config_info = self.get_object("plugin_config_info") or {}
-        return {
-            label: PluginConfigInfo.from_dict(plugin)
-            for label, plugin in plugin_config_info.items()
-        }
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the application databag."""
+        return m.update_ts if (m := self.model) else ""
 
-    @plugin_config_info.setter
-    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
-        """Returns configuration information for plugins this unit is managing"""
-        if not value:
-            self.relation.data[self.unit].pop("plugin_config_info", None)
-            return
-        self.put_object("plugin_config_info", value)
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the application databag (casts int to str)."""
+        if m := self.model:
+            m.update_ts = str(timestamp)
+            self.write(m)
 
-    @property
-    def jwt_auth_configuration(self) -> JWTAuthConfiguration | None:
-        """Return JWT auth configuration if any."""
-        if not (config := self.get_object("jwt-auth-configuration")):
-            return None
-        return JWTAuthConfiguration.from_dict(config)
-
-    @jwt_auth_configuration.setter
-    def jwt_auth_configuration(self, value: JWTAuthConfiguration) -> None:
-        """Update JWT auth configuration."""
-        self.put_object("jwt-auth-configuration", value.to_dict())
-
-    @jwt_auth_configuration.deleter
-    def jwt_auth_configuration(self) -> None:
-        """Remove JWT auth configuration."""
-        self.relation.data[self.unit].pop("jwt-auth-configuration", None)
-
-    @property
-    def oauth_openid_connect_url(self) -> str | None:
-        """Return OAuth openid_connect_url if configured."""
-        return self.relation_data.get("oauth_openid_connect_url")
-
-    @oauth_openid_connect_url.setter
-    def oauth_openid_connect_url(self, value: str | None) -> None:
-        """Set or remove OAuth openid_connect_url."""
-        self.update({"oauth_openid_connect_url": value or ""})
-
-    @property
-    def oauth_departing(self) -> bool:
-        """Return whether oauth relation broken event should be skipped.
-
-        When current leader is unit oauth relation isn't breaking
-        even if unit receives oauth relation broken event.
-        """
-        return self.relation_data.get("oauth_departing", "").lower() == "true"
-
-    @oauth_departing.setter
-    def oauth_departing(self, value: bool) -> None:
-        """Set whether oauth relation broken event should be skipped.
-
-        When current leader is unit oauth relation isn't breaking
-        even if unit receives oauth relation broken event.
-        """
-        self.update({"oauth_departing": str(value)})
-
-    @property
-    def transport_secrets(self) -> dict[str, str]:
-        """Get the Transport layer TLS secrets."""
-        return self.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT, peek=True) or {}
-
-    @property
-    def http_secrets(self) -> dict[str, str]:
-        """Get the HTTP layer TLS secrets."""
-        return self.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP, peek=True) or {}
-
-    @property
-    def transport_keystore_password(self) -> str | None:
-        """Get the keystore-password of transport TLS cert from the TLS cert_secret."""
-        return self.transport_secrets.get("keystore-password")
-
-    @property
-    def http_keystore_password(self) -> str | None:
-        """Get the keystore-password of HTTP TLS cert from the TLS cert_secret."""
-        return self.http_secrets.get("keystore-password")
-
-    def get_relation_departing(self, relation: Relation) -> bool:
-        """Return whether relation broken event should be skipped."""
-        return (
-            self.relation.data[self.unit]
-            .get(f"{relation.name}_{relation.id}_departing", "")
-            .lower()
-            == "true"
-        )
-
-    def set_relation_departing(self, relation: Relation) -> None:
-        """Set whether relation broken event should be skipped."""
-        self.update({f"{relation.name}_{relation.id}_departing": "true"})
-
-    def remove_relation_departing(self, relation: Relation) -> None:
-        """Cleanup mark whether relation broken event should be skipped."""
-        self.relation.data[self.unit].pop(f"{relation.name}_{relation.id}_departing", None)
+    def initialize_empty_secrets(self) -> None:
+        """Initialize empty unit-level secrets to prevent log spam."""
+        if m := self.model:
+            # Use truthy placeholders only for fields whose secrets don't exist yet
+            if not m.transport_key_password:
+                m.transport_key_password = " "
+            if not m.http_key_password:
+                m.http_key_password = " "
+            self.write(m)
 
 
 class OpenSearchApplication(RelationState):
-    """An OpenSearch Application is a charm application with a given role.
+    """An OpenSearch Application is a charm application with a given role."""
 
-    In OpenSearch a cluster can be formed using one or more applications.
-    This class defines state/relation data for a single opensearch application.
-    """
+    # State flags
+    is_admin_user_initialized = ModelProperty("admin_user_initialized", default=False)
+    is_security_index_initialised = ModelProperty("security_index_initialised", default=False)
+    bootstrapped = ModelProperty("bootstrapped", default=False)
+
+    # Counters & Configs
+    bootstrap_contributors_count = ModelProperty("bootstrap_contributors_count", default=0)
+    nodes_config = ModelProperty("nodes_config", default_factory=dict)
+    deployment_desc = ModelProperty("deployment_description", default=None)
+    cluster_fleet_apps = ModelProperty("cluster_fleet_apps", default_factory=dict)
+    cluster_fleet_apps_rels = ModelProperty("cluster_fleet_apps_rels", default_factory=dict)
+    orchestrators = ModelProperty("orchestrators", default_factory=PeerClusterOrchestrators)
+    first_data_node = ModelProperty("first_data_node", default="")
+    client_users_dict = ModelProperty("client_relation_users", default_factory=dict)
+    plugin_config_info = ModelProperty("plugin_config_info", default_factory=dict)
+    plugin_secrets = ModelProperty("plugin_secrets", default=None)
+    missing_relations = ModelProperty("missing_relations", default=False)
+
+    # Object Storage
+    s3 = ModelProperty("s3", default=None)
+    azure = ModelProperty("azure", default=None)
+    gcs = ModelProperty("gcs", default=None)
+
+    # Passwords & Secrets
+    admin_truststore_password = ModelProperty("admin_truststore_password", default="")
+    admin_keystore_password = ModelProperty("admin_keystore_password", default="")
+    admin_password = ModelProperty("admin_password", default="")
+    admin_hashed_password = ModelProperty("admin_hashed_password", default="")
+    kibana_server_password = ModelProperty("kibana_server_password", default="")
+    kibana_server_hashed_password = ModelProperty("kibana_server_hashed_password", default="")
+    cos_password = ModelProperty("cos_password", default="")
+    cos_hashed_password = ModelProperty("cos_hashed_password", default="")
+
+    # TLS Certificates & Keys
+    admin_key = ModelProperty("admin_key", default="")
+    admin_key_password = ModelProperty("admin_key_password", default="")
+    admin_csr = ModelProperty("admin_csr", default="")
+    admin_chain = ModelProperty("admin_chain", default="")
+    admin_cert = ModelProperty("admin_cert", default="")
+    admin_ca_cert = ModelProperty("admin_ca_cert", default="")
+    admin_subject = ModelProperty("admin_subject", default="")
 
     def __init__(
         self,
         relation: Relation | None,
-        data_interface: DataPeerData,
+        repository: OpsPeerRepositoryInterface[OpenSearchAppPeerModel],
         component: Application,
-        # TODO to be removed when integrating data interfaces v1
-        secrets: OpenSearchSecrets,
     ):
-        super().__init__(relation, data_interface, component)
+        super().__init__(relation, repository, component)
         self.app = component
-        self.secrets = secrets
+
+    @property
+    def model(self) -> OpenSearchAppPeerModel | None:
+        """Internal helper to retrieve the peer model state."""
+        if not self.relation:
+            return None
+        return self.repository.build_model(self.relation.id)
+
+    def write(self, model: OpenSearchAppPeerModel):
+        """Internal helper to write the modified peer model back to the databag."""
+        if self.relation:
+            self.repository.write_model(self.relation.id, model)
 
     @property
     def name(self) -> str:
@@ -376,162 +263,53 @@ class OpenSearchApplication(RelationState):
         return self.app.name
 
     @property
-    def is_admin_user_initialized(self) -> bool:
-        """Return the value of 'admin_user_initialized' in application state."""
-        return self.relation_data.get("admin_user_initialized", "").lower() == "true"
+    def update_ts(self) -> str:
+        """Get the value of 'update-ts' from the application databag."""
+        return m.update_ts if (m := self.model) else ""
+
+    @update_ts.setter
+    def update_ts(self, timestamp: int):
+        """Update the value of 'update-ts' in the application databag (casts int to str)."""
+        if m := self.model:
+            m.update_ts = str(timestamp)
+            self.write(m)
 
     @property
-    def bootstrap_contributors_count(self) -> int:
-        """Get the value of 'bootstrap_contributors_count'"""
-        return int(self.relation_data.get("bootstrap_contributors_count", 0))
+    def delete_voting_exclusions(self) -> set[str]:
+        """Return the value of 'delete_voting_exclusions' from application databag."""
+        if m := self.model:
+            return set(m.delete_voting_exclusions) if m.delete_voting_exclusions else set()
+        return set()
 
-    @bootstrap_contributors_count.setter
-    def bootstrap_contributors_count(self, value: int) -> None:
-        """Set value of bootstrap contributors count in application state."""
-        self.update({"bootstrap_contributors_count": str(value)})
-
-    @bootstrap_contributors_count.deleter
-    def bootstrap_contributors_count(self) -> None:
-        """Remove value of 'bootstrap_contributors_count' from application state."""
-        self.relation.data[self.app].pop("bootstrap_contributors_count", None)
-
-    @is_admin_user_initialized.setter
-    def is_admin_user_initialized(self, value: bool) -> None:
-        """Update the value of 'admin_user_initialized' in application state."""
-        self.update({"admin_user_initialized": str(value)})
+    @delete_voting_exclusions.setter
+    def delete_voting_exclusions(self, value: set[str]):
+        """Set the value of 'delete_voting_exclusions' in application databag."""
+        if m := self.model:
+            m.delete_voting_exclusions = list(value)
+            self.write(m)
 
     @property
-    def is_security_index_initialised(self) -> bool:
-        """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "").lower() == "true"
+    def allocation_exclusions_to_delete(self) -> set[str]:
+        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
+        if m := self.model:
+            return (
+                set(m.allocation_exclusions_to_delete)
+                if m.allocation_exclusions_to_delete
+                else set()
+            )
+        return set()
 
-    @is_security_index_initialised.setter
-    def is_security_index_initialised(self, value: bool) -> None:
-        """Update the value of 'security_index_initialised' in application state."""
-        self.update({"security_index_initialised": str(value)})
-
-    @is_security_index_initialised.deleter
-    def is_security_index_initialised(self) -> None:
-        """Remove value of 'security_index_initialised' from application state."""
-        self.relation.data[self.app].pop("security_index_initialised", None)
-
-    @property
-    def nodes_config(self) -> dict[str, Node]:
-        """Return the value of 'nodes_config' in application state"""
-        nodes_config = self.get_object("nodes_config")
-        if not nodes_config:
-            return {}
-        return {name: Node.from_dict(node) for name, node in nodes_config.items()}
-
-    @nodes_config.setter
-    def nodes_config(self, value: dict[str, Node]) -> None:
-        """Set the value of 'nodes_config' in application state."""
-        self.put_object("nodes_config", {name: node.to_dict() for name, node in value.items()})
-
-    @nodes_config.deleter
-    def nodes_config(self) -> None:
-        """Remove the value of 'nodes_config' from application state."""
-        self.relation.data[self.app].pop("nodes_config", None)
-
-    @property
-    def bootstrapped(self) -> bool:
-        """Return the value of 'bootstrapped' in application state"""
-        return self.relation_data.get("bootstrapped", "").lower() == "true"
-
-    @bootstrapped.setter
-    def bootstrapped(self, value: bool) -> None:
-        """Set the value of 'bootstrapped' in application state."""
-        self.update({"bootstrapped": str(value)})
-
-    @bootstrapped.deleter
-    def bootstrapped(self) -> None:
-        """Remove the value of 'bootstrapped' from application state."""
-        self.relation.data[self.app].pop("bootstrapped", None)
-
-    @property
-    def deployment_desc(self) -> DeploymentDescription | None:
-        """Return the deployment description object if any."""
-        if not (current_deployment_desc := self.get_object("deployment-description")):
-            return None
-        return DeploymentDescription.from_dict(current_deployment_desc)
-
-    @deployment_desc.setter
-    def deployment_desc(self, deployment_desc: DeploymentDescription) -> None:
-        """Set the deployment description."""
-        self.put_object("deployment-description", deployment_desc.to_dict())
-
-    @property
-    def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
-        """Get the cluster fleet applications."""
-        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}"))
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
-
-    @cluster_fleet_apps.setter
-    def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]) -> None:
-        """Set the cluster fleet applications."""
-        self.put_object(
-            "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
-        )
-
-    @property
-    def cluster_fleet_apps_rels(self) -> dict[str, PeerClusterApp]:
-        """Get the cluster fleet applications from relations."""
-        if not (cluster_fleet_apps_rels := self.get_object("cluster_fleet_apps_rels")):
-            return {}
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps_rels.items()}
-
-    @cluster_fleet_apps_rels.setter
-    def cluster_fleet_apps_rels(self, cluster_fleet_apps_rels: dict[str, PeerClusterApp]) -> None:
-        """Set the cluster fleet applications to relations."""
-        self.put_object(
-            "cluster_fleet_apps_rels",
-            {id: app.to_dict() for id, app in cluster_fleet_apps_rels.items()},
-        )
+    @allocation_exclusions_to_delete.setter
+    def allocation_exclusions_to_delete(self, value: set[str]):
+        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
+        if m := self.model:
+            m.allocation_exclusions_to_delete = list(value)
+            self.write(m)
 
     @property
     def apps_in_fleet(self) -> list[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
         return self.cluster_fleet_apps.values()
-
-    @property
-    def update_ts(self) -> str:
-        """Get the value of 'update-ts' from the application databag."""
-        return self.relation_data.get("update-ts", "")
-
-    @update_ts.setter
-    def update_ts(self, timestamp: int) -> None:
-        """Update the value of 'update-ts' in the application databag."""
-        self.update({"update-ts": str(timestamp)})
-
-    @property
-    def voting_exclusions_to_delete(self) -> set[str]:
-        """Return the value of 'delete_voting_exclusions' from application databag."""
-        return set(
-            filter(
-                None,
-                self.relation_data.get("delete-voting-exclusions", "").split(","),
-            )
-        )
-
-    @voting_exclusions_to_delete.setter
-    def voting_exclusions_to_delete(self, value: set[str]) -> None:
-        """Set the value of 'delete_voting_exclusions' in application databag."""
-        self.update({"delete-voting-exclusions": ",".join(value)})
-
-    @property
-    def allocation_exclusions_to_delete(self) -> set[str]:
-        """Return the value of 'allocation_exclusion_to_delete' from application databag."""
-        return set(
-            filter(
-                None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
-            )
-        )
-
-    @allocation_exclusions_to_delete.setter
-    def allocation_exclusions_to_delete(self, value: set[str]) -> None:
-        """Set the value of 'allocation_exclusion_to_delete' in application databag."""
-        self.update({"allocation-exclusions-to-delete": ",".join(value)})
 
     @property
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
@@ -541,91 +319,77 @@ class OpenSearchApplication(RelationState):
             app.planned_units > 0 for app in data_apps_in_fleet
         )
 
-    @property
-    def client_users_dict(self) -> dict[str, str]:
-        """Get the client relation users dict from application databag."""
-        return self.get_object("client_relation_users") or {}
+    def initialize_empty_secrets(self) -> None:
+        """Initialize empty app-level secrets to prevent log spam.
 
-    @client_users_dict.setter
-    def client_users_dict(self, users_dict: dict[str, str]) -> None:
-        """Set the client relation users dict in application databag."""
-        self.put_object("client_relation_users", users_dict)
+        The lib only creates a Juju secret when the written value is truthy.
+        Writing "" silently skips creation, so the secret group never exists and
+        every model read logs "Secret not found". We write a single-space placeholder
+        to force creation and leave it in place — callers strip the value before use
+        so the placeholder is never mistaken for real data.
+        """
+        if m := self.model:
+            m.plugin_secrets = m.plugin_secrets or "{}"
 
-    @property
-    def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
-        """Returns configuration information for plugins this app is managing"""
-        plugin_config_info = self.get_object("plugin_config_info") or {}
-        return {
-            label: PluginConfigInfo.from_dict(plugin)
-            for label, plugin in plugin_config_info.items()
-        }
+            # Use truthy placeholders only for fields whose secrets don't exist yet.
+            # " " is truthy so subsequent calls skip re-initialization correctly.
+            if not m.admin_password:
+                m.admin_password = " "
+            if not m.admin_key_password:
+                m.admin_key_password = " "
+            self.write(m)
 
-    @plugin_config_info.setter
-    def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
-        """Returns configuration information for plugins this app is managing"""
-        if not value:
-            self.relation.data[self.app].pop("plugin_config_info", None)
-            return
-        self.put_object("plugin_config_info", value)
+    def add_plugin_secret(self, plugin_name: str, secret_content: str) -> None:
+        """Helper to safely add a secret mapping the plugin's secret_name."""
+        if m := self.model:
+            config = m.plugin_config_info.get(plugin_name)
+            if not config or not config.secret_name:
+                logger.warning(f"No secret_name defined for plugin {plugin_name}")
+                return
+            current_secrets = json.loads(m.plugin_secrets) if m.plugin_secrets else {}
+            current_secrets[config.secret_name] = secret_content
+            m.plugin_secrets = json.dumps(current_secrets)
+            self.write(m)
 
-    @property
-    def admin_secrets(self) -> dict[str, str]:
-        """Get the admin secrets dict."""
-        return self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+    def get_plugin_secret(self, plugin_name: str) -> str | None:
+        """Retrieves the secret content for a specific plugin by its name."""
+        if m := self.model:
+            config = m.plugin_config_info.get(plugin_name)
 
-    @property
-    def tls_truststore_password(self) -> str | None:
-        """Get the truststore-password from the TLS admin_secrets."""
-        return (
-            truststore_pwd
-            if (admin_secrets := self.admin_secrets)
-            and (truststore_pwd := admin_secrets.get("truststore-password"))
-            else None
-        )
+            if not config or not config.secret_name:
+                return None
 
-    @property
-    def tls_subject(self) -> str | None:
-        """Get the normalized_tls_subject from the TLS admin_secrets."""
-        return (
-            normalized_tls_subject(subject)
-            if (admin_secrets := self.admin_secrets) and (subject := admin_secrets.get("subject"))
-            else None
-        )
+            current_secrets = json.loads(m.plugin_secrets) if m.plugin_secrets else {}
+            if not current_secrets:
+                return None
+            return current_secrets.get(config.secret_name)
+        return None
 
-    @property
-    def admin_password(self) -> str | None:
-        """Get the admin password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
+    def delete_plugin_secret(self, plugin_name: str) -> None:
+        """Deletes the secret content for a specific plugin by its name."""
+        if m := self.model:
+            config = m.plugin_config_info.get(plugin_name)
 
-    @property
-    def kibana_server_password(self) -> str | None:
-        """Get the kibana server password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
+            if not config or not config.secret_name:
+                logger.warning(
+                    f"Cannot delete secret: no secret_name defined for plugin {plugin_name}"
+                )
+                return
 
-    @property
-    def cos_password(self) -> str | None:
-        """Get the cos user password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(COS_USER))
-
-    @property
-    def admin_hashed_password(self) -> str | None:
-        """Get the admin hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
-
-    @property
-    def kibana_server_hashed_password(self) -> str | None:
-        """Get the kibana server hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
-
-    @property
-    def cos_hashed_password(self) -> str | None:
-        """Get the cos user hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(COS_USER))
+            current_secrets = json.loads(m.plugin_secrets) if m.plugin_secrets else {}
+            if not current_secrets:
+                logger.debug("Plugins secrets group is empty.")
+                return
+            if current_secrets.pop(config.secret_name, None) is not None:
+                m.plugin_secrets = json.dumps(current_secrets)
+                self.write(m)
+            else:
+                logger.debug(f"Secret for plugin {plugin_name} was not found, nothing to delete.")
 
     def get_user_password(self, user: str) -> str | None:
         """Get the password for a given user from the client relation users dict."""
         if user == ADMIN_USER:
-            return self.admin_password
+            return (self.admin_password or "").strip() or None
         elif user == KIBANA_SERVER_USER:
             return self.kibana_server_password
         elif user == COS_USER:
@@ -644,54 +408,124 @@ class OpenSearchApplication(RelationState):
 
         raise ValueError(f"User {user} is not an internal user.")
 
-    @property
-    def orchestrators(self) -> PeerClusterOrchestrators:
-        """Return the value of 'orchestrators' in application databag."""
-        orchestrators_dict = self.get_object("orchestrators")
-        return PeerClusterOrchestrators.from_dict(orchestrators_dict)
+    def peer_cluster_rel_data_from_application_model(
+        self,
+        security_index_initialised: bool | None,
+        first_data_node: str | None,
+        cm_nodes: dict[str, Node],
+    ) -> PeerClusterAppModel:
+        """Marshal: Construct the peer cluster rel data from the local app peer model."""
+        is_main_orchestrator = (
+            self.deployment_desc is not None
+            and self.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        )
 
-    @property
-    def orchestrators_dict(self) -> dict[str, Any]:
-        """Return the value of 'orchestrators' in application databag as dict."""
-        orchestrators_dict = self.get_object("orchestrators")
-        return orchestrators_dict if orchestrators_dict else {}
+        m = self.model
+        copied_data: dict = {
+            "cluster_name": (
+                m.deployment_description.config.cluster_name if m.deployment_description else ""
+            ),
+            "deployment_description": m.deployment_description,
+        }
+        copied_data["admin_password"] = (m.admin_password or "").strip() or None
+        copied_data["admin_hashed_password"] = m.admin_hashed_password
+        copied_data["kibana_server_password"] = m.kibana_server_password
+        copied_data["kibana_server_hashed_password"] = m.kibana_server_hashed_password
+        copied_data["cos_password"] = m.cos_password
+        copied_data["cos_hashed_password"] = m.cos_hashed_password
+        copied_data["admin_truststore_password"] = (
+            m.admin_truststore_password or ""
+        ).strip() or None
+        copied_data["admin_keystore_password"] = (m.admin_keystore_password or "").strip() or None
+        copied_data["admin_subject"] = (m.admin_subject or "").strip() or None
+        copied_data["admin_key"] = (m.admin_key or "").strip() or None
+        copied_data["admin_key_password"] = (m.admin_key_password or "").strip() or None
+        copied_data["admin_csr"] = (m.admin_csr or "").strip() or None
+        copied_data["admin_chain"] = (m.admin_chain or "").strip() or None
+        copied_data["admin_cert"] = (m.admin_cert or "").strip() or None
+        copied_data["admin_ca_cert"] = (m.admin_ca_cert or "").strip() or None
 
-    @orchestrators.setter
-    def orchestrators(self, orchestrators: PeerClusterOrchestrators) -> None:
-        """Set the value of 'orchestrators' in application databag."""
-        self.put_object("orchestrators", orchestrators.to_dict())
+        copied_data["security_index_initialised"] = security_index_initialised
+        copied_data["first_data_node"] = first_data_node or ""
+        copied_data["nodes_config"] = cm_nodes
+        copied_data["plugin_config_info"] = self.plugin_config_info if is_main_orchestrator else {}
+        copied_data["plugin_secrets"] = self.plugin_secrets if is_main_orchestrator else ""
 
-    @orchestrators.deleter
-    def orchestrators(self) -> None:
-        """Remove the value of 'orchestrators' from application databag."""
-        self.relation.data[self.app].pop("orchestrators", None)
+        return PeerClusterAppModel(**copied_data)
 
-    @property
-    def missing_relations(self) -> bool:
-        """Return the value of 'missing_relations' in application databag."""
-        return self.relation_data.get("missing_relations", "") == "True"
+    def update_from_peer_cluster_rel_data(self, peer_data: PeerCluster) -> None:
+        """Unmarshal: Update the local app peer model using data from a peer cluster relation."""
+        self.is_security_index_initialised = peer_data.security_index_initialised
+        self.first_data_node = peer_data.first_data_node
+        self.nodes_config = peer_data.nodes_config
 
-    @missing_relations.setter
-    def missing_relations(self, value: bool) -> None:
-        """Set the value of 'missing_relations' in application databag."""
-        self.update({"missing_relations": str(value)})
+        # Passwords
+        self.admin_password = (peer_data.admin_password or "").strip() or None
+        self.admin_hashed_password = peer_data.admin_hashed_password
+        if (
+            peer_data.admin_password and peer_data.admin_password.strip()
+        ) or peer_data.admin_hashed_password:
+            self.is_admin_user_initialized = True
+        self.kibana_server_password = peer_data.kibana_server_password
+        self.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
+        self.cos_password = peer_data.cos_password
+        self.cos_hashed_password = peer_data.cos_hashed_password
 
-    @missing_relations.deleter
-    def missing_relations(self) -> None:
-        """Remove the value of 'missing_relations' from application databag."""
-        self.relation.data[self.app].pop("missing_relations", None)
+        # Admin TLS Secrets
+        self.admin_truststore_password = (
+            peer_data.admin_truststore_password or ""
+        ).strip() or None
+        self.admin_keystore_password = (peer_data.admin_keystore_password or "").strip() or None
+        self.admin_subject = (peer_data.admin_subject or "").strip() or None
+        self.admin_key = (peer_data.admin_key or "").strip() or None
+        self.admin_key_password = (peer_data.admin_key_password or "").strip() or None
+        self.admin_csr = (peer_data.admin_csr or "").strip() or None
+        self.admin_chain = (peer_data.admin_chain or "").strip() or None
+        self.admin_cert = (peer_data.admin_cert or "").strip() or None
+        self.admin_ca_cert = (peer_data.admin_ca_cert or "").strip() or None
 
-    @property
-    def first_data_node(self) -> str:
-        """Return the value of 'first_data_node' in application databag."""
-        return self.relation_data.get("first_data_node", "")
+        if peer_data.plugin_config_info:
+            self.plugin_config_info = peer_data.plugin_config_info
+        if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
+            self.plugin_secrets = peer_data.plugin_secrets
 
-    @first_data_node.setter
-    def first_data_node(self, value: str) -> None:
-        """Set the value of 'first_data_node' in the application databag."""
-        self.update({"first_data_node": value})
+    def marshal_gcs_secrets(self) -> GcsRelData:
+        """Return a copy of this model containing only the secret fields."""
+        return GcsRelData.model_construct(secret_key=self.gcs.secret_key)
 
-    @first_data_node.deleter
-    def first_data_node(self) -> None:
-        """Remove the value of 'first_data_node' from the application databag."""
-        self.relation.data[self.app].pop("first_data_node", None)
+    def unmarshal_gcs_secrets(self, source: GcsRelData) -> None:
+        """Copy secret fields from source into this instance."""
+        current = self.gcs or GcsRelData.model_construct()
+        self.gcs = current.model_copy(update={"secret_key": source.secret_key})
+
+    def marshal_azure_secrets(self) -> AzureRelData:
+        """Return a copy of this model containing only the secret fields."""
+        return AzureRelData.model_construct(
+            storage_account=self.azure.storage_account, secret_key=self.azure.secret_key
+        )
+
+    def unmarshal_azure_secrets(self, source: AzureRelData) -> None:
+        """Copy secret fields from source into this instance."""
+        current = self.azure or AzureRelData.model_construct()
+        self.azure = current.model_copy(
+            update={"storage_account": source.storage_account, "secret_key": source.secret_key}
+        )
+
+    def marshal_s3_secrets(self) -> S3RelData:
+        """Return a copy of this model containing only the secret fields."""
+        return S3RelData.model_construct(
+            access_key=self.s3.access_key,
+            secret_key=self.s3.secret_key,
+            tls_ca_chain=self.s3.tls_ca_chain,
+        )
+
+    def unmarshal_s3_secrets(self, source: S3RelData) -> None:
+        """Copy secret fields from source into this instance."""
+        current = self.s3 or S3RelData.model_construct()
+        self.s3 = current.model_copy(
+            update={
+                "access_key": source.access_key,
+                "secret_key": source.secret_key,
+                "tls_ca_chain": source.tls_ca_chain,
+            }
+        )

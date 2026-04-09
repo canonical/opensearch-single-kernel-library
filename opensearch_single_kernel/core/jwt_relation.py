@@ -5,49 +5,46 @@
 
 """State collection for jwt relation."""
 
+import logging
+
+from ops import Model, Relation
+from pydantic import ValidationError
+
 from opensearch_single_kernel.core.models import JWTAuthConfiguration
-from opensearch_single_kernel.core.relations import RelationState
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
-    SecretGroup,
+from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+    DataContractV1,
+    OpsRelationRepository,
+    build_model,
 )
 
+logger = logging.getLogger(__name__)
 
-class JwtState(RelationState):
+
+class JwtState:
     """State for the JWT relation data."""
 
-    def is_jwt_secret(self, label: str | None) -> bool:
-        """Check whether provided secret label is a JWT relation secret.
-
-        This is needed to avoid reacting to secret changes that are
-          not related to JWT relation configuration.
-
-        Args:
-            label: the secret label to check
-
-        Returns:
-            bool: True if the label corresponds to a JWT relation secret, False otherwise
-        """
-        if label and (relation := self.data_interface._relation_from_secret_label(label)):
-            return label == self.data_interface._generate_secret_label(
-                relation.name, relation.id, SecretGroup("extra")
-            )
-        return False
+    def __init__(self, relation: Relation | None, model: Model):
+        self.relation = relation
+        self.model = model
 
     @property
-    def auth_configuration(self) -> JWTAuthConfiguration:
-        """Build a JWT auth configuration from the relation data.
+    def auth_configuration(self) -> JWTAuthConfiguration | None:
+        """Build a JWT auth configuration from the relation data."""
+        relation = self.relation
+        if not relation or not relation.app:
+            return None
+        repository = OpsRelationRepository(self.model, relation, component=relation.app)
+        version = repository.get_field("version") or "v0"
+        try:
+            if version == "v0":
+                parsed_config = build_model(repository, JWTAuthConfiguration)
+            else:
+                contract = build_model(repository, DataContractV1[JWTAuthConfiguration])
+                if not contract.requests:
+                    return None
+                parsed_config = contract.requests[0]
+            return parsed_config
 
-        Might throw a validation exception.
-        """
-        return JWTAuthConfiguration(
-            signing_key=self.relation_data.get("signing-key", ""),
-            jwt_header=self.relation_data.get("jwt-header"),
-            jwt_url_parameter=self.relation_data.get("jwt-url-parameter"),
-            roles_key=self.relation_data.get("roles-key", ""),
-            subject_key=self.relation_data.get("subject-key"),
-            required_audience=self.relation_data.get("required-audience"),
-            required_issuer=self.relation_data.get("required-issuer"),
-            jwt_clock_skew_tolerance_seconds=self.relation_data.get(
-                "jwt-clock-skew-tolerance-seconds"
-            ),
-        )
+        except ValidationError as e:
+            logger.error(f"failed to validate jwt: {e}")
+            return None

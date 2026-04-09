@@ -120,12 +120,16 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (admin_secrets := self.charm.state.application.admin_secrets):
+        if (
+            not self.charm.state.application.admin_truststore_password
+            or not self.charm.state.application.admin_keystore_password
+        ):
+            logger.debug("Admin truststore or keystore password is missing, deferring")
             event.defer()
             return
 
         if not self.charm.cluster_manager.apply_security_config(
-            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+            self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
             return
@@ -133,7 +137,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handler for `relation_departed` event."""
         if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
-            self.charm.state.server.set_relation_departing(event.relation)
+            self.charm.state.server.unit_dying = True
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
@@ -149,7 +153,7 @@ class OAuthEventsHandler(Object):
             return
 
         if (
-            self.charm.state.server.get_relation_departing(event.relation)
+            self.charm.state.server.unit_dying
             or not self.charm.state.application.is_security_index_initialised
         ):
             return
@@ -160,11 +164,15 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (admin_secrets := self.charm.state.application.admin_secrets):
+        if (
+            not self.charm.state.application.admin_truststore_password
+            or not self.charm.state.application.admin_keystore_password
+        ):
+            logger.debug("Admin truststore or keystore password is missing, deferring")
             event.defer()
             return
         if not self.charm.cluster_manager.apply_security_config(
-            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+            self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
             return
