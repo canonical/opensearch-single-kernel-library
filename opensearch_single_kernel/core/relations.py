@@ -35,30 +35,36 @@ class DataStore(ABC):
     @abstractmethod
     def put(self, scope: Scope, key: str, value: Any | None) -> None:
         """Put string into the data store."""
+        pass
 
     @abstractmethod
     def put_object(
         self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
     ) -> None:
         """Put object into the data store."""
+        pass
 
     @abstractmethod
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the store."""
+        pass
 
     @abstractmethod
     def get(
         self, scope: Scope, key: str, default: float | str | bool | None = None
     ) -> int | float | str | bool | None:
         """Get string from the data store."""
+        pass
 
     @abstractmethod
     def get_object(self, scope: Scope, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the data store."""
+        pass
 
     @abstractmethod
     def delete(self, scope: Scope, key: str):
         """Delete object from the data store."""
+        pass
 
     @staticmethod
     def cast(str_val: str) -> bool | int | float | str:
