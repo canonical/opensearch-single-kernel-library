@@ -417,7 +417,6 @@ def test_truststore_password_secret(harness, mocker, substrate):
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
-    secret = {"key": "secret_12345"}
     create_store_pwd_if_not_exists = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.create_store_pwd_if_not_exists"
     )
