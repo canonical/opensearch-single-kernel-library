@@ -127,7 +127,7 @@ class RelationDataStore(DataStore):
         self.put(scope, key, payload_str)
 
     @override
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the relation data."""
         if scope is None:
             raise ValueError("Scope undefined.")

@@ -150,7 +150,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         self.cached_secrets.delete(scope, self.label(scope, key))
 
     @override
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the relation data."""
         if scope is None:
             raise ValueError("Scope undefined.")
