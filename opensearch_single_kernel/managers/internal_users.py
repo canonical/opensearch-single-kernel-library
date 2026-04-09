@@ -66,7 +66,7 @@ class InternalUsersManager(BaseManager):
         # We need to do this for all credential changes
         if password_secret and update:
             try:
-                self.opensearch_client.update_user_password(user, hashed_pwd)
+                self.opensearch_client.patch_user_password(user, hashed_pwd)
             except OpenSearchHttpError as e:
                 raise OpenSearchUserMgmtError(e)
 

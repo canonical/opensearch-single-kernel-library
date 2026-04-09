@@ -120,6 +120,25 @@ class CharmStatuses(Enum):
         "Parameters missing from smtp-integrator: {params}."
     )
     SMTP_COULD_NOT_READ_DATA = BlockedStatus("Could not read smtp relation data: {exc}.")
+    # Backup
+    BACKUP_RELATION_CONFLICT = BlockedStatus(
+        "Too many object storage relations. Only one is supported."
+    )
+    BACKUP_RELATION_DATA_INCOMPLETE = BlockedStatus("Backup relation data missing or incomplete.")
+    BACKUP_CREDENTIALS_INCORRECT = BlockedStatus(
+        "Backup configuration error: bad credentials, permissions, invalid CA, or unsupported configuration."
+    )
+    BACKUP_REPOSITORY_MISCONFIGURED = BlockedStatus(
+        "opensearch {storage_type} repository setup failed. Check the {integrator} config."
+    )
+    BACKUP_RELATION_SHOULD_NOT_EXIST = BlockedStatus(
+        "This application should not be related to backup relation."
+    )
+    BACKUP_CREDENTIALS_CLEANUP_FAILED = BlockedStatus(
+        "Failed to remove keystore credentials or snapshot repository. Please check the logs for more details."
+    )
+    BACKUP_IN_PROGRESS = MaintenanceStatus("Backup in progress...")
+    RESTORE_IN_PROGRESS = MaintenanceStatus("Restore in progress...")
 
     # JWT
     JWT_RELATION_INVALID = BlockedStatus(

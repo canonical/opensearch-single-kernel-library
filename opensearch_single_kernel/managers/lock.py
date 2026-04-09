@@ -26,7 +26,11 @@ import os
 import ops
 from ops import Relation
 
-from opensearch_single_kernel.common.constants import DeploymentType, StartMode
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_NODE_LOCK_INDEX,
+    DeploymentType,
+    StartMode,
+)
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
@@ -222,8 +226,6 @@ class PeerLockManager(BaseManager):
 class LockManager(PeerLockManager):
     """OpenSearch Lock Manager."""
 
-    OPENSEARCH_INDEX = ".charm_node_lock"
-
     def __init__(self, state, workload):
         self.name = "lock_manager"
         super().__init__(state, workload)
@@ -260,7 +262,7 @@ class LockManager(PeerLockManager):
         try:
             document_data = self.opensearch_client.request(
                 "GET",
-                endpoint=f"/{self.OPENSEARCH_INDEX}/_source/0",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_source/0",
                 host=host,
                 alt_hosts=self.alt_hosts,
                 retries=3,
@@ -319,7 +321,7 @@ class LockManager(PeerLockManager):
                 try:
                     response = self.opensearch_client.request(
                         "PUT",
-                        endpoint=f"/{self.OPENSEARCH_INDEX}/_create/0?refresh=true&wait_for_active_shards=all",
+                        endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_create/0?refresh=true&wait_for_active_shards=all",
                         host=host,
                         alt_hosts=self.alt_hosts,
                         retries=0,
@@ -359,7 +361,7 @@ class LockManager(PeerLockManager):
                         # Delete document id 0
                         self.opensearch_client.request(
                             "DELETE",
-                            endpoint=f"/{self.OPENSEARCH_INDEX}/_doc/0?refresh=true",
+                            endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_doc/0?refresh=true",
                             host=host,
                             alt_hosts=self.alt_hosts,
                             retries=10,
@@ -441,7 +443,7 @@ class LockManager(PeerLockManager):
                 try:
                     self.opensearch_client.request(
                         "DELETE",
-                        endpoint=f"/{self.OPENSEARCH_INDEX}/_doc/0?refresh=true",
+                        endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_doc/0?refresh=true",
                         host=host,
                         alt_hosts=alt_hosts,
                         retries=3,
@@ -461,16 +463,16 @@ class LockManager(PeerLockManager):
         # complaining about spamming the index creation endpoint
         try:
             indices = self.opensearch_client.get_indices(host, alt_hosts)
-            if self.OPENSEARCH_INDEX in indices:
+            if OPENSEARCH_NODE_LOCK_INDEX in indices:
                 logger.debug(
                     "%s already created. Skipping creation attempt. List:%s",
-                    self.OPENSEARCH_INDEX,
+                    OPENSEARCH_NODE_LOCK_INDEX,
                     indices,
                 )
                 if self.state.application.app.planned_units() > 1:
                     self.opensearch_client.request(
                         "GET",
-                        endpoint=f"/_cluster/health/{self.OPENSEARCH_INDEX}?wait_for_status=green",
+                        endpoint=f"/_cluster/health/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_status=green",
                         resp_status_code=True,
                     )
                 return True
@@ -481,7 +483,7 @@ class LockManager(PeerLockManager):
         try:
             self.opensearch_client.request(
                 "PUT",
-                endpoint=f"/{self.OPENSEARCH_INDEX}?wait_for_active_shards=all",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_active_shards=all",
                 host=host,
                 alt_hosts=alt_hosts,
                 retries=3,
