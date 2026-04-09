@@ -102,7 +102,7 @@ class TLSEventsHandler(Object):
                 "key-password": event.params.get("password", None),
             }
             csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope, cert_type, secrets=secrets
+                scope, cert_type, secret=secrets
             )
             self.certs.request_certificate_creation(certificate_signing_request=csr)
 
@@ -303,7 +303,7 @@ class TLSEventsHandler(Object):
         old_csr = secrets["csr"].encode("utf-8")
 
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            scope=scope, cert_type=cert_type, secrets=secrets, tls_file=False
+            scope=scope, cert_type=cert_type, secret=secrets, tls_file=False
         )
         self.certs.request_certificate_renewal(
             old_certificate_signing_request=old_csr,
@@ -316,7 +316,11 @@ class TLSEventsHandler(Object):
         self._on_certificate_expiring(event)
 
     def on_tls_conf_set(
-        self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
+        self,
+        event: CertificateAvailableEvent,
+        scope: Scope,
+        cert_type: CertType,
+        renewal: bool,
     ) -> None:
         """Called after certificate ready and stored on the corresponding scope databag.
 

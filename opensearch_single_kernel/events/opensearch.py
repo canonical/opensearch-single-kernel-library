@@ -1146,7 +1146,7 @@ class OpenSearchEventsHandler(Object):
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
-                secrets=secret,
+                secret=secret,
                 tls_file=False,
             )
 
@@ -1163,7 +1163,7 @@ class OpenSearchEventsHandler(Object):
         csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
-            secrets=self.charm.state.application.admin_secrets,
+            secret=self.charm.state.application.admin_secrets,
             tls_file=False,
         )
 
