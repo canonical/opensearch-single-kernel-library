@@ -200,15 +200,15 @@ class TlsManager(BaseManager):
         self,
         scope: Scope,
         cert_type: CertType,
-        secrets: dict[str, str] | None = None,
+        secret: dict[str, str] | None = None,
         tls_file: bool = True,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         key = None
         password = None
-        if secrets:
-            key = secrets.get("key") if secrets.get("key") else None
-            password = secrets.get("key-password", None)
+        if secret:
+            key = secret.get("key") if secret.get("key") else None
+            password = secret.get("key-password", None)
 
         if key is None:
             key = generate_private_key()
