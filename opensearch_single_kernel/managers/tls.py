@@ -524,14 +524,15 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
+    def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
 
         admin_secrets = self.state.application.admin_secrets
+        cert_secrets = self.get_secrets_for_cert_type(cert_type)
 
-        if not ((secrets or {}).get("ca-cert") and admin_secrets.get("truststore-password")):
+        if not (cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
@@ -540,13 +541,13 @@ class TlsManager(BaseManager):
             alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
-            ca=secrets.get("ca-cert"),
+            ca=cert_secrets.get("ca-cert"),
             keep_previous=True,
             add_read_perm=True,
         ):
             return False
 
-        self.update_request_ca_bundle(secrets.get("chain"))
+        self.update_request_ca_bundle(cert_secrets.get("chain"))
 
         return True
 

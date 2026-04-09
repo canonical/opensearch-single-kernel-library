@@ -198,7 +198,7 @@ class TLSEventsHandler(Object):
         current_stored_ca = self.charm.tls_manager.read_stored_ca()
         if current_stored_ca != event.ca:
             if not self.charm.tls_manager.store_new_ca(
-                self.charm.tls_manager.get_secrets_for_cert_type(cert_type),
+                cert_type,
                 create_store_pwd=is_leader_unit and is_main_orchestrator,
             ):
                 logger.debug("Could not store new CA certificate.")
