@@ -13,12 +13,15 @@ from typing import TYPE_CHECKING
 from ops import Application, JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
+    ADMIN_USER,
     AZURE_RELATION,
     CLIENT_RELATION,
+    COS_USER,
     GCS_RELATION,
     GENERATED_ROLES,
     JWT_CONFIG_RELATION,
     KIBANA_SERVER_ROLE,
+    KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OAUTH_RELATION,
     OPENSEARCH_HTTP_PORT,
@@ -508,15 +511,57 @@ class OpenSearchApplication(RelationState):
             else None
         )
 
-    # TODO when migrated to v1 this would be changed to a match case where the passwords
-    # are explicitly defined in the application model
+    @property
+    def admin_password(self) -> str | None:
+        """Get the admin password from the admin secrets."""
+        return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
+
+    @property
+    def kibana_server_password(self) -> str | None:
+        """Get the kibana server password from the admin secrets."""
+        return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
+
+    @property
+    def cos_password(self) -> str | None:
+        """Get the cos user password from the admin secrets."""
+        return self.secrets.get(Scope.APP, password_key(COS_USER))
+
+    @property
+    def admin_hashed_password(self) -> str | None:
+        """Get the admin hashed password from the admin secrets."""
+        return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
+
+    @property
+    def kibana_server_hashed_password(self) -> str | None:
+        """Get the kibana server hashed password from the admin secrets."""
+        return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
+
+    @property
+    def cos_hashed_password(self) -> str | None:
+        """Get the cos user hashed password from the admin secrets."""
+        return self.secrets.get(Scope.APP, hash_key(COS_USER))
+
     def get_user_password(self, user: str) -> str | None:
         """Get the password for a given user from the client relation users dict."""
-        return self.secrets.get(Scope.APP, password_key(user))
+        if user == ADMIN_USER:
+            return self.admin_password
+        elif user == KIBANA_SERVER_USER:
+            return self.kibana_server_password
+        elif user == COS_USER:
+            return self.cos_password
+
+        raise ValueError(f"User {user} is not an internal user.")
 
     def get_user_hashed_password(self, user: str) -> str | None:
         """Get the hashed password for a given user from the client relation users dict."""
-        return self.secrets.get(Scope.APP, hash_key(user))
+        if user == ADMIN_USER:
+            return self.admin_hashed_password
+        elif user == KIBANA_SERVER_USER:
+            return self.kibana_server_hashed_password
+        elif user == COS_USER:
+            return self.cos_hashed_password
+
+        raise ValueError(f"User {user} is not an internal user.")
 
 
 class ExternalOpenSearchClient(RelationState):

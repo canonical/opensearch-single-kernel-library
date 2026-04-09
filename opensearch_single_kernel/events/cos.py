@@ -53,7 +53,7 @@ class CosEventsHandler(Object):
         if (
             not (app_secrets := self.charm.state.application.admin_secrets)
             or not (ca := app_secrets.get("ca-cert"))
-            or not (pwd := self.charm.state.application.get_user_password(COS_USER))
+            or not (pwd := self.charm.state.application.cos_password)
             or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
         ):
             # Not yet ready, waiting for certain values to be set

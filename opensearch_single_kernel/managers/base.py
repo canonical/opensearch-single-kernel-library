@@ -36,7 +36,7 @@ class BaseManager:
             self.workload,
             self.state.host_ip,
             OPENSEARCH_HTTP_PORT,
-            self.state.application.get_user_password(ADMIN_USER),
+            self.state.application.admin_password,
         )
 
     @property

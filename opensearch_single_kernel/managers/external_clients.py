@@ -55,7 +55,7 @@ class ExternalClientsManager(BaseManager):
         )
         if extra_user_roles == KIBANA_SERVER_ROLE:
             username = KIBANA_SERVER_USER
-            pwd = self.state.application.get_user_password(username)
+            pwd = self.state.application.kibana_server_password
         else:
             username = external_client.relation_username
             hashed_pwd, pwd = generate_hashed_password()
@@ -253,7 +253,7 @@ class ExternalClientsManager(BaseManager):
     def update_dashboards_password(self):
         """Update each Opensearch Dashboards relation with the latest kibanaserver."""
         # only get the secret once to optimize performance
-        pwd = self.state.application.get_user_password(KIBANA_SERVER_USER)
+        pwd = self.state.application.kibana_server_password
         for dashboards_client in self.state.dashboards_clients:
             dashboards_client.username = KIBANA_SERVER_USER
             dashboards_client.password = pwd
