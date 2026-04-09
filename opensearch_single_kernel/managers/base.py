@@ -9,7 +9,6 @@ import random
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
-    ADMIN_USER,
     OPENSEARCH_HTTP_PORT,
 )
 from opensearch_single_kernel.core.models import App, Node

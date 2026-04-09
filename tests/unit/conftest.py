@@ -58,7 +58,7 @@ def context(substrate):
 
 
 @pytest.fixture
-def mock_fs_interactions(mocker, substrate: Substrate) -> None:
+def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     """Mock Filesystem interactions."""
     if request.node.get_closest_marker("real_fs"):
         return
