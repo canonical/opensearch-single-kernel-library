@@ -8,6 +8,7 @@ import responses
 from charmlibs.pathops import LocalPath
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from ops import Model, Unit
 
 from opensearch_single_kernel.common.constants import (
     DeploymentType,
@@ -297,3 +298,14 @@ def mock_response_put_transport_cert(host):
         json={"status": "OK", "message": "updated transport certs"},
         status=201,
     )
+
+
+def get_relation_unit(model: Model, relation_name: str, unit_name: str) -> Unit | None:
+    """Get the Unit object from the relation that matches unit_name."""
+    relation = model.get_relation(relation_name)
+    if not relation or not relation.units:
+        return
+
+    for unit in relation.units:
+        if unit.name == unit_name:
+            return unit
