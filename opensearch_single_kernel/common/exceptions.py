@@ -129,3 +129,7 @@ class OpenSearchSmtpMissingParametersError(OpenSearchError):
         super().__init__(
             f"Parameters missing from smtp-integrator: {', '.join(missing_parameters)}"
         )
+
+
+class OpenSearchLockError(OpenSearchError):
+    """Base exception for lock manager errors."""

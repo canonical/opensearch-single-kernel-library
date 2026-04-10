@@ -7,6 +7,7 @@
 
 import json
 import logging
+import os
 import socket
 from json import JSONDecodeError
 from typing import TYPE_CHECKING
@@ -64,6 +65,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
+    lock_unit_name,
     normalized_tls_subject,
 )
 
@@ -115,7 +117,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation.data[self.unit].get("bootstrap_contributor", "") == "True"
+        return self.relation.data[self.unit].get("bootstrap_contributor", "").lower() == "true"
 
     @is_bootstrap_contributor.setter
     def is_bootstrap_contributor(self, value: bool):
@@ -125,7 +127,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
-        return self.relation.data[self.unit].get("cluster_manager_removed", "") == "True"
+        return self.relation.data[self.unit].get("cluster_manager_removed", "").lower() == "true"
 
     @is_cluster_manager_removed.setter
     def is_cluster_manager_removed(self, value: bool):
@@ -140,7 +142,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -150,7 +152,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation.data[self.unit].get("tls_ca_renewed", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -160,7 +162,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation.data[self.unit].get("tls_configured", "") == "True"
+        return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -280,7 +282,7 @@ class OpenSearchServer(RelationState):
         When current leader is unit oauth relation isn't breaking
         even if unit receives oauth relation broken event.
         """
-        return self.relation.data[self.unit].get("oauth_departing", "") == "True"
+        return self.relation.data[self.unit].get("oauth_departing", "").lower() == "true"
 
     @oauth_departing.setter
     def oauth_departing(self, value: bool):
@@ -316,7 +318,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_admin_user_initialized(self) -> bool:
         """Return the value of 'admin_user_initialized' in application state."""
-        return self.relation_data.get("admin_user_initialized", "") == "True"
+        return self.relation_data.get("admin_user_initialized", "").lower() == "true"
 
     @property
     def bootstrap_contributors_count(self) -> int:
@@ -336,7 +338,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "") == "True"
+        return self.relation_data.get("security_index_initialised", "").lower() == "true"
 
     @is_security_index_initialised.setter
     def is_security_index_initialised(self, value: bool):
@@ -354,7 +356,7 @@ class OpenSearchApplication(RelationState):
     @property
     def bootstrapped(self) -> bool:
         """Return the value of 'bootstrapped' in application state"""
-        return self.relation_data.get("bootstrapped", "") == "True"
+        return self.relation_data.get("bootstrapped", "").lower() == "true"
 
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
@@ -588,6 +590,99 @@ class JwtState(RelationState):
         )
 
 
+class LockAppState(RelationState):
+    """State collection for the application side of lock relation."""
+
+    def __init__(
+        self,
+        relation: Relation | None,
+        data_interface: Data,
+        component: Application,
+        unit_name: str,
+    ):
+        super().__init__(relation, data_interface, component)
+        self._unit_name = unit_name
+
+    @property
+    def leader_acquired_after_juju_event_id(self) -> str | None:
+        """Juju event ID during which lock was granted to unit.
+
+        Prevent leader unit from using lock in the same Juju event that it was granted
+        If the charm code raises an uncaught exception later in the Juju event,
+        `unit-with-lock` will be reverted to its previous value—which could allow another
+        unit to get the lock.
+        Therefore, we cannot use the lock in this Juju event. We must wait until the next
+        Juju event, when `unit-with-lock` has been committed (i.e. won't be reverted), to use
+        the lock.
+        """
+        return self.relation_data.get("leader-acquired-lock-after-juju-event-id")
+
+    @property
+    def unit_with_lock(self) -> str | None:
+        """Get format name of the unit that holds the lock."""
+        return self.relation_data.get("unit-with-lock")
+
+    @unit_with_lock.setter
+    def unit_with_lock(self, value: str) -> None:
+        """Set format name of the unit that holds the lock.
+
+        Update leader_acquired_after_juju_event_id if lock acquired by the current (leader) unit.
+        """
+        assert self.unit_with_lock != value
+
+        if value == self._unit_name:
+            logger.debug("[Node lock] (leader) granted peer lock to own unit")
+            # See LockAppState.leader_acquired_after_juju_event_id
+            # description for explanation on why is it needed.
+            # `JUJU_CONTEXT_ID` is unique for each Juju event
+            # (https://matrix.to/#/!xdClnUGkurzjxqiQcN:ubuntu.com/$yEGjGlDaIPBtCi8uB3fH6ZaXUjN7GF-Y2s9YwvtPM-o?via=ubuntu.com&via=matrix.org&via=cutefunny.art)
+            self.update(
+                {"leader-acquired-lock-after-juju-event-id": os.environ["JUJU_CONTEXT_ID"]}
+            )
+        self.update({"unit-with-lock": value})
+
+    @unit_with_lock.deleter
+    def unit_with_lock(self) -> None:
+        """Remove lock assignment from the units and clear leader_acquired_after_juju_event_id."""
+        self.relation_data.update(
+            {
+                "unit-with-lock": "",
+                "leader-acquired-lock-after-juju-event-id": "",
+            }
+        )
+
+
+class LockServerState(RelationState):
+    """State collection for the unit side of lock relation."""
+
+    def __init__(
+        self,
+        relation: Relation | None,
+        data_interface: Data,
+        component: Unit,
+    ):
+        super().__init__(relation, data_interface, component)
+        self.unit = component
+
+    @property
+    def lock_requested(self) -> bool:
+        """Get whether the lock is requested by unit."""
+        return self.relation.data[self.unit].get("lock_requested", "").lower() == "true"
+
+    @lock_requested.setter
+    def lock_requested(self, value: bool) -> None:
+        """Set whether the lock is requested by unit."""
+        self.update({"lock_requested": str(value) if value else ""})
+
+    def trigger_relation_changed(self) -> None:
+        """Trigger relation changed event on other units by writing to dummy field."""
+        # Use `JUJU_CONTEXT_ID` only to ensure that the value changes
+        # (Value should never be read)
+        # (If we set the same value that is currently in the databag, a peer relation
+        # changed event will not be triggered)
+        self.relation.data[self.unit].update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})
+
+
 class ClusterState(Object):
     """The global OpenSearch Cluster State ."""
 
@@ -614,7 +709,7 @@ class ClusterState(Object):
         return self.model.get_relation(PEER_RELATION)
 
     @property
-    def node_lock_relation(self) -> Relation | None:
+    def lock_relation(self) -> Relation | None:
         """Get Node Lock Peer Relation."""
         return self.model.get_relation(NODE_LOCK_RELATION)
 
@@ -808,7 +903,7 @@ class ClusterState(Object):
             return False
         for unit in self.all_units:
             if (
-                self.peer_relation.data[unit].get("tls_configured") != "True"
+                self.peer_relation.data[unit].get("tls_configured", "").lower() != "true"
                 or "tls_ca_renewing" in self.peer_relation.data[unit]
                 or "tls_ca_renewed" in self.peer_relation.data[unit]
             ):
@@ -1087,3 +1182,55 @@ class ClusterState(Object):
     def oauth_relation(self) -> Relation | None:
         """Get OAuth relation."""
         return self.model.get_relation(OAUTH_RELATION)
+
+    @property
+    def server_lock(self) -> LockServerState:
+        """Get state of lock relation for current unit."""
+        return LockServerState(
+            relation=self.lock_relation,
+            data_interface=DataPeerUnitData(model=self.model, relation_name=NODE_LOCK_RELATION),
+            component=self.model.unit,
+        )
+
+    @property
+    def lock_granted_server(self) -> LockServerState | None:
+        """Get state of lock relation for unit granted with lock."""
+        return (
+            LockServerState(
+                relation=self.lock_relation,
+                data_interface=DataPeerUnitData(
+                    model=self.model, relation_name=NODE_LOCK_RELATION
+                ),
+                component=self.get_unit(lock_unit_name(granted_unit_name)),
+            )
+            if (granted_unit_name := self.application_lock.unit_with_lock)
+            else None
+        )
+
+    @property
+    def server_locks(self) -> list[LockServerState]:
+        """Get state of lock relation for all units in it."""
+        return (
+            [
+                LockServerState(
+                    relation=self.lock_relation,
+                    data_interface=DataPeerUnitData(
+                        model=self.model, relation_name=NODE_LOCK_RELATION
+                    ),
+                    component=unit,
+                )
+                for unit in (self.server.unit, *self.lock_relation.units)
+            ]
+            if self.lock_relation
+            else []
+        )
+
+    @property
+    def application_lock(self) -> LockAppState:
+        """Get application state of lock relation."""
+        return LockAppState(
+            relation=self.lock_relation,
+            data_interface=DataPeerData(model=self.model, relation_name=NODE_LOCK_RELATION),
+            component=self.model.app,
+            unit_name=self.unit_name,
+        )
