@@ -9,9 +9,11 @@ import logging
 import os
 import re
 import socket
+import time
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
+import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.protocol import StatusesStateProtocol
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -38,6 +40,7 @@ from opensearch_single_kernel.common.constants import (
     SMTP_RELATION,
     STATUS_PEERS_RELATION,
     TLS_RELATION,
+    UPGRADE_RELATION,
     CertType,
     ObjectStorageType,
     Scope,
@@ -56,6 +59,8 @@ from opensearch_single_kernel.core.models import (
     PluginConfigInfo,
     ProductionProfile,
     TestingProfile,
+    UnitUpgradesState,
+    UpgradeVersions,
 )
 from opensearch_single_kernel.core.relations import (
     JwtData,
@@ -821,6 +826,104 @@ class LockServerState(RelationState):
         self.relation.data[self.unit].update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})
 
 
+class UpgradeAppState(RelationState):
+    """State collection for the application side of upgrade relation."""
+
+    @property
+    def versions(self) -> UpgradeVersions | None:
+        """Get the versions of installed OpenSearch from the relation bag.
+
+        Should only be None during first charm install. If a user upgrades from a charm
+        that does not set versions, this charm will get stuck.
+        """
+        if not (raw := self.get_object("versions")):
+            return None
+        return UpgradeVersions.from_dict(raw)
+
+    @versions.setter
+    def versions(self, value: UpgradeVersions):
+        """Set the versions of installed OpenSearch in the relation bag.
+
+        Used after next upgrade to check compatibility (i.e. whether that upgrade should be
+        allowed).
+        """
+        self.put_object("versions", value.to_dict())
+
+    @property
+    def upgrade_resumed(self) -> bool:
+        """Get whether user has resumed upgrade with Juju action.
+
+        Reset to `False` after each `juju refresh`.
+        """
+        return self.relation_data.get("upgrade_resumed", "").lower() == "true"
+
+    @upgrade_resumed.setter
+    def upgrade_resumed(self, value: bool) -> None:
+        """Set whether user has resumed upgrade with Juju action."""
+        self.relation_data.update(
+            {
+                # Trigger peer relation_changed event even if value does not change
+                # (Needed when leader sets value to False during `ops.UpgradeCharmEvent`)
+                "-unused-timestamp-upgrade-resume-last-updated": str(time.time()),
+                "upgrade_resumed": str(value),
+            }
+        )
+
+
+class UpgradeServerState(RelationState):
+    """State collection for the unit side of upgrade relation."""
+
+    def __init__(
+        self,
+        relation: Relation | None,
+        data_interface: Data,
+        component: Unit,
+    ):
+        super().__init__(relation, data_interface, component)
+        self.unit = component
+
+    @property
+    def unit_state(self) -> UnitUpgradesState | None:
+        """Get the unit upgrade state from relation bag."""
+        return (
+            UnitUpgradesState(state)
+            if (state := self.relation.data[self.unit].get("state"))
+            else None
+        )
+
+    @unit_state.setter
+    def unit_state(self, value: UnitUpgradesState):
+        """Set the unit upgrade state in relation bag."""
+        self.relation.data[self.unit].update({"state": value.value})
+
+    @property
+    def snap_revision(self) -> str | None:
+        """Get the revision of installed OpenSearch snap from the relation bag."""
+        return self.relation.data[self.unit].get("snap_revision")
+
+    @snap_revision.setter
+    def snap_revision(self, value: str) -> None:
+        """Set the revision of installed OpenSearch snap in the relation bag."""
+        self.relation.data[self.unit].update({"snap_revision": value})
+
+    @property
+    def workload_version(self) -> str | None:
+        """Get the workload version of installed OpenSearch from the relation bag."""
+        return self.relation.data[self.unit].get("workload_version")
+
+    @workload_version.setter
+    def workload_version(self, value: str) -> None:
+        """Set the workload version of installed OpenSearch in the relation bag."""
+        self.relation.data[self.unit].update({"workload_version": value})
+
+    @property
+    def workload_version_parsed(self) -> poetry_version.Version | None:
+        """Get the parsed workload version of installed OpenSearch from the relation bag."""
+        return (
+            poetry_version.Version.parse(self.workload_version) if self.workload_version else None
+        )
+
+
 class ClusterState(Object, StatusesStateProtocol):
     """The global OpenSearch Cluster State ."""
 
@@ -914,6 +1017,11 @@ class ClusterState(Object, StatusesStateProtocol):
     def smtp_relations(self) -> list[Relation]:
         """Get SMTP relations."""
         return self.model.relations.get(SMTP_RELATION, [])
+
+    @property
+    def upgrade_relation(self) -> Relation | None:
+        """Get peer upgrade relation."""
+        return self.model.get_relation(UPGRADE_RELATION)
 
     @property
     def peer_cluster_orchestrator(self) -> PeerCluster:
@@ -1484,3 +1592,43 @@ class ClusterState(Object, StatusesStateProtocol):
                 raise OpenSearchInvalidStorageTypeError(
                     "Unsupported object storage type: %s" % object_storage_type
                 )
+
+    @property
+    def server_upgrade(self) -> UpgradeServerState:
+        """Get state of lock relation for current unit."""
+        return UpgradeServerState(
+            relation=self.upgrade_relation,
+            data_interface=DataPeerUnitData(model=self.model, relation_name=UPGRADE_RELATION),
+            component=self.model.unit,
+        )
+
+    @property
+    def application_upgrade(self) -> UpgradeAppState:
+        """Get application state of upgrade relation."""
+        return UpgradeAppState(
+            relation=self.upgrade_relation,
+            data_interface=DataPeerData(model=self.model, relation_name=UPGRADE_RELATION),
+            component=self.model.app,
+        )
+
+    @property
+    def sorted_server_upgrades(self) -> list[UpgradeServerState]:
+        """Get state of upgrade relation for all units in it sorted by highest unit number."""
+        return (
+            [
+                UpgradeServerState(
+                    relation=self.upgrade_relation,
+                    data_interface=DataPeerUnitData(
+                        model=self.model, relation_name=UPGRADE_RELATION
+                    ),
+                    component=unit,
+                )
+                for unit in sorted(
+                    (self.server.unit, *self.upgrade_relation.units),
+                    key=lambda unit: unit.name.split("/")[1],
+                    reverse=True,
+                )
+            ]
+            if self.upgrade_relation
+            else []
+        )

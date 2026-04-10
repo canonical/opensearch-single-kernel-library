@@ -133,3 +133,7 @@ class OpenSearchSmtpMissingParametersError(OpenSearchError):
 
 class OpenSearchLockError(OpenSearchError):
     """Base exception for lock manager errors."""
+
+
+class OpenSearchUpgradePrecheckError(OpenSearchError):
+    """App is not ready to upgrade"""

@@ -8,10 +8,11 @@ import os
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 from charmlibs import pathops
-from charmlibs.pathops import PathProtocol
+from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
@@ -40,8 +41,9 @@ class VMWorkload(BaseWorkload):
 
     SERVICE_NAME = "daemon"
 
-    def __init__(self):
+    def __init__(self, charm_root: Path):
         super().__init__()
+        self.charm_root = charm_root
         for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
@@ -330,7 +332,7 @@ class VMWorkload(BaseWorkload):
     @override
     def paths(self) -> Paths:
         """Return Workload's paths"""
-        return Paths(self.root)
+        return Paths(self.root, LocalPath(self.charm_root))
 
     @property
     @override

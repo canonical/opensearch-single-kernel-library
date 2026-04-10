@@ -64,7 +64,13 @@ class ExternalClientsEventsHandler(Object):
             OpenSearchIndexError if the index name is invalid
             OpenSearchHttpError if we can't create the required index
         """
-        # TODO: If upgrade in progress then defer event
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+            event.defer()
+            return
 
         if not self.charm.unit.is_leader():
             return
@@ -224,12 +230,11 @@ class ExternalClientsEventsHandler(Object):
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
             return
-        # TODO: Handle upgrades
-        # if self.charm.upgrade_in_progress:
-        #    logger.warning(
-        # "Modifying relations during an upgrade is not supported."
-        # "The charm may be in a broken, unrecoverable state"
-        # )
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
             external_client
         )

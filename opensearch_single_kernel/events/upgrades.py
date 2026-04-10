@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Handler for upgrade events."""
+
+import json
+import logging
+import typing
+
+import ops
+from data_platform_helpers.version_check import get_charm_revision
+from ops import Object
+
+from opensearch_single_kernel.common.constants import UPGRADE_RELATION, HealthColors
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchHttpError,
+    OpenSearchStopError,
+    OpenSearchUpgradePrecheckError,
+)
+from opensearch_single_kernel.common.statuses import UpgradesStatuses
+from opensearch_single_kernel.core.models import UnitUpgradesState
+from opensearch_single_kernel.events.custom_events import UpgradeOpenSearch
+
+if typing.TYPE_CHECKING:
+    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+
+logger = logging.getLogger(__name__)
+
+
+class UpgradesEventsHandler(Object):
+    """Class implementing OpenSearch upgrades event handling."""
+
+    def __init__(self, charm: "OpenSearchBaseCharm"):
+        super().__init__(charm, key="upgrade_events")
+        self.charm = charm
+
+        self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
+        self.framework.observe(
+            self.charm.on[UPGRADE_RELATION].relation_created,
+            self._on_upgrade_peer_relation_created,
+        )
+        self.framework.observe(
+            self.charm.on[UPGRADE_RELATION].relation_changed, self._reconcile_upgrade
+        )
+        self.framework.observe(
+            self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
+        )
+        self.framework.observe(self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action)
+        self.framework.observe(self.charm.on.force_upgrade_action, self._on_force_upgrade_action)
+        self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
+        self.framework.observe(
+            self.charm.on.force_refresh_start_action,
+            self._on_refresh_force_start_action,
+        )
+
+    def _on_upgrade_peer_relation_created(self, _) -> None:
+        """Handle relation created events."""
+        self.charm.upgrades_manager.save_snap_revision_after_first_install()
+        if self.charm.unit.is_leader():
+            if not self.charm.upgrades_manager.in_progress:
+                # Save versions on initial start
+                logger.debug(
+                    f"Setting {self.charm.upgrades_manager.current_versions=} in upgrade peer relation app databag"
+                )
+                self.charm.state.application_upgrade.versions = (
+                    self.charm.upgrades_manager.current_versions
+                )
+
+    def _reconcile_upgrade(self, _=None):  # noqa: C901
+        """Handle upgrade events."""
+        if not self.charm.state.upgrade_relation:
+            logger.debug("Peer relation not available")
+            return
+        if not self.charm.state.application_upgrade.versions:
+            logger.debug("Peer relation not ready")
+            return
+        if self.charm.unit.is_leader() and not self.charm.upgrades_manager.in_progress:
+            # Run before checking `self._upgrade.is_compatible` in case incompatible upgrade was
+            # forced & completed on all units.
+            # Side effect: on machines, if charm was upgraded to a charm with the same snap
+            # revision, compatibility checks will be skipped.
+            # (The only real use case for this would be upgrading the charm code to an incompatible
+            # version without upgrading the snap. In that situation, the upgrade may appear
+            # successful and the user will not be notified of the charm incompatibility. This case
+            # is much less likely than the forced incompatible upgrade & the impact is not as bad
+            # as the impact if we did not handle the forced incompatible upgrade case.)
+            logger.debug(
+                f"Setting {self.charm.upgrades_manager.current_versions=} in upgrade peer relation app databag"
+            )
+            self.charm.state.application_upgrade.versions = (
+                self.charm.upgrades_manager.current_versions
+            )
+        if not self.charm.upgrades_manager.is_compatible:
+            self._set_upgrade_status()
+            return
+
+        # CHECK FOR ROLLBACK
+        if (
+            self.charm.upgrades_manager.is_rollback
+            and not self.charm.upgrades_manager.can_rollback
+        ):
+            logger.error(
+                "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
+            )
+            self._set_upgrade_status()
+            # TODO: LOG LINK TO RECOVERY DOCS
+            return
+
+        if self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED:
+            logger.debug(
+                f"Rollback status: is_rollback={self.charm.upgrades_manager.is_rollback}, can_rollback={self.charm.upgrades_manager.can_rollback}"
+            )
+            if self.charm.upgrades_manager.is_rollback:
+                logger.warning("Rollback detected")
+                logger.warning(
+                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
+                )
+                self._set_upgrade_status()
+                self.charm.lock_manager.release()
+                return
+            try:
+                if self.charm.upgrades_manager.requires_general_prechecks:
+                    self._run_general_prechecks()
+                authorized = self.charm.upgrades_manager.authorized
+            except OpenSearchUpgradePrecheckError as exception:
+                self.charm.state.add_status_if_not_present(
+                    UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
+                    "unit",
+                    self.charm.upgrades_manager.name,
+                )
+                logger.error(exception)
+                return
+            if authorized:
+                self._set_upgrade_status()
+                self.charm.upgrade_opensearch_event.emit()
+            else:
+                logger.debug("Waiting to upgrade")
+        self._set_upgrade_status()
+
+    def _run_general_prechecks(self) -> None:
+        """Check health and snapshot state before upgrade.
+
+        Raises:
+            PrecheckFailed: If cluster is not ready to upgrade.
+        """
+        health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
+        if health != HealthColors.GREEN:
+            raise OpenSearchUpgradePrecheckError(f"Cluster health is {health} instead of green")
+        if self.charm.snapshots_manager.is_operation_in_progress:
+            raise OpenSearchUpgradePrecheckError("Backup or restore is in progress")
+
+    def _set_upgrade_status(self):
+        """Set upgrade unit status while clearing all other upgrade statuses."""
+        unit_status, unit_dynamic_params = self.charm.upgrades_manager.unit_status
+        app_status = self.charm.upgrades_manager.app_status
+
+        for status in UpgradesStatuses:
+            if status is not unit_status:
+                self.charm.state.remove_status_if_present(
+                    status.value, "unit", self.charm.upgrades_manager.name, interpolated=True
+                )
+            if status is not app_status:
+                self.charm.state.remove_status_if_present(
+                    status.value, "app", self.charm.upgrades_manager.name
+                )
+
+        if unit_status:
+            self.charm.state.add_status_if_not_present(
+                unit_status,
+                "unit",
+                self.charm.upgrades_manager.name,
+                dynamic_params=unit_dynamic_params,
+            )
+        if app_status:
+            self.charm.state.add_status_if_not_present(
+                app_status,
+                "app",
+                self.charm.upgrades_manager.name,
+            )
+
+    def _on_upgrade_charm(self, _):
+        """Handle Juju upgrade charm event."""
+        self.update_grafana_dashboards_title()
+        # TODO check backwards compatibility for profiles
+
+        if self.charm.unit.is_leader():
+            if not self.charm.upgrades_manager.in_progress:
+                logger.info("Charm upgraded. OpenSearch version unchanged")
+            self.charm.state.application_upgrade.upgrade_resumed = False
+            # Only call `_reconcile_upgrade` on leader unit to avoid race conditions with
+            # `upgrade_resumed`
+            self._reconcile_upgrade()
+
+    def _on_pre_upgrade_check_action(self, event: ops.ActionEvent) -> None:
+        """Handle pre-upgrade-check action."""
+        if not self.charm.unit.is_leader():
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader pre-upgrade-check`)"
+            logger.debug(f"Pre-upgrade check event failed: {message}")
+            event.fail(message)
+            return
+        if not self.charm.state.upgrade_relation or self.charm.upgrades_manager.in_progress:
+            message = "Upgrade already in progress"
+            logger.debug(f"Pre-upgrade check event failed: {message}")
+            event.fail(message)
+            return
+        try:
+            self._run_general_prechecks()
+            self.charm.upgrades_manager.pre_upgrade_check()
+        except OpenSearchUpgradePrecheckError as exception:
+            message = f"Charm is *not* ready for upgrade. Pre-upgrade check failed: {exception}"
+            logger.debug(f"Pre-upgrade check event failed: {message}")
+            event.fail(message)
+            return
+        message = "Charm is ready for upgrade"
+        event.set_results({"result": message})
+        logger.debug(f"Pre-upgrade check event succeeded: {message}")
+
+    def _on_resume_upgrade_action(self, event: ops.ActionEvent) -> None:
+        """Handle resume-upgrade action."""
+        if not self.charm.unit.is_leader():
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-upgrade`)"
+            logger.debug(f"Resume upgrade event failed: {message}")
+            event.fail(message)
+            return
+        if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
+            message = "No upgrade in progress"
+            logger.debug(f"Resume upgrade event failed: {message}")
+            event.fail(message)
+            return
+        self.charm.upgrades_manager.reconcile_partition(action_event=event)
+        # If next to upgrade, upgrade leader unit
+        self._reconcile_upgrade()
+
+    def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
+        """Handle force-upgrade action."""
+        if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
+            message = "No upgrade in progress"
+            logger.debug(f"Force upgrade event failed: {message}")
+            event.fail(message)
+            return
+        if not self.charm.state.application_upgrade.upgrade_resumed:
+            message = f"Run `juju run {self.charm.app.name}/leader resume-upgrade` before trying to force upgrade"
+            logger.debug(f"Force upgrade event failed: {message}")
+            event.fail(message)
+            return
+        if self.charm.upgrades_manager.unit_state is not UnitUpgradesState.OUTDATED:
+            message = "Unit already upgraded"
+            logger.debug(f"Force upgrade event failed: {message}")
+            event.fail(message)
+            return
+        logger.debug("Forcing upgrade")
+        event.log(f"Forcefully upgrading {self.charm.unit.name}")
+        # TODO: replace `ignore_lock=False` with `event.params["ignore-lock"]` if specification
+        # DA091 approved
+        # (https://docs.google.com/document/d/1rwnS-deJU9Mzc8BFkl3UGgjZiBa6e3bxoT-6BQo9e3E/edit)
+        self.charm.upgrade_opensearch_event.emit(ignore_lock=False)
+        event.set_results({"result": f"Forcefully upgraded {self.charm.unit.name}"})
+        logger.debug("Forced upgrade")
+
+    def _upgrade_opensearch(self, event: UpgradeOpenSearch) -> None:  # noqa: C901
+        """Handle upgrade OpenSearch event."""
+        logger.debug("Attempting to acquire lock for upgrade")
+        if not self.charm.lock_manager.acquire():
+            # (Attempt to acquire lock even if `event.ignore_lock`)
+            if event.ignore_lock:
+                logger.debug("Upgrading without lock")
+            else:
+                logger.debug("Lock to upgrade opensearch not acquired. Will retry next event")
+                event.defer()
+                return
+        logger.debug("Acquired lock for upgrade")
+
+        # https://www.elastic.co/guide/en/elastic-stack/8.13/upgrading-elasticsearch.html
+        try:
+            self.charm.cluster_manager.opensearch_client.disable_shard_allocation()
+        except OpenSearchHttpError:
+            logger.exception("Failed to disable shard allocation before upgrade")
+            self.charm.lock_manager.release()
+            event.defer()
+            return
+        try:
+            self.charm.cluster_manager.opensearch_client.flush()
+        except OpenSearchHttpError as e:
+            logger.debug("Failed to flush before upgrade", exc_info=e)
+
+        logger.debug("Stopping OpenSearch before upgrade")
+        try:
+            self.charm.stop_opensearch(restart=True)
+        except OpenSearchStopError as e:
+            logger.exception(e)
+            self.charm.lock_manager.release()
+            event.defer()
+            return
+        logger.debug("Stopped OpenSearch before upgrade")
+
+        self.charm.upgrades_manager.upgrade_unit(snap=self.charm.workload)
+
+        if event.override_version:
+            logger.debug("Overriding OpenSearch version")
+            try:
+                self.charm.upgrades_manager.override_version()
+            except OpenSearchCmdError as e:
+                logger.error("Failed to override OpenSearch version: %s", str(e))
+
+        logger.debug("Starting OpenSearch after upgrade")
+        self.charm.start_opensearch_event.emit(ignore_lock=event.ignore_lock, after_upgrade=True)
+
+    def _on_refresh_force_start_action(self, event: ops.ActionEvent) -> None:
+        """Handle force-refresh-start action for rollback scenario."""
+        if not self.charm.upgrades_manager.is_rollback:
+            logger.debug("For refresh start event failed: No rollback in progress")
+            event.fail("No rollback in progress")
+            return
+        if self.charm.upgrades_manager.unit_state is not UnitUpgradesState.OUTDATED:
+            message = "Unit already upgraded"
+            logger.debug(f"Force upgrade event failed: {message}")
+            event.fail(message)
+            return
+        if event.params.get("check-compatibility", True):
+            message = "Rollbacks are not supported. This action will attempt to start the unit with the current version of OpenSearch. If the current version is incompatible with the cluster, the unit may fail to start. Rerun with `check-compatibility` set to false to override this check and attempt startup procedure."
+            logger.debug("Refresh force start event failed: %s", message)
+            event.fail(message)
+            return
+        self.charm.upgrade_opensearch_event.emit(override_version=True)
+        event.set_results(
+            {"result": f"Overrode OpenSearch version on {self.charm.state.unit_name}"}
+        )
+        logger.debug("Overrode OpenSearch version")
+
+    def update_grafana_dashboards_title(self) -> None:
+        """Update the title of the Grafana dashboard file to include the charm revision."""
+        revision = get_charm_revision(self.charm.model.unit)
+
+        dashboard = json.loads(
+            self.charm.workload.read_text(self.charm.workload.paths.grafana_dashboard)
+        )
+
+        old_title = dashboard.get("title", "Charmed OpenSearch")
+        title_prefix = old_title.split(" - Rev")[0]
+        new_title = f"{old_title} - Rev {revision}"
+        dashboard["title"] = f"{title_prefix} - Rev {revision}"
+
+        logger.info(
+            "Changing the title of grafana dashboard from %s to %s",
+            old_title,
+            new_title,
+        )
+
+        self.charm.workload.write_text(
+            json.dumps(dashboard, indent=4), self.charm.workload.paths.grafana_dashboard
+        )

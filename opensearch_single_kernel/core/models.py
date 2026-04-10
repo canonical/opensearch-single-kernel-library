@@ -16,6 +16,7 @@ from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
+import poetry.core.constraints.version as poetry_version
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -38,6 +39,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 logger = logging.getLogger(__name__)
 
@@ -721,3 +723,29 @@ class JWTAuthConfiguration(Model):
     required_audience: str | None = None
     required_issuer: str | None = None
     jwt_clock_skew_tolerance_seconds: int | None = None
+
+
+class UpgradeVersions(Model):
+    """Model class for the charm & workload versions used for upgrades."""
+
+    charm: str
+    workload: str
+
+    @property
+    def charm_parsed(self) -> poetry_version.Version:
+        """Parsed charm version with build version omitted."""
+        return poetry_version.Version.parse(self.charm.split("+")[0])
+
+    @property
+    def workload_parsed(self) -> poetry_version.Version:
+        """Parsed workload version."""
+        return poetry_version.Version.parse(self.workload)
+
+
+class UnitUpgradesState(BaseStrEnum):
+    """Unit state of upgrade."""
+
+    HEALTHY = "healthy"
+    RESTARTING = "restarting"  # Kubernetes only
+    UPGRADING = "upgrading"  # Machines only
+    OUTDATED = "outdated"  # Machines only

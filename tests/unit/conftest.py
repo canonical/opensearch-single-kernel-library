@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from pathlib import Path
+from unittest.mock import PropertyMock
 
 import pytest
 import yaml
@@ -16,7 +17,9 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     S3_RELATION,
     TLS_RELATION,
+    UPGRADE_RELATION,
 )
+from opensearch_single_kernel.core.models import UpgradeVersions
 from tests.helpers import Substrate
 from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S3_INFO
 
@@ -41,12 +44,25 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
     actions = str(yaml.safe_load((opensearch_base_path / "actions.yaml").read_text()))
     metadata = str(yaml.safe_load((opensearch_base_path / "metadata.yaml").read_text()))
 
+    # _current_versions is a @property that reads version files via read_text(), which is mocked to
+    # return MagicMock by mock_fs_interactions. Patch it as a PropertyMock before begin() so all
+    # events (including upgrade relation_created) see valid version strings.
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.current_versions",
+        new_callable=PropertyMock,
+        return_value=UpgradeVersions(charm="1.0.0", workload="2.19.4"),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.reconcile_compatibility_matrix",
+    )
+
     harness = Harness(TestCharm, meta=metadata, actions=actions, config=config)
     harness.add_network("1.1.1.1")
     harness.add_network("1.1.1.1", endpoint=TLS_RELATION)
     harness.begin()
     rel_id = harness.add_relation(PEER_RELATION, harness.charm.app.name)
     harness.add_relation_unit(rel_id, f"{harness.charm.app.name}/0")
+    harness.add_relation(UPGRADE_RELATION, harness.charm.app.name)
     harness.add_relation(TLS_RELATION, harness.charm.app.name),
 
     return harness
@@ -72,6 +88,9 @@ def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     mocker.patch("charmlibs.pathops.LocalPath.write_text")
     mocker.patch("charmlibs.pathops.LocalPath.mkdir")
     mocker.patch("charmlibs.pathops.LocalPath.unlink")
+
+    if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
 
 
 # ---- Backup and Restore related fixtures ---- #
