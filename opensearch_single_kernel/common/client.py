@@ -38,7 +38,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
 )
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
-from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     repository_type,
@@ -879,19 +878,17 @@ class OpenSearchClient:
         staged_path = staged_dir / "chain.pem"
 
         chain_path = self.workload.paths.certs / "chain.pem"
-        chain_path_str = path_as_posix(chain_path)
-
         try:
             if chain_path.exists():
                 chain_content = self.workload.read_text(chain_path)
                 if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
                     staged_path.write_text(chain_content)
                     staged_path.chmod(0o644)
-                    return path_as_posix(staged_path)
+                    return staged_path.as_posix()
         except (PebbleConnectionError, OpenSearchFileOperationError) as e:
             logger.warning(
                 "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
-                chain_path_str,
+                chain_path,
                 e,
             )
 
@@ -902,7 +899,7 @@ class OpenSearchClient:
             except OSError:
                 cached = ""
             if "BEGIN CERTIFICATE" in cached:
-                return path_as_posix(staged_path)
+                return staged_path.as_posix()
 
         raise OpenSearchHttpError(response_text="chain.pem not available yet")
 

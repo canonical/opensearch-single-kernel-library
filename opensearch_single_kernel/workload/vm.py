@@ -58,6 +58,15 @@ class VMWorkload(BaseWorkload):
         except SnapError:
             return False
 
+    @property
+    @override
+    def can_connect(self) -> bool:
+        """Check if the snap is installed and we can connect to the snapd API."""
+        try:
+            return bool(self.opensearch_snap.services[self.SERVICE_NAME])
+        except KeyError:
+            return False
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

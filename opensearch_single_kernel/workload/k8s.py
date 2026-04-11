@@ -6,7 +6,7 @@
 import logging
 import shlex
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -24,9 +24,7 @@ from ops.pebble import (
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
-    DIR_PERMISSIONS_CERTIFICATES,
     DIR_PERMISSIONS_READONLY,
-    DIR_PERMISSIONS_SECURE,
     OPENSEARCH_PEBBLE_SERVICE_NAME,
     PEBBLE_SERVICE_GROUP,
     PEBBLE_SERVICE_USER,
@@ -35,14 +33,12 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchContainerPrepareError,
-    OpenSearchFileOperationError,
     OpenSearchStartError,
     OpenSearchStopError,
 )
 from opensearch_single_kernel.utils.helpers import (
     build_command_list,
     mask_sensitive_information,
-    path_as_posix,
     wait_for_process_output,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -144,15 +140,16 @@ class K8sWorkload(BaseWorkload):
 
     SERVICE_NAME = OPENSEARCH_PEBBLE_SERVICE_NAME
 
-    def __init__(self, container_getter: Callable[[], Container] | None = None):
+    def __init__(self, container: Container | None = None):
         """Initialize K8s workload.
 
         Args:
-            container_getter: callable that returns the Container instance.
-                If None, accessing container property will raise RuntimeError.
+            container: the Container instance.
         """
         super().__init__()
-        self._container_getter = container_getter
+        if not container:
+            raise AttributeError("Container is required.")
+        self.container = container
         self._paths: BasePaths | None = None
 
     def _get_service(self) -> ServiceInfo | None:
@@ -168,20 +165,6 @@ class K8sWorkload(BaseWorkload):
         return None
 
     @property
-    def container(self) -> Container:
-        """Get the container instance.
-
-        Returns:
-            Container: the Container instance.
-
-        Raises:
-            RuntimeError: if container_getter was not provided in constructor.
-        """
-        if self._container_getter is not None:
-            return self._container_getter()
-        raise RuntimeError("Container not available. Provide container_getter in __init__")
-
-    @property
     @override
     def workload_present(self) -> bool:
         """Check if the container is ready and connected.
@@ -195,30 +178,11 @@ class K8sWorkload(BaseWorkload):
         except (RuntimeError, ModelError):
             return False
 
-    def _ensure_required_directories(self) -> None:
-        """Ensure required directories exist for OpenSearch to run.
-
-        This method is idempotent and is intended to be called from the
-        K8s pebble-ready hook before starting the service.
-        """
-        # Pebble file API resolves user/group by *name*, not numeric UID/GID.
-        user = str(PEBBLE_SERVICE_USER)
-        group = str(PEBBLE_SERVICE_GROUP)
-        root_group = "root"
-        required_dirs: list[tuple[PathProtocol, int]] = [
-            (self.paths.data, DIR_PERMISSIONS_SECURE),
-            (self.paths.logs, DIR_PERMISSIONS_SECURE),
-            (self.paths.conf, DIR_PERMISSIONS_READONLY),
-            (self.paths.certs, DIR_PERMISSIONS_CERTIFICATES),
-            (self.paths.home / "logs", DIR_PERMISSIONS_READONLY),
-        ]
-
-        for dir_path, mode in required_dirs:
-            try:
-                dir_group = root_group if dir_path == self.paths.certs else group
-                dir_path.mkdir(mode=mode, parents=True, exist_ok=True, user=user, group=dir_group)
-            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
-                logger.warning("Failed to ensure directory %s exists: %s", dir_path, e)
+    @property
+    @override
+    def can_connect(self):
+        """Check if the workload container is connectable."""
+        return self.container.can_connect()
 
     def _configure_pebble_plan(self, *, enable_checks: bool = False) -> None:
         """Configure the Pebble plan with the OpenSearch service definition.
@@ -249,7 +213,6 @@ class K8sWorkload(BaseWorkload):
         - pebble plan configuration
         """
         try:
-            self._ensure_required_directories()
             self._configure_pebble_plan(enable_checks=False)
         except ModelError as e:
             logger.error("Failed to prepare container on pebble-ready: %s", e)
@@ -257,10 +220,10 @@ class K8sWorkload(BaseWorkload):
 
     def _build_pebble_layer(self) -> Layer:
         """Build Pebble layer for OpenSearch service."""
-        opensearch_cmd = path_as_posix(self.paths.bin / "opensearch")
-        opensearch_home = path_as_posix(self.paths.home)
-        opensearch_conf = path_as_posix(self.paths.conf)
-        java_home = path_as_posix(self.paths.jdk)
+        opensearch_cmd = (self.paths.bin / "opensearch").as_posix()
+        opensearch_home = self.paths.home.as_posix()
+        opensearch_conf = self.paths.conf.as_posix()
+        java_home = self.paths.jdk.as_posix()
 
         # build PATH with Java bin, OpenSearch bin, and system paths
         path_value = (
@@ -268,12 +231,11 @@ class K8sWorkload(BaseWorkload):
             % java_home
         )
 
-        service_name = OPENSEARCH_PEBBLE_SERVICE_NAME
         layer_dict = {
             "summary": "OpenSearch service layer",
             "description": "Pebble plan layer for OpenSearch",
             "services": {
-                service_name: {
+                OPENSEARCH_PEBBLE_SERVICE_NAME: {
                     "override": "replace",
                     "summary": "OpenSearch service",
                     "command": opensearch_cmd,
@@ -392,10 +354,10 @@ class K8sWorkload(BaseWorkload):
         Returns:
             str: environment setup string with exports and command.
         """
-        java_home = path_as_posix(self.paths.jdk)
-        opensearch_home = path_as_posix(self.paths.home)
-        opensearch_bin = path_as_posix(self.paths.bin)
-        opensearch_conf = path_as_posix(self.paths.conf)
+        java_home = self.paths.jdk
+        opensearch_home = self.paths.home
+        opensearch_bin = self.paths.bin
+        opensearch_conf = self.paths.conf
 
         # build PATH with Java bin, OpenSearch bin, and system paths
         path_value = "%s/bin:%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" % (
@@ -442,7 +404,7 @@ class K8sWorkload(BaseWorkload):
     @override
     def keytool_cmd(self) -> str:
         """Return keytool command path from the workload JDK."""
-        return path_as_posix(self.paths.jdk / "bin" / "keytool")
+        return (self.paths.jdk / "bin" / "keytool").as_posix()
 
     def _get_pod_fqdn(self) -> str | None:
         """Get pod FQDN using hostname -f command.
@@ -685,18 +647,13 @@ class K8sWorkload(BaseWorkload):
              if current value does not meet the requirement.
             config_method: Description of how to configure this property in K8s.
 
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read.
+
         Returns:
             str or None: Error message if requirement is not met, None otherwise.
         """
         current_value = self._get_kernel_property_value(property_name)
-
-        if current_value is None:
-            return (
-                "Cannot read %s from container. "
-                "This may indicate missing permissions or node-level configuration issue. "
-                "For K8s deployments, configure via %s."
-            ) % (property_name, config_method)
-
         violates = False
         if comparison_op == "<":
             violates = current_value < required_value
@@ -720,93 +677,26 @@ class K8sWorkload(BaseWorkload):
         return None
 
     @override
-    def _get_kernel_property_value(self, prop: str) -> int | None:
+    def _get_kernel_property_value(self, prop: str) -> int:
         """Get the value of a kernel parameter.
-
-        Try 3 methods in order to get the value of a kernel parameter:
-        1. sysctl -n (most reliable)
-        2. sysctl without -n (parse output)
-        3. Read directly from /proc/sys/ (fallback)
 
         Args:
             prop: Kernel property name (e.g., "vm.max_map_count").
 
         Returns:
-            int | None: Kernel property value, or None if cannot be read.
-        """
-        # try sysctl -n first, most reliable method
-        if (property_value := self._read_kernel_property_via_sysctl_n(prop)) is not None:
-            return property_value
+            int: Kernel property value.
 
-        # fallback: try sysctl without -n flag
-        if (property_value := self._read_kernel_property_via_sysctl(prop)) is not None:
-            return property_value
-
-        # final fallback: read directly from /proc/sys/
-        return self._read_kernel_property_via_procfs(prop)
-
-    def _read_kernel_property_via_sysctl_n(self, property_name: str) -> int | None:
-        """Read kernel property using sysctl -n command.
-
-        Args:
-            property_name: Kernel property name.
-
-        Returns:
-            int | None: Property value if successful, None otherwise.
-
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read.
         """
         try:
-            result = self.run_cmd("sysctl", args="-n %s" % property_name)
+            result = self.run_cmd("sysctl", args="-n %s" % prop)
             return int(result.out.rstrip())
         except OpenSearchCmdError as e:
             error_message = e.err or e.out or str(e)
-            logger.warning("sysctl -n %s failed: %s", property_name, error_message)
-            return None
-
-    def _read_kernel_property_via_sysctl(self, property_name: str) -> int | None:
-        """Read kernel property using sysctl command and parse output.
-
-        Output format: "vm.max_map_count = 262144"
-
-        Args:
-            property_name: Kernel property name.
-
-        Returns:
-            int | None: Property value if successful, None otherwise.
-        """
-        try:
-            result = self.run_cmd("sysctl", args=property_name)
-            # parse output: "property_name = value" -> extract value
-            value_string = result.out.split("=")[-1].strip()
-            return int(value_string)
-        except OpenSearchCmdError as e:
-            error_message = e.err or e.out or str(e)
-            logger.warning("sysctl %s failed: %s", property_name, error_message)
-            return None
-        except (ValueError, IndexError) as e:
-            logger.warning("sysctl %s parsing failed: %s", property_name, e)
-            return None
-
-    def _read_kernel_property_via_procfs(self, property_name: str) -> int | None:
-        """Read kernel property directly from /proc/sys/ filesystem.
-
-        Converts property name to file path:
-        "vm.max_map_count" -> "/proc/sys/vm/max_map_count"
-
-        Args:
-            property_name: Kernel property name.
-
-        Returns:
-            int or None: Property value if successful, None otherwise.
-
-        """
-        procfs_path = "/proc/sys/%s" % property_name.replace(".", "/")
-        try:
-            result = self.run_cmd("cat %s" % procfs_path)
-            return int(result.out.strip())
-        except (OpenSearchCmdError, ValueError) as e:
-            logger.warning("Failed to read %s from /proc/sys/: %s", property_name, e)
-            return None
+            logger.warning("sysctl -n %s failed: %s", prop, error_message)
+            # Propagate error
+            raise e
 
     @override
     def run_cmd(
@@ -894,31 +784,6 @@ class K8sWorkload(BaseWorkload):
             self._paths = K8sPaths(root_path)
         return self._paths
 
-    @override
-    def write_text(self, content: str, path: pathops.PathProtocol) -> None:  # type: ignore[override]
-        """K8s-safe write, ensure parent dir exists and handle pebble readiness.
-
-        Overrides BaseWorkload.write_text() to ensure parent directories exist
-        before writing, which is critical for K8s where directories may not exist
-        yet or may disappear during container restarts.
-
-        Args:
-            content: Content to write to the file
-            path: PathProtocol object representing the file path
-
-        Raises:
-            OpenSearchFileOperationError: If container is not ready or file operation fails.
-        """
-        try:
-            path.parent.mkdir(
-                mode=DIR_PERMISSIONS_READONLY,
-                parents=True,
-                exist_ok=True,
-            )
-            path.write_text(content)
-        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
-            raise OpenSearchFileOperationError(e) from e
-
     @property
     @override
     def root(self) -> PathProtocol:
@@ -930,7 +795,4 @@ class K8sWorkload(BaseWorkload):
         Returns:
             PathProtocol: ContainerPath instance bound to the container.
         """
-        # for K8s containers, use PathOps ContainerPath for container API
-        # containerPath handles pull/push operations internally
-        # via its read_text/write_text methods
         return pathops.ContainerPath("/", container=self.container)

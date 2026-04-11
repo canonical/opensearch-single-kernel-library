@@ -6,9 +6,6 @@
 
 import logging
 
-from ops import Container
-from ops.model import ModelError
-
 from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 from opensearch_single_kernel.common.constants import (
     CONTAINER_NAME,
@@ -27,13 +24,6 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         """Initialize the OpenSearch Kubernetes Charm."""
         super().__init__(*args)
 
-    def _get_container(self) -> Container | None:
-        """Return the workload container if available, else None."""
-        try:
-            return self.unit.get_container(CONTAINER_NAME)
-        except ModelError:
-            return None
-
     @property
     def workload(self) -> BaseWorkload:
         """Access current workload instance.
@@ -43,11 +33,7 @@ class OpenSearchK8sCharm(OpenSearchBaseCharm):
         Returns:
             BaseWorkload: The K8sWorkload instance for this charm
         """
-        if not hasattr(self, "_workload") or self._workload is None:
-            # Workload can be created even if the container isn't ready yet.
-            # Managers will check workload.workload_present when they actually need to use it.
-            self._workload = K8sWorkload(container_getter=self._get_container)
-        return self._workload
+        return K8sWorkload(container=self.unit.get_container(CONTAINER_NAME))
 
     @property
     def substrate(self) -> Substrates:

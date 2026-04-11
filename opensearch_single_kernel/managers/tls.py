@@ -18,12 +18,7 @@ from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
-    DIR_PERMISSIONS_CERTIFICATES,
-    JDK_CACERTS_STORE_PASSWORD,
     OLD_CA_ALIAS,
-    OPENSEARCH_RUN_AS_USER,
-    PEBBLE_SERVICE_USER,
-    ROOT_GID,
     CertType,
     Scope,
     StoreType,
@@ -49,7 +44,6 @@ from opensearch_single_kernel.utils.certificates import (
 )
 from opensearch_single_kernel.utils.helpers import (
     generate_password,
-    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -71,13 +65,10 @@ class TlsManager(BaseManager):
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
         """Check if all TLS resources are stored and ready to use.
 
-        VM: certs are on persistent disk and match the stored CA (issuer check).
-        K8s: certs are available in Juju secrets (source of truth), the charm
-        restores to the ephemeral filesystem on pebble-ready/start, so we do not
-        require on-disk presence here.
+        For K8s, we need first to save TLS resources from secrets.
         """
         if self.state.substrate == Substrates.K8S:
-            return self.all_certificates_available()
+            self.reconcile_k8s_runtime_resources()
 
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
         if not only_unit_resources:
@@ -386,11 +377,6 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
         if ca_chain not in bundle_content:
             self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
-            # Apply snap-style permissions: keep the bundle readable/writable by the workload user,
-            # and accessible to root via group bits when needed.
-            chain_path_str = path_as_posix(chain_path)
-            self._set_tls_store_permissions(chain_path_str)
-            self._best_effort_set_tls_store_ownership(chain_path_str)
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
@@ -442,12 +428,10 @@ class TlsManager(BaseManager):
     ) -> None:
         """Store cert in keystore."""
         certs_dir_path = self.workload.paths.certs
-        self._ensure_certificates_directory(certs_dir_path)
         self._safe_unlink(store_path)
 
-        store_path_str = path_as_posix(store_path)
-        if self.state.substrate == Substrates.K8S and not store_path_str.startswith("/"):
-            store_path_str = path_as_posix(self.workload.paths.certs / store_path_str.lstrip("/"))
+        if self.state.substrate == Substrates.K8S and not store_path.as_posix().startswith("/"):
+            store_path = self.workload.paths.certs / store_path.as_posix().lstrip("/")
 
         try:
             with (
@@ -458,12 +442,10 @@ class TlsManager(BaseManager):
                     mode="w+t", suffix=".cert", data=cert, dir=certs_dir_path
                 ) as tmp_cert,
             ):
-                tmp_key_path = path_as_posix(tmp_key)
-                tmp_cert_path = path_as_posix(tmp_cert)
                 cmd = (
                     "openssl pkcs12 -export "
-                    f"-in {tmp_cert_path} -inkey {tmp_key_path} "
-                    f"-out {store_path_str} -name {name}"
+                    f"-in {tmp_cert} -inkey {tmp_key} "
+                    f"-out {store_path} -name {name}"
                 )
                 args = f"-passout pass:{store_pwd}"
                 if key_pwd:
@@ -480,38 +462,7 @@ class TlsManager(BaseManager):
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
             raise
 
-        self._set_tls_store_permissions(store_path_str)
-        self._best_effort_set_tls_store_ownership(store_path_str)
         logger.info("TLS certificate for %s stored.", name)
-
-    def _ensure_certificates_directory(self, cert_dir_path: PathProtocol) -> None:
-        """Ensure the certificates directory exists.
-
-        On K8s, this directory can be backed by runtime mounts, ensure it exists before writing
-        PKCS12 stores and temp files.
-        """
-        try:
-            if self.state.substrate == Substrates.K8S:
-                # ContainerPath.mkdir uses Pebble file API, PebbleConnectionError propagates.
-                cert_dir_path.mkdir(
-                    mode=DIR_PERMISSIONS_CERTIFICATES,
-                    parents=True,
-                    exist_ok=True,
-                    user=str(PEBBLE_SERVICE_USER),
-                    group="root",
-                )
-            else:
-                cert_dir_path.mkdir(parents=True, exist_ok=True)
-        except (
-            FileExistsError,
-            FileNotFoundError,
-            LookupError,
-            NotADirectoryError,
-            PermissionError,
-            OSError,
-            ValueError,
-        ) as e:
-            raise OpenSearchFileOperationError(e) from e
 
     def _safe_unlink(self, path: PathProtocol) -> None:
         """Unlink for both VM and K8s PathProtocol implementations."""
@@ -519,70 +470,6 @@ class TlsManager(BaseManager):
             path.unlink(missing_ok=True)
         except (PebbleConnectionError, OSError) as e:
             logger.debug("Could not unlink %s (may not exist): %s", path, e)
-
-    def _set_tls_store_permissions(self, store_path_str: str) -> None:
-        """Set keystore permissions after writing.
-
-        Force for a known minimum access mode.
-        """
-        chmod_cmd = (
-            f"chmod 640 {store_path_str}"
-            if self.state.substrate == Substrates.K8S
-            else f"sudo chmod 640 {store_path_str}"
-        )
-        try:
-            self.workload.run_cmd(chmod_cmd)
-        except OpenSearchCmdError as e:
-            logger.debug("Could not set permissions on %s: %s", store_path_str, e)
-
-    def _best_effort_set_tls_store_ownership(self, store_path_str: str) -> None:
-        """Best-effort ownership fix for TLS artifacts on each substrate."""
-        try:
-            if self.state.substrate == Substrates.K8S:
-                owner = f"{OPENSEARCH_RUN_AS_USER}:{ROOT_GID}"
-                cmd = f"chown {owner} {store_path_str}"
-            else:
-                # Snap services run as snap_daemon on VM, so 640 files must be transferred.
-                owner = "snap_daemon:root"
-                cmd = f"sudo chown {owner} {store_path_str}"
-
-            self.workload.run_cmd(cmd)
-        except OpenSearchCmdError as e:
-            # Expected to fail if running as non-root, or if the runtime fixes ownership later.
-            logger.debug("Could not change ownership of %s: %s", store_path_str, e)
-
-    def _ensure_jvm_cacerts_truststore(self) -> None:
-        """Create cacert.p12 for the JVM."""
-        if self.state.substrate != Substrates.K8S:
-            return
-
-        dest = self.workload.paths.certs / CA_TRUSTSTORE_P12
-        if dest.exists():
-            return
-
-        jdk_cacerts = self.workload.paths.jdk / "lib/security/cacerts"
-        if not jdk_cacerts.exists():
-            logger.warning("JDK cacerts not found at %s; skipping %s", jdk_cacerts, dest)
-            return
-
-        dest_str = path_as_posix(dest)
-        src_str = path_as_posix(jdk_cacerts)
-        keytool = self.workload.keytool_cmd
-        pwd = JDK_CACERTS_STORE_PASSWORD
-        cmd = (
-            f"{keytool} -importkeystore -noprompt "
-            f"-srckeystore {src_str} -srcstoretype JKS -srcstorepass {pwd} "
-            f"-destkeystore {dest_str} -deststoretype PKCS12 -deststorepass {pwd}"
-        )
-
-        try:
-            self.workload.run_cmd(cmd)
-        except OpenSearchCmdError as e:
-            logger.error("Failed to create %s from JDK cacerts: %s", dest_str, e)
-            return
-
-        self._set_tls_store_permissions(dest_str)
-        self._best_effort_set_tls_store_ownership(dest_str)
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""
@@ -626,7 +513,7 @@ class TlsManager(BaseManager):
         if self._k8s_runtime_tls_artifacts_ready():
             return
 
-        self.workload.prepare_container()
+        # TODO: Address scenario of CA rotation
         self.restore_tls_files_from_secrets()
 
     def _k8s_runtime_tls_artifacts_ready(self) -> bool:
@@ -672,10 +559,6 @@ class TlsManager(BaseManager):
         """
         if self.state.substrate != Substrates.K8S:
             return
-
-        # ensure certs directory exists before writing CA truststore/keystores.
-        self._ensure_certificates_directory(self.workload.paths.certs)
-        self._ensure_jvm_cacerts_truststore()
 
         # ensure CA truststore + chain.pem (if secrets available).
         admin_secrets = (
@@ -723,7 +606,7 @@ class TlsManager(BaseManager):
         """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
         try:
             return self.workload.run_cmd(
-                f"openssl pkcs12 -in {path_as_posix(store_path)}",
+                f"openssl pkcs12 -in {store_path}",
                 f"""-nodes \
                 -passin pass:{store_pwd} \
                 | openssl x509 -noout -issuer
@@ -848,11 +731,6 @@ class TlsManager(BaseManager):
                 store_path=trust_store_path,
                 keytool_cmd=self.workload.keytool_cmd,
             )
-        # keytool/store_ca may rewrite the PKCS12 on disk, so restore the expected
-        # mode/owner for the workload after updating ca.p12.
-        ca_store_path_str = path_as_posix(trust_store_path)
-        self._set_tls_store_permissions(ca_store_path_str)
-        self._best_effort_set_tls_store_ownership(ca_store_path_str)
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
@@ -880,11 +758,6 @@ class TlsManager(BaseManager):
             use_sudo=self.state.substrate == Substrates.VM,
         ):
             return False
-
-        # ensure the CA truststore ends up with expected ownership/permissions on K8s.
-        ca_store_path_str = path_as_posix(self.workload.paths.certs / f"{CA_ALIAS}.p12")
-        self._set_tls_store_permissions(ca_store_path_str)
-        self._best_effort_set_tls_store_ownership(ca_store_path_str)
 
         self.update_request_ca_bundle(secrets.get("chain"))
 

@@ -219,7 +219,7 @@ SYSTEM_INDICES = {
 }
 # TLS
 CA_ALIAS = "ca"
-CA_TRUSTSTORE_P12 = "cacert.p12"
+CA_TRUSTSTORE_P12 = "cacerts.p12"
 JDK_CACERTS_STORE_PASSWORD = "changeit"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
 KEYTOOL = "opensearch.keytool"

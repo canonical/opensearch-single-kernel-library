@@ -28,7 +28,6 @@ from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
-    CONTAINER_NAME,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
@@ -45,7 +44,6 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
-    OpenSearchContainerPrepareError,
     OpenSearchError,
     OpenSearchFileOperationError,
     OpenSearchHAError,
@@ -118,12 +116,6 @@ class OpenSearchEventsHandler(Object):
             self._on_opensearch_data_storage_detaching,
         )
 
-        # Perform container preparation when pebble is ready for the K8s workload container.
-        if self.charm.state.substrate == Substrates.K8S:
-            self.framework.observe(
-                getattr(self.charm.on, f"{CONTAINER_NAME}_pebble_ready"), self._on_pebble_ready
-            )
-
         # --- OpenSearch Custom events ---
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
@@ -150,6 +142,11 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa C901
         """Handle peer relation changes."""
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for peer relation changed, deferring.")
+            event.defer()
+            return
+
         # check requirements
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed.")
@@ -158,9 +155,6 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.state.server.started:
             logger.debug("Deferring peer relation changed because server haven't started yet")
             event.defer()
-            return
-
-        if not self._ensure_k8s_workload_ready(event, "peer relation changed"):
             return
 
         if not (is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()):
@@ -183,7 +177,12 @@ class OpenSearchEventsHandler(Object):
         # update any orchestrators about planned units
         # if self.opensearch_peer_cm.is_consumer():
         # self.peer_cluster_requirer.refresh_requirer_relation_data()
-        self.charm.config_manager.update_seeds_config()
+        try:
+            self.charm.config_manager.update_seeds_config()
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while updating seeds config: %s", str(e))
+            event.defer()
+            return
 
         if self.charm.unit.is_leader():
             try:
@@ -206,12 +205,22 @@ class OpenSearchEventsHandler(Object):
             # self.peer_cluster_requirer.apply_orchestrator_status()
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            if self.charm.config_manager.update_opensearch_config():
-                self.charm.status.set(CharmStatuses.WAITING_TO_START)
-                logger.debug("Restarting opensearch due to reconfiguring node roles")
-                self.charm.restart_opensearch_event.emit()
+            try:
 
-        self.check_profile_missing_requirements()
+                if self.charm.config_manager.update_opensearch_config():
+                    self.charm.status.set(CharmStatuses.WAITING_TO_START)
+                    logger.debug("Restarting opensearch due to reconfiguring node roles")
+                    self.charm.restart_opensearch_event.emit()
+            except (OpenSearchFileOperationError, OpenSearchError) as e:
+                logger.error("An error occurred while updating opensearch config: %s", str(e))
+                event.defer()
+                return
+        try:
+            self.check_profile_missing_requirements()
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            event.defer()
+            return
 
         if not (unit_data := event.relation.data.get(event.unit)):
             return
@@ -232,13 +241,15 @@ class OpenSearchEventsHandler(Object):
         #        "Removing units during an upgrade is not supported. The charm may be in a broken,
         #  unrecoverable state"
         #    )
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for peer relation departed, deferring.")
+            event.defer()
+            return
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # that happens in the very last stages of the application removal
             return
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
-            return
-
-        if not self._ensure_k8s_workload_ready(event, "peer relation departed"):
             return
 
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -275,6 +286,13 @@ class OpenSearchEventsHandler(Object):
 
     def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            # If the workload is not ready, we cannot just defer the event
+            # since data will be lost
+            raise OpenSearchHAError(
+                "Workload not ready for opensearch data storage detaching."
+                " Unable to safely detach storage, aborting unit removal to prevent data loss."
+            )
         # TODO: Warning in case of upgrade in progress
         planned_units = self.charm.app.planned_units()
 
@@ -333,15 +351,20 @@ class OpenSearchEventsHandler(Object):
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for update status, deferring.")
+            event.defer()
+            return
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
-
-        if self.check_profile_missing_requirements():
-            return
-
-        if not self._ensure_k8s_workload_ready(event, "update status"):
-            return
+        try:
+            if self.check_profile_missing_requirements():
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            event.defer()
 
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -388,9 +411,10 @@ class OpenSearchEventsHandler(Object):
         # we need to wait for them all to be ready before deleting the old CA
         try:
             old_ca_present = self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-        except PebbleConnectionError as e:
-            logger.debug("Skipping old CA check in update-status; container not ready: %s", e)
-            old_ca_present = None
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while reading old stored CA: %s", str(e))
+            old_ca_present = False
+
         if old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster():
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
@@ -434,16 +458,19 @@ class OpenSearchEventsHandler(Object):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        if not self._ensure_k8s_workload_ready(event, "config-changed event"):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for config changed, deferring.")
+            event.defer()
             return
-
-        if (
-            self.charm.state.server.last_host_ip
-            and self.charm.state.host_ip != self.charm.state.server.last_host_ip
-        ):
-            self.charm.config_manager.update_opensearch_config()
-            # This happens when the unit IP has changed
-            self.on_unit_ip_changed(event)
+        if self.charm.substrate == Substrates.VM:
+            # This concern only VM substrate
+            if (
+                self.charm.state.server.last_host_ip
+                and self.charm.state.host_ip != self.charm.state.server.last_host_ip
+            ):
+                self.charm.config_manager.update_opensearch_config()
+                # This happens when the unit IP has changed
+                self.on_unit_ip_changed(event)
 
         if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
             if (
@@ -475,7 +502,12 @@ class OpenSearchEventsHandler(Object):
             self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             return
 
-        if self.check_profile_missing_requirements():
+        try:
+            if self.check_profile_missing_requirements():
+                event.defer()
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
             event.defer()
             return
 
@@ -497,48 +529,6 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
-    def _ensure_k8s_workload_ready(self, event, context: str) -> bool:
-        """Defer until the K8s workload container is connectable."""
-        if self.charm.state.substrate != Substrates.K8S:
-            return True
-        if self.charm.workload.workload_present:
-            return True
-
-        logger.info("Container not ready for %s, deferring", context)
-        event.defer()
-        return False
-
-    def _ensure_k8s_runtime_ready(self, event, context: str) -> bool:
-        """Prepare the K8s runtime before continuing with the hook."""
-        if not self._ensure_k8s_workload_ready(event, context):
-            return False
-
-        try:
-            self.charm.tls_manager.reconcile_k8s_runtime_resources()
-        except PebbleConnectionError as e:
-            logger.info("Container not ready to %s: %s", context, e)
-            event.defer()
-            return False
-        except (
-            OpenSearchContainerPrepareError,
-            OpenSearchFileOperationError,
-            OpenSearchError,
-        ) as e:
-            logger.warning("Failed to %s: %s", context, e)
-            event.defer()
-            return False
-
-        return True
-
-    def _on_pebble_ready(self, event) -> None:
-        """Handle pebble-ready for K8s workload container.
-
-        We do the K8s container preparation:
-            filesystem permissions, pebble plan, restore tls files from Juju secret.
-        """
-        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime on pebble-ready"):
-            return
-
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
@@ -547,10 +537,13 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for leader elected, deferring.")
             event.defer()
             return
-        if not self._ensure_k8s_workload_ready(event, "leader election"):
+
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            event.defer()
             return
 
         if self.charm.state.application.is_security_index_initialised:
@@ -569,8 +562,8 @@ class OpenSearchEventsHandler(Object):
                 # Nodes Config updated, we would need to reconfigure and restart
                 try:
                     restart_needed = self.charm.config_manager.update_opensearch_config()
-                except PebbleConnectionError as e:
-                    logger.info("Container not ready for leader election: %s", e)
+                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
                     return
 
@@ -586,8 +579,8 @@ class OpenSearchEventsHandler(Object):
         # users. Purge the user list before initialising the users the charm requires.
         try:
             self.charm.internal_users_manager.purge_initial_default_users()
-        except PebbleConnectionError as e:
-            logger.info("Container not ready for leader election: %s", e)
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while purging initial default users: %s", str(e))
             event.defer()
             return
 
@@ -604,12 +597,8 @@ class OpenSearchEventsHandler(Object):
                     self.charm.internal_users_manager.put_or_update_internal_user_leader(
                         user, update=False
                     )
-                except OpenSearchUserMgmtError as e:
+                except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
                     logger.error("An error occurred while updating internal user %s", str(e))
-                    event.defer()
-                    return
-                except PebbleConnectionError as e:
-                    logger.info("Container not ready for leader election: %s", e)
                     event.defer()
                     return
 
@@ -617,7 +606,9 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
-        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime for start"):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for start, deferring.")
+            event.defer()
             return
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -700,18 +691,12 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.unit.is_leader():
             try:
                 self.charm.internal_users_manager.purge_initial_default_users()
-            except PebbleConnectionError as e:
-                logger.info("Container not ready to configure users on start: %s", e)
+                for user in OPENSEARCH_SYSTEM_USERS:
+                    self.charm.internal_users_manager.save_user_locally(user)
+            except OpenSearchFileOperationError as e:
+                logger.error("An error occurred while saving internal users: %s", str(e))
                 event.defer()
                 return
-
-            for user in OPENSEARCH_SYSTEM_USERS:
-                try:
-                    self.charm.internal_users_manager.save_user_locally(user)
-                except PebbleConnectionError as e:
-                    logger.info("Container not ready to configure users on start: %s", e)
-                    event.defer()
-                    return
 
         deployment_desc = self.charm.state.application.deployment_desc
         # only start the main orchestrator if a data node is available
@@ -762,7 +747,9 @@ class OpenSearchEventsHandler(Object):
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
-        if not self._ensure_k8s_runtime_ready(event, "prepare workload runtime for start"):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for start, deferring.")
+            event.defer()
             return
 
         if (
@@ -803,18 +790,6 @@ class OpenSearchEventsHandler(Object):
             # if self.opensearch_peer_cm.is_provider(typ="main"):
             # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
             return
-
-        if self.charm.state.substrate == Substrates.K8S:
-            try:
-                self.charm.config_manager.ensure_k8s_tls_config_present()
-            except PebbleConnectionError as e:
-                logger.info("Container not ready to ensure TLS config for start: %s", e)
-                event.defer()
-                return
-            except (OpenSearchFileOperationError, OpenSearchError) as e:
-                logger.warning("Failed to ensure TLS config for start: %s", e)
-                event.defer()
-                return
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -872,7 +847,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.config_manager.update_opensearch_config(
                 cm_names=cm_names, seed_hosts=seed_hosts
             )
-        except (PebbleConnectionError, OpenSearchFileOperationError, OpenSearchError) as e:
+        except (OpenSearchFileOperationError, OpenSearchError) as e:
             logger.info("Unable to configure OpenSearch node before start: %s", e)
             self.charm.lock_manager.release()
             event.defer()
@@ -886,10 +861,6 @@ class OpenSearchEventsHandler(Object):
                 )
             )
             self._post_start_init(event)
-        except PebbleConnectionError as e:
-            logger.info("Container not ready during start flow: %s", e)
-            event.defer()
-            return
         except (
             OpenSearchHttpError,
             OpenSearchStartTimeoutError,
@@ -918,6 +889,11 @@ class OpenSearchEventsHandler(Object):
 
     def _post_start_init(self, event: StartOpenSearch) -> None:
         """Initialisation post OpenSearch start"""
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for post-start init, deferring.")
+            event.defer()
+            return
+
         deployment_desc = self.charm.state.application.deployment_desc
         # initialize the security index if needed (and certs written on disk etc.)
         # this happens only on the first data node to join the cluster
@@ -975,6 +951,11 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for restart, deferring.")
+            event.defer()
+            return
+
         if not self.charm.lock_manager.acquired:
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
@@ -983,10 +964,6 @@ class OpenSearchEventsHandler(Object):
         try:
             self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
-        except PebbleConnectionError as e:
-            logger.info("Container not ready for restart: %s", e)
-            event.defer()
-            return
         except OpenSearchStopError as e:
             logger.info("Error while Restarting Opensearch: %s", e)
             logger.exception(e)
@@ -1053,7 +1030,6 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.status.set(CharmStatuses.INVALID_PROFILE_CONFIG_OPTION)
             return [CharmStatuses.INVALID_PROFILE_CONFIG_OPTION.value.message]
-
         missing_requirements = self.charm.profiles_manager.get_missing_requirements()
 
         self.set_profile_status(missing_requirements)
@@ -1124,6 +1100,11 @@ class OpenSearchEventsHandler(Object):
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for secret changed, deferring.")
+            event.defer()
+            return
+
         secret = event.secret
         secret.get_content(refresh=True)
 
@@ -1177,7 +1158,12 @@ class OpenSearchEventsHandler(Object):
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
-                self.charm.internal_users_manager.put_internal_user(sys_user, password)
+                try:
+                    self.charm.internal_users_manager.put_internal_user(sys_user, password)
+                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                    logger.error("An error occurred while updating internal user: %s", str(e))
+                    event.defer()
+                    return
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.

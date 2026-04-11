@@ -18,7 +18,6 @@ from overrides import override
 from ruamel.yaml import YAML, CommentedMap, CommentedSeq
 from ruamel.yaml.comments import CommentedSet
 
-from opensearch_single_kernel.utils.helpers import path_as_posix
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -210,10 +209,7 @@ class ConfigSetter(ABC):
         if base_path is None:
             raise ValueError("base_path cannot be None")
 
-        # posix_path is a string representation of the path using posix-style forward slashes (/)
-        posix_path = path_as_posix(base_path)
-
-        if not posix_path.endswith("/"):
+        if not base_path.as_posix().endswith("/"):
             base_path = base_path / ""
 
         return base_path
@@ -234,13 +230,13 @@ class YamlConfigSetter(ConfigSetter):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            PebbleConnectionError: If container is not ready (for K8s, callers may defer).
+            OpenSearchFileOperationError: If file cannot be read due to other reasons
         """
         path = self.base_path / config_file
 
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
-        contents = path.read_text()
+        contents = self.workload.read_text(path)
 
         lines = contents.split("\n")
 
@@ -269,7 +265,22 @@ class YamlConfigSetter(ConfigSetter):
         inline_array: bool = False,
         output_file: str = None,
     ) -> dict[str, object]:
-        """Add or update the value of a key (or content of array at index / key) if it exists."""
+        """Add or update the value of a key (or content of array at index / key) if it exists.
+
+        Args:
+            config_file (str): Path to the source config file
+            key_path (str): The path of the YAML key to target
+            val (any): The value to store for the passed key
+            sep (str): The separator / delimiter character to use in the key_path
+            output_type (OutputType): The type of output we're expecting from this operation
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
+        Returns:
+            dict[str, object]: The final version of the YAML config.
+        """
         data = self.load(config_file)
 
         self.__deep_update(data, key_path.split(sep), val)
@@ -293,13 +304,17 @@ class YamlConfigSetter(ConfigSetter):
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
 
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
         Returns:
             whether config file was changed.
         """
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
-        old_content = path.read_text()
+        old_content = self.workload.read_text(path)
         self.__dump(target, OutputType.file, config_file)
         return old_content != path.read_text()
 
@@ -312,7 +327,22 @@ class YamlConfigSetter(ConfigSetter):
         output_type: OutputType = OutputType.file,
         output_file: str = None,
     ) -> dict[str, object]:
-        """Delete the value of a key (or content of array at index / key) if it exists."""
+        """Delete the value of a key (or content of array at index / key) if it exists.
+
+        Args:
+            config_file (str): Path to the source config file
+            key_path (str): The path of the YAML key to target
+            sep (str): The separator / delimiter character to use in the key_path
+            output_type (OutputType): The type of output we're expecting from this operation
+            output_file: Target file for the result config, by default same as config_file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
+        Returns:
+            dict[str, object]: The final version of the YAML config.
+        """
         data = self.load(config_file)
 
         self.__deep_delete(data, key_path.split(sep))
@@ -347,9 +377,14 @@ class YamlConfigSetter(ConfigSetter):
             output_type (OutputType): The type of output we're expecting from this operation,
                 i.e, set OutputType.all to have the output on both the console and target file
             output_file: Target file for the result config, by default same as config_file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
         """
         path = self.base_path / config_file
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
 
         data = self.workload.read_text(path)
@@ -382,11 +417,12 @@ class YamlConfigSetter(ConfigSetter):
             text_to_append (str): The str to append to the config file
 
         Raises:
-            PebbleConnectionError: If container is not ready (for K8s; callers may defer).
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
         """
         path = self.base_path / config_file
 
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
 
         data = self.workload.read_text(path)
@@ -399,6 +435,14 @@ class YamlConfigSetter(ConfigSetter):
 
         Always writes YAML even if data is empty ({}), to ensure file exists
         and prevent file does not exist yet.
+
+        Args:
+            data: the YAML data to write
+            output_type: the type of output we're expecting from this operation, i.e, set Output
+            .all to have the output on both the console and target file
+
+        Raises:
+            OpenSearchFileOperationError: If file cannot be written due to any reason
         """
         if output_type in [OutputType.console, OutputType.all]:
             self.yaml.dump(data, sys.stdout)
@@ -415,7 +459,7 @@ class YamlConfigSetter(ConfigSetter):
             buffer = StringIO()
             self.yaml.dump(data, buffer)
             yaml_content = buffer.getvalue()
-            target_path.write_text(yaml_content)
+            self.workload.write_text(yaml_content, target_path)
 
     def __deep_update(self, source, node_keys: list[str], val: object):
         """Recursively traverses the tree of nodes, and writes the value accordingly.

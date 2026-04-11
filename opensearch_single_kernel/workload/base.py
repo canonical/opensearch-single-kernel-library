@@ -171,6 +171,12 @@ class BaseWorkload(ABC):
         """Flag to check if workload is present and ready."""
         pass
 
+    @property
+    @abstractmethod
+    def can_connect(self) -> bool:
+        """Flag to check if workload is present and Pebble API is connectable."""
+        pass
+
     def write_text(self, content: str, path: pathops.PathProtocol) -> None:
         """Write content to a file on disk.
 
@@ -378,7 +384,12 @@ class BaseWorkload(ABC):
         pass
 
     def check_missing_system_requirements(self) -> List[str]:
-        """Checks the system requirements."""
+        """Checks the system requirements.
+
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read
+                or if applying a system requirement fails.
+        """
         missing_requirements = []
 
         prop, val = "vm.max_map_count", 262144

@@ -13,6 +13,8 @@ summary: |
 assumes:
   - k8s-api
 
+charm-user: sudoer
+
 peers:
   opensearch-peers:
     interface: opensearch_peers
@@ -78,6 +80,8 @@ storage:
 
 containers:
   opensearch:
+    uid: 584792
+    gid: 584792
     resource: opensearch-image
     mounts:
       - storage: opensearch-data
@@ -89,4 +93,6 @@ resources:
   opensearch-image:
     type: oci-image
     description: OCI image for opensearch
-    upstream-source: ghcr.io/canonical/opensearch:2.19.4-24.04_edge
+    #upstream-source: ghcr.io/canonical/opensearch:2.19.4-24.04_edge
+    # TODO: Update upstream once image is published
+    upstream-source: akram0907/opensearch-2.19-rock:latest

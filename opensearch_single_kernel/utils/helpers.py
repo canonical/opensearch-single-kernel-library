@@ -15,7 +15,6 @@ from collections.abc import Iterable
 from typing import Any
 
 import bcrypt
-from charmlibs.pathops import PathProtocol
 from ops import Unit
 
 from opensearch_single_kernel.common.constants import (
@@ -27,18 +26,6 @@ from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 logger = logging.getLogger(__name__)
-
-
-def path_as_posix(path: PathProtocol) -> str:
-    """Convert a PathProtocol to a POSIX path string.
-
-    The workload code uses PathProtocol and some callers (config generation, command execution)
-    need a plain string path, but PathProtocol implementations aren't guaranteed to be
-    pathlib.Path. The reason is pathlib.Path is a default type for paths in Python. Hence, we use
-    .as_posix() when available and fall back to str().
-    """
-    as_posix = getattr(path, "as_posix", None)
-    return as_posix() if callable(as_posix) else str(path)
 
 
 def format_unit_name(unit: Unit | str, app: App) -> str:

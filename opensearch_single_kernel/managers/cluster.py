@@ -51,7 +51,6 @@ from opensearch_single_kernel.utils.helpers import (
     deployment_type,
     format_unit_name,
     mask_sensitive_information,
-    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -365,7 +364,7 @@ class ClusterManager(BaseManager):
             f"-tspass {admin_secrets['truststore-password']}",
             "-tsalias ca",
             "-tst PKCS12",
-            f"-ks {path_as_posix(self.workload.paths.certs / f'{CertType.APP_ADMIN.val}.p12')}",
+            f"-ks {(self.workload.paths.certs / f'{CertType.APP_ADMIN.val}.p12')}",
             f"-kspass {admin_secrets['keystore-password']}",
             f"-ksalias {CertType.APP_ADMIN.val}",
             "-kst PKCS12",

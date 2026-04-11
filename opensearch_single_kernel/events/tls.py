@@ -13,7 +13,6 @@ from ops import (
     RelationBrokenEvent,
     RelationCreatedEvent,
 )
-from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     OLD_CA_ALIAS,
@@ -23,7 +22,6 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Scope,
     StoreType,
-    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
@@ -114,15 +112,12 @@ class TLSEventsHandler(Object):
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
         # TODO: Defer when upgrade is in progress
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for TLS relation created, deferring.")
             event.defer()
             return
 
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.workload.workload_present
-        ):
-            logger.info("Container not ready for TLS relation created, deferring.")
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
 
@@ -179,6 +174,11 @@ class TLSEventsHandler(Object):
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.
         """
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for certificate available, deferring.")
+            event.defer()
+            return
+
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate_signing_request, "csr"
@@ -211,8 +211,8 @@ class TLSEventsHandler(Object):
 
         try:
             current_stored_ca = self.charm.tls_manager.read_stored_ca()
-        except PebbleConnectionError as e:
-            logger.info("Container not ready for certificate available: %s", e)
+        except OpenSearchFileOperationError as e:
+            logger.error("Error while reading stored CA certificate: %s", e)
             event.defer()
             return
 
@@ -222,8 +222,8 @@ class TLSEventsHandler(Object):
                     self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
                     create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
                 )
-            except PebbleConnectionError as e:
-                logger.info("Container not ready for certificate available: %s", e)
+            except OpenSearchFileOperationError as e:
+                logger.error("Error while storing new CA certificate: %s", e)
                 event.defer()
                 return
 
@@ -251,7 +251,7 @@ class TLSEventsHandler(Object):
             self.charm.tls_manager.store_new_tls_resources(
                 cert_type, self.charm.state.secrets.get_object(scope, cert_type.val, peek=True)
             )
-        except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+        except OpenSearchFileOperationError as e:
             logger.info("Unable to store TLS resources yet: %s", e)
             event.defer()
             return
@@ -262,14 +262,14 @@ class TLSEventsHandler(Object):
         )
         try:
             old_ca_present = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
-        except PebbleConnectionError as e:
-            logger.info("Container not ready while reading old CA: %s", e)
+        except OpenSearchFileOperationError as e:
+            logger.error("Error while reading stored CA certificate: %s", e)
             event.defer()
             return
         if admin_secrets.get("chain") and not old_ca_present:
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
-            except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+            except OpenSearchFileOperationError as e:
                 logger.debug("Error while updating request CA bundle: %s", e)
                 event.defer()
                 return
@@ -282,7 +282,7 @@ class TLSEventsHandler(Object):
                     self.charm.tls_manager.store_new_tls_resources(
                         CertType.APP_ADMIN, admin_secrets
                     )
-                except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+                except OpenSearchFileOperationError as e:
                     logger.debug("Error while storing admin TLS certificate and key: %s", e)
                     event.defer()
                     return
@@ -313,10 +313,7 @@ class TLSEventsHandler(Object):
 
         try:
             self.on_tls_conf_set(event, scope, cert_type, renewal)
-        except PebbleConnectionError as e:
-            logger.info("Container not ready for TLS conf set: %s", e)
-            event.defer()
-        except OpenSearchError as e:
+        except (OpenSearchError, OpenSearchFileOperationError) as e:
             logger.exception(e)
             event.defer()
 
@@ -362,6 +359,10 @@ class TLSEventsHandler(Object):
         - Store the cert on the file system, on all nodes for APP certificates
         - Update the corresponding yaml conf files
         - Run the security admin script
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error while operating with certificate
+              files.
         """
         if scope == Scope.UNIT:
             admin_secrets = (

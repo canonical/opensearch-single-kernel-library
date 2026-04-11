@@ -10,7 +10,6 @@ from typing import Any
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CA_TRUSTSTORE_P12,
-    JDK_CACERTS_STORE_PASSWORD,
     CertType,
     Scope,
     Substrates,
@@ -21,7 +20,6 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
 from opensearch_single_kernel.utils.helpers import (
     get_k8s_seed_host,
-    path_as_posix,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -169,14 +167,17 @@ class ConfigManager(BaseManager):
             "http.publish_host": publish_host or self.state.network_ingress_address,
             "node.roles": sorted(roles),
             "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
-            "path.data": path_as_posix(self.workload.paths.data),
-            "path.logs": path_as_posix(self.workload.paths.logs),
-            "path.home": path_as_posix(self.workload.paths.home),
+            "path.data": self.workload.paths.data.as_posix(),
+            "path.logs": self.workload.paths.logs.as_posix(),
+            "path.home": self.workload.paths.home.as_posix(),
         }
 
     def _opensearch_host_config(self) -> dict[str, Any]:
         """Network publish host settings written to opensearch.yml."""
-        return {"network.publish_host": self.state.host_ip} if self.state.host_ip else {}
+        publish_host = (
+            self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
+        )
+        return {"network.publish_host": publish_host} if publish_host else {}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
         """Optional data temperature settings written to opensearch.yml."""
@@ -260,22 +261,8 @@ class ConfigManager(BaseManager):
 
     def _update_static_jvm_options(self) -> None:
         """Update Opensearch JVM config file with the right static options."""
-        logs_path = path_as_posix(self.workload.paths.logs)
-        self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={logs_path}/")
+        self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={self.workload.paths.logs}/")
         self.yaml_setter.append(self.JVM_OPTIONS, "-Djdk.tls.client.protocols=TLSv1.2")
-        # K8s: Pebble overrides the rock entrypoint, so start.sh never creates cacert.p12.
-        if self.state.substrate == Substrates.K8S:
-            if (
-                self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-            ).get("truststore-password"):
-                truststore_path = path_as_posix(self.workload.paths.certs / CA_TRUSTSTORE_P12)
-                self.yaml_setter.append(
-                    self.JVM_OPTIONS, f"-Djavax.net.ssl.trustStore={truststore_path}"
-                )
-                self.yaml_setter.append(
-                    self.JVM_OPTIONS,
-                    f"-Djavax.net.ssl.trustStorePassword={JDK_CACERTS_STORE_PASSWORD}",
-                )
 
     @staticmethod
     def _security_authc_static_config() -> dict[str, Any]:

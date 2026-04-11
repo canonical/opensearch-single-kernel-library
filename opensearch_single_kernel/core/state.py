@@ -800,8 +800,7 @@ class ClusterState(Object):
         - K8s: canonical endpoint FQDN for this unit service name.
         """
         if self.substrate == Substrates.K8S:
-            deployment_desc = self.application.deployment_desc
-            if deployment_desc:
+            if deployment_desc := self.application.deployment_desc:
                 unit_prefix = str(self.unit_name).split(".", 1)[0]
                 service_name = f"{unit_prefix}.{deployment_desc.app.name}-endpoints"
                 try:

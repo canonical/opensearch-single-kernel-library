@@ -102,14 +102,25 @@ class InternalUsersManager(BaseManager):
                 self.yaml_setter.delete("opensearch-security/internal_users.yml", user)
 
     def save_user_locally(self, user: str) -> None:
-        """Save the user in internal_users.yaml"""
+        """Save the user in internal_users.yaml
+
+        Raises:
+            OpenSearchError: If user is not an internal user.
+            OpenSearchFileOperationError: If internal_users.yml cannot be read or written
+        """
         user_hash = hash_key(user)
         hashed_pwd = self.state.secrets.get(Scope.APP, user_hash)
         # System users have to be saved locally in internal_users.yml
         self.put_internal_user(user, hashed_pwd)
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
-        """User creation for specific system users."""
+        """User creation for specific system users.
+
+        Raises:
+            OpenSearchError: If user is not an internal user.
+            OpenSearchFileOperationError: If internal_users.yml cannot be read or written
+              due to any reason
+        """
         if user not in OPENSEARCH_USERS:
             raise OpenSearchError(f"User {user} is not an internal user.")
 
