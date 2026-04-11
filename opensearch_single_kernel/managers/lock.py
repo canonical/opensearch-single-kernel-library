@@ -190,8 +190,7 @@ class LockManager(PeerLockManager):
         Returns:
             Whether lock was acquired
         """
-        local_host = self._preferred_local_https_host()
-        host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
+        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] 1+ opensearch nodes online")
@@ -277,8 +276,7 @@ class LockManager(PeerLockManager):
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
 
-        local_host = self._preferred_local_https_host()
-        host = local_host if local_host and self.opensearch_client.is_node_up(local_host) else None
+        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] Checking which unit has opensearch lock")
