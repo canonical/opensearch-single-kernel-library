@@ -27,6 +27,7 @@ from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_BACKUP_ID_FORMAT,
+    OPENSEARCH_NODE_LOCK_INDEX,
     SYSTEM_INDICES,
     USER_ENDPOINT,
     USER_ROLE_ENDPOINT,
@@ -1383,3 +1384,165 @@ class OpenSearchClient:
             )
 
         return log_error
+
+    def get_unit_with_lock(self, host: str | None, alt_hosts: list[str] | None) -> str | None:
+        """Get unit name that has acquired OpenSearch lock."""
+        try:
+            document_data = self.request(
+                "GET",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_source/0",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=3,
+                ignore_retry_on=[404],
+            )
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                # No unit has lock or index not available
+                return None
+            raise
+        return document_data["unit-name"]
+
+    def create_lock_index_if_needed(
+        self, host: str, alt_hosts: list[str] | None, wait_for_cluster: bool = False
+    ) -> bool:
+        """Try creating the lock index if it doesn't exist yet.
+
+        Args:
+            host: connection host.
+            alt_hosts: alternative connection hosts.
+            wait_for_cluster: whether to wait for green status of lock index if it already exists.
+
+        Returns:
+            whether the operation was successful.
+        """
+        # we do this, to circumvent opensearch raising a 429 error,
+        # complaining about spamming the index creation endpoint
+        try:
+            indices = self.get_indices(host, alt_hosts)
+            if OPENSEARCH_NODE_LOCK_INDEX in indices:
+                logger.debug(
+                    "%s already created. Skipping creation attempt. List:%s",
+                    OPENSEARCH_NODE_LOCK_INDEX,
+                    indices,
+                )
+                if wait_for_cluster:
+                    self.request(
+                        "GET",
+                        endpoint=f"/_cluster/health/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_status=green",
+                        resp_status_code=True,
+                    )
+                return True
+        except OpenSearchHttpError:
+            pass
+
+        # Create index if it doesn't exist
+        try:
+            self.request(
+                "PUT",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}?wait_for_active_shards=all",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=3,
+                ignore_retry_on=[400],
+                payload={"settings": {"index": {"auto_expand_replicas": "0-all"}}},
+            )
+        except OpenSearchHttpError as e:
+            if (
+                e.response_code == 400
+                and e.response_body.get("error", {}).get("type")
+                == "resource_already_exists_exception"
+            ):
+                # Index already created
+                return True
+            else:
+                logger.error("Could not create OpenSearch lock index: %s", e)
+                return False
+
+        try:
+            self.request(
+                "POST",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_refresh",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=3,
+            )
+        except OpenSearchHttpError as e:
+            logger.error("Could not refresh OpenSearch lock index: %s", e)
+
+        return True
+
+    def delete_lock_document(self, host: str, alt_hosts: list[str] | None) -> None:
+        """Delete lock document from lock index."""
+        try:
+            self.request(
+                "DELETE",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_doc/0?refresh=true",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=3,
+                ignore_retry_on=[404],
+            )
+        except OpenSearchHttpError as e:
+            if e.response_code != 404:
+                raise
+
+    def create_lock_document(self, host: str, alt_hosts: list[str] | None, unit_name: str) -> bool:
+        """Create lock document in lock index with granted unit name.
+
+        Also ensures it propagated all over the cluster. If propagation is failed,
+        the document is deleted and negative result returned.
+
+        Args:
+            host: connection host.
+            alt_hosts: alternative connection hosts.
+            unit_name: granted unit name.
+
+        Returns:
+            whether the operation was successful.
+        """
+        try:
+            response = self.request(
+                "PUT",
+                endpoint=f"/{OPENSEARCH_NODE_LOCK_INDEX}/_create/0?refresh=true&wait_for_active_shards=all",
+                host=host,
+                alt_hosts=alt_hosts,
+                retries=0,
+                payload={"unit-name": unit_name},
+            )
+        except OpenSearchHttpError as e:
+            if e.response_code == 409 and "document already exists" in e.response_body.get(
+                "error", {}
+            ).get("reason", ""):
+                # Document already created
+                logger.debug(
+                    "[Node lock] Another unit acquired OpenSearch lock while this unit attempted "
+                    "to acquire lock"
+                )
+                return False
+            else:
+                raise
+        else:
+            # Ensure write was successful on all nodes
+            # "It is important to note that this setting [`wait_for_active_shards`] greatly
+            # reduces the chances of the write operation not writing to the requisite
+            # number of shard copies, but it does not completely eliminate the possibility,
+            # because this check occurs before the write operation commences. Once the
+            # write operation is underway, it is still possible for replication to fail on
+            # any number of shard copies but still succeed on the primary. The `_shards`
+            # section of the write operation’s response reveals the number of shard copies
+            # on which replication succeeded/failed."
+            # from
+            # https://www.elastic.co/guide/en/elasticsearch/reference/8.13/docs-index_.html#index-wait-for-active-shards
+            if response["_shards"]["failed"] > 0:
+                logger.error("Failed to write OpenSearch lock document to all nodes.")
+                logger.debug(
+                    "[Node lock] Deleting OpenSearch lock after failing to write to all nodes"
+                )
+                # Delete document id 0
+                self.delete_lock_document(host, alt_hosts)
+                logger.debug(
+                    "[Node lock] Deleted OpenSearch lock after failing to write to all nodes"
+                )
+                return False
+        return True

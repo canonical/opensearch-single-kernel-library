@@ -199,7 +199,7 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 
 def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
-    lock_acquired = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquired")
+    lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
@@ -293,7 +293,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     can_service_start.return_value = True
     check_profile_missing_requirements.return_value = False
     harness.set_leader(True)
-    lock_acquired.return_value = True
+    lock_acquire.return_value = True
     unit_allowed_to_start.return_value = True
 
     harness.charm.on.start.emit()

@@ -251,6 +251,13 @@ def wait_for_process_output(
         raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
 
 
+def lock_unit_name(full_unit_id: str) -> str:
+    """Build back the juju formatted unit name."""
+    # we first take out the app id suffix
+    full_unit_id_split = full_unit_id.split(".")[0].rsplit("-")
+    return "{}/{}".format("-".join(full_unit_id_split[:-1]), full_unit_id_split[-1])
+
+
 def hash_credentials(credentials: dict[str, str]) -> str:
     """Return a hash of the given credentials.
 
