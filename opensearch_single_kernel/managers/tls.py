@@ -428,7 +428,7 @@ class TlsManager(BaseManager):
     ) -> None:
         """Store cert in keystore."""
         certs_dir_path = self.workload.paths.certs
-        self._safe_unlink(store_path)
+        self.workload.unlink(store_path, missing_ok=True)
 
         if self.state.substrate == Substrates.K8S and not store_path.as_posix().startswith("/"):
             store_path = self.workload.paths.certs / store_path.as_posix().lstrip("/")
@@ -452,6 +452,7 @@ class TlsManager(BaseManager):
                     args = f"{args} -passin pass:{key_pwd}"
 
                 self.workload.run_cmd(cmd, args)
+                self.workload.run_cmd(f"chmod +r {store_path}")
         except OpenSearchFileOperationError as e:
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
             raise
@@ -463,13 +464,6 @@ class TlsManager(BaseManager):
             raise
 
         logger.info("TLS certificate for %s stored.", name)
-
-    def _safe_unlink(self, path: PathProtocol) -> None:
-        """Unlink for both VM and K8s PathProtocol implementations."""
-        try:
-            path.unlink(missing_ok=True)
-        except (PebbleConnectionError, OSError) as e:
-            logger.debug("Could not unlink %s (may not exist): %s", path, e)
 
     def store_admin_tls_secrets_if_applies(self) -> None:
         """Store admin TLS resources if available and mark unit as configured if correct."""

@@ -518,7 +518,7 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.external_clients_manager.update_relations_roles_mapping()
             except OpenSearchUserMgmtError as e:
-                logger.error("Failed to update relations roles mapping: %s", e)
+                logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()
                 return
 
