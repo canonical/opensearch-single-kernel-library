@@ -873,7 +873,7 @@ class ClusterState(Object):
         On K8s this is the unit DNS name. On VM this is the unit IP address.
         """
         if self.substrate == Substrates.K8S:
-            return socket.getfqdn()
+            return self.fqdn
         return self.host_ip
 
     @property
