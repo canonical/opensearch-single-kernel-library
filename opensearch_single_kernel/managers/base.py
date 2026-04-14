@@ -126,10 +126,12 @@ class BaseManager:
             response = self.opensearch_client.get_nodes(host, alt_hosts)
             if "nodes" in response:
                 for obj in response["nodes"].values():
+                    # For k8s we need to use the host instead of IP
+                    host = obj["ip"] if self.state.substrate == Substrates.VM else obj["host"]
                     node = Node(
                         name=obj["name"],
                         roles=obj["roles"],
-                        ip=obj["ip"],
+                        ip=host,
                         app=App(id=obj["attributes"]["app_id"]),
                         unit_number=int(obj["name"].split(".")[0].split("-")[-1]),
                         temperature=obj.get("attributes", {}).get("temp"),
