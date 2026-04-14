@@ -161,6 +161,9 @@ def test_on_start(harness, mocker):
     )
 
     is_node_up = mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.is_node_up")
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
     mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_service_started")
 
     # test when setup complete

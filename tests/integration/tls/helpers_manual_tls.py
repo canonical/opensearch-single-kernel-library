@@ -85,7 +85,7 @@ class ManualTLSAgent:
     async def get_outstanding_certificate_requests(self) -> None:
         """Get the outstanding certificate requests from the TLS operator.
 
-        Raises
+        Raises:
         ------
             GetOutstandingCertificateRequestsError:
                 If getting the outstanding certificate requests fails.

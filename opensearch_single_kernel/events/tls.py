@@ -102,7 +102,7 @@ class TLSEventsHandler(Object):
                 "key-password": event.params.get("password", None),
             }
             csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope, cert_type, secrets=secrets
+                scope, cert_type, secret=secrets
             )
             self.certs.request_certificate_creation(certificate_signing_request=csr)
 
@@ -115,10 +115,6 @@ class TLSEventsHandler(Object):
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
-
-        admin_cert = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
 
         if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             # create passwords for both ca trust_store/admin key_store
@@ -133,7 +129,7 @@ class TLSEventsHandler(Object):
             )
 
             self.certs.request_certificate_creation(certificate_signing_request=csr)
-        elif not admin_cert.get("truststore-password"):
+        elif not self.charm.state.application.admin_secrets.get("truststore-password"):
             logger.debug("Truststore-password from main-orchestrator not available yet.")
             event.defer()
             return
@@ -202,7 +198,7 @@ class TLSEventsHandler(Object):
         current_stored_ca = self.charm.tls_manager.read_stored_ca()
         if current_stored_ca != event.ca:
             if not self.charm.tls_manager.store_new_ca(
-                self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
+                cert_type,
                 create_store_pwd=is_leader_unit and is_main_orchestrator,
             ):
                 logger.debug("Could not store new CA certificate.")
@@ -225,13 +221,11 @@ class TLSEventsHandler(Object):
         # store the certificates and keys in a key store
         self.charm.tls_manager.store_new_tls_resources(
             cert_type,
-            self.charm.state.secrets.get_object(scope, cert_type.val, peek=True),
+            self.charm.tls_manager.get_secrets_for_cert_type(cert_type),
         )
 
         # apply the chain.pem file for API requests, only if the CA cert has not been updated
-        admin_secrets = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
+        admin_secrets = self.charm.state.application.admin_secrets
         if admin_secrets.get("chain") and not self.charm.tls_manager.read_stored_ca(
             alias=OLD_CA_ALIAS
         ):
@@ -309,7 +303,7 @@ class TLSEventsHandler(Object):
         old_csr = secrets["csr"].encode("utf-8")
 
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            scope=scope, cert_type=cert_type, secrets=secrets, tls_file=False
+            scope=scope, cert_type=cert_type, secret=secrets, tls_file=False
         )
         self.certs.request_certificate_renewal(
             old_certificate_signing_request=old_csr,
@@ -322,7 +316,11 @@ class TLSEventsHandler(Object):
         self._on_certificate_expiring(event)
 
     def on_tls_conf_set(
-        self, event: CertificateAvailableEvent, scope: Scope, cert_type: CertType, renewal: bool
+        self,
+        event: CertificateAvailableEvent,
+        scope: Scope,
+        cert_type: CertType,
+        renewal: bool,
     ) -> None:
         """Called after certificate ready and stored on the corresponding scope databag.
 
@@ -331,10 +329,7 @@ class TLSEventsHandler(Object):
         - Run the security admin script
         """
         if scope == Scope.UNIT:
-            admin_secrets = (
-                self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-                or {}
-            )
+            admin_secrets = self.charm.state.application.admin_secrets
             if not admin_secrets.get("truststore-password"):
                 event.defer()
                 return
@@ -431,15 +426,12 @@ class TLSEventsHandler(Object):
             event.fail("TLS certificates not configured yet.")
             return
 
-        password = self.charm.state.secrets.get(Scope.APP, password_key(user_name))
-        cert = self.charm.state.secrets.get_object(
-            Scope.APP, CertType.APP_ADMIN.val, peek=True
-        )  # replace later with new user certs
+        password = self.charm.state.application.get_user_password(user_name)
 
         event.set_results(
             {
                 "username": user_name,
                 "password": password,
-                "ca-chain": cert["chain"],
+                "ca-chain": self.charm.state.application.admin_secrets["chain"],
             }
         )

@@ -45,13 +45,13 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the store."""
         pass
 
     @abstractmethod
     def get(
-        self, scope: Scope, key: str, default: int | float | str | bool | None = None
+        self, scope: Scope, key: str, default: float | str | bool | None = None
     ) -> int | float | str | bool | None:
         """Get string from the data store."""
         pass
@@ -92,7 +92,7 @@ class RelationDataStore(DataStore):
     """Class representing a relation data store for a charm."""
 
     def __init__(self, charm, relation_name: str):
-        super(RelationDataStore, self).__init__(charm)
+        super().__init__(charm)
         self.relation_name = relation_name
 
     @override
@@ -127,7 +127,7 @@ class RelationDataStore(DataStore):
         self.put(scope, key, payload_str)
 
     @override
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the relation data."""
         if scope is None:
             raise ValueError("Scope undefined.")
@@ -139,7 +139,7 @@ class RelationDataStore(DataStore):
         self,
         scope: Scope,
         key: str,
-        default: int | float | str | bool | None = None,
+        default: float | str | bool | None = None,
         auto_casting: bool = True,
     ) -> int | float | str | bool | None:
         """Get string from the relation data store."""
