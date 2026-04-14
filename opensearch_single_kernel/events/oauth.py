@@ -20,8 +20,6 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_REDIRECT_URI,
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
-    CertType,
-    Scope,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import CharmStatuses
@@ -113,9 +111,7 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (
-            admin_secrets := self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val)
-        ):
+        if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
 
@@ -154,9 +150,7 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (
-            admin_secrets := self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val)
-        ):
+        if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
         try:

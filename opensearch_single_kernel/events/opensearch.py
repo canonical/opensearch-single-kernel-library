@@ -122,7 +122,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
-        pass
         # TODO: Handle upgrades
         # if self.upgrade_in_progress:
         # logger.warning(
@@ -132,7 +131,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Event received by all units when a new node joins the cluster."""
-        pass
         # TODO: Handle upgrades
         # if self.upgrade_in_progress:
         #    logger.warning(
@@ -140,7 +138,7 @@ class OpenSearchEventsHandler(Object):
         #  unrecoverable state"
         #    )
 
-    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa C901
+    def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
         if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
             logger.warning("Workload not ready for peer relation changed, deferring.")
@@ -1253,21 +1251,28 @@ class OpenSearchEventsHandler(Object):
         # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
 
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secret_obj = (
-                self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True) or {}
+            secret = (
+                self.charm.state.server.transport_secrets
+                if cert_type == CertType.UNIT_TRANSPORT
+                else self.charm.state.server.http_secrets
             )
-            csr = secret_obj["csr"].encode("utf-8")
-            self.charm.tls_events.certs.request_certificate_revocation(csr)
+            self.charm.tls_events.certs.request_certificate_revocation(
+                secret["csr"].encode("utf-8")
+            )
 
         # doing this sequentially (revoking -> requesting new ones), to avoid triggering
         # the "certificate available" callback with old certificates
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secrets = self.charm.state.secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
-            old_csr = secrets["csr"].encode("utf-8")
+            secret = (
+                self.charm.state.server.transport_secrets
+                if cert_type == CertType.UNIT_TRANSPORT
+                else self.charm.state.server.http_secrets
+            )
+            old_csr = secret["csr"].encode("utf-8")
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
-                secrets=secrets,
+                secret=secret,
                 tls_file=False,
             )
 
@@ -1280,14 +1285,11 @@ class OpenSearchEventsHandler(Object):
         """Request the generation of a new admin certificate."""
         if not self.charm.unit.is_leader():
             return
-        admin_secrets = (
-            self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
 
         csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
-            secrets=admin_secrets,
+            secret=self.charm.state.application.admin_secrets,
             tls_file=False,
         )
 

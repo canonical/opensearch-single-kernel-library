@@ -55,8 +55,8 @@ class InternalUsersManager(BaseManager):
             OpenSearchUserMgmtErorr: In case of error when updating user password.
         """
         # Leader is to set new password and hash, others populate existing hash locally
-        secret = self.state.secrets.get(Scope.APP, password_key(user))
-        if secret and not update:
+        password_secret = self.state.application.get_user_password(user)
+        if password_secret and not update:
             self.save_user_locally(user)
             return
 
@@ -64,7 +64,7 @@ class InternalUsersManager(BaseManager):
 
         # Updating security index
         # We need to do this for all credential changes
-        if secret and update:
+        if password_secret and update:
             try:
                 self.opensearch_client.patch_user_password(user, hashed_pwd)
             except OpenSearchHttpError as e:
@@ -72,7 +72,7 @@ class InternalUsersManager(BaseManager):
 
         # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
         # we either need to initialize or update (local) credentials as well
-        if not secret or user in OPENSEARCH_SYSTEM_USERS:
+        if not password_secret or user in OPENSEARCH_SYSTEM_USERS:
             self.put_internal_user(user, hashed_pwd)
 
         # Secrets need to be maintained
@@ -102,16 +102,9 @@ class InternalUsersManager(BaseManager):
                 self.yaml_setter.delete("opensearch-security/internal_users.yml", user)
 
     def save_user_locally(self, user: str) -> None:
-        """Save the user in internal_users.yaml
-
-        Raises:
-            OpenSearchError: If user is not an internal user.
-            OpenSearchFileOperationError: If internal_users.yml cannot be read or written
-        """
-        user_hash = hash_key(user)
-        hashed_pwd = self.state.secrets.get(Scope.APP, user_hash)
+        """Save the user in internal_users.yaml"""
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, hashed_pwd)
+        self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users.

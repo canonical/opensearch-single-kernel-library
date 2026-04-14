@@ -27,7 +27,6 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     DeploymentType,
     Directive,
-    Scope,
     StartMode,
     State,
 )
@@ -351,11 +350,9 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
-        admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
-
         # Use a connectable host for the securityadmin CLI.
         securityadmin_host = self.state.node_host
-
+        admin_secrets = self.state.application.admin_secrets
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",

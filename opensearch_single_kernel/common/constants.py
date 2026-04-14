@@ -200,13 +200,13 @@ PERFORMANCE_PROFILE = "profile"
 OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
-OPENSEARCH_SYSTEM_USERS = {"admin", "kibanaserver"}
-OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {"monitor"}
+ADMIN_USER = "admin"
 KIBANA_SERVER_USER = "kibanaserver"
 KIBANA_SERVER_ROLE = "kibana_server"
-ADMIN_USER = "admin"
 COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
+OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
+OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 

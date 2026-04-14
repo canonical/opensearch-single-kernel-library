@@ -361,6 +361,9 @@ def test_on_certificate_available(harness, mocker):
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
     mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
+    mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.create_store_pwd_if_not_exists")
@@ -370,6 +373,9 @@ def test_on_certificate_available(harness, mocker):
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.store_new_ca")
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca", return_value="ca_12345"
     )
     on_tls_conf_set = mocker.patch(
         "opensearch_single_kernel.events.tls.TLSEventsHandler.on_tls_conf_set"
@@ -396,7 +402,7 @@ def test_on_certificate_available(harness, mocker):
     event_mock = MagicMock(certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca)
     harness.charm.tls_events._on_certificate_available(event_mock)
 
-    harness.charm.state.secrets.get_object(Scope.UNIT, secret_key) == {
+    assert harness.charm.state.server.transport_secrets == {
         "csr": csr,
         "chain": chain[0],
         "cert": cert,
@@ -500,21 +506,23 @@ def test_truststore_password_secret(harness, mocker, substrate):
     )
     mocker.patch("opensearch_single_kernel.utils.certificates.store_ca_chain")
     mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
+    mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
-    secret = {"key": "secret_12345"}
     create_store_pwd_if_not_exists = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.create_store_pwd_if_not_exists"
     )
 
     harness.set_leader(is_leader=False)
-    harness.charm.tls_manager.store_new_ca(secret, False)
+    harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, False)
 
     create_store_pwd_if_not_exists.assert_not_called()
 
     harness.set_leader(is_leader=True)
-    harness.charm.tls_manager.store_new_ca(secret, True)
+    harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, True)
 
     create_store_pwd_if_not_exists.assert_called_once()
 
@@ -562,6 +570,9 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
@@ -717,6 +728,9 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
         new_callable=PropertyMock,
     )
     mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
+    mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch("opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config")
@@ -845,6 +859,9 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
@@ -1266,6 +1283,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     )
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
     request_certificate_revocation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
     )
@@ -1748,6 +1769,9 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"

@@ -242,6 +242,9 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
 
     # test when setup complete
     should_ignore_lock.return_value = False

@@ -3,20 +3,18 @@
 # See LICENSE file for licensing details.
 
 """Base OpenSearch manager."""
+
 import logging
 import random
-from typing import Optional
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_HTTP_PORT,
-    Scope,
     Substrates,
 )
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.utils.helpers import get_k8s_seed_host
-from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -29,14 +27,12 @@ class BaseManager:
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        self.state = state
+        self.state: ClusterState = state
         self.workload = workload
 
     @property
     def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
-        admin_field = password_key("admin")
-        admin_secret = self.state.secrets.get(Scope.APP, admin_field)
         # Keep substrate-specific host policy explicit:
         # - K8s: canonical DNS identity.
         # - VM: advertised public host, fallback to internal bind IP.
@@ -50,11 +46,11 @@ class BaseManager:
             self.workload,
             host,
             OPENSEARCH_HTTP_PORT,
-            admin_secret,
+            self.state.application.admin_password,
         )
 
     @property
-    def alt_hosts(self) -> Optional[list[str]]:
+    def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
         all_units_ips = self.state.units_ips
         all_hosts = list(all_units_ips.values())

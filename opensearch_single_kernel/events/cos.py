@@ -15,13 +15,10 @@ from opensearch_single_kernel.common.constants import (
     COS_USER,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
-    CertType,
-    Scope,
 )
 from opensearch_single_kernel.lib.charms.grafana_agent.v0.cos_agent import (
     COSAgentProvider,
 )
-from opensearch_single_kernel.utils.secrets import password_key
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -54,13 +51,9 @@ class CosEventsHandler(Object):
     def scrape_config(self) -> list[dict[str, Any]]:
         """Generates the scrape config as needed."""
         if (
-            not (
-                app_secrets := self.charm.state.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val, peek=True
-                )
-            )
+            not (app_secrets := self.charm.state.application.admin_secrets)
             or not (ca := app_secrets.get("ca-cert"))
-            or not (pwd := self.charm.state.secrets.get(Scope.APP, password_key(COS_USER)))
+            or not (pwd := self.charm.state.application.cos_password)
             or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
         ):
             # Not yet ready, waiting for certain values to be set

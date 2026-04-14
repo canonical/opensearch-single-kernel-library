@@ -82,11 +82,11 @@ def context(substrate):
     return testing.Context(charm_type=charm_type, config=CONFIG, meta=METADATA, actions=ACTIONS)
 
 
-@pytest.fixture
-def mock_fs_interactions(mocker, substrate: Substrate) -> None:
+@pytest.fixture(autouse=True)
+def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     """Mock Filesystem interactions."""
-    # Mock the workload FS helpers to avoid touching the real filesystem in unit tests.
-    mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.mkdir")
+    if request.node.get_closest_marker("real_fs"):
+        return
     mocker.patch("charmlibs.pathops.PathProtocol.read_text")
     mocker.patch("charmlibs.pathops.PathProtocol.write_text")
     mocker.patch("charmlibs.pathops.PathProtocol.mkdir")
@@ -105,6 +105,11 @@ def mock_fs_interactions(mocker, substrate: Substrate) -> None:
     mocker.patch("charmlibs.pathops._local_path.LocalPath.read_text")
     mocker.patch("charmlibs.pathops._local_path.LocalPath.write_text")
     mocker.patch("charmlibs.pathops._local_path.LocalPath.unlink")
+
+    mocker.patch("charmlibs.pathops.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops.LocalPath.unlink")
 
 
 # ---- Backup and Restore related fixtures ---- #

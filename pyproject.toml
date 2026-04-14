@@ -122,7 +122,7 @@ allure-pytest-default-results = "^0.1.3"
 # Azure integration tests
 azure-identity = "^1.23.0"
 azure-storage-blob = "^12.25.1"
-oauth_tools = {git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0"}
+oauth_tools = { git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0" }
 
 [tool.poetry.requires-plugins]
 poetry-plugin-export = ">=1.8"
@@ -149,7 +149,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
-markers = ["unstable"]
+markers = ["unstable", "real_fs"]
 asyncio_mode = "auto"
 
 # Formatting tools configuration
@@ -165,7 +165,17 @@ profile = "black"
 max-line-length = 99
 max-doc-length = 99
 max-complexity = 10
-exclude = [".git", "__pycache__", ".tox", "build", "dist", "*.egg_info", "venv"]
+exclude = [
+  ".git",
+  "__pycache__",
+  ".tox",
+  "build",
+  "dist",
+  "*.egg_info",
+  "venv",
+  ".coverage",
+  ".poetry",
+]
 select = ["E", "W", "F", "C", "N", "R", "D", "H"]
 # Ignore W503, E501 because using black creates errors with this
 # Ignore D107 Missing docstring in __init__

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -27,6 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# TODO this class should be removed when data interfaces v1 is integrated
 class OpenSearchSecrets(Object, RelationDataStore):
     """Encapsulating Juju3 secrets handling."""
 
@@ -145,13 +144,13 @@ class OpenSearchSecrets(Object, RelationDataStore):
             logger.warning(
                 "Secret %s:%s can't be deleted as it doesn't exist", str(scope.val), str(key)
             )
-            return None
+            return
 
         secret.remove_all_revisions()
         self.cached_secrets.delete(scope, self.label(scope, key))
 
     @override
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the relation data."""
         if scope is None:
             raise ValueError("Scope undefined.")
@@ -166,7 +165,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         self,
         scope: Scope,
         key: str,
-        default: int | float | str | bool | None = None,
+        default: float | str | bool | None = None,
         auto_casting: bool = True,
     ) -> int | float | str | bool | None:
         """Getting a secret's value."""

@@ -211,16 +211,25 @@ class ConfigManager(BaseManager):
         """Get Admin DN settings to be written to opensearch.yml."""
         return (
             {"plugins.security.authcz.admin_dn": [tls_subject]}
-            if (tls_subject := self.state.tls_subject)
+            if (tls_subject := self.state.application.tls_subject)
             else {}
         )
 
     def _opensearch_tls_config(self, cert_type: CertType) -> dict[str, Any]:
-        """TLS store settings written to opensearch.yml (paths + passwords)."""
-        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
-        truststore_pwd = self.state.tls_truststore_password
-        keystore_pwd = self.state.get_tls_keystore_password(cert_type)
-        if not truststore_pwd or not keystore_pwd:
+        """Get set of TLS config options of provided cert_type for the Opensearch.
+
+        Intended for opensearch.yml config file.
+        """
+        if cert_type == CertType.UNIT_HTTP:
+            layer = "http"
+            keystore_pwd = self.state.server.http_keystore_password
+        else:
+            layer = "transport"
+            keystore_pwd = self.state.server.transport_keystore_password
+
+        truststore_pwd = self.state.application.tls_truststore_password
+
+        if not (truststore_pwd and keystore_pwd):
             return {}
 
         return {
