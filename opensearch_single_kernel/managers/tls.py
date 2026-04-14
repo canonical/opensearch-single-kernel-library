@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any
 
 from charmlibs.pathops import PathProtocol
-from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
@@ -304,6 +303,11 @@ class TlsManager(BaseManager):
         }
 
         if secret != {"chain": ca_chain, "cert": certificate, "ca-cert": ca}:
+            logger.debug(
+                "Updating TLS certificate secrets for scope: %s, cert_type: %s",
+                scope.val,
+                cert_type.val,
+            )
             # Juju is not able to check if secrets' content changed between revisions
             # this IF is intended to reduce a storm of secret-removed/-changed events
             # for the same content
@@ -391,6 +395,7 @@ class TlsManager(BaseManager):
         """Add key and cert to keystore."""
         if not self.state.ca_rotation_complete_in_cluster:
             return
+        logger.debug("Storing new TLS resources for cert_type: %s", cert_type.val)
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         if cert_type == CertType.APP_ADMIN:
@@ -427,6 +432,7 @@ class TlsManager(BaseManager):
         key_pwd: str | None,
     ) -> None:
         """Store cert in keystore."""
+        logger.debug("Storing TLS key pair for %s at %s", name, store_path)
         certs_dir_path = self.workload.paths.certs
         self.workload.unlink(store_path, missing_ok=True)
 
@@ -456,9 +462,6 @@ class TlsManager(BaseManager):
         except OpenSearchFileOperationError as e:
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
             raise
-        except (PebbleConnectionError, OSError) as e:
-            logger.error("Error storing the TLS certificates for %s: %s", name, e)
-            raise OpenSearchFileOperationError(e) from e
         except OpenSearchCmdError as e:
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
             raise

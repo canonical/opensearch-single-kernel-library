@@ -188,6 +188,8 @@ class TLSEventsHandler(Object):
             logger.debug("Unknown certificate available.")
             return
 
+        logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
+
         if not self.charm.unit.is_leader() and scope == Scope.APP:
             return
 
@@ -327,13 +329,15 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
-        self.charm.state.server.update({"tls_configured": ""})
+        logger.debug("Certificate expiring event received for certificate: %s", event.certificate)
+        if self.charm.state.server.tls_configured:
+            del self.charm.state.server.tls_configured
         # TODO: Update peer cluster relation
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
             )
-            logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
+            logger.debug(" %s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return

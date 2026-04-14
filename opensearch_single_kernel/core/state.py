@@ -170,6 +170,11 @@ class OpenSearchServer(RelationState):
         """Update the value of 'tls_configured'"""
         self.update({"tls_configured": str(value)})
 
+    @tls_configured.deleter
+    def tls_configured(self):
+        """Remove the 'tls_configured' key from unit data bag."""
+        self.update({"tls_configured": ""})
+
     @property
     def update_ts(self) -> str:
         """Get the value of 'update-ts' from the unit databag."""

@@ -316,7 +316,7 @@ class YamlConfigSetter(ConfigSetter):
         path = self.base_path / config_file
         old_content = self.workload.read_text(path)
         self.__dump(target, OutputType.file, config_file)
-        return old_content != path.read_text()
+        return old_content.strip() != path.read_text().strip()
 
     @override
     def delete(
