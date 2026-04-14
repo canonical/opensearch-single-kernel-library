@@ -212,7 +212,6 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Skipping large deployment")
 async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: str) -> None:
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:

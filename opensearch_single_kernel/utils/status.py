@@ -7,12 +7,13 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from ops.model import ActiveStatus
+from ops.model import ActiveStatus, BlockedStatus
 
-from opensearch_single_kernel.common.constants import HealthColors
+from opensearch_single_kernel.common.constants import Directive, HealthColors
 from opensearch_single_kernel.common.statuses import (
     CharmStatuses,
 )
+from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 if TYPE_CHECKING:
@@ -35,6 +36,39 @@ class Status:
 
     def __init__(self, charm: "OpenSearchBaseCharm"):
         self.charm = charm
+
+    def apply_status_from_deployment_desc(
+        self,
+        deployment_desc: DeploymentDescription | None = None,
+        show_status_only_once: bool = True,
+    ) -> None:
+        """Resolve and applies corresponding status from the deployment state."""
+        if not (
+            deployment_desc := deployment_desc or self.charm.state.application.deployment_desc
+        ):
+            return
+
+        if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
+            return
+
+        # remove show_status directive which is applied below
+        if show_status_only_once:
+            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+
+        blocked_status = [
+            CharmStatuses.CM_ROLE_REMOVAL_FORBIDDEN,
+            CharmStatuses.CM_VO_PROVIDED_INVALID,
+            CharmStatuses.DATA_ROLE_REMOVAL_FORBIDDEN,
+            CharmStatuses.PEER_CLUSTER_NO_RELATION,
+            CharmStatuses.PEER_CLUSTER_WRONG_RELATION,
+            CharmStatuses.PEER_CLUSTER_WRONG_ROLES_PROVIDED,
+        ]
+        blocked_status_messages = [status.value.message for status in blocked_status]
+        if deployment_desc.state.message not in blocked_status_messages:
+            for status in blocked_status:
+                self.charm.status.clear(status, app=True)
+            return
+        self.charm.app.status = BlockedStatus(deployment_desc.state.message)
 
     def apply_health(
         self,
@@ -102,11 +136,39 @@ class Status:
             dynamic_params={"shards": " - ".join(message)},
         )
 
+    def clear_blocked_status(
+        self,
+        status_message: str,
+        pattern: CheckPattern = CheckPattern.Equal,
+        app: bool = False,
+    ):
+        """Resets the unit/app status if it was previously blocked with message."""
+        context = self.charm.app if app else self.charm.unit
+
+        condition: bool
+        if pattern == Status.CheckPattern.Equal:
+            condition = context.status.message == status_message
+        elif pattern == Status.CheckPattern.Start:
+            condition = context.status.message.startswith(status_message)
+        elif pattern == Status.CheckPattern.End:
+            condition = context.status.message.endswith(status_message)
+        elif pattern == Status.CheckPattern.Interpolated:
+            condition = (
+                re.fullmatch(status_message.replace("{}", "(?s:.*?)"), context.status.message)
+                is not None
+            )
+        else:
+            condition = status_message in context.status.message
+
+        if condition:
+            context.status = ActiveStatus()
+
     def clear(
         self,
         status: CharmStatuses,
         pattern: CheckPattern = CheckPattern.Equal,
         app: bool = False,
+        match_message: str | None = None,
     ):
         """Resets the unit status if it was previously blocked/maintenance with message."""
         status_message = status.value.message

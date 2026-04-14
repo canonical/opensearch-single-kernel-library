@@ -273,13 +273,6 @@ class PeerClusterData(ProviderData, RequirerData):
         super(ProviderData, self)._update_relation_data(relation, data)
 
 
-class PeerCluster(RelationState):
-    """State collection metadata for a peer-cluster application."""
-
-    def __init__(self, relation, data_interface, component):
-        super().__init__(relation, data_interface, component)
-
-
 class JwtData(RequirerData):
     """Data Interface to JWT relation on requirer side."""
 

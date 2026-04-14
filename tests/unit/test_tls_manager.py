@@ -992,9 +992,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
-    )
-    mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch(

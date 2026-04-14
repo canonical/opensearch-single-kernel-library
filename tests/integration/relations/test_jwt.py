@@ -151,7 +151,6 @@ async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsTest) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")

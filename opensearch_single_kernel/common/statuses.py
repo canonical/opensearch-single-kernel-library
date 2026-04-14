@@ -102,6 +102,16 @@ class CharmStatuses(Enum):
     DATA_ROLE_REMOVAL_FORBIDDEN = BlockedStatus(
         "Removal of data role from current deployment not allowed - the data cannot be reallocated."
     )
+    PEER_CLUSTER_MISSING_RELATIONS = BlockedStatus(
+        "Found credentials with missing relations. Add relation for {relation} and any client applications."
+    )
+    PEER_CLUSTER_ORCHESTRATORS_REMOVED = BlockedStatus(
+        "Main-cluster-orchestrator removed, and no failover cluster related."
+    )
+    PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION = WaitingStatus(
+        "Main-cluster-orchestrator removed, waiting for failover promotion."
+    )
+    PEER_CLUSTER_MAIN_IS_REQUIRER = BlockedStatus("Main orchestrator cannot be a requirer")
 
     # Notifications
     SMTP_RELATION_INVALID = BlockedStatus(

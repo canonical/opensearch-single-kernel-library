@@ -89,7 +89,6 @@ async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None
 
 @pytest.mark.group(id=LARGE_DEPLOYMENT)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip()
 async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
     """Setup a large deployments cluster."""
     # deploy new cluster

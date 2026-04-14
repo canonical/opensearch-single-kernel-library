@@ -6,12 +6,14 @@
 
 import logging
 import random
+from typing import Literal
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_HTTP_PORT,
+    DeploymentType,
 )
-from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.models import App, Node, PeerClusterRelData
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -47,9 +49,8 @@ class BaseManager:
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.extend([node.ip for node in nodes_conf.values()])
 
-        # TODO: Add getting relation data form state
-        # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
-        #    all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
+        if peer_cm_rel_data := self.get_rel_data_from_main_orchestrator():
+            all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
 
         random.shuffle(all_hosts)
 
@@ -108,3 +109,113 @@ class BaseManager:
                     )
                     nodes.append(node)
         return nodes
+
+    def get_rel_data_from_main_orchestrator(
+        self, peek_secrets: bool = False
+    ) -> PeerClusterRelData | None:
+        """Get the data from the main orchestrator relation.
+
+        Returns:
+            data: peer cluster rel data if any.
+
+        """
+        if not self.is_peer_cluster_consumer(of="main"):
+            return None
+
+        if (
+            not (orchestrators := self.state.application.orchestrators)
+            or not orchestrators.main_rel_id
+        ):
+            logger.info("no orchestrators found")
+            return None
+
+        if not self.state.peer_cluster_relation_exists(orchestrators.main_rel_id):
+            logger.info(
+                "relation with id %s not found for main orchestrator", orchestrators.main_rel_id
+            )
+            return None
+
+        if not (
+            related_peer_cluster := self.state.related_peer_cluster_by_relation_id(
+                is_provider=True, relation_id=orchestrators.main_rel_id
+            )
+        ):
+            logger.info(
+                "related peer cluster not found for relation id %s of main orchestrator",
+                orchestrators.main_rel_id,
+            )
+            return None
+
+        data = related_peer_cluster.get_data(peek_secrets=peek_secrets)
+        return data
+
+    def is_peer_cluster_provider(self, typ: Literal["main", "failover"] | None = None) -> bool:
+        """Return whether the current app is a related to provider / orchestrator."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return False
+
+        if deployment_desc.typ == DeploymentType.OTHER:
+            return False
+
+        # the current app is not related as an orchestrator to any app
+        if not self.state.peer_cluster_orchestrator_relations:
+            return False
+
+        # check if the current app is elected orchestrator
+        if not (orchestrators := self.state.application.orchestrators):
+            # not populated yet
+            return False
+
+        current_app_id = deployment_desc.app.id
+
+        is_main = orchestrators.main_app and orchestrators.main_app.id == current_app_id
+        is_failover = (
+            orchestrators.failover_app and orchestrators.failover_app.id == current_app_id
+        )
+
+        if typ == "main":
+            return is_main
+        elif typ == "failover":
+            return is_failover
+        else:
+            return is_main or is_failover
+
+    def is_peer_cluster_consumer(self, of: Literal["main", "failover"] | None = None) -> bool:
+        """Check if the current app is a consumer of the peer-cluster-relation."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return False
+
+        # the current app is not related to any orchestrator app
+        if not self.state.peer_cluster_relations:
+            return False
+
+        # check if the current app is elected orchestrator
+        if not (orchestrators := self.state.application.orchestrators):
+            # not populated yet
+            return False
+
+        if orchestrators.main_app and orchestrators.main_app.id == deployment_desc.app.id:
+            # there is a wrong relation happening - where current is the main orchestrator
+            # yet related to another "orchestrator"
+            return False
+
+        of_main = (
+            orchestrators.main_app
+            and self.state.related_peer_cluster_by_relation_id(
+                relation_id=orchestrators.main_rel_id, is_provider=True
+            )
+            is not None
+        )
+        of_failover = (
+            orchestrators.failover_app
+            and self.state.related_peer_cluster_by_relation_id(
+                is_provider=True, relation_id=orchestrators.failover_rel_id
+            )
+            is not None
+        )
+        if of == "main":
+            return of_main
+        elif of == "failover":
+            return of_failover
+        else:
+            return of_main or of_failover

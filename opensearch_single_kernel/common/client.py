@@ -21,6 +21,7 @@ from tenacity import (
     wait_exponential,
     wait_fixed,
 )
+from tenacity.retry import RetryBaseT
 from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.constants import (
@@ -1193,6 +1194,7 @@ class OpenSearchClient:
         ignore_retry_on: list | None = None,
         timeout: int = 5,
         cert_files: tuple[str, str] | None = None,
+        retry_strategy: RetryBaseT | None = None,
     ) -> dict[str, Any] | list[Any] | int:
         """Make an HTTP request.
 

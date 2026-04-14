@@ -131,7 +131,7 @@ def test_on_start(harness, mocker):
         "opensearch_single_kernel.managers.cluster.ClusterManager.check_blocking_directives"
     )
     should_ignore_lock = mocker.patch(
-        "opensearch_single_kernel.managers.lock.LockManager.should_ignore_lock"
+        "opensearch_single_kernel.managers.cluster.ClusterManager.should_ignore_lock"
     )
     is_fully_configured = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.is_fully_configured"

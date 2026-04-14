@@ -13,7 +13,7 @@ import re
 import secrets
 import string
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 import bcrypt
 from cryptography import x509
@@ -25,7 +25,12 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import App, PeerClusterConfig
+from opensearch_single_kernel.core.models import (
+    App,
+    PeerClusterApp,
+    PeerClusterConfig,
+    PeerClusterOrchestrators,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,3 +211,26 @@ def hash_credentials(credentials: dict[str, str]) -> str:
         hash of the credentials
     """
     return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()
+
+
+def update_cluster_fleet(
+    fleet_dict: dict[str, dict[str, Any]], app: PeerClusterApp, key: str | None = None
+) -> None:
+    """Update fleet dictionary with the app, or remove the entry if no planned units."""
+    if not key:
+        key = app.app.id
+
+    if app.planned_units == 0:
+        fleet_dict.pop(key, None)
+        return
+
+    fleet_dict.update({key: app})
+
+
+def is_failover_promoted(orchestrators: PeerClusterOrchestrators) -> bool:
+    """Checks if failover orchestrator was promoted to the main orchestrator"""
+    return (
+        orchestrators.failover_app is not None
+        and orchestrators.main_app is not None
+        and orchestrators.failover_app.id == orchestrators.main_app.id
+    )

@@ -40,10 +40,8 @@ class PluginEventsHandler(Object):
     def _on_peer_relation_changed(self, event):  # noqa: C901
         """Handle plugin secret-related peer relation changes."""
         # if this is a subcluster, all units must add plugin keys from secrets to their keystores
-        # if not self.charm.opensearch_peer_cm.is_consumer(of="main"):
-        #     return
-        return
-
+        if not self.charm.cluster_manager.is_peer_cluster_consumer(of="main"):
+            return
         app_plugins = self.charm.state.application.plugin_config_info
         unit_plugins = self.charm.state.server.plugin_config_info
         added, removed = diff(app_plugins.keys(), unit_plugins.keys())

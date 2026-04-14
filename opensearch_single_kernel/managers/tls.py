@@ -23,6 +23,10 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
+from opensearch_single_kernel.core.models import (
+    PeerClusterRelData,
+    PeerClusterRelErrorData,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -136,12 +140,9 @@ class TlsManager(BaseManager):
         if secrets:
             store_pwd = secrets.get(f"{store_type.val}-password")
 
-        if not store_pwd:
-            # and not (
-            # TODO: handle this once large deployment is implemented
-            # self.charm.opensearch_peer_cm.is_consumer(of="main")
-            # and cert_type == CertType.APP_ADMIN
-            # ):
+        if not store_pwd and not (
+            self.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
+        ):
 
             self.state.secrets.put_object(
                 scope,
@@ -413,8 +414,11 @@ class TlsManager(BaseManager):
         # Mark this unit as tls configured
         if self.is_fully_configured():
             self.state.server.tls_configured = True
-            # TODO: Update peer cluster relation
-            # self.update_tls_flag_to_peer_cluster_relation("tls_configured", "add")
+            peer_cluster_servers = self.state.peer_clusters_servers(
+                is_provider=True
+            ) + self.state.peer_clusters_servers(is_provider=False)
+            for peer_cluster_server in peer_cluster_servers:
+                peer_cluster_server.tls_configured = True
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
@@ -550,6 +554,36 @@ class TlsManager(BaseManager):
         self.update_request_ca_bundle(cert_secrets.get("chain"))
 
         return True
+
+    def peer_cluster_error_from_tls(
+        self, peer_cluster_rel_data: PeerClusterRelData
+    ) -> PeerClusterRelErrorData | None:
+        """Compute TLS related errors."""
+        blocked_msg, should_sever_relation = None, False
+
+        if self.all_tls_resources_stored():  # compare CAs
+            unit_transport_ca_cert = self.state.secrets.get_object(
+                Scope.UNIT, CertType.UNIT_TRANSPORT.val
+            )["ca-cert"]
+            if unit_transport_ca_cert != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]:
+                blocked_msg = "CA certificate mismatch between clusters."
+                should_sever_relation = True
+
+        if not peer_cluster_rel_data.credentials.admin_tls["truststore-password"]:
+            logger.info("Relation data for TLS is missing.")
+            blocked_msg = "CA truststore-password not available."
+            should_sever_relation = True
+
+        if not blocked_msg:
+            return None
+
+        return PeerClusterRelErrorData(
+            cluster_name=peer_cluster_rel_data.cluster_name,
+            should_sever_relation=should_sever_relation,
+            should_wait=not should_sever_relation,
+            blocked_message=blocked_msg,
+            deployment_desc=self.state.application.deployment_desc,
+        )
 
     def get_secrets_for_cert_type(self, cert_type: CertType) -> dict[str, str]:
         """Get secrets for a given certificate type."""

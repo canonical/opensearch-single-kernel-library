@@ -27,8 +27,11 @@ from pydantic import (
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
+    ADMIN_USER,
     AZURE_CREDENTIALS,
+    COS_USER,
     GCS_CREDENTIALS,
+    KIBANA_SERVER_USER,
     MAX_HEAP_SIZE_IN_KB,
     S3_CREDENTIALS,
     DeploymentType,
@@ -163,30 +166,21 @@ class Node(Model):
         return False
 
 
-class PeerClusterOrchestrators(Model):
-    """Model class for the PClusters registered main/failover clusters."""
+class DeploymentState(Model):
+    """Full state of a deployment, along with the juju status."""
 
-    _TYPES = Literal["main", "failover"]
+    value: State
+    message: str = Field(default="")
 
-    main_rel_id: int = -1
-    main_app: App | None = None
-    failover_rel_id: int = -1
-    failover_app: App | None = None
+    @model_validator(mode="after")
+    def prevent_none(self):
+        """Validate the message or lack of depending on the state."""
+        if self.value == State.ACTIVE:
+            self.message = ""
+        elif not self.message.strip():
+            raise ValueError("The message must be set when state not Active.")
 
-    def delete(self, typ: _TYPES) -> None:
-        """Delete an orchestrator from the current pair."""
-        if typ == "main":
-            self.main_rel_id = -1
-            self.main_app = None
-        else:
-            self.failover_rel_id = -1
-            self.failover_app = None
-
-    def promote_failover(self) -> None:
-        """Delete previous main orchestrator and promote failover if any."""
-        self.main_app = self.failover_app
-        self.main_rel_id = self.failover_rel_id
-        self.delete("failover")
+        return self
 
 
 class PeerClusterConfig(Model):
@@ -225,44 +219,6 @@ class PeerClusterConfig(Model):
             self.roles.append("data")
             self.roles.remove(f"data.{temperature}")
             self.roles = list(set(self.roles))
-        return self
-
-
-class PeerClusterApp(Model):
-    """Model class for representing an application part of a large deployment."""
-
-    app: App
-    planned_units: int
-    units: list[str]
-    roles: list[str]
-
-
-class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
-    """Model class for all applications in a large deployment as a dict."""
-
-    def __iter__(self) -> Iterator[str]:
-        """Implements the iter magic method."""
-        return iter(self.root)
-
-    def __getitem__(self, item: str) -> PeerClusterApp:
-        """Implements the getitem magic method."""
-        return self.root[item]
-
-
-class DeploymentState(Model):
-    """Full state of a deployment, along with the juju status."""
-
-    value: State
-    message: str = Field(default="")
-
-    @model_validator(mode="after")
-    def prevent_none(self):
-        """Validate the message or lack of depending on the state."""
-        if self.value == State.ACTIVE:
-            self.message = ""
-        elif not self.message.strip():
-            raise ValueError("The message must be set when state not Active.")
-
         return self
 
 
@@ -687,6 +643,181 @@ class ObjectStorageConfig(Model):
     s3: S3RelData | None = None
     azure: AzureRelData | None = None
     gcs: GcsRelData | None = None
+
+
+# Peer cluster
+class PeerClusterRelDataCredentials(Model):
+    """Model class for credentials passed on the PCluster relation."""
+
+    admin_username: str
+    admin_password: str
+    admin_password_hash: str
+    kibana_password: str
+    kibana_password_hash: str
+    monitor_password: str | None
+    admin_tls: dict[str, str | None] | None
+    s3: S3RelDataCredentials | None
+    azure: AzureRelDataCredentials | None
+    gcs: GcsRelDataCredentials | None
+
+
+class PeerClusterRelData(Model):
+    """Model class for the PCluster relation data."""
+
+    cluster_name: str
+    cm_nodes: list[Node]
+    credentials: PeerClusterRelDataCredentials
+    deployment_desc: DeploymentDescription | None
+    security_index_initialised: bool = False
+    first_data_node: str | None = None
+    plugins: dict[str, PluginConfigInfo] | None = None
+
+    @staticmethod
+    def peer_cluster_rel_data_from_str(
+        secrets, redacted_dict_str: str, peek_secrets: bool = False
+    ):
+        """Construct the peer cluster rel data from the secret data."""
+        content = json.loads(redacted_dict_str)
+        credentials = content["credentials"]
+
+        credentials["admin_password"] = secrets.resolve_credential(
+            credentials["admin_password"], password_key=ADMIN_USER, peek_secrets=peek_secrets
+        )
+        credentials["admin_password_hash"] = secrets.resolve_credential(
+            credentials["admin_password_hash"], hash_key=ADMIN_USER, peek_secrets=peek_secrets
+        )
+
+        credentials["kibana_password"] = secrets.resolve_credential(
+            credentials["kibana_password"],
+            password_key=KIBANA_SERVER_USER,
+            peek_secrets=peek_secrets,
+        )
+        credentials["kibana_password_hash"] = secrets.resolve_credential(
+            credentials["kibana_password_hash"],
+            hash_key=KIBANA_SERVER_USER,
+            peek_secrets=peek_secrets,
+        )
+
+        if credentials.get("monitor_password"):
+            credentials["monitor_password"] = secrets.resolve_credential(
+                credentials["monitor_password"], password_key=COS_USER, peek_secrets=peek_secrets
+            )
+        else:
+            credentials["monitor_password"] = None
+
+        if credentials.get("admin_tls") and isinstance(credentials["admin_tls"], str):
+            credentials["admin_tls"] = secrets.resolve_credential(
+                credentials["admin_tls"], peek_secrets=peek_secrets
+            )
+
+        if (
+            credentials.get("s3")
+            and credentials["s3"].get("access-key")
+            and credentials["s3"].get("secret-key")
+        ):
+            credentials["s3"]["access-key"] = secrets.resolve_credential(
+                credentials["s3"]["access-key"],
+                content_key="s3-access-key",
+                peek_secrets=peek_secrets,
+            )
+            credentials["s3"]["secret-key"] = secrets.resolve_credential(
+                credentials["s3"]["secret-key"],
+                content_key="s3-secret-key",
+                peek_secrets=peek_secrets,
+            )
+            if credentials["s3"].get("s3-tls-ca-chain"):
+                credentials["s3"]["s3-tls-ca-chain"] = secrets.resolve_credential(
+                    credentials["s3"]["s3-tls-ca-chain"],
+                    content_key="s3-tls-ca-chain",
+                    peek_secrets=peek_secrets,
+                )
+        else:
+            credentials["s3"] = {}
+        if (
+            credentials.get("azure")
+            and credentials["azure"].get("storage-account")
+            and credentials["azure"].get("secret-key")
+        ):
+            credentials["azure"]["storage-account"] = secrets.resolve_credential(
+                credentials["azure"]["storage-account"],
+                content_key="azure-storage-account",
+                peek_secrets=peek_secrets,
+            )
+            credentials["azure"]["secret-key"] = secrets.resolve_credential(
+                credentials["azure"]["secret-key"],
+                content_key="azure-secret-key",
+                peek_secrets=peek_secrets,
+            )
+        else:
+            credentials["azure"] = {}
+
+        if credentials.get("gcs", {}).get("secret-key"):
+            credentials["gcs"]["secret-key"] = secrets.resolve_credential(
+                credentials["gcs"]["secret-key"],
+                content_key="gcs-secret-key",
+                peek_secrets=peek_secrets,
+            )
+        else:
+            credentials["gcs"] = {}
+
+        return PeerClusterRelData.from_dict(content)
+
+
+class PeerClusterRelErrorData(Model):
+    """Model class for the PCluster relation data."""
+
+    cluster_name: str | None
+    should_sever_relation: bool
+    should_wait: bool
+    blocked_message: str
+    deployment_desc: DeploymentDescription | None
+
+
+class PeerClusterOrchestrators(Model):
+    """Model class for the PClusters registered main/failover clusters."""
+
+    _TYPES = Literal["main", "failover"]
+
+    main_rel_id: int = -1
+    main_app: App | None = None
+    failover_rel_id: int = -1
+    failover_app: App | None = None
+
+    def delete(self, typ: _TYPES) -> None:
+        """Delete an orchestrator from the current pair."""
+        if typ == "main":
+            self.main_rel_id = -1
+            self.main_app = None
+        else:
+            self.failover_rel_id = -1
+            self.failover_app = None
+
+    def promote_failover(self) -> None:
+        """Delete previous main orchestrator and promote failover if any."""
+        self.main_app = self.failover_app
+        self.main_rel_id = self.failover_rel_id
+        self.delete("failover")
+
+
+class PeerClusterApp(Model):
+    """Model class for representing an application part of a large deployment."""
+
+    app: App
+    planned_units: int
+    units: list[str]
+    roles: list[str]
+
+
+class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
+    """Model class for all applications in a large deployment as a dict."""
+
+    def __iter__(self) -> Iterator[str]:
+        """Implements the iter magic method."""
+        return iter(self.root)
+
+    def __getitem__(self, item: str) -> PeerClusterApp:
+        """Implements the getitem magic method."""
+        return self.root[item]
 
 
 @dataclass(frozen=True)

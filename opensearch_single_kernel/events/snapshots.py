@@ -13,7 +13,9 @@ from ops import ActionEvent, Object
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     GCS_RELATION,
+    PEER_CLUSTER_RELATION,
     S3_RELATION,
+    DeploymentType,
     HealthColors,
     ObjectStorageType,
 )
@@ -25,6 +27,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
     OpenSearchObjectStorageConfigValidationError,
+    OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
@@ -81,19 +84,14 @@ class SnapshotsEventsHandler(Object):
         ]:
             self.framework.observe(event, self._on_snapshots_credentials_gone)
 
-        # TODO: Handle large deployments
-        # large deployments with non-main orchestrator
-        # self.framework.observe(
-        #    charm.on[PeerClusterRelationName].relation_changed,
-        #    self._on_peer_clusters_relation_changed_for_snapshots,
-        # )
-        # self.framework.observe(
-        #    charm.on[PeerClusterRelationName].relation_departed,
-        #    self._on_peer_clusters_relation_departed_for_snapshots,
-        # )
-        # self.framework.observe(
-        #    self.verify_backup_credentials_event, self._on_verify_backup_credentials
-        # )
+        self.framework.observe(
+            charm.on[PEER_CLUSTER_RELATION].relation_changed,
+            self._on_peer_clusters_relation_changed_for_snapshots,
+        )
+        self.framework.observe(
+            charm.on[PEER_CLUSTER_RELATION].relation_departed,
+            self._on_peer_clusters_relation_departed_for_snapshots,
+        )
 
         # Custom events
         self.framework.observe(
@@ -109,15 +107,21 @@ class SnapshotsEventsHandler(Object):
         self, event: CredentialsChangedEvent | StorageConnectionInfoChangedEvent
     ) -> None:
         """Handler for backup credentials changed event."""
-        if not (self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return
 
         # block non-main orchestrators only when they are in a multi-app topology.
-        # TODO: Handle once large deployments are implemented
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
+            self.charm.snapshots_manager.is_peer_cluster_consumer()
+            or self.charm.snapshots_manager.is_peer_cluster_provider()
+        ):
+            if self.charm.unit.is_leader():
+                self.charm.status.set(CharmStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST, app=True)
+            return
 
-        if not (object_storage_type := self.charm.state.storage_type):
+        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
             logger.warning("No object storage type could be determined.")
             return
 
@@ -229,8 +233,8 @@ class SnapshotsEventsHandler(Object):
             pattern=Status.CheckPattern.Interpolated,
             app=True,
         )
-        # TODO: Handle large deployments
         # Refresh peer relations
+        self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
     def _on_snapshots_credentials_gone(
         self, event: CredentialsGoneEvent | StorageConnectionInfoGoneEvent
@@ -293,14 +297,14 @@ class SnapshotsEventsHandler(Object):
 
         self.charm.reload_keystore_event.emit()
 
-        # TODO: Handle large deployments
         # Refresh peer relations
+        self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
     def _on_verify_snapshots_credentials(  # noqa C901
         self, event: VerifySnapshotsCredentialsEvent
     ) -> None:
         """Verify that stored backup credentials are still valid."""
-        if not (object_storage_type := self.charm.state.storage_type):
+        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
             logger.warning(
                 "No object storage type could be determined for backup credentials verification."
             )
@@ -346,6 +350,12 @@ class SnapshotsEventsHandler(Object):
                 "Error: %s, response_body=%r",
                 e,
                 getattr(e, "response_body", None),
+            )
+            event.defer()
+            return
+        except OpenSearchPeerClusterDidntSaveCredentialsYetError as e:
+            logger.warning(
+                "Not all peer clusters have saved the latest backup credentials yet: %s", e
             )
             event.defer()
             return
@@ -452,6 +462,125 @@ class SnapshotsEventsHandler(Object):
         finally:
             self.charm.status.clear(CharmStatuses.RESTORE_IN_PROGRESS)
 
+    def _on_peer_clusters_relation_changed_for_snapshots(self, event) -> None:  # noqa C901
+        """Apply snapshots config when the orchestrator broadcasts over peer-clusters."""
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not ready; deferring %s", event)
+            event.defer()
+            return None
+
+        info_to_save, object_storage_type_to_cleanup = (
+            self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
+        )
+        if info_to_save:
+            for object_storage_type in object_storage_type_to_cleanup:
+                if not self._remove_credentials(object_storage_type):
+                    logger.warning(
+                        "Cleanup for %s credentials are failed during peer cluster relation change.",
+                        object_storage_type,
+                    )
+                    if self.charm.unit.is_leader():
+                        self.charm.status.set(
+                            CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED,
+                            app=True,
+                        )
+                    event.defer()
+                    return None
+            if self.charm.unit.is_leader():
+                self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
+
+            if self.charm.snapshots_manager.s3_info_from_peer_cluster:
+                object_storage_type = ObjectStorageType.S3
+                object_storage_config_dict = self.charm.snapshots_manager.s3_info_from_peer_cluster
+            elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
+                object_storage_type = ObjectStorageType.AZURE
+                object_storage_config_dict = (
+                    self.charm.snapshots_manager.azure_info_from_peer_cluster
+                )
+            elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
+                object_storage_type = ObjectStorageType.GCS
+                object_storage_config_dict = (
+                    self.charm.snapshots_manager.gcs_info_from_peer_cluster
+                )
+
+            try:
+                self.update_stored_credentials(
+                    object_storage_type, object_storage_config_dict=object_storage_config_dict
+                )
+            except OpenSearchFileOperationError:
+                logger.error("Failed to update stored backup credentials.")
+                return
+
+            # Reload keystore
+            self.charm.reload_keystore_event.emit()
+            self.charm.snapshots_manager.set_credentials_saved(info_to_save)
+            return
+
+        for object_storage_type in [
+            ObjectStorageType.S3,
+            ObjectStorageType.AZURE,
+            ObjectStorageType.GCS,
+        ]:
+            self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type)
+
+        # clean S3 CA
+        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
+            self.charm.snapshots_manager.remove_s3_ca()
+
+        self.charm.reload_keystore_event.emit()
+
+        self.charm.snapshots_manager.set_credentials_saved(None)
+
+    def _on_peer_clusters_relation_departed_for_snapshots(self, event) -> None:  # noqa C901
+        """Cleanup snapshot config if the orchestrator we depended on is gone."""
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not ready; deferring %s", event)
+            event.defer()
+            return
+
+        if (
+            self.charm.state.application.orchestrators
+            and self.charm.state.application.orchestrators.main_app
+            and self.charm.state.application.orchestrators.main_app.name == event.relation.app.name
+            and len(event.relation.units) > 0
+        ):
+            logger.debug(
+                "Main orchestrator still accessible; do not cleanup as it can be scale down"
+            )
+            return
+
+        logger.info(
+            "peer-clusters relation for snapshots departed; "
+            "cleaning all object-storage snapshot configuration."
+        )
+        # clean S3-related config
+        for object_storage_type in [
+            ObjectStorageType.S3,
+            ObjectStorageType.AZURE,
+            ObjectStorageType.GCS,
+        ]:
+            if not self._remove_credentials(object_storage_type):
+                logger.warning(
+                    "Cleanup for %s credentials are failed during peer cluster relation departure.",
+                    object_storage_type,
+                )
+                if self.charm.unit.is_leader():
+                    self.charm.status.set(
+                        CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED,
+                        app=True,
+                    )
+                event.defer()
+                return
+
+        if self.charm.unit.is_leader():
+            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
+
+        # clean S3 CA
+        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
+            self.charm.snapshots_manager.remove_s3_ca()
+
+        self.charm.reload_keystore_event.emit()
+
     def _action_missing_pre_requisites(  # noqa C901
         self,
         report_running_operations: bool = True,
@@ -464,7 +593,7 @@ class SnapshotsEventsHandler(Object):
         Returns:
             A string representing the missing prerequisites.
         """
-        if not (object_storage_type := self.charm.state.storage_type):
+        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
             logger.warning("Missing object storage type for create backup action.")
             return "Missing relation with an object storage integrator."
 
@@ -499,7 +628,7 @@ class SnapshotsEventsHandler(Object):
         if object_storage_type not in pcluster_types:
             try:
                 if (
-                    not (storage_type := self.charm.state.storage_type)
+                    not (storage_type := self.charm.snapshots_manager.storage_type)
                     or not (
                         conn_inf := self.get_storage_connection_info_from_relation(storage_type)
                     )

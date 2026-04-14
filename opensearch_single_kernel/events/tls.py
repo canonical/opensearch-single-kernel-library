@@ -211,10 +211,11 @@ class TLSEventsHandler(Object):
             # -> delete both tls_ca_renewing and tls_ca_renewed
             if current_stored_ca:
                 self.charm.state.server.tls_ca_renewing = True
-                # TODO: Handle this when large deployments are introduced
-                # self.update_tls_flag_to_peer_cluster_relation(
-                # flag="tls_ca_renewing", operation="add"
-                # )
+                peer_clusters_servers = self.charm.state.peer_clusters_servers(
+                    is_provider=True
+                ) + self.charm.state.peer_clusters_servers(is_provider=False)
+                for peer_cluster_server in peer_clusters_servers:
+                    peer_cluster_server.tls_ca_renewing = True
                 self.on_tls_ca_rotation()
                 return
 
@@ -253,21 +254,21 @@ class TLSEventsHandler(Object):
                 event.defer()
                 return
 
-        # TODO: Handle opensearch-client relation in a separate PR.
-        # for relation in self.charm.opensearch_provider.relations:
-        #    try:
-        # self.charm.opensearch_provider.update_certs(relation.id, ca_chain)
-        # except KeyError:
-        # As we are setting the ca_chain, it should not be likely to happen a KeyError at
-        # update_certs. This logic is left for a very corner case.
-        # logger.error("Error updating certificates in the relation: ca_chain not set.")
-        # event.defer()
-        # return
+        for external_client in self.charm.state.external_clients:
+            try:
+                external_client.tls_ca = self.charm.state.secrets.get_object(
+                    Scope.APP, CertType.APP_ADMIN.val
+                )["chain"]
+            except KeyError as e:
+                logger.error("Failed to update relation TLS info: missing key %s", str(e))
+                event.defer()
+                return
 
-        # TODO: Handle large deployment case
         # broadcast secret updates for certs and CA to related sub-clusters
-        # if self.charm.unit.is_leader() and self.charm.opensearch_peer_cm.is_provider(typ="main"):
-        # self.charm.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+        if self.charm.unit.is_leader() and self.charm.tls_manager.is_peer_cluster_provider(
+            typ="main"
+        ):
+            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
         renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
             old_cert is not None and old_cert != event.certificate
@@ -290,7 +291,11 @@ class TLSEventsHandler(Object):
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
         self.charm.state.server.update({"tls_configured": ""})
-        # TODO: Update peer cluster relation
+        peer_clusters_servers = self.charm.state.peer_clusters_servers(
+            is_provider=True
+        ) + self.charm.state.peer_clusters_servers(is_provider=False)
+        for peer_cluster_server in peer_clusters_servers:
+            del peer_cluster_server.tls_configured
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
@@ -394,8 +399,7 @@ class TLSEventsHandler(Object):
             label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
-            # TODO: Update relation of peer cluster provider
-            # self.peer_cluster_provider.refresh_relation_data(event)
+            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
         except OpenSearchError as e:
             event.fail(f"Failed changing the password: {e}")
         except RuntimeError as e:
