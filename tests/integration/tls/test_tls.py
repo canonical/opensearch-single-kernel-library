@@ -222,7 +222,11 @@ async def test_tls_expiration(
     python_version = "python3.12" if series == "noble" else "python3.10"
 
     lib_file = f"/var/lib/juju/agents/unit-opensearch-{unit_id}/charm/venv/lib/{python_version}/site-packages/opensearch_single_kernel/lib/charms/tls_certificates_interface/v3/tls_certificates.py"
-    cmd = f"juju ssh {APP_NAME}/{unit_id} sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
+    sudo = ""
+    # VM uses root user
+    if substrate == "vm":
+        sudo = "sudo"
+    cmd = f"juju ssh {APP_NAME}/{unit_id} {sudo} sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
     logger.info(f"Running command: {cmd}")
     subprocess.check_output(cmd, shell=True)
 
