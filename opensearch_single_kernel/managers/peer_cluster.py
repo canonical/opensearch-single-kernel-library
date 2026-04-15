@@ -119,26 +119,32 @@ class PeerClusterManager(BaseManager):
         relation_units: int,
     ) -> PeerClusterOrchestrators:
         """Fetch related orchestrator IDs and App names."""
-        if not (orchestrators_dict := related_peer_cluster.orchestrators.to_dict()):
-            orchestrators_dict = json.loads(data["orchestrators"])
+        if not (remote_orchestrators := related_peer_cluster.orchestrators):
+            remote_orchestrators = json.loads(data["orchestrators"])
+        logger.debug(
+            "Fetched orchestrators from provider %s with relation id %s are %s",
+            relation_app_name,
+            relation_id,
+            remote_orchestrators,
+        )
 
         # fetch the (main/failover)-cluster-orchestrator relations
         for related_peer_cluster in self.state.related_peer_clusters(is_provider=False):
-            orchestrators_dict.update(related_peer_cluster.orchestrators.to_dict())
+            remote_orchestrators.update(related_peer_cluster.orchestrators)
 
-        local_orchestrators = self.state.application.orchestrators.to_dict()
+        local_orchestrators = self.state.application.orchestrators_dict
 
         if (trigger in {"main", "failover"}) and (relation_units > 0):
             logger.debug(
                 "Updating local orchestrator from provider %s. trigger %s The orchestrators are %s",
                 relation_app_name,
                 trigger,
-                orchestrators_dict,
+                remote_orchestrators,
             )
             local_orchestrators.update(
                 {
                     f"{trigger}_rel_id": relation_id,
-                    f"{trigger}_app": orchestrators_dict[f"{trigger}_app"],
+                    f"{trigger}_app": remote_orchestrators[f"{trigger}_app"],
                 }
             )
 
@@ -200,7 +206,7 @@ class PeerClusterManager(BaseManager):
             provider_app_id = provider_deployment_desc.app.id
             if (
                 provider_app_id in cluster_fleet_apps
-                and cluster_fleet_apps[provider_app_id]["planned_units"] > 0
+                and cluster_fleet_apps[provider_app_id].planned_units > 0
             ):
                 blocked_msg = CharmStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
         elif event_rel_id not in [

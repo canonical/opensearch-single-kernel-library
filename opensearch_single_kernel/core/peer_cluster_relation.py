@@ -6,15 +6,18 @@
 """State collection for peer cluster relation."""
 
 import json
+import logging
+from typing import Any
 
 from opensearch_single_kernel.core.models import (
     PeerClusterApp,
-    PeerClusterOrchestrators,
     PeerClusterRelData,
     PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
+
+logger = logging.getLogger(__name__)
 
 
 class PeerCluster(RelationState):
@@ -90,17 +93,15 @@ class PeerCluster(RelationState):
         self.update({"trigger": ""})
 
     @property
-    def orchestrators(self) -> PeerClusterOrchestrators:
+    def orchestrators(self) -> dict[str, Any]:
         """Return the value of 'orchestrators' in application databag."""
-        orchestrators_data = self.relation.data[self.app].get("orchestrators", "")
-        if not orchestrators_data:
-            return PeerClusterOrchestrators.from_dict({})
-        return PeerClusterOrchestrators.from_dict(json.loads(orchestrators_data))
+        orchestrators_data = self.relation.data[self.app].get("orchestrators", "{}")
+        return json.loads(orchestrators_data)
 
     @orchestrators.setter
-    def orchestrators(self, orchestrators: PeerClusterOrchestrators):
+    def orchestrators(self, orchestrators: dict[str, Any]):
         """Set the value of 'orchestrators' in application databag."""
-        self.put_object("orchestrators", orchestrators.to_dict())
+        self.put_object("orchestrators", orchestrators)
 
     @property
     def main_orchestrator_registered(self) -> bool:

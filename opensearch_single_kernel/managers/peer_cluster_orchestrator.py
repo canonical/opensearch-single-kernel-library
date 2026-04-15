@@ -121,7 +121,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         # update reported orchestrators on local orchestrator
         # fetch stored orchestrators
-        orchestrators_dict = self.state.application.orchestrators.to_dict()
+        orchestrators_dict = orchestrators.to_dict()
         orchestrators_dict[f"{cluster_type}_app"] = deployment_desc.app.to_dict()
         self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
             orchestrators_dict
@@ -132,7 +132,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for peer_cluster in self.state.peer_clusters(is_provider=is_provider):
-            orchestrators = peer_cluster.orchestrators.to_dict()
+            orchestrators = peer_cluster.orchestrators
             logger.debug(
                 "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
                 peer_cluster.relation.app.name,
@@ -148,7 +148,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             )
             # in case of demotion update the trigger
             peer_cluster.trigger = cluster_type
-            peer_cluster.orchestrators = PeerClusterOrchestrators.from_dict(orchestrators)
+            peer_cluster.orchestrators = orchestrators
 
             # we add the hash of the rel_data to only emit a change event
             # if the data has actually changed
@@ -573,9 +573,9 @@ class PeerClusterOrchestratorManager(BaseManager):
                 p_cluster.relation.id,
             )
             # Update the orchestrators
-            orchestrators = p_cluster.orchestrators
+            orchestrators = PeerClusterOrchestrators.from_dict(p_cluster.orchestrators)
             orchestrators.failover_app = candidate_failover_app
-            p_cluster.orchestrators = orchestrators
+            p_cluster.orchestrators = orchestrators.to_dict()
 
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""

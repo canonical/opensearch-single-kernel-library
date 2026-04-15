@@ -87,6 +87,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
+
         self.reconcile_peer_relation_data(event)
 
     def _on_peer_cluster_orchestrator_relation_changed(  # noqa: C901
@@ -247,11 +248,16 @@ class PeerClusterEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
+        if (
+            len(event.relation.units) == 0
+        ):  # ensure not a deferred event from a departed orchestrator
+            return
+
         # register in the 'main/failover'-CMs the number of planned units of the current app
         self.charm.peer_cluster_manager.set_current_app_in_cluster_fleet(
             rel_id=event.relation.id,
             deployment_desc=deployment_desc,
-            is_provider=True,
+            is_provider=False,
         )
         # set the main orchestrator registered flag for this relation
         if (
@@ -277,7 +283,7 @@ class PeerClusterEventsHandler(Object):
             relation_id=event.relation.id, is_provider=False
         )
         if not related_peer_cluster or not related_peer_cluster.orchestrators:
-            logger.debug("No orchestrators found in remote peer cluster data.")
+            logger.warning("No orchestrators found in remote peer cluster data.")
             return
 
         orchestrators = self.charm.peer_cluster_manager.reconcile_orchestrators_from_provider_data(
@@ -377,7 +383,7 @@ class PeerClusterEventsHandler(Object):
         )
 
         # register main and failover cm app names if any
-        logger.debug("Requirer updating orchestrators")
+        logger.debug("Requirer updating orchestrators %s", orchestrators)
         self.charm.state.application.orchestrators = orchestrators
 
         # clear or set missing orchestrator status

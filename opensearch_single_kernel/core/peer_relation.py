@@ -6,6 +6,7 @@
 """State collection for opensearch-peers relation."""
 
 import json
+from typing import Any
 
 from ops.model import Application, Relation, Unit
 
@@ -563,7 +564,14 @@ class OpenSearchApplication(RelationState):
     @property
     def orchestrators(self) -> PeerClusterOrchestrators:
         """Return the value of 'orchestrators' in application databag."""
-        return PeerClusterOrchestrators.from_dict(self.get_object("orchestrators") or {})
+        orchestrators_dict = self.get_object("orchestrators")
+        return PeerClusterOrchestrators.from_dict(orchestrators_dict)
+
+    @property
+    def orchestrators_dict(self) -> dict[str, Any]:
+        """Return the value of 'orchestrators' in application databag as dict."""
+        orchestrators_dict = self.get_object("orchestrators")
+        return orchestrators_dict if orchestrators_dict else {}
 
     @orchestrators.setter
     def orchestrators(self, orchestrators: PeerClusterOrchestrators):
