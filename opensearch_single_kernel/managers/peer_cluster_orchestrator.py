@@ -528,7 +528,9 @@ class PeerClusterOrchestratorManager(BaseManager):
         # check how many related apps are disconnected from main orchestrator
         related_peer_clusters = self.state.related_peer_clusters(is_provider=True)
         n_disconnected = sum(
-            1 for p_cluster in related_peer_clusters if not p_cluster.main_orchestrator_registered
+            1
+            for p_cluster in related_peer_clusters
+            if (p_cluster.main_orchestrator_registered.lower() == "false")
         )
 
         # check if failover is disconnected from main orchestrator
