@@ -104,16 +104,22 @@ class PeerCluster(RelationState):
         self.put_object("orchestrators", orchestrators)
 
     @property
-    def main_orchestrator_registered(self) -> bool:
+    def main_orchestrator_registered(self) -> str:
         """Return the value of 'main_orchestrator_registered' in the databag."""
-        return (
-            self.relation.data[self.app].get("main_orchestrator_registered", "").lower() == "true"
-        )
+        return self.relation.data[self.app].get("main_orchestrator_registered", "")
 
     @main_orchestrator_registered.setter
     def main_orchestrator_registered(self, value: bool):
         """Set the value of 'main_orchestrator_registered' in the databag."""
         self.update({"main_orchestrator_registered": str(value).lower()})
+
+    @main_orchestrator_registered.deleter
+    def main_orchestrator_registered(self):
+        """Delete the 'main_orchestrator_registered' field to notify related clusters."""
+        if "main_orchestrator_registered" not in self.relation.data[self.app]:
+            logger.debug("No main_orchestrator_registered field found to delete.")
+            return
+        self.update({"main_orchestrator_registered": ""})
 
 
 class PeerClusterServer(RelationState):

@@ -89,9 +89,10 @@ class PeerClusterManager(BaseManager):
         cluster_fleet_apps.update(related_cluster_fleet_apps)
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
 
-    def update_main_orchestrator_registered(self, rel_id: int) -> None:
+    def update_main_orchestrator_registered(
+        self, rel_id: int, orchestrators: PeerClusterOrchestrators
+    ) -> None:
         """Update whether the main orchestrator is registered in the relation data."""
-        orchestrators = self.state.application.orchestrators
         if rel_id == -1:
             return
         local_peer_cluster_data = self.state.peer_cluster_by_relation_id(
@@ -107,7 +108,7 @@ class PeerClusterManager(BaseManager):
         if local_peer_cluster_data := self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=rel_id
         ):
-            local_peer_cluster_data.update({"main_orchestrator_registered": ""})
+            del local_peer_cluster_data.main_orchestrator_registered
 
     def reconcile_orchestrators_from_provider_data(
         self,
