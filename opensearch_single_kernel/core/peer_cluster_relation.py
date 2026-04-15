@@ -166,4 +166,7 @@ class PeerClusterServer(RelationState):
     @credentials_saved.deleter
     def credentials_saved(self):
         """Delete the 'credentials_saved' field to notify related clusters."""
+        if "credentials_saved" not in self.relation.data[self.unit]:
+            logger.debug("No credentials_saved field found to delete.")
+            return
         self.update({"credentials_saved": ""})

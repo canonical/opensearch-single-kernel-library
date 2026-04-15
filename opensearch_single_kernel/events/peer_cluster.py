@@ -455,7 +455,6 @@ class PeerClusterEventsHandler(Object):
                 self.charm.peer_cluster_manager.update_main_orchestrator_registered(
                     orchestrators.failover_rel_id
                 )
-                self._put_main_orchestrator_registered(orchestrators.failover_rel_id, False)
             elif self.charm.peer_cluster_orchestrator_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()

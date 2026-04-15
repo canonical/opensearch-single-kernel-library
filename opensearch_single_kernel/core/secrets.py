@@ -9,7 +9,7 @@ to an event handler.
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import Relation, Secret, SecretNotFoundError
+from ops import ModelError, Relation, Secret, SecretNotFoundError
 from ops.framework import Object
 from overrides import override
 
@@ -291,8 +291,16 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
     def grant_secret_to_relation(self, secret_id: str, relation: Relation):
         """Grant a secret to a relation."""
-        secret = self.charm.model.get_secret(id=secret_id)
-        secret.grant(relation)
+        try:
+            secret = self._charm.model.get_secret(id=secret_id)
+            secret.grant(relation)
+        except SecretNotFoundError:
+            logger.error("Could not find secret: %s", secret_id)
+            return False
+        except ModelError:
+            logger.error("Not owner of secret: %s. Cannot grant to relation", secret_id)
+            return False
+        return True
 
     def grant_secret_to_subclusters(self, secret_id: str, is_provider: bool) -> bool:
         """Returns True if secret is successfully granted to all subclusters"""
