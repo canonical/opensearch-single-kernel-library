@@ -11,7 +11,7 @@ from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, Statu
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
+from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
