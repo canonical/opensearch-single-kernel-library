@@ -31,7 +31,15 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
-from opensearch_single_kernel.core.models import ObjectStorageConfig
+from opensearch_single_kernel.core.models import (
+    AzureRelData,
+    AzureRelDataCredentials,
+    GcsRelData,
+    GcsRelDataCredentials,
+    ObjectStorageConfig,
+    S3RelData,
+    S3RelDataCredentials,
+)
 from opensearch_single_kernel.events.custom_events import (
     VerifySnapshotsCredentialsEvent,
 )
@@ -491,21 +499,27 @@ class SnapshotsEventsHandler(Object):
 
             if self.charm.snapshots_manager.s3_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.S3
-                object_storage_config_dict = self.charm.snapshots_manager.s3_info_from_peer_cluster
+                s3_credentials = self.charm.snapshots_manager.s3_info_from_peer_cluster
+                s3_rel_data = S3RelData(credentials=S3RelDataCredentials(**s3_credentials.dict()))
+                object_storage_config = ObjectStorageConfig(s3=s3_rel_data)
             elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.AZURE
-                object_storage_config_dict = (
-                    self.charm.snapshots_manager.azure_info_from_peer_cluster
+                azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
+                azure_rel_data = AzureRelData(
+                    credentials=AzureRelDataCredentials(**azure_credentials.dict())
                 )
+                object_storage_config = ObjectStorageConfig(azure=azure_rel_data)
             elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.GCS
-                object_storage_config_dict = (
-                    self.charm.snapshots_manager.gcs_info_from_peer_cluster
+                gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
+                gcs_rel_data = GcsRelData(
+                    credentials=GcsRelDataCredentials(**gcs_credentials.dict())
                 )
+                object_storage_config = ObjectStorageConfig(gcs=gcs_rel_data)
 
             try:
                 self.update_stored_credentials(
-                    object_storage_type, object_storage_config_dict=object_storage_config_dict
+                    object_storage_type, object_storage_config=object_storage_config
                 )
             except OpenSearchFileOperationError:
                 logger.error("Failed to update stored backup credentials.")

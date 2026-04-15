@@ -551,10 +551,10 @@ class SnapshotsManager(BaseManager):
             if peer_cluster_server.credentials_saved != credentials_hash:
                 logger.warning(
                     "Peer cluster %s has not saved the latest backup credentials yet.",
-                    peer_cluster_server.relation_id,
+                    peer_cluster_server.relation.id,
                 )
                 raise OpenSearchPeerClusterDidntSaveCredentialsYetError(
-                    f"Peer cluster {peer_cluster_server.relation_id} has not saved the latest backup credentials yet."
+                    f"Peer cluster {peer_cluster_server.relation.id} has not saved the latest backup credentials yet."
                 )
 
         # all units have saved the latest credentials
