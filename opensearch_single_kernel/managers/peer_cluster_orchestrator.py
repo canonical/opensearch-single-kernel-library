@@ -331,7 +331,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 for node in self._nodes(self.opensearch_client.is_node_up())
                 if node.app.id == self.state.application.deployment_desc.app.id
             ]
-            return len(current_app_nodes) == self.state.planned_units()
+            return len(current_app_nodes) == self.state.planned_units
         except OpenSearchHttpError:
             return False
 
