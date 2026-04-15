@@ -759,7 +759,10 @@ class OpenSearchEventsHandler(Object):
                 self.charm.status.set(CharmStatuses.SERVICE_START_ERROR)
                 event.defer()
             finally:
-                if self.charm.cluster_manager.is_peer_cluster_provider(typ="main"):
+                if (
+                    self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
+                    and self.charm.unit.is_leader()
+                ):
                     self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
             return
 
@@ -860,7 +863,10 @@ class OpenSearchEventsHandler(Object):
             # In large deployments with cluster-manager-only-nodes, the startup might fail
             # for the cluster-manager if a joining data node did not yet initialize the
             # security index. We still want to update and broadcast the latest relation data.
-            if self.charm.cluster_manager.is_peer_cluster_provider(typ="main"):
+            if (
+                self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
+                and self.charm.unit.is_leader()
+            ):
                 self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
             pass
 
@@ -932,7 +938,7 @@ class OpenSearchEventsHandler(Object):
 
         # TODO: Handle event.after_upgrade
         # update the peer cluster rel data with new IP in case of main cluster manager
-        if self.charm.cluster_manager.is_peer_cluster_provider():
+        if self.charm.cluster_manager.is_peer_cluster_provider() and self.charm.unit.is_leader():
             self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
         self.post_start_ca_rotation()

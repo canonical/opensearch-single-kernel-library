@@ -236,7 +236,7 @@ class SnapshotsEventsHandler(Object):
         # Refresh peer relations
         self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
-    def _on_snapshots_credentials_gone(
+    def _on_snapshots_credentials_gone(  # noqa C901
         self, event: CredentialsGoneEvent | StorageConnectionInfoGoneEvent
     ) -> None:
         """Handler for backup credentials gone event."""
@@ -296,9 +296,9 @@ class SnapshotsEventsHandler(Object):
             self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
 
         self.charm.reload_keystore_event.emit()
-
-        # Refresh peer relations
-        self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+        if self.charm.unit.is_leader():
+            # Refresh peer relations
+            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
 
     def _on_verify_snapshots_credentials(  # noqa C901
         self, event: VerifySnapshotsCredentialsEvent
