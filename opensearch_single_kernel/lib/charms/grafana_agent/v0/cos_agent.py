@@ -1103,9 +1103,11 @@ class COSAgentRequirer(Object):
                             # connections to grafana-agent timing out. After the change, the charm will fail validating
                             # databag contents (as it expects a string in URL) but that won't cause any errors as
                             # tracing endpoints are the only content in the grafana-agent's side of the databag.
-                            url=f"{self._get_tracing_receiver_url(protocol)}"
-                            if tracing_ready()
-                            else None,
+                            url=(
+                                f"{self._get_tracing_receiver_url(protocol)}"
+                                if tracing_ready()
+                                else None
+                            ),
                             protocol=ProtocolType(
                                 name=protocol,
                                 type=receiver_protocol_to_transport_protocol[protocol],

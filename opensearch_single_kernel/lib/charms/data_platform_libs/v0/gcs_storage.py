@@ -619,7 +619,11 @@ class StorageRequirerEventHandlers(RequirerEventHandlers):
             return
 
         if relation.name != self.relation_name:
-            logger.info("Ignoring secret-changed from endpoint %s (expected %s)", relation.name, self.relation_name)
+            logger.info(
+                "Ignoring secret-changed from endpoint %s (expected %s)",
+                relation.name,
+                self.relation_name,
+            )
             return
 
         if relation.app == self.charm.app:

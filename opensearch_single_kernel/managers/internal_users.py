@@ -6,10 +6,6 @@
 
 import logging
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from overrides import override
-
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_ROLE,
@@ -25,7 +21,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import (
-    GeneralStatuses,
     InternalUsersStatuses,
 )
 from opensearch_single_kernel.core.state import ClusterState
@@ -176,20 +171,3 @@ class InternalUsersManager(BaseManager):
             self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
-
-    @override
-    def get_statuses(
-        self, scope: AdvancedStatusesScope, recompute: bool = False
-    ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
-        status_list: list[StatusObject] = []
-
-        if scope == "unit" and not self.state.application.is_admin_user_initialized:
-            status_list.append(InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value)
-
-        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

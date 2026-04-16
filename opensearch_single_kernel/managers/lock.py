@@ -23,17 +23,14 @@ The workflow logic goes alongside the following:
 import logging
 import os
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import Relation
-from overrides import override
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchLockError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
+from opensearch_single_kernel.common.statuses import LockStatuses
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -69,9 +66,6 @@ class PeerLockManager(BaseManager):
             logger.debug(
                 "[Node lock] Not acquired. Unit with peer databag lock: %s",
                 self.state.application_lock.unit_with_lock,
-            )
-            self.state.add_status_if_not_present(
-                LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
             )
             return False
 
@@ -160,27 +154,6 @@ class PeerLockManager(BaseManager):
         else:
             logger.debug("[Node lock] (leader) cleared peer lock")
             del self.state.application_lock.unit_with_lock
-
-    @override
-    def get_statuses(
-        self, scope: AdvancedStatusesScope, recompute: bool = False
-    ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
-        status_list: list[StatusObject] = []
-
-        if (
-            scope == "unit"
-            and self.state.server_lock.lock_requested
-            and self.state.application_lock.unit_with_lock != self.state.unit_name
-        ):
-            status_list.append(LockStatuses.REQUEST_LOCK_ON_START.value)
-
-        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
 
 class LockManager(PeerLockManager):

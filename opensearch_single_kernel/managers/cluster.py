@@ -697,9 +697,6 @@ class ClusterManager(BaseManager):
             time.sleep(3)
 
         del self.state.server.started
-        self.state.add_status_if_not_present(
-            GeneralStatuses.WAITING_TO_START.value, "unit", self.name
-        )
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -737,14 +734,15 @@ class ClusterManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
+        current_status_list = self.state.statuses.get(scope, self.name).root
         if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+            return current_status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         status_list: list[StatusObject] = []
 
         if scope == "unit":
+            if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
+                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
             self._add_unit_statuses(status_list)
 
         if scope == "app":
@@ -762,8 +760,6 @@ class ClusterManager(BaseManager):
             and not self.state.application.is_security_index_initialised
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
-        if not self.state.server.started:
-            status_list.append(GeneralStatuses.WAITING_TO_START.value)
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
         """Compute the manager's app statuses and append them to list."""

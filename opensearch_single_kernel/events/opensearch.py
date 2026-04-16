@@ -57,6 +57,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     InternalUsersStatuses,
+    LockStatuses,
     PeerClusterStatuses,
     ProfileStatuses,
     TlsStatuses,
@@ -530,10 +531,10 @@ class OpenSearchEventsHandler(Object):
             return
 
         if not self.charm.state.application.is_admin_user_initialized:
-            self.charm.state.add_status_if_not_present(
+            self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
-                self.charm.internal_users_manager.name,
+                component_name=self.charm.internal_users_manager.name,
             )
 
         try:
@@ -597,10 +598,10 @@ class OpenSearchEventsHandler(Object):
             )
 
         if not self.charm.state.application.is_admin_user_initialized:
-            self.charm.state.add_status_if_not_present(
+            self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
-                self.charm.internal_users_manager.name,
+                component_name=self.charm.internal_users_manager.name,
             )
             event.defer()
             return
@@ -720,22 +721,20 @@ class OpenSearchEventsHandler(Object):
                         "Node is not ready to start, but data node exists and"
                         " the cluster was previously bootstrapped."
                     )
-                    self.charm.status_handler.set_running_status(
+                    self.charm.state.add_status_if_not_present(
                         GeneralStatuses.SERVICE_START_ERROR.value,
                         "unit",
-                        statuses_state=self.charm.state.statuses,
-                        component_name=self.charm.cluster_manager.name,
+                        self.charm.cluster_manager.name,
                     )
                 event.defer()
             except OpenSearchUserMgmtError as e:
                 # Either generic start failure or cluster is not read to create the internal users
                 logger.warning(e)
                 self.charm.lock_manager.release()
-                self.charm.status_handler.set_running_status(
+                self.charm.state.add_status_if_not_present(
                     GeneralStatuses.SERVICE_START_ERROR.value,
                     "unit",
-                    statuses_state=self.charm.state.statuses,
-                    component_name=self.charm.cluster_manager.name,
+                    self.charm.cluster_manager.name,
                 )
                 event.defer()
             # finally:
@@ -745,8 +744,11 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.state.server.started:
             del self.charm.state.server.started
-        self.charm.state.add_status_if_not_present(
-            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
         )
 
         # Check if we can start. This means we will check
@@ -774,17 +776,22 @@ class OpenSearchEventsHandler(Object):
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
         elif not self.charm.lock_manager.acquire():
+            self.charm.status_handler.set_running_status(
+                LockStatuses.REQUEST_LOCK_ON_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.lock_manager.name,
+            )
             logger.debug("Lock to start opensearch not acquired. Will retry next event")
             event.defer()
             return
 
         if self.charm.workload.is_failed():
             self.charm.lock_manager.release()
-            self.charm.status_handler.set_running_status(
+            self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.cluster_manager.name,
+                self.charm.cluster_manager.name,
             )
             event.defer()
             return
@@ -826,11 +833,10 @@ class OpenSearchEventsHandler(Object):
             logger.debug("error of type: %s", type(e).__name__)
             self.charm.lock_manager.release()
             logger.warning(e)
-            self.charm.status_handler.set_running_status(
+            self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.cluster_manager.name,
+                self.charm.cluster_manager.name,
             )
             event.defer()
         except OpenSearchNotFullyReadyError as e:
@@ -919,6 +925,12 @@ class OpenSearchEventsHandler(Object):
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
         if not self.charm.lock_manager.acquire():
+            self.charm.status_handler.set_running_status(
+                LockStatuses.REQUEST_LOCK_ON_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.lock_manager.name,
+            )
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
             return

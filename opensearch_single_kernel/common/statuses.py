@@ -23,11 +23,12 @@ class GeneralStatuses(Enum):
         message="Initializing the security index...",
         running="blocking",
     )
-    WAITING_TO_START = StatusObject(status="waiting", message="Waiting for OpenSearch to start...")
+    WAITING_TO_START = StatusObject(
+        status="waiting", message="Waiting for OpenSearch to start...", running="async"
+    )
     SERVICE_START_ERROR = StatusObject(
         status="blocked",
         message="An error occurred during the start of the OpenSearch service.",
-        running="async",
     )
     SERVICE_IS_STOPPING = StatusObject(
         status="waiting",
@@ -84,7 +85,7 @@ class InternalUsersStatuses(Enum):
     """Collection of charm statuses related to internal users manager."""
 
     ADMIN_USER_INIT_IN_PROGRESS = StatusObject(
-        status="maintenance", message="Configuring admin user..."
+        status="maintenance", message="Configuring admin user...", running="blocking"
     )
 
 
@@ -108,7 +109,7 @@ class LockStatuses(Enum):
     """Collection of charm statuses related to lock manager."""
 
     REQUEST_LOCK_ON_START = StatusObject(
-        status="waiting", message="Requesting lock on operation: start"
+        status="waiting", message="Requesting lock on operation: start", running="async"
     )
 
 

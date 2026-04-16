@@ -167,7 +167,8 @@ class OpenSearchServer(RelationState):
 
     @started.deleter
     def started(self) -> None:
-        self.relation_data.update({"started": ""})
+        if self.started:
+            self.relation_data.update({"started": ""})
 
     @property
     def tls_ca_renewing(self) -> bool:
@@ -193,8 +194,7 @@ class OpenSearchServer(RelationState):
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag.
 
-        This property signalizes the completion of TlsManager.is_fully_configured()
-        process on the unit.
+        Signal the completion of TlsManager.is_fully_configured() process on the unit.
         """
         return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
@@ -278,7 +278,8 @@ class OpenSearchServer(RelationState):
     def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
         """Returns configuration information for plugins this unit is managing"""
         if not value:
-            self.update({"plugin_config_info": ""})
+            if self.plugin_config_info:
+                self.update({"plugin_config_info": ""})
             return
         self.put_object("plugin_config_info", value)
 
@@ -297,7 +298,8 @@ class OpenSearchServer(RelationState):
     @jwt_auth_configuration.deleter
     def jwt_auth_configuration(self) -> None:
         """Remove JWT auth configuration."""
-        self.update({"jwt-auth-configuration": ""})
+        if self.jwt_auth_configuration:
+            self.update({"jwt-auth-configuration": ""})
 
     @property
     def oauth_openid_connect_url(self) -> str | None:
@@ -514,7 +516,8 @@ class OpenSearchApplication(RelationState):
     def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
         """Returns configuration information for plugins this app is managing"""
         if not value:
-            self.update({"plugin_config_info": ""})
+            if self.plugin_config_info:
+                self.update({"plugin_config_info": ""})
             return
         self.put_object("plugin_config_info", value)
 
@@ -777,12 +780,13 @@ class LockAppState(RelationState):
     @unit_with_lock.deleter
     def unit_with_lock(self) -> None:
         """Remove lock assignment from the units and clear leader_acquired_after_juju_event_id."""
-        self.relation_data.update(
-            {
-                "unit-with-lock": "",
-                "leader-acquired-lock-after-juju-event-id": "",
-            }
-        )
+        if self.unit_with_lock:
+            self.relation_data.update(
+                {
+                    "unit-with-lock": "",
+                    "leader-acquired-lock-after-juju-event-id": "",
+                }
+            )
 
 
 class LockServerState(RelationState):
