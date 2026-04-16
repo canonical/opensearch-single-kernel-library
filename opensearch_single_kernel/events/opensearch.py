@@ -293,7 +293,7 @@ class OpenSearchEventsHandler(Object):
                 "Checking if no cluster managers left: %s",
                 self.charm.cluster_manager.no_cluster_manager_left,
             )
-            if not self.charm.cluster_manager.no_cluster_manager_left:
+            if self.charm.cluster_manager.no_cluster_manager_left:
                 logger.error(
                     "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
                 )
