@@ -500,19 +500,21 @@ class SnapshotsEventsHandler(Object):
             if self.charm.snapshots_manager.s3_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.S3
                 s3_credentials = self.charm.snapshots_manager.s3_info_from_peer_cluster
-                s3_rel_data = S3RelData(credentials=S3RelDataCredentials(**s3_credentials))
+                s3_rel_data = S3RelData(**{"s3-creds": S3RelDataCredentials(**s3_credentials)})
                 object_storage_config = ObjectStorageConfig(s3=s3_rel_data)
             elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.AZURE
                 azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
                 azure_rel_data = AzureRelData(
-                    credentials=AzureRelDataCredentials(**azure_credentials)
+                    **{"azure-creds": AzureRelDataCredentials(**azure_credentials)}
                 )
                 object_storage_config = ObjectStorageConfig(azure=azure_rel_data)
             elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.GCS
                 gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
-                gcs_rel_data = GcsRelData(credentials=GcsRelDataCredentials(**gcs_credentials))
+                gcs_rel_data = GcsRelData(
+                    **{"gcs-creds": GcsRelDataCredentials(**gcs_credentials)}
+                )
                 object_storage_config = ObjectStorageConfig(gcs=gcs_rel_data)
 
             try:

@@ -280,25 +280,19 @@ class OpenSearchEventsHandler(Object):
             )
             if planned_units == 0:
                 if self.charm.cluster_manager.is_peer_cluster_provider():
-                    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+                    self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
                     logger.debug("demoting main orchestrator")
                     self.charm.cluster_manager.demote_deployment_type()
                     del self.charm.state.application.orchestrators
                     self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
                 elif self.charm.cluster_manager.is_peer_cluster_consumer():
                     self.charm.peer_cluster_manager.refresh_requirer_relation_data()
-
-            if self.charm.peer_cluster_orchestrator_manager.is_peer_cluster_provider():
-                self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
-                logger.debug("demoting main orchestrator")
-                self.charm.cluster_manager.demote_deployment_type()
-                del self.charm.state.application.orchestrators
-                self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
-            elif self.charm.peer_cluster_manager.is_peer_cluster_consumer():
-                self.charm.peer_cluster_manager.refresh_requirer_relation_data()
-
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
+            logger.debug(
+                "Checking if no cluster managers left: %s",
+                self.charm.cluster_manager.no_cluster_manager_left,
+            )
             if not self.charm.cluster_manager.no_cluster_manager_left:
                 logger.error(
                     "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."

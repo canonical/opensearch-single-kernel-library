@@ -47,7 +47,7 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type, format_unit_name
+from opensearch_single_kernel.utils.helpers import deployment_type
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -640,10 +640,7 @@ class ClusterManager(BaseManager):
             remaining_nodes = [
                 node
                 for node in self.get_nodes(self.opensearch_client.is_node_up())
-                if node.name
-                != format_unit_name(
-                    self.state.unit_name, app=self.state.application.deployment_desc.app
-                )
+                if node.name != self.state.unit_name
             ]
             self.compute_and_broadcast_updated_topology(remaining_nodes)
         elif is_last_unit:
