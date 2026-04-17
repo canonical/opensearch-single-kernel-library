@@ -7,8 +7,16 @@
 
 import json
 import logging
+from hashlib import sha1
 from typing import Any
 
+from opensearch_single_kernel.common.constants import (
+    ADMIN_USER,
+    COS_USER,
+    KIBANA_SERVER_USER,
+    CertType,
+    Scope,
+)
 from opensearch_single_kernel.core.models import (
     PeerClusterApp,
     PeerClusterRelData,
@@ -16,6 +24,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
+from opensearch_single_kernel.utils.secrets import hash_key, password_key
 
 logger = logging.getLogger(__name__)
 
@@ -66,16 +75,141 @@ class PeerCluster(RelationState):
             "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
         )
 
-    def set_error_data(self, error_data: PeerClusterRelErrorData):
+    @cluster_fleet_apps.deleter
+    def cluster_fleet_apps(self):
+        """Delete the 'cluster_fleet_apps' field to notify related clusters."""
+        if "cluster_fleet_apps" not in self.relation_data:
+            logger.debug("No cluster_fleet_apps field found to delete.")
+            return
+        del self.relation_data["cluster_fleet_apps"]
+
+    @property
+    def error_data(self) -> PeerClusterRelErrorData | None:
+        """Get the error data."""
+        error_data_str = self.relation.data[self.app].get("error_data", "")
+        return PeerClusterRelErrorData.from_str(error_data_str) if error_data_str else None
+
+    @error_data.setter
+    def error_data(self, error_data: PeerClusterRelErrorData):
         """Set the error data."""
         self.update({"error_data": error_data.to_str()})
 
-    def get_data(self, peek_secrets: bool = False) -> PeerClusterRelData:
+    @error_data.deleter
+    def error_data(self):
+        """Delete the 'error_data' field to notify related clusters."""
+        self.update({"error_data": ""})
+
+    def data(self, peek_secrets: bool = False) -> PeerClusterRelData:
         """Get the relation data as a PeerClusterRelData object."""
         content = self.relation.data[self.app].get("data", "{}")
         return PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.secrets, content, peek_secrets=peek_secrets
         )
+
+    def set_data(self, rel_data: PeerClusterRelData, is_provider: bool = True):
+        """Set the relation data from a dict."""
+        # replace the plaintext credentials in
+        # rel_data with their corresponding secret IDs
+        rel_data_redacted_dict = self._protect_secrets_relation_data(rel_data)
+
+        # grant the secrets inside the rel_data to all the related clusters
+        self.secrets.grant_secrets_to_peer_clusters(
+            rel_data_redacted_dict, is_provider=is_provider
+        )
+        # we add the hash of the rel_data to only emit a change event
+        # if the data has actually changed
+        self.update(
+            {
+                "data": json.dumps(rel_data_redacted_dict),
+            }
+        )
+        self.rel_data_hash = sha1(
+            json.dumps(rel_data.to_dict(), sort_keys=True).encode()
+        ).hexdigest()
+
+    def delete_data(self):
+        """Delete the field 'data' in the peer-cluster relation"""
+        if "data" not in self.relation.data[self.app]:
+            logger.debug("No 'data' field found to delete.")
+            return
+        del self.relation.data[self.app]["data"]
+
+    @property
+    def rel_data_hash(self) -> str:
+        """Get the hash of the relation data."""
+        return self.relation.data[self.app].get("rel_data_hash", "")
+
+    @rel_data_hash.setter
+    def rel_data_hash(self, value: str):
+        """Set the hash of the relation data."""
+        self.update({"rel_data_hash": value})
+
+    @rel_data_hash.deleter
+    def rel_data_hash(self):
+        """Delete the 'rel_data_hash' field to notify related clusters."""
+        self.update({"rel_data_hash": ""})
+
+    def _protect_secrets_relation_data(
+        self, rel_data: PeerClusterRelData | None
+    ) -> dict[str, Any] | None:
+        """Replace the secrets' plain text content in the rel data by their IDs."""
+        # hide the secrets and instead pass their ids so that
+        # they can be fetched when needed in the requirer side
+        # returns None if rel_data has not been successfully created
+        if not rel_data:
+            return None
+
+        redacted_dict = rel_data.to_dict()
+
+        redacted_dict["credentials"] = {
+            "admin_username": ADMIN_USER,
+            "admin_password": self.secrets.get_secret_id(Scope.APP, password_key(ADMIN_USER)),
+            "admin_password_hash": self.secrets.get_secret_id(Scope.APP, hash_key(ADMIN_USER)),
+            "kibana_password": self.secrets.get_secret_id(
+                Scope.APP, password_key(KIBANA_SERVER_USER)
+            ),
+            "kibana_password_hash": self.secrets.get_secret_id(
+                Scope.APP, hash_key(KIBANA_SERVER_USER)
+            ),
+        }
+
+        if monitor_password := self.secrets.get_secret_id(Scope.APP, password_key(COS_USER)):
+            redacted_dict["credentials"]["monitor_password"] = monitor_password
+        if admin_tls := self.secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val):
+            redacted_dict["credentials"]["admin_tls"] = admin_tls
+
+        if (
+            rel_data.credentials.s3
+            and rel_data.credentials.s3.access_key
+            and rel_data.credentials.s3.secret_key
+        ):
+            # TODO Move this to s3 relation and include both in one secret
+            redacted_dict["credentials"]["s3"] = {
+                "access-key": self.secrets.get_secret_id(Scope.APP, "s3-access-key"),
+                "secret-key": self.secrets.get_secret_id(Scope.APP, "s3-secret-key"),
+            }
+
+        if rel_data.credentials and getattr(rel_data.credentials.s3, "s3_tls_ca_chain", None):
+            if sid := self.secrets.get_secret_id(Scope.APP, "s3-tls-ca-chain"):
+                redacted_dict["credentials"]["s3"]["s3-tls-ca-chain"] = sid
+
+        if (
+            rel_data.credentials.azure
+            and rel_data.credentials.azure.storage_account
+            and rel_data.credentials.azure.secret_key
+        ):
+            # TODO Move this to azure relation and include both in one secret
+            redacted_dict["credentials"]["azure"] = {
+                "storage-account": self.secrets.get_secret_id(Scope.APP, "azure-storage-account"),
+                "secret-key": self.secrets.get_secret_id(Scope.APP, "azure-secret-key"),
+            }
+
+        if rel_data.credentials.gcs and rel_data.credentials.gcs.secret_key:
+            redacted_dict["credentials"]["gcs"] = {
+                "secret-key": self.secrets.get_secret_id(Scope.APP, "gcs-secret-key"),
+            }
+
+        return redacted_dict
 
     @property
     def trigger(self) -> str:
@@ -103,6 +237,14 @@ class PeerCluster(RelationState):
         """Set the value of 'orchestrators' in application databag."""
         self.put_object("orchestrators", orchestrators)
 
+    @orchestrators.deleter
+    def orchestrators(self):
+        """Delete the 'orchestrators' field to notify related clusters."""
+        if "orchestrators" not in self.relation.data[self.app]:
+            logger.debug("No orchestrators field found to delete.")
+            return
+        del self.relation.data[self.app]["orchestrators"]
+
     @property
     def main_orchestrator_registered(self) -> str:
         """Return the value of 'main_orchestrator_registered' in the databag."""
@@ -116,9 +258,6 @@ class PeerCluster(RelationState):
     @main_orchestrator_registered.deleter
     def main_orchestrator_registered(self):
         """Delete the 'main_orchestrator_registered' field to notify related clusters."""
-        if "main_orchestrator_registered" not in self.relation.data[self.app]:
-            logger.debug("No main_orchestrator_registered field found to delete.")
-            return
         self.update({"main_orchestrator_registered": ""})
 
 
@@ -160,19 +299,16 @@ class PeerClusterServer(RelationState):
         self.update({"tls_configured": str(value)})
 
     @property
-    def credentials_saved(self) -> str:
+    def snapshots_credentials_saved(self) -> str:
         """Get the value of 'credentials_saved' from unit data bag."""
         return self.relation.data[self.unit].get("credentials_saved", "")
 
-    @credentials_saved.setter
-    def credentials_saved(self, value: bool):
+    @snapshots_credentials_saved.setter
+    def snapshots_credentials_saved(self, value: bool):
         """Update the value of 'credentials_saved'"""
         self.update({"credentials_saved": str(value)})
 
-    @credentials_saved.deleter
-    def credentials_saved(self):
+    @snapshots_credentials_saved.deleter
+    def snapshots_credentials_saved(self):
         """Delete the 'credentials_saved' field to notify related clusters."""
-        if "credentials_saved" not in self.relation.data[self.unit]:
-            logger.debug("No credentials_saved field found to delete.")
-            return
         self.update({"credentials_saved": ""})

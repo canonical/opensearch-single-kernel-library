@@ -4,10 +4,7 @@
 
 """OpenSearch Peer Cluster Orchestrator manager."""
 
-import json
 import logging
-from hashlib import sha1
-from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
@@ -36,7 +33,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.helpers import (
+from opensearch_single_kernel.utils.peer_cluster import (
     update_cluster_fleet,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
@@ -58,7 +55,6 @@ class PeerClusterOrchestratorManager(BaseManager):
 
     def refresh_relation_data(  # noqa: C901
         self,
-        is_provider: bool,
         event_rel_id: int | None = None,
         s3_credentials: S3RelDataCredentials | None = None,
         azure_credentials: AzureRelDataCredentials | None = None,
@@ -79,14 +75,6 @@ class PeerClusterOrchestratorManager(BaseManager):
             azure_credentials=azure_credentials,
             gcs_credentials=gcs_credentials,
         )
-        # replace the plaintext credentials in
-        # rel_data with their corresponding secret IDs
-        rel_data_redacted_dict = self.update_secrets_relation_data(rel_data)
-
-        # grant the secrets inside the rel_data to all the related clusters
-        self.state.secrets.grant_peer_rel_data_secrets(
-            rel_data_redacted_dict, is_provider=is_provider
-        )
 
         orchestrators = self.state.application.orchestrators
         rel_err_data = self.build_peer_cluster_rel_err_data(
@@ -94,14 +82,10 @@ class PeerClusterOrchestratorManager(BaseManager):
         )
 
         # exit if current cluster should not have been considered a provider
-        if self.set_peer_cluster_err_data_if_wrong_integration(rel_err_data) and event_rel_id:
-            if peer_cluster := self.state.peer_cluster_by_relation_id(
-                relation_id=event_rel_id, is_provider=is_provider
-            ):
-                logger.warning(
-                    f"Relation with {peer_cluster.relation.app.name} severed due to wrong integration: {rel_err_data.blocked_message}"
-                )
-                del peer_cluster.trigger
+        if (
+            self.set_peer_cluster_err_data_if_wrong_integration(event_rel_id, rel_err_data)
+            and event_rel_id
+        ):
             return
 
         # store the main/failover-cm planned units count
@@ -114,7 +98,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         # flag the trigger of the rel changed update on the consumer side
         if event_rel_id:
             peer_cluster = self.state.peer_cluster_by_relation_id(
-                relation_id=event_rel_id, is_provider=is_provider
+                relation_id=event_rel_id, is_provider=True
             )
             if peer_cluster:
                 peer_cluster.trigger = cluster_type
@@ -131,7 +115,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
-        for peer_cluster in self.state.peer_clusters(is_provider=is_provider):
+        for peer_cluster in self.state.peer_clusters(is_provider=True):
             orchestrators = peer_cluster.orchestrators
             logger.debug(
                 "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
@@ -152,24 +136,17 @@ class PeerClusterOrchestratorManager(BaseManager):
 
             # we add the hash of the rel_data to only emit a change event
             # if the data has actually changed
-            if rel_data_redacted_dict:
-                peer_cluster.update(
-                    {
-                        "data": json.dumps(rel_data_redacted_dict),
-                        "rel_data_hash": sha1(
-                            json.dumps(rel_data.to_dict(), sort_keys=True).encode()
-                        ).hexdigest(),
-                    }
-                )
+            if rel_data:
+                peer_cluster.set_data(rel_data, is_provider=True)
             # there is no error to broadcast - we clear any previously broadcasted error
             if not rel_err_data:
-                peer_cluster.update({"error_data": ""})
+                del peer_cluster.error_data
             else:
-                peer_cluster.set_error_data(rel_err_data)
+                peer_cluster.error_data = rel_err_data
 
             # if no planned units, delete relation data as it won't get updated
             if not has_units:
-                peer_cluster.update({"error_data": ""})
+                del peer_cluster.error_data
         return should_defer
 
     def build_peer_cluster_rel_data(
@@ -335,74 +312,6 @@ class PeerClusterOrchestratorManager(BaseManager):
         except OpenSearchHttpError:
             return False
 
-    def update_secrets_relation_data(
-        self, rel_data: PeerClusterRelData | None
-    ) -> dict[str, Any] | None:
-        """Replace the secrets' plain text content in the rel data by their IDs."""
-        # hide the secrets and instead pass their ids so that
-        # they can be fetched when needed in the requirer side
-        # returns None if rel_data has not been successfully created
-        if not rel_data:
-            return None
-
-        redacted_dict = rel_data.to_dict()
-
-        redacted_dict["credentials"] = {
-            "admin_username": ADMIN_USER,
-            "admin_password": self.state.secrets.get_secret_id(
-                Scope.APP, password_key(ADMIN_USER)
-            ),
-            "admin_password_hash": self.state.secrets.get_secret_id(
-                Scope.APP, hash_key(ADMIN_USER)
-            ),
-            "kibana_password": self.state.secrets.get_secret_id(
-                Scope.APP, password_key(KIBANA_SERVER_USER)
-            ),
-            "kibana_password_hash": self.state.secrets.get_secret_id(
-                Scope.APP, hash_key(KIBANA_SERVER_USER)
-            ),
-        }
-
-        if monitor_password := self.state.secrets.get_secret_id(Scope.APP, password_key(COS_USER)):
-            redacted_dict["credentials"]["monitor_password"] = monitor_password
-        if admin_tls := self.state.secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val):
-            redacted_dict["credentials"]["admin_tls"] = admin_tls
-
-        if (
-            rel_data.credentials.s3
-            and rel_data.credentials.s3.access_key
-            and rel_data.credentials.s3.secret_key
-        ):
-            # TODO Move this to s3 relation and include both in one secret
-            redacted_dict["credentials"]["s3"] = {
-                "access-key": self.state.secrets.get_secret_id(Scope.APP, "s3-access-key"),
-                "secret-key": self.state.secrets.get_secret_id(Scope.APP, "s3-secret-key"),
-            }
-
-        if rel_data.credentials and getattr(rel_data.credentials.s3, "s3_tls_ca_chain", None):
-            if sid := self.state.secrets.get_secret_id(Scope.APP, "s3-tls-ca-chain"):
-                redacted_dict["credentials"]["s3"]["s3-tls-ca-chain"] = sid
-
-        if (
-            rel_data.credentials.azure
-            and rel_data.credentials.azure.storage_account
-            and rel_data.credentials.azure.secret_key
-        ):
-            # TODO Move this to azure relation and include both in one secret
-            redacted_dict["credentials"]["azure"] = {
-                "storage-account": self.state.secrets.get_secret_id(
-                    Scope.APP, "azure-storage-account"
-                ),
-                "secret-key": self.state.secrets.get_secret_id(Scope.APP, "azure-secret-key"),
-            }
-
-        if rel_data.credentials.gcs and rel_data.credentials.gcs.secret_key:
-            redacted_dict["credentials"]["gcs"] = {
-                "secret-key": self.state.secrets.get_secret_id(Scope.APP, "gcs-secret-key"),
-            }
-
-        return redacted_dict
-
     def build_peer_cluster_rel_err_data(  # noqa: C901
         self,
         deployment_desc: DeploymentDescription | None,
@@ -476,6 +385,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
     def set_peer_cluster_err_data_if_wrong_integration(
         self,
+        event_rel_id: int,
         rel_err_data: PeerClusterRelErrorData | None,
     ) -> bool:
         """Check if relation is invalid and notify related sub-clusters."""
@@ -483,7 +393,18 @@ class PeerClusterOrchestratorManager(BaseManager):
             return False
 
         for peer_cluster in self.state.peer_clusters(is_provider=True):
-            peer_cluster.set_error_data(rel_err_data)
+            peer_cluster.error_data = rel_err_data
+
+        # delete trigger
+        if peer_cluster := self.state.peer_cluster_by_relation_id(
+            relation_id=event_rel_id, is_provider=True
+        ):
+            logger.warning(
+                "Relation with %s severed due to wrong integration: %s",
+                peer_cluster.relation.app.name,
+                rel_err_data.blocked_message,
+            )
+            del peer_cluster.trigger
         return True
 
     def save_cluster_fleet_apps(
@@ -588,13 +509,9 @@ class PeerClusterOrchestratorManager(BaseManager):
         """Deletes relation data"""
         peer_cluster = self.state.peer_cluster_by_relation_id(is_provider=True, relation_id=rel_id)
         if peer_cluster:
-            peer_cluster.update(
-                {
-                    "cluster_fleet_apps": "",
-                    "data": "",
-                    "rel_data_hash": "",
-                    "error_data": "",
-                    "trigger": "",
-                    "orchestrators": "",
-                }
-            )
+            peer_cluster.delete_data()
+            del peer_cluster.rel_data_hash
+            del peer_cluster.error_data
+            del peer_cluster.cluster_fleet_apps
+            del peer_cluster.orchestrators
+            del peer_cluster.trigger

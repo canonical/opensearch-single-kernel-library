@@ -146,8 +146,7 @@ class BaseManager:
             )
             return None
 
-        data = related_peer_cluster.get_data(peek_secrets=peek_secrets)
-        return data
+        return related_peer_cluster.data(peek_secrets=peek_secrets)
 
     def is_peer_cluster_provider(self, typ: Literal["main", "failover"] | None = None) -> bool:
         """Return whether the current app is a related to provider / orchestrator."""

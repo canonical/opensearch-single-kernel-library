@@ -300,13 +300,12 @@ class SnapshotsEventsHandler(Object):
             self.charm.snapshots_manager.remove_s3_ca()
 
         if self.charm.unit.is_leader():
-            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
-            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
-
-        self.charm.reload_keystore_event.emit()
-        if self.charm.unit.is_leader():
             # Refresh peer relations
             self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+
+            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
+            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_INCORRECT, app=True)
+        self.charm.reload_keystore_event.emit()
 
     def _on_verify_snapshots_credentials(  # noqa C901
         self, event: VerifySnapshotsCredentialsEvent

@@ -6,6 +6,7 @@
 """State collection for opensearch-peers relation."""
 
 import json
+import logging
 from typing import Any
 
 from ops.model import Application, Relation, Unit
@@ -38,6 +39,8 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 from opensearch_single_kernel.utils.helpers import normalized_tls_subject
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
+
+logger = logging.getLogger(__name__)
 
 
 class OpenSearchServer(RelationState):
@@ -171,12 +174,12 @@ class OpenSearchServer(RelationState):
         )
 
     @allocation_exclusions_to_delete.setter
-    def allocation_exclusions_to_delete(self, value: set[str]):
+    def allocation_exclusions_to_delete(self, value: set[str]) -> None:
         """Set the value of 'allocation_exclusion_to_delete' in application databag."""
         self.update({"allocation-exclusions-to-delete": ",".join(value)})
 
     @property
-    def delete_voting_exclusions(self) -> set[str]:
+    def voting_exclusions_to_delete(self) -> set[str]:
         """Return the value of 'delete_voting_exclusions' from application databag."""
         return set(
             filter(
@@ -185,8 +188,8 @@ class OpenSearchServer(RelationState):
             )
         )
 
-    @delete_voting_exclusions.setter
-    def delete_voting_exclusions(self, value: set[str]):
+    @voting_exclusions_to_delete.setter
+    def voting_exclusions_to_delete(self, value: set[str]) -> None:
         """Set the value of 'delete_voting_exclusions' in application databag."""
         self.update({"delete-voting-exclusions": ",".join(value)})
 
@@ -254,7 +257,7 @@ class OpenSearchServer(RelationState):
         return self.relation_data.get("oauth_departing", "") == "True"
 
     @oauth_departing.setter
-    def oauth_departing(self, value: bool):
+    def oauth_departing(self, value: bool) -> None:
         """Set whether oauth relation broken event should be skipped.
 
         When current leader is unit oauth relation isn't breaking
@@ -318,12 +321,12 @@ class OpenSearchApplication(RelationState):
         return int(self.relation_data.get("bootstrap_contributors_count", 0))
 
     @bootstrap_contributors_count.setter
-    def bootstrap_contributors_count(self, value: int):
+    def bootstrap_contributors_count(self, value: int) -> None:
         """Set value of bootstrap contributors count in application state."""
         self.update({"bootstrap_contributors_count": str(value)})
 
     @is_admin_user_initialized.setter
-    def is_admin_user_initialized(self, value: bool):
+    def is_admin_user_initialized(self, value: bool) -> None:
         """Update the value of 'admin_user_initialized' in application state."""
         self.update({"admin_user_initialized": str(value)})
 
@@ -333,7 +336,7 @@ class OpenSearchApplication(RelationState):
         return self.relation_data.get("security_index_initialised", "") == "True"
 
     @is_security_index_initialised.setter
-    def is_security_index_initialised(self, value: bool):
+    def is_security_index_initialised(self, value: bool) -> None:
         """Update the value of 'security_index_initialised' in application state."""
         self.update({"security_index_initialised": str(value)})
 
@@ -346,7 +349,7 @@ class OpenSearchApplication(RelationState):
         return {name: Node.from_dict(node) for name, node in nodes_config.items()}
 
     @nodes_config.setter
-    def nodes_config(self, value: dict[str, Node]):
+    def nodes_config(self, value: dict[str, Node]) -> None:
         """Set the value of 'nodes_config' in application state."""
         self.put_object("nodes_config", {name: node.to_dict() for name, node in value.items()})
 
@@ -356,7 +359,7 @@ class OpenSearchApplication(RelationState):
         return self.relation_data.get("bootstrapped", "").lower() == "true"
 
     @bootstrapped.setter
-    def bootstrapped(self, value: bool):
+    def bootstrapped(self, value: bool) -> None:
         """Set the value of 'bootstrapped' in application state."""
         self.update({"bootstrapped": str(value)})
 
@@ -369,7 +372,7 @@ class OpenSearchApplication(RelationState):
         return DeploymentDescription.from_dict(current_deployment_desc)
 
     @deployment_desc.setter
-    def deployment_desc(self, deployment_desc: DeploymentDescription):
+    def deployment_desc(self, deployment_desc: DeploymentDescription) -> None:
         """Set the deployment description."""
         self.put_object("deployment-description", deployment_desc.to_dict())
 
@@ -380,7 +383,7 @@ class OpenSearchApplication(RelationState):
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     @cluster_fleet_apps.setter
-    def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]):
+    def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]) -> None:
         """Set the cluster fleet applications."""
         self.put_object(
             "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
@@ -395,7 +398,7 @@ class OpenSearchApplication(RelationState):
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps_rels.items()}
 
     @cluster_fleet_apps_rels.setter
-    def cluster_fleet_apps_rels(self, cluster_fleet_apps_rels: dict[str, PeerClusterApp]):
+    def cluster_fleet_apps_rels(self, cluster_fleet_apps_rels: dict[str, PeerClusterApp]) -> None:
         """Set the cluster fleet applications to relations."""
         self.put_object(
             "cluster_fleet_apps_rels",
@@ -416,7 +419,7 @@ class OpenSearchApplication(RelationState):
         return self.relation_data.get("update-ts", "")
 
     @update_ts.setter
-    def update_ts(self, timestamp: int):
+    def update_ts(self, timestamp: int) -> None:
         """Update the value of 'update-ts' in the application databag."""
         self.update({"update-ts": str(timestamp)})
 
@@ -431,7 +434,7 @@ class OpenSearchApplication(RelationState):
         )
 
     @delete_voting_exclusions.setter
-    def delete_voting_exclusions(self, value: set[str]):
+    def delete_voting_exclusions(self, value: set[str]) -> None:
         """Set the value of 'delete_voting_exclusions' in application databag."""
         self.update({"delete-voting-exclusions": ",".join(value)})
 
@@ -446,7 +449,7 @@ class OpenSearchApplication(RelationState):
         )
 
     @allocation_exclusions_to_delete.setter
-    def allocation_exclusions_to_delete(self, value: set[str]):
+    def allocation_exclusions_to_delete(self, value: set[str]) -> None:
         """Set the value of 'allocation_exclusion_to_delete' in application databag."""
         self.update({"allocation-exclusions-to-delete": ",".join(value)})
 
@@ -464,7 +467,7 @@ class OpenSearchApplication(RelationState):
         return self.get_object("client_relation_users") or {}
 
     @client_users_dict.setter
-    def client_users_dict(self, users_dict: dict[str, str]):
+    def client_users_dict(self, users_dict: dict[str, str]) -> None:
         """Set the client relation users dict in application databag."""
         self.put_object("client_relation_users", users_dict)
 
@@ -574,12 +577,12 @@ class OpenSearchApplication(RelationState):
         return orchestrators_dict if orchestrators_dict else {}
 
     @orchestrators.setter
-    def orchestrators(self, orchestrators: PeerClusterOrchestrators):
+    def orchestrators(self, orchestrators: PeerClusterOrchestrators) -> None:
         """Set the value of 'orchestrators' in application databag."""
         self.put_object("orchestrators", orchestrators.to_dict())
 
     @orchestrators.deleter
-    def orchestrators(self):
+    def orchestrators(self) -> None:
         """Remove the value of 'orchestrators' from application databag."""
         self.update({"orchestrators": ""})
 
@@ -589,7 +592,7 @@ class OpenSearchApplication(RelationState):
         return self.relation_data.get("missing_relations", "") == "True"
 
     @missing_relations.setter
-    def missing_relations(self, value: bool):
+    def missing_relations(self, value: bool) -> None:
         """Set the value of 'missing_relations' in application databag."""
         self.update({"missing_relations": str(value)})
 

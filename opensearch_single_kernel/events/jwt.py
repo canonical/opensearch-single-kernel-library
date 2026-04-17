@@ -87,7 +87,7 @@ class JWTEventsHandler(Object):
         if not self.charm.state.jwt.relation:
             return
 
-        if not self.charm.state.jwt.is_related_secret_label(event.secret.label):
+        if not self.charm.state.jwt.is_jwt_secret(event.secret.label):
             logger.debug("Updated secret not relevant")
             return
 

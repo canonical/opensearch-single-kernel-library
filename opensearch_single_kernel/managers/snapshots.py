@@ -139,10 +139,10 @@ class SnapshotsManager(BaseManager):
             return
 
         if credentials is None:
-            del peer_cluster_server.credentials_saved
+            del peer_cluster_server.snapshots_credentials_saved
             return
 
-        peer_cluster_server.credentials_saved = hash_credentials(credentials)
+        peer_cluster_server.snapshots_credentials_saved = hash_credentials(credentials)
 
     def storage_config_from_connection_info(  # noqa: C901
         self, object_storage_type: ObjectStorageType, connection_info: dict[str, str]
@@ -548,7 +548,7 @@ class SnapshotsManager(BaseManager):
             is_provider=True
         ) + self.state.peer_clusters_servers(is_provider=False)
         for peer_cluster_server in peer_clusters_servers:
-            if peer_cluster_server.credentials_saved != credentials_hash:
+            if peer_cluster_server.snapshots_credentials_saved != credentials_hash:
                 logger.warning(
                     "Peer cluster %s has not saved the latest backup credentials yet.",
                     peer_cluster_server.relation.id,

@@ -89,13 +89,13 @@ class NotificationsEvents(Object):
 
         try:
             smtp_data = self.smtp.get_relation_data_from_relation(event.relation)
-        except SecretError as exc:
-            logger.error(f"Could not read smtp relation data: {exc}")
+        except SecretError as e:
+            logger.error(f"Could not read smtp relation data: {e}")
             if is_leader:
                 self.charm.status.set(
                     CharmStatuses.SMTP_COULD_NOT_READ_DATA,
                     app=True,
-                    dynamic_params={"exc": str(exc)},
+                    dynamic_params={"exc": str(e)},
                 )
                 return
 
@@ -210,8 +210,7 @@ class NotificationsEvents(Object):
 
         # propagate to subclusters if this is the main provider
         if self.charm.notifications_manager.is_peer_cluster_provider():
-            should_defer = self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
-            if should_defer:
+            if self.charm.peer_cluster_events.reconcile_peer_relation_data():
                 event.defer()
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
@@ -252,10 +251,7 @@ class NotificationsEvents(Object):
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.notifications_manager.is_peer_cluster_provider():
-                    should_defer = self.charm.peer_cluster_events.reconcile_peer_relation_data(
-                        event
-                    )
-                    if should_defer:
+                    if self.charm.peer_cluster_events.reconcile_peer_relation_data():
                         event.defer()
             return
 
@@ -285,8 +281,7 @@ class NotificationsEvents(Object):
         self.charm.plugin_manager.remove_plugin_secret(label)
 
         if self.charm.notifications_manager.is_peer_cluster_provider():
-            should_defer = self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
-            if should_defer:
+            if self.charm.peer_cluster_events.reconcile_peer_relation_data(None):
                 event.defer()
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:

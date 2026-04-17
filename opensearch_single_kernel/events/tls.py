@@ -260,6 +260,8 @@ class TLSEventsHandler(Object):
                     Scope.APP, CertType.APP_ADMIN.val
                 )["chain"]
             except KeyError as e:
+                # As we are setting the ca_chain, it should not be likely to happen a KeyError at
+                # update_certs. This logic is left for a very corner case.
                 logger.error("Failed to update relation TLS info: missing key %s", str(e))
                 event.defer()
                 return

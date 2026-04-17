@@ -195,7 +195,7 @@ class PeerClusterManager(BaseManager):
         deployment_desc: DeploymentDescription,
         peer_cluster_rel_data: PeerClusterRelData,
         event_rel_id: int,
-    ) -> bool:
+    ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
         blocked_msg = None
         provider_deployment_desc = peer_cluster_rel_data.deployment_desc
@@ -300,12 +300,9 @@ class PeerClusterManager(BaseManager):
             peer_cluster = self.state.related_peer_cluster_by_relation_id(
                 relation_id=rel_id, is_provider=False
             )
-            data = peer_cluster.relation_data.get("data", {}) if peer_cluster else {}
-
-            if not data:  # not ready yet
+            if not (data := peer_cluster.data()):  # not ready yet
                 continue
 
-            data = PeerClusterRelData.peer_cluster_rel_data_from_str(self.state.secrets, data)
             cm_nodes = {**cm_nodes, **{node.name: node for node in data.cm_nodes}}
 
         # attempt to have an opensearch reported list of CMs - the response

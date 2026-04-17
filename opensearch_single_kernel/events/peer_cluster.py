@@ -36,7 +36,7 @@ from opensearch_single_kernel.core.models import (
     PeerClusterRelData,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.utils.helpers import is_failover_promoted
+from opensearch_single_kernel.utils.peer_cluster import is_failover_promoted
 from opensearch_single_kernel.utils.status import Status
 
 if TYPE_CHECKING:
@@ -488,7 +488,7 @@ class PeerClusterEventsHandler(Object):
                 self.charm.state.application.cluster_fleet_apps
             )
 
-    def reconcile_peer_relation_data(self, event: RelationChangedEvent) -> bool:
+    def reconcile_peer_relation_data(self, event: RelationChangedEvent | None = None) -> bool:
         """Reconcile peer relation data.
 
         The function will get backup credentials and returns
@@ -521,7 +521,6 @@ class PeerClusterEventsHandler(Object):
 
         return self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
             event_rel_id=event.relation.id if hasattr(event, "relation") else None,
-            is_provider=True,
             s3_credentials=s3_credentials,
             azure_credentials=azure_credentials,
             gcs_credentials=gcs_credentials,

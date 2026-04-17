@@ -475,8 +475,9 @@ class ConfigManager(BaseManager):
             },
         }
 
-    def update_seeds_config(self, nodes: list[Node] = []) -> None:
+    def update_seeds_config(self, nodes: list[Node] | None = None) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using values from nodes_config."""
+        nodes = nodes or []
         if nodes_config := self.state.application.nodes_config:
             nodes.extend(list(nodes_config.values()))
             self._update_seeds_file([node.ip for node in list(nodes) if node.is_cm_eligible()])

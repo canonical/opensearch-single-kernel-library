@@ -15,17 +15,23 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 class JwtState(RelationState):
     """State for the JWT relation data."""
 
-    def is_related_secret_label(self, label: str | None) -> bool:
-        """Check whether provided secret label is related to this relation."""
-        return (
-            label
-            == self.data_interface._generate_secret_label(
+    def is_jwt_secret(self, label: str | None) -> bool:
+        """Check whether provided secret label is a JWT relation secret.
+
+        This is needed to avoid reacting to secret changes that are
+          not related to JWT relation configuration.
+
+        Args:
+            label: the secret label to check
+
+        Returns:
+            bool: True if the label corresponds to a JWT relation secret, False otherwise
+        """
+        if label and (relation := self.data_interface._relation_from_secret_label(label)):
+            return label == self.data_interface._generate_secret_label(
                 relation.name, relation.id, SecretGroup("extra")
             )
-            if label is not None
-            and (relation := self.data_interface._relation_from_secret_label(label))
-            else False
-        )
+        return False
 
     @property
     def auth_configuration(self) -> JWTAuthConfiguration:

@@ -139,9 +139,9 @@ class ClusterState(Object):
         return self.model.get_relation(GCS_RELATION)
 
     @property
-    def external_client_relations(self) -> set[Relation]:
+    def external_client_relations(self) -> list[Relation]:
         """Get OpenSearch client relation."""
-        return self.model.relations[CLIENT_RELATION]
+        return self.model.relations.get(CLIENT_RELATION, [])
 
     def relation_exists(self, relation_name) -> bool:
         """Check if the relation exists"""
@@ -159,8 +159,7 @@ class ClusterState(Object):
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
-        relation = self.model.get_relation(relation_name, relation_id)
-        if relation:
+        if relation := self.model.get_relation(relation_name, relation_id):
             return PeerCluster(
                 relation=relation,
                 data_interface=(
@@ -184,8 +183,7 @@ class ClusterState(Object):
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
-        relation = self.model.get_relation(relation_name, relation_id)
-        if relation:
+        if relation := self.model.get_relation(relation_name, relation_id):
             return PeerCluster(
                 relation=relation,
                 data_interface=(
@@ -244,8 +242,7 @@ class ClusterState(Object):
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
-        relation = self.model.get_relation(relation_name, relation_id)
-        if relation:
+        if relation := self.model.get_relation(relation_name, relation_id):
             return PeerClusterServer(
                 relation=relation,
                 data_interface=(
@@ -465,19 +462,16 @@ class ClusterState(Object):
     @property
     def ca_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
-        rotation_in_progress = False
-        rotation_complete = True
-
         # Use related_peer_cluster_servers since we are reading remote data.
-        servers_all_fleet = (
+        all_units_in_fleet = (
             self.servers
             + self.related_peer_cluster_servers(is_provider=False)
             + self.related_peer_cluster_servers(is_provider=True)
         )
 
         # check peer units and current unit
-        rotation_in_progress = any([server.tls_ca_renewing for server in servers_all_fleet])
-        rotation_complete = all([server.tls_ca_renewed for server in servers_all_fleet])
+        rotation_in_progress = any([server.tls_ca_renewing for server in all_units_in_fleet])
+        rotation_complete = all([server.tls_ca_renewed for server in all_units_in_fleet])
 
         logger.debug(
             "CA rotation state"
@@ -491,21 +485,17 @@ class ClusterState(Object):
 
     def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
-        rotation_complete = True
-
-        servers_all_fleet = (
+        all_units_in_fleet = (
             self.servers
             + self.related_peer_cluster_servers(is_provider=False)
             + self.related_peer_cluster_servers(is_provider=True)
         )
 
-        # the current unit is not in the relation.units list
-        # if tls is not configured or in the middle of rotation, return False
-        if not all([server.tls_configured for server in servers_all_fleet]) or all(
-            [server.tls_ca_renewing and not server.tls_ca_renewed for server in servers_all_fleet]
-        ):
-            return False
-        return rotation_complete
+        # if the current unit is not in the relation.units list
+        # or if tls is not configured or in the middle of rotation, return False
+        return all([server.tls_configured for server in all_units_in_fleet]) and all(
+            [server.tls_ca_renewing and not server.tls_ca_renewed for server in all_units_in_fleet]
+        )
 
     def reset_ca_rotation_state(self) -> None:
         """Handle internal flags during CA rotation routine."""
@@ -651,10 +641,10 @@ class ClusterState(Object):
             )
             # No pure data nodes in the cluster
             and not any(
-                self.application.name != cluster_fleet_apps[app].app.name
-                and "data" in cluster_fleet_apps[app].roles
-                and "cluster_manager" not in cluster_fleet_apps[app].roles
-                for app in cluster_fleet_apps
+                self.application.name != cluster_fleet_app.app.name
+                and "data" in cluster_fleet_app.roles
+                and "cluster_manager" not in cluster_fleet_app.roles
+                for cluster_fleet_app in cluster_fleet_apps.values()
             )
         )
 

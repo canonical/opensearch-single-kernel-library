@@ -158,7 +158,7 @@ class PluginManager(BaseManager):
         self.remove_plugin_config(Scope.APP, label)
 
     def missing_plugins_relations(self) -> list[str]:
-        """Get the cureent plugins missing relations."""
+        """Get the cureent missing plugins relations."""
         # Check the plugin_config_info to get configured relations
         plugin_relation_names = [
             s.relation_name

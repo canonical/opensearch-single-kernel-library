@@ -309,7 +309,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
                 return False
         return True
 
-    def grant_peer_rel_data_secrets(  # noqa: C901
+    def grant_secrets_to_peer_clusters(  # noqa: C901
         self,
         rel_data_secret_content: dict[str, Any] | None,
         is_provider: bool,
