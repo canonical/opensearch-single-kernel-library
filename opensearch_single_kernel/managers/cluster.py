@@ -41,6 +41,8 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
+    JwtStatuses,
+    OAuthStatuses,
     PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.models import (
@@ -767,11 +769,11 @@ class ClusterManager(BaseManager):
             deployment_desc := self.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.state.oauth_relation:
-                status_list.append(GeneralStatuses.OAUTH_RELATION_INVALID.value)
+                status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
             if self.state.jwt_relation:
-                status_list.append(GeneralStatuses.JWT_RELATION_INVALID.value)
+                status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
         elif self.state.jwt_relation:
             try:
                 self.state.jwt.auth_configuration
             except ValidationError:
-                status_list.append(GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value)
+                status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)

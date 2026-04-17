@@ -20,7 +20,7 @@ from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.common.statuses import GeneralStatuses
+from opensearch_single_kernel.common.statuses import JwtStatuses
 from opensearch_single_kernel.core.models import DeploymentType
 
 if TYPE_CHECKING:
@@ -59,12 +59,7 @@ class JWTEventsHandler(Object):
             # this is a safeguard to avoid different sources for applying security configuration
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
-                    GeneralStatuses.JWT_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
-                self.charm.state.remove_status_if_present(
-                    GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    JwtStatuses.JWT_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -84,12 +79,12 @@ class JWTEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.remove_status_if_present(
-                    GeneralStatuses.JWT_RELATION_INVALID.value,
+                    JwtStatuses.JWT_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
                 self.charm.state.remove_status_if_present(
-                    GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -118,12 +113,12 @@ class JWTEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
-                    GeneralStatuses.JWT_RELATION_INVALID.value,
+                    JwtStatuses.JWT_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
                 self.charm.state.remove_status_if_present(
-                    GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -143,7 +138,7 @@ class JWTEventsHandler(Object):
             logger.error(f"Validation failed for JWT authentication config: {e}")
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
-                    GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -151,7 +146,7 @@ class JWTEventsHandler(Object):
 
         if self.charm.unit.is_leader():
             self.charm.state.remove_status_if_present(
-                GeneralStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
                 "app",
                 self.charm.cluster_manager.name,
             )

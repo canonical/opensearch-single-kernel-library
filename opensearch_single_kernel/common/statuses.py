@@ -35,18 +35,6 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
-    OAUTH_RELATION_INVALID = StatusObject(
-        status="blocked",
-        message="OAuth relation must be created with Main-cluster-orchestrator",
-    )
-    JWT_RELATION_INVALID = StatusObject(
-        status="blocked",
-        message="JWT relation must be created with Main-cluster-orchestrator.",
-    )
-    JWT_AUTH_CONFIG_INVALID = StatusObject(
-        status="blocked",
-        message="Configuration for JWT authentication is invalid. Check and correct parameters.",
-    )
 
 
 class HealthStatuses(Enum):
@@ -234,4 +222,26 @@ class SnapshotsStatuses(Enum):
         status="maintenance",
         message="restore in progress...",
         running="blocking",
+    )
+
+
+class OAuthStatuses(Enum):
+    """Collection of charm statuses related to OAuth relation."""
+
+    OAUTH_RELATION_INVALID = StatusObject(
+        status="blocked",
+        message="OAuth relation must be created with Main-cluster-orchestrator",
+    )
+
+
+class JwtStatuses(Enum):
+    """Collection of charm statuses related to JWT relation."""
+
+    JWT_RELATION_INVALID = StatusObject(
+        status="blocked",
+        message="JWT relation must be created with Main-cluster-orchestrator.",
+    )
+    JWT_AUTH_CONFIG_INVALID = StatusObject(
+        status="blocked",
+        message="Configuration for JWT authentication is invalid. Check and correct parameters.",
     )

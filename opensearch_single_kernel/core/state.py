@@ -823,7 +823,15 @@ class LockServerState(RelationState):
 class ClusterState(Object, StatusesStateProtocol):
     """The global OpenSearch Cluster State ."""
 
-    def __init__(self, charm: "OpenSearchBaseCharm", substrate: Substrates):
+    def __init__(
+        self,
+        charm: "OpenSearchBaseCharm",
+        substrate: Substrates,
+        smtp_requires: SmtpRequires,
+        s3_requirer: S3Requirer,
+        azure_requires: AzureStorageRequires,
+        gcs_requires: GcsStorageRequires,
+    ):
         super().__init__(charm, "cluster_state")
         self.config = charm.config
         self.substrate = substrate
@@ -839,10 +847,10 @@ class ClusterState(Object, StatusesStateProtocol):
             model=charm.model, relation_name=CLIENT_RELATION
         )
 
-        self.smtp_requires = SmtpRequires(charm, SMTP_RELATION)
-        self.s3_requirer = S3Requirer(charm, S3_RELATION)
-        self.azure_requirer = AzureStorageRequires(charm, AZURE_RELATION)
-        self.gcs_requirer = GcsStorageRequires(charm, GCS_RELATION)
+        self.smtp_requires = smtp_requires
+        self.s3_requirer = s3_requirer
+        self.azure_requires = azure_requires
+        self.gcs_requires = gcs_requires
 
     # -- Relations
 
@@ -890,6 +898,21 @@ class ClusterState(Object, StatusesStateProtocol):
     def external_client_relations(self) -> set[Relation]:
         """Get OpenSearch client relation."""
         return self.model.relations[CLIENT_RELATION]
+
+    @property
+    def jwt_relation(self) -> Relation | None:
+        """Get JWT relation."""
+        return self.model.get_relation(JWT_CONFIG_RELATION)
+
+    @property
+    def oauth_relation(self) -> Relation | None:
+        """Get OAuth relation."""
+        return self.model.get_relation(OAUTH_RELATION)
+
+    @property
+    def smtp_relations(self) -> list[Relation]:
+        """Get SMTP relations."""
+        return self.model.relations.get(SMTP_RELATION, [])
 
     @property
     def peer_cluster_orchestrator(self) -> PeerCluster:
@@ -1273,11 +1296,6 @@ class ClusterState(Object, StatusesStateProtocol):
         )
 
     @property
-    def jwt_relation(self) -> Relation | None:
-        """Get JWT relation."""
-        return self.model.get_relation(JWT_CONFIG_RELATION)
-
-    @property
     def jwt(self) -> JwtState:
         """Get JWT state."""
         return JwtState(
@@ -1285,11 +1303,6 @@ class ClusterState(Object, StatusesStateProtocol):
             data_interface=JwtData(self.model, JWT_CONFIG_RELATION),
             component=self.model.app,
         )
-
-    @property
-    def oauth_relation(self) -> Relation | None:
-        """Get OAuth relation."""
-        return self.model.get_relation(OAUTH_RELATION)
 
     @property
     def server_lock(self) -> LockServerState:
@@ -1342,11 +1355,6 @@ class ClusterState(Object, StatusesStateProtocol):
             component=self.model.app,
             unit_name=self.unit_name,
         )
-
-    @property
-    def smtp_relations(self) -> list[Relation]:
-        """Get SMTP relations."""
-        return self.model.relations.get(SMTP_RELATION, [])
 
     def add_status_if_not_present(
         self,
@@ -1470,11 +1478,11 @@ class ClusterState(Object, StatusesStateProtocol):
             case ObjectStorageType.S3:
                 return self.s3_requirer.get_s3_connection_info() or {}
             case ObjectStorageType.AZURE:
-                return self.azure_requirer.get_azure_storage_connection_info() or {}
+                return self.azure_requires.get_azure_storage_connection_info() or {}
             case ObjectStorageType.GCS:
                 if not self.gcs_relation:
                     return {}
-                return self.gcs_requirer.get_storage_connection_info(self.gcs_relation) or {}
+                return self.gcs_requires.get_storage_connection_info(self.gcs_relation) or {}
             case _:
                 raise OpenSearchInvalidStorageTypeError(
                     "Unsupported object storage type: %s" % object_storage_type

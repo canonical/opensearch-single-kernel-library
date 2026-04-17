@@ -23,7 +23,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import (
-    GeneralStatuses,
+    OAuthStatuses,
 )
 from opensearch_single_kernel.core.models import DeploymentType
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
@@ -78,7 +78,7 @@ class OAuthEventsHandler(Object):
             # this is a safeguard to avoid different sources for applying security configuration
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
-                    GeneralStatuses.OAUTH_RELATION_INVALID.value,
+                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -95,7 +95,7 @@ class OAuthEventsHandler(Object):
             # this is a safeguard to avoid different sources for applying security configuration
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
-                    GeneralStatuses.OAUTH_RELATION_INVALID.value,
+                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )
@@ -146,7 +146,7 @@ class OAuthEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.remove_status_if_present(
-                    GeneralStatuses.OAUTH_RELATION_INVALID.value,
+                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
                     "app",
                     self.charm.cluster_manager.name,
                 )

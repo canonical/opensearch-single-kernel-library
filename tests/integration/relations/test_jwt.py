@@ -16,7 +16,7 @@ from pytest_operator.plugin import OpsTest
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses
+from opensearch_single_kernel.common.statuses import JwtStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -206,7 +206,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
         ops_test,
         apps=[DATA_APP],
         apps_statuses={
-            DATA_APP: [GeneralStatuses.JWT_RELATION_INVALID.value],
+            DATA_APP: [JwtStatuses.JWT_RELATION_INVALID.value],
         },
         wait_for_exact_units={DATA_APP: 3},
     )

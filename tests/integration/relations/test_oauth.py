@@ -17,7 +17,7 @@ from oauth_tools import (
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import (
-    GeneralStatuses,
+    OAuthStatuses,
 )
 from tests.integration.conftest import CONFIG_OPTS
 from tests.integration.helpers import get_leader_unit_ip, wait_until
@@ -341,7 +341,7 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
         ops_test,
         apps=[DATA_APP],
         apps_statuses={
-            DATA_APP: [GeneralStatuses.OAUTH_RELATION_INVALID.value],
+            DATA_APP: [OAuthStatuses.OAUTH_RELATION_INVALID.value],
         },
         wait_for_exact_units={DATA_APP: 3},
     )

@@ -13,7 +13,11 @@ from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import EventSource
 
 from opensearch_single_kernel.common.constants import (
+    AZURE_RELATION,
+    GCS_RELATION,
     PEER_RELATION,
+    S3_RELATION,
+    SMTP_RELATION,
     Scope,
     Substrates,
 )
@@ -40,6 +44,14 @@ from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
+    AzureStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
+    GcsStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
@@ -71,7 +83,14 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         super().__init__(*args)
 
         # State
-        self.state = ClusterState(self, self.substrate)
+        self.state = ClusterState(
+            self,
+            self.substrate,
+            SmtpRequires(self, SMTP_RELATION),
+            S3Requirer(self, S3_RELATION),
+            AzureStorageRequires(self, AZURE_RELATION),
+            GcsStorageRequires(self, GCS_RELATION),
+        )
 
         # Managers
         self.tls_manager = TlsManager(self.state, self.workload)

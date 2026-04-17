@@ -32,8 +32,8 @@ def test_on_leader_elected(harness, mocker):
     put_or_update_internal_user_leader = mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
-    add_status = mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    set_running_status = mocker.patch(
+        "data_platform_helpers.advanced_statuses.StatusHandler.set_running_status"
     )
 
     harness.set_leader(True)
@@ -49,12 +49,12 @@ def test_on_leader_elected(harness, mocker):
         ],
         any_order=True,
     )
-    add_status.assert_has_calls(
+    set_running_status.assert_has_calls(
         [
             call(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
-                harness.charm.internal_users_manager.name,
+                component_name=harness.charm.internal_users_manager.name,
             )
         ]
     )
@@ -62,7 +62,7 @@ def test_on_leader_elected(harness, mocker):
     # Reset mocks
     purge_initial_default_users.reset_mock()
     put_or_update_internal_user_leader.reset_mock()
-    add_status.reset_mock()
+    set_running_status.reset_mock()
 
     # Set admin user initialized
     harness.charm.state.application.is_admin_user_initialized = True
@@ -76,7 +76,7 @@ def test_on_leader_elected(harness, mocker):
         ],
         any_order=True,
     )
-    add_status.assert_not_called()
+    set_running_status.assert_not_called()
 
 
 def test_on_leader_elected_index_initialised(harness, mocker):
