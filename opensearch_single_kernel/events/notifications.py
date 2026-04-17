@@ -40,7 +40,6 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SmtpDataAvailableEvent,
 )
 from opensearch_single_kernel.utils.helpers import decode_plugin_secret_content
-from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
