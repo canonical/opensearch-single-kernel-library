@@ -1459,11 +1459,7 @@ class ClusterState(Object, StatusesStateProtocol):
         regex_pattern = re.sub(
             r"\{.*?\}",
             r"(?s:.*?)",
-            (
-                format_status(status, interpolated_parameters)
-                if interpolated_parameters
-                else status
-            ).message,
+            format_status(status, interpolated_parameters).message,
         )
         for present_status in self.statuses.get(scope, component):
             if re.fullmatch(regex_pattern, present_status.message) is not None:
