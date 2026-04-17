@@ -119,7 +119,6 @@ class NotificationsStatuses(Enum):
     SMTP_CONFIGURATION_ERROR = StatusObject(
         status="blocked",
         message="SMTP relation {id} configuration failed. Check smtp-integrator and unit logs.",
-        running="async",
     )
     SMTP_MISSING_REQUIRED_PARAMETERS = StatusObject(
         status="blocked", message="SMTP relation {id} parameters missing: {params}."
@@ -140,17 +139,14 @@ class ExternalClientsStatuses(Enum):
     INDEX_CREATION_FAILED = StatusObject(
         status="blocked",
         message="Failed to create {index} index on client relation {id} - see the logs...",
-        running="async",
     )
     INVALID_INDEX_NAME = StatusObject(
         status="blocked",
         message="Invalid index name on client relation {id}: {index}",
-        running="async",
     )
     USER_CREATION_FAILED = StatusObject(
         status="blocked",
         message="Failed to create users for client relation {id}",
-        running="async",
     )
 
 

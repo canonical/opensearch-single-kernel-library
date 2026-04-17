@@ -78,14 +78,11 @@ class ExternalClientsEventsHandler(Object):
             return
 
         if not validate_index_name(event.index):
-            self.charm.status_handler.set_running_status(
-                format_status(
-                    ExternalClientsStatuses.INVALID_INDEX_NAME.value,
-                    {"id": event.relation.id, "index": event.index},
-                ),
+            self.charm.state.add_status_if_not_present(
+                ExternalClientsStatuses.INVALID_INDEX_NAME.value,
                 "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.external_clients_manager.name,
+                self.charm.external_clients_manager.name,
+                dynamic_params={"id": event.relation.id, "index": event.index},
             )
             return
         self.charm.state.remove_status_if_present(
@@ -108,14 +105,11 @@ class ExternalClientsEventsHandler(Object):
             logger.error(
                 f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
             )
-            self.charm.status_handler.set_running_status(
-                format_status(
-                    ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
-                    {"id": event.relation.id, "index": event.index},
-                ),
+            self.charm.state.add_status_if_not_present(
+                ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
                 "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.external_clients_manager.name,
+                self.charm.external_clients_manager.name,
+                dynamic_params={"id": event.relation.id, "index": event.index},
             )
             event.defer()
             return
@@ -133,13 +127,11 @@ class ExternalClientsEventsHandler(Object):
             )
         except OpenSearchUserMgmtError as err:
             logger.error(err)
-            self.charm.status_handler.set_running_status(
-                format_status(
-                    ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": event.relation.id}
-                ),
+            self.charm.state.add_status_if_not_present(
+                ExternalClientsStatuses.USER_CREATION_FAILED.value,
                 "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.external_clients_manager.name,
+                self.charm.external_clients_manager.name,
+                dynamic_params={"id": event.relation.id},
             )
             event.defer()
             return

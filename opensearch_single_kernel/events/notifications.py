@@ -174,14 +174,11 @@ class NotificationsEvents(Object):
                     config.smtp_account_id,
                     str(e),
                 )
-                self.charm.status_handler.set_running_status(
-                    format_status(
-                        NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                        {"id": event.relation.id},
-                    ),
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
                     "app",
-                    statuses_state=self.charm.state.statuses,
-                    component_name=self.charm.notifications_manager.name,
+                    self.charm.notifications_manager.name,
+                    dynamic_params={"id": event.relation.id},
                 )
                 event.defer()
                 return
@@ -243,14 +240,11 @@ class NotificationsEvents(Object):
                     config.group_id,
                     str(e),
                 )
-                self.charm.status_handler.set_running_status(
-                    format_status(
-                        NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                        {"id": event.relation.id},
-                    ),
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
                     "app",
-                    statuses_state=self.charm.state.statuses,
-                    component_name=self.charm.notifications_manager.name,
+                    self.charm.notifications_manager.name,
+                    dynamic_params={"id": event.relation.id},
                 )
                 event.defer()
                 return

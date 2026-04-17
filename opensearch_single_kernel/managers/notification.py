@@ -21,6 +21,7 @@ from opensearch_single_kernel.common.constants import (
     SmtpTransportSecurity,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -278,8 +279,28 @@ class NotificationsManager(BaseManager):
                     )
                 )
                 return
-            self.get_smtp_config(smtp_data, relation.id)
-            if not smtp_data.recipients:
+            config = self.get_smtp_config(smtp_data, relation.id)
+
+            self.put_smtp_sender(
+                smtp_account_id=config.smtp_account_id,
+                host=smtp_data.host,
+                port=smtp_data.port,
+                transport_security=config.transport_security,
+                from_address=config.sender_email,
+            )
+
+            if smtp_data.recipients:
+                self.put_email_group(
+                    group_id=config.group_id,
+                    recipients=[str(r) for r in smtp_data.recipients],
+                )
+                self.put_email_channel(
+                    channel_id=config.channel_id,
+                    smtp_account_id=config.smtp_account_id,
+                    email_group_ids=[config.group_id],
+                    fallback_recipients=[],
+                )
+            else:
                 status_list.append(
                     format_status(
                         NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
@@ -302,4 +323,11 @@ class NotificationsManager(BaseManager):
                         "params": ", ".join(e.missing_parameters),
                     },
                 )
+            )
+        except OpenSearchHttpError:
+            status_list.append(
+                format_status(
+                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+                    {"id": relation.id},
+                ),
             )
