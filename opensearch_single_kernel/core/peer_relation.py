@@ -419,7 +419,7 @@ class OpenSearchApplication(RelationState):
         self.update({"update-ts": str(timestamp)})
 
     @property
-    def delete_voting_exclusions(self) -> set[str]:
+    def voting_exclusions_to_delete(self) -> set[str]:
         """Return the value of 'delete_voting_exclusions' from application databag."""
         return set(
             filter(
@@ -428,8 +428,8 @@ class OpenSearchApplication(RelationState):
             )
         )
 
-    @delete_voting_exclusions.setter
-    def delete_voting_exclusions(self, value: set[str]) -> None:
+    @voting_exclusions_to_delete.setter
+    def voting_exclusions_to_delete(self, value: set[str]) -> None:
         """Set the value of 'delete_voting_exclusions' in application databag."""
         self.update({"delete-voting-exclusions": ",".join(value)})
 

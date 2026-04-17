@@ -149,7 +149,9 @@ class PeerClusterEventsHandler(Object):
 
         self.charm.peer_cluster_orchestrator_manager.reconcile_security_index_initialised()
         # Reconcile the first data node in the cluster
-        if first_data_node := self.first_data_node_in_all_clusters:
+        if (
+            first_data_node := self.charm.peer_cluster_orchestrator_manager.first_data_node_in_all_clusters
+        ):
             self.state.application.first_data_node = first_data_node
 
         # fetch emitting app planned units and broadcast

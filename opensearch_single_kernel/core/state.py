@@ -650,11 +650,11 @@ class ClusterState(Object):
 
     def get_local_first_data_node(self) -> str | None:
         """Get first data node from the local app relation data."""
-        orchestrators = self.state.application.orchestrators
+        orchestrators = self.application.orchestrators
 
         if orchestrators.main_app is None:
             return None
-        peer_cluster = self.state.peer_cluster_by_relation_id(
+        peer_cluster = self.peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id
         )
         if not peer_cluster:

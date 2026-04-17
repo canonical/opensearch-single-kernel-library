@@ -166,8 +166,8 @@ class NodesExclusionsManager(BaseManager):
                 alt_hosts=self.alt_hosts,
             )
             if scope == Scope.APP:
-                self.state.application.delete_voting_exclusions = to_add.union(
-                    self.state.application.delete_voting_exclusions
+                self.state.application.voting_exclusions_to_delete = to_add.union(
+                    self.state.application.voting_exclusions_to_delete
                 )
             else:
                 self.state.server.voting_exclusions_to_delete = to_add.union(
@@ -233,8 +233,8 @@ class NodesExclusionsManager(BaseManager):
 
             # Finally, we clean up the VOTING_TO_DELETE
             if scope == Scope.APP:
-                self.state.application.delete_voting_exclusions = (
-                    self.state.application.delete_voting_exclusions - exclusions
+                self.state.application.voting_exclusions_to_delete = (
+                    self.state.application.voting_exclusions_to_delete - exclusions
                 )
             else:
                 self.state.server.voting_exclusions_to_delete = (
