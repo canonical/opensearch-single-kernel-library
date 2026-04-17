@@ -32,12 +32,9 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import CharmStatuses
 from opensearch_single_kernel.core.models import (
-    AzureRelData,
     AzureRelDataCredentials,
-    GcsRelData,
     GcsRelDataCredentials,
-    ObjectStorageConfig,
-    S3RelData,
+    ObjectStorageCredentials,
     S3RelDataCredentials,
 )
 from opensearch_single_kernel.events.custom_events import (
@@ -193,7 +190,14 @@ class SnapshotsEventsHandler(Object):
         # Update backup credentials
         # Catch file operation exceptions
         try:
-            self.update_stored_credentials(object_storage_type, object_storage_config)
+            match object_storage_type:
+                case ObjectStorageType.S3:
+                    object_storage_credentials = object_storage_config.s3.credentials
+                case ObjectStorageType.AZURE:
+                    object_storage_credentials = object_storage_config.azure.credentials
+                case ObjectStorageType.GCS:
+                    object_storage_credentials = object_storage_config.gcs.credentials
+            self.update_stored_credentials(object_storage_type, object_storage_credentials)
         except OpenSearchFileOperationError:
             logger.error("Failed to update stored backup credentials.")
             return
@@ -499,26 +503,19 @@ class SnapshotsEventsHandler(Object):
             if self.charm.snapshots_manager.s3_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.S3
                 s3_credentials = self.charm.snapshots_manager.s3_info_from_peer_cluster
-                s3_rel_data = S3RelData(**{"s3-creds": S3RelDataCredentials(**s3_credentials)})
-                object_storage_config = ObjectStorageConfig(s3=s3_rel_data)
+                object_storage_credentials = S3RelDataCredentials(**s3_credentials)
             elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.AZURE
                 azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
-                azure_rel_data = AzureRelData(
-                    **{"azure-creds": AzureRelDataCredentials(**azure_credentials)}
-                )
-                object_storage_config = ObjectStorageConfig(azure=azure_rel_data)
+                object_storage_credentials = AzureRelDataCredentials(**azure_credentials)
             elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.GCS
                 gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
-                gcs_rel_data = GcsRelData(
-                    **{"gcs-creds": GcsRelDataCredentials(**gcs_credentials)}
-                )
-                object_storage_config = ObjectStorageConfig(gcs=gcs_rel_data)
+                object_storage_credentials = GcsRelDataCredentials(**gcs_credentials)
 
             try:
                 self.update_stored_credentials(
-                    object_storage_type, object_storage_config=object_storage_config
+                    object_storage_type, object_storage_credentials=object_storage_credentials
                 )
             except OpenSearchFileOperationError:
                 logger.error("Failed to update stored backup credentials.")
@@ -701,33 +698,41 @@ class SnapshotsEventsHandler(Object):
                 )
 
     def update_stored_credentials(
-        self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
+        self,
+        object_storage_type: ObjectStorageType,
+        object_storage_credentials: ObjectStorageCredentials,
     ) -> None:
         """Update the stored credentials."""
-        if object_storage_type == ObjectStorageType.GCS:
+        if object_storage_type == ObjectStorageType.GCS and isinstance(
+            object_storage_credentials, GcsRelDataCredentials
+        ):
             with self.charm.workload.temp_file(
                 chown="snap_daemon:root", dir=self.charm.workload.paths.conf
             ) as temp_path:
                 self.charm.snapshots_manager.write_gcs_service_account_json(
-                    secret_key=object_storage_config.gcs.credentials.secret_key, path=temp_path
+                    secret_key=object_storage_credentials.secret_key, path=temp_path
                 )
                 self.charm.keystore_manager.put_object_storage_credentials(
-                    object_storage_type, object_storage_config, gcs_file_path=temp_path
+                    object_storage_type, object_storage_credentials, gcs_file_path=temp_path
                 )
             return
 
-        if object_storage_type == ObjectStorageType.S3:
-            if object_storage_config.s3.tls_ca_chain:
+        if object_storage_type == ObjectStorageType.S3 and isinstance(
+            object_storage_credentials, S3RelDataCredentials
+        ):
+            if object_storage_credentials.s3_tls_ca_chain:
                 if not self.charm.snapshots_manager.is_custom_s3_ca_stored(
-                    object_storage_config.s3.tls_ca_chain
+                    object_storage_credentials.s3_tls_ca_chain
                 ):
                     # Content differs: rotate / store new chain
-                    self.charm.snapshots_manager.store_s3_ca(object_storage_config.s3.tls_ca_chain)
+                    self.charm.snapshots_manager.store_s3_ca(
+                        object_storage_credentials.s3_tls_ca_chain
+                    )
                     logger.info("S3 CA stored/updated.")
             else:
                 self.charm.snapshots_manager.remove_s3_ca()
         self.charm.keystore_manager.put_object_storage_credentials(
-            object_storage_type, object_storage_config
+            object_storage_type, object_storage_credentials
         )
 
     def _remove_credentials(self, object_storage_type: ObjectStorageType) -> bool:

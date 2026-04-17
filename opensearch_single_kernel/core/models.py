@@ -637,6 +637,9 @@ class GcsRelData(Model):
         return cls.parse_obj(merged)
 
 
+type ObjectStorageCredentials = S3RelDataCredentials | AzureRelDataCredentials | GcsRelDataCredentials
+
+
 class ObjectStorageConfig(Model):
     """Model class for the object storage config - for all clouds."""
 
