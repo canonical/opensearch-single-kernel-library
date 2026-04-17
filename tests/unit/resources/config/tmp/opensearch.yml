@@ -86,32 +86,11 @@
 # Require explicit names when deleting indices:
 #
 #action.destructive_requires_name: true
-discovery.seed_providers: file
-plugins.security.disabled: false
-plugins.security.ssl.http.enabled: true
-plugins.security.ssl.transport.enforce_hostname_verification: true
-plugins.security.ssl_cert_reload_enabled: true
-plugins.security.unsupported.restapi.allow_securityconfig_modification: true
-plugins.security.restapi.roles_enabled:
-- all_access
-- security_rest_api_access
-plugins.security.ssl.http.clientauth_mode: OPTIONAL
-prometheus.metric_name.prefix: opensearch_
-prometheus.indices: 'false'
-prometheus.cluster.settings: 'false'
-prometheus.nodes.filter: _local
-network.publish_host: 20.20.20.20
-cluster.name: opensearch-dev
-node.name: opensearch-0.76e
-network.host:
-- _site_
-- 10.10.10.10
-http.publish_host: 30.30.30.30
-node.roles:
-- cluster_manager
-- data
-node.attr.app_id: 8ab3beab-9c2c-4a65-a6b4-fa9cf0f663ee/opensearch
-path.data: /var/snap/opensearch/common/var/lib/opensearch
-path.logs: /var/snap/opensearch/common/var/log/opensearch
-path.home: /var/snap/opensearch/current/usr/share/opensearch
+node.attr.app_id: opensearch
 node.attr.temp: hot
+node.roles:
+- data
+- ingest
+- ml
+- coordinating_only
+- cluster_manager
