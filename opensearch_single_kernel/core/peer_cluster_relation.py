@@ -55,7 +55,7 @@ class PeerCluster(RelationState):
     @property
     def security_index_initialised(self) -> bool:
         """Return whether the security index has been initialised."""
-        return self.relation.data[self.app].get("security_index_initialised", "") == "True"
+        return self.relation.data[self.app].get("security_index_initialised", "").lower() == "true"
 
     @security_index_initialised.setter
     def security_index_initialised(self, value: bool):
@@ -65,7 +65,7 @@ class PeerCluster(RelationState):
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
+        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}"))
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     @cluster_fleet_apps.setter
@@ -253,7 +253,7 @@ class PeerCluster(RelationState):
     @main_orchestrator_registered.setter
     def main_orchestrator_registered(self, value: bool):
         """Set the value of 'main_orchestrator_registered' in the databag."""
-        self.update({"main_orchestrator_registered": str(value).lower()})
+        self.update({"main_orchestrator_registered": str(value)})
 
     @main_orchestrator_registered.deleter
     def main_orchestrator_registered(self):
@@ -271,7 +271,7 @@ class PeerClusterServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -281,7 +281,7 @@ class PeerClusterServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation.data[self.unit].get("tls_ca_renewed", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -291,7 +291,7 @@ class PeerClusterServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation.data[self.unit].get("tls_configured", "") == "True"
+        return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):

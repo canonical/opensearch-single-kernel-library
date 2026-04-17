@@ -608,9 +608,9 @@ class ClusterState(Object):
         if (
             deployment_desc := self.application.deployment_desc
         ).start == StartMode.WITH_PROVIDED_ROLES:
-            computed_roles = deployment_desc.config.roles
+            computed_roles = deployment_desc.config.roles.copy()
         else:
-            computed_roles = GENERATED_ROLES
+            computed_roles = GENERATED_ROLES.copy()
 
         # If the failover orchestrator is the only data node in the cluster, remove the
         # cluster-manager role from it to avoid it bootstrapping the cluster
@@ -647,6 +647,20 @@ class ClusterState(Object):
                 for cluster_fleet_app in cluster_fleet_apps.values()
             )
         )
+
+    def get_local_first_data_node(self) -> str | None:
+        """Get first data node from the local app relation data."""
+        orchestrators = self.state.application.orchestrators
+
+        if orchestrators.main_app is None:
+            return None
+        peer_cluster = self.state.peer_cluster_by_relation_id(
+            is_provider=False, relation_id=orchestrators.main_rel_id
+        )
+        if not peer_cluster:
+            return None
+
+        return peer_cluster.first_data_node
 
     @property
     def jwt_relation(self) -> Relation | None:

@@ -148,7 +148,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         self.charm.peer_cluster_orchestrator_manager.reconcile_security_index_initialised()
-        self.charm.peer_cluster_orchestrator_manager.reconcile_first_data_node()
+        # Reconcile the first data node in the cluster
+        if first_data_node := self.first_data_node_in_all_clusters:
+            self.state.application.first_data_node = first_data_node
 
         # fetch emitting app planned units and broadcast
         related_peer_cluster_app = PeerClusterApp.from_str(data.get("app"))
@@ -227,6 +229,7 @@ class PeerClusterEventsHandler(Object):
         # Remove the cluster_fleet_app
         cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
         cluster_fleet_apps.pop(trigger_app.app.id, None)
+        self.charm.state.application.cluster_fleet_apps = cluster_fleet_apps
 
         # Update the orchestrators
         orchestrators = self.charm.state.application.orchestrators

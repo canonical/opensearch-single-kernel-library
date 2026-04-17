@@ -481,11 +481,6 @@ class PeerClusterOrchestratorManager(BaseManager):
             # clean up the first data node attribute when security index is initialised
             del self.state.application.first_data_node
 
-    def reconcile_first_data_node(self) -> None:
-        """Check if we can get first_data_node from the other clusters."""
-        if first_data_node := self.first_data_node_in_all_clusters:
-            self.state.application.first_data_node = first_data_node
-
     def broadcast_new_failover_app(self, peer_cluster_app: PeerClusterApp) -> None:
         """Broadcasts the new failover in all the cluster fleet"""
         candidate_failover_app = peer_cluster_app.app

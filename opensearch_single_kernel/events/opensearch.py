@@ -683,7 +683,7 @@ class OpenSearchEventsHandler(Object):
         if (
             is_leader_unit
             and self.charm.cluster_manager.is_peer_cluster_consumer()
-            and (local_first_data_node := self.charm.cluster_manager.get_local_first_data_node())
+            and (local_first_data_node := self.charm.state.get_local_first_data_node())
         ):
             # lock requested
             if not (
@@ -805,7 +805,7 @@ class OpenSearchEventsHandler(Object):
                 and self.charm.state.is_failover_and_sole_data_app()
                 and not self.charm.state.application.is_security_index_initialised
             ):
-                del self.charm.state.server.is_cluster_manager_removed
+                self.charm.state.server.is_cluster_manager_removed = True
                 computed_roles.remove("cluster-manager")
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
             cm_ips = self.charm.cluster_manager.get_cluster_managers_ips(nodes)

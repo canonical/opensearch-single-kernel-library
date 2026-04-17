@@ -86,7 +86,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_bootstrap_contributor(self) -> bool:
         """Get value of 'bootstrap_contributor'"""
-        return self.relation_data.get("bootstrap_contributor", "") == "True"
+        return self.relation_data.get("bootstrap_contributor", "").lower() == "true"
 
     @is_bootstrap_contributor.setter
     def is_bootstrap_contributor(self, value: bool):
@@ -96,7 +96,7 @@ class OpenSearchServer(RelationState):
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
-        return self.relation_data.get("cluster_manager_removed", "") == "True"
+        return self.relation_data.get("cluster_manager_removed", "").lower() == "true"
 
     @is_cluster_manager_removed.setter
     def is_cluster_manager_removed(self, value: bool):
@@ -116,7 +116,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
@@ -126,7 +126,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
-        return self.relation.data[self.unit].get("tls_ca_renewed", "") == "True"
+        return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
@@ -136,7 +136,7 @@ class OpenSearchServer(RelationState):
     @property
     def tls_configured(self) -> bool:
         """Get the value of 'tls_configured' from unit data bag."""
-        return self.relation.data[self.unit].get("tls_configured", "") == "True"
+        return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
     def tls_configured(self, value: bool):
@@ -254,7 +254,7 @@ class OpenSearchServer(RelationState):
         When current leader is unit oauth relation isn't breaking
         even if unit receives oauth relation broken event.
         """
-        return self.relation_data.get("oauth_departing", "") == "True"
+        return self.relation_data.get("oauth_departing", "").lower() == "true"
 
     @oauth_departing.setter
     def oauth_departing(self, value: bool) -> None:
@@ -313,7 +313,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_admin_user_initialized(self) -> bool:
         """Return the value of 'admin_user_initialized' in application state."""
-        return self.relation_data.get("admin_user_initialized", "") == "True"
+        return self.relation_data.get("admin_user_initialized", "").lower() == "true"
 
     @property
     def bootstrap_contributors_count(self) -> int:
@@ -333,7 +333,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "") == "True"
+        return self.relation_data.get("security_index_initialised", "").lower() == "true"
 
     @is_security_index_initialised.setter
     def is_security_index_initialised(self, value: bool) -> None:
@@ -366,8 +366,7 @@ class OpenSearchApplication(RelationState):
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
         """Return the deployment description object if any."""
-        current_deployment_desc = self.get_object("deployment-description")
-        if not current_deployment_desc:
+        if not (current_deployment_desc := self.get_object("deployment-description")):
             return None
         return DeploymentDescription.from_dict(current_deployment_desc)
 
@@ -379,7 +378,7 @@ class OpenSearchApplication(RelationState):
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
+        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}"))
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     @cluster_fleet_apps.setter
@@ -392,8 +391,7 @@ class OpenSearchApplication(RelationState):
     @property
     def cluster_fleet_apps_rels(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications from relations."""
-        cluster_fleet_apps_rels = self.get_object("cluster_fleet_apps_rels")
-        if not cluster_fleet_apps_rels:
+        if not (cluster_fleet_apps_rels := self.get_object("cluster_fleet_apps_rels")):
             return {}
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps_rels.items()}
 
@@ -408,10 +406,7 @@ class OpenSearchApplication(RelationState):
     @property
     def apps_in_fleet(self) -> list[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
-        cluster_fleet_apps = self.get_object("cluster_fleet_apps")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
+        return self.cluster_fleet_apps.values()
 
     @property
     def update_ts(self) -> str:
