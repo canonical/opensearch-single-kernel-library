@@ -104,11 +104,14 @@ class PeerLockManager(BaseManager):
         if not self.state.lock_relation:
             return
 
+        logger.debug(f"Releasing peer databag lock for {self.state.unit_name}")
+
         self.state.server_lock.lock_requested = False
+        logger.debug(f"Released peer databag lock {self.state.server_lock.lock_requested}")
         if self.state.server.is_app_leader:
-            logger.debug("[Node lock] Released peer lock as leader unit")
             # A separate relation-changed event won't get fired
             self.refresh_lock()
+            logger.debug("[Node lock] Released peer lock as leader unit")
 
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""

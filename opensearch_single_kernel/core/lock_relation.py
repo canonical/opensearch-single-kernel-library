@@ -30,6 +30,7 @@ class LockAppState(RelationState):
     ):
         super().__init__(relation, data_interface, component)
         self._unit_name = unit_name
+        self.app = component
 
     @property
     def leader_acquired_after_juju_event_id(self) -> str | None:
@@ -48,7 +49,7 @@ class LockAppState(RelationState):
     @property
     def unit_with_lock(self) -> str | None:
         """Get format name of the unit that holds the lock."""
-        return self.relation_data.get("unit-with-lock")
+        return self.relation.data[self.app].get("unit-with-lock")
 
     @unit_with_lock.setter
     def unit_with_lock(self, value: str) -> None:
@@ -64,20 +65,16 @@ class LockAppState(RelationState):
             # description for explanation on why is it needed.
             # `JUJU_CONTEXT_ID` is unique for each Juju event
             # (https://matrix.to/#/!xdClnUGkurzjxqiQcN:ubuntu.com/$yEGjGlDaIPBtCi8uB3fH6ZaXUjN7GF-Y2s9YwvtPM-o?via=ubuntu.com&via=matrix.org&via=cutefunny.art)
-            self.update(
+            self.relation.data[self.app].update(
                 {"leader-acquired-lock-after-juju-event-id": os.environ["JUJU_CONTEXT_ID"]}
             )
-        self.update({"unit-with-lock": value})
+        self.relation.data[self.app].update({"unit-with-lock": value})
 
     @unit_with_lock.deleter
     def unit_with_lock(self) -> None:
         """Remove lock assignment from the units and clear leader_acquired_after_juju_event_id."""
-        self.relation_data.update(
-            {
-                "unit-with-lock": "",
-                "leader-acquired-lock-after-juju-event-id": "",
-            }
-        )
+        self.relation.data[self.app].pop("unit-with-lock", None)
+        self.relation.data[self.app].pop("leader-acquired-lock-after-juju-event-id", None)
 
 
 class LockServerState(RelationState):
@@ -100,7 +97,10 @@ class LockServerState(RelationState):
     @lock_requested.setter
     def lock_requested(self, value: bool) -> None:
         """Set whether the lock is requested by unit."""
-        self.update({"lock_requested": str(value) if value else ""})
+        if not value:
+            self.relation.data[self.unit].pop("lock_requested", None)
+        else:
+            self.relation.data[self.unit].update({"lock_requested": str(value)})
 
     def trigger_relation_changed(self) -> None:
         """Trigger relation changed event on other units by writing to dummy field."""

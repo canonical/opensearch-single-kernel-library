@@ -302,10 +302,10 @@ class PeerClusterEventsHandler(Object):
 
         logger.debug(f"Orchestrators: {orchestrators}")
         if is_failover_promoted(orchestrators):
-            orchestrators.delete("failover")
             self.charm.peer_cluster_manager.remove_main_orchestrator_registered(
                 orchestrators.failover_rel_id
             )
+            orchestrators.delete("failover")
 
         if orchestrators.failover_app:
             # should we add a check where the failover rel has data while the main has none yet?
