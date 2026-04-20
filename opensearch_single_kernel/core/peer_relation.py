@@ -123,6 +123,11 @@ class OpenSearchServer(RelationState):
         """Update value of tls_ca_renewing from unit state."""
         self.update({"tls_ca_renewing": str(value)})
 
+    @tls_ca_renewing.deleter
+    def tls_ca_renewing(self):
+        """Remove value of 'tls_ca_renewing' from unit state."""
+        self.update({"tls_ca_renewing": ""})
+
     @property
     def tls_ca_renewed(self) -> bool:
         """Get the value of 'tls_ca_renewed' from unit data bag"""
@@ -132,6 +137,11 @@ class OpenSearchServer(RelationState):
     def tls_ca_renewed(self, value: bool):
         """Update value of 'tls_ca_renewed'"""
         self.update({"tls_ca_renewed": str(value)})
+
+    @tls_ca_renewed.deleter
+    def tls_ca_renewed(self):
+        """Remove value of 'tls_ca_renewed' from unit state."""
+        self.update({"tls_ca_renewed": ""})
 
     @property
     def tls_configured(self) -> bool:

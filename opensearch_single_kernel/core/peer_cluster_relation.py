@@ -45,12 +45,12 @@ class PeerCluster(RelationState):
     @first_data_node.setter
     def first_data_node(self, value: str):
         """Set the value of 'first_data_node' in application databag."""
-        self.update({"first_data_node": value})
+        self.relation.data[self.app].update({"first_data_node": value})
 
     @first_data_node.deleter
     def first_data_node(self):
         """Delete the 'first_data_node' field to notify related clusters."""
-        self.update({"first_data_node": ""})
+        self.relation.data[self.app].pop("first_data_node", None)
 
     @property
     def security_index_initialised(self) -> bool:
@@ -60,12 +60,14 @@ class PeerCluster(RelationState):
     @security_index_initialised.setter
     def security_index_initialised(self, value: bool):
         """Set the security index initialised value."""
-        self.update({"security_index_initialised": str(value)})
+        self.relation.data[self.app].update({"security_index_initialised": str(value)})
 
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}"))
+        cluster_fleet_apps = json.loads(
+            self.relation.data[self.app].get("cluster_fleet_apps", "{}")
+        )
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
     @cluster_fleet_apps.setter
@@ -78,10 +80,10 @@ class PeerCluster(RelationState):
     @cluster_fleet_apps.deleter
     def cluster_fleet_apps(self):
         """Delete the 'cluster_fleet_apps' field to notify related clusters."""
-        if "cluster_fleet_apps" not in self.relation_data:
+        if "cluster_fleet_apps" not in self.relation.data[self.app]:
             logger.debug("No cluster_fleet_apps field found to delete.")
             return
-        del self.relation_data["cluster_fleet_apps"]
+        del self.relation.data[self.app]["cluster_fleet_apps"]
 
     @property
     def error_data(self) -> PeerClusterRelErrorData | None:
@@ -92,12 +94,12 @@ class PeerCluster(RelationState):
     @error_data.setter
     def error_data(self, error_data: PeerClusterRelErrorData):
         """Set the error data."""
-        self.update({"error_data": error_data.to_str()})
+        self.relation.data[self.app].update({"error_data": error_data.to_str()})
 
     @error_data.deleter
     def error_data(self):
         """Delete the 'error_data' field to notify related clusters."""
-        self.update({"error_data": ""})
+        self.relation.data[self.app].pop("error_data", None)
 
     def data(self, peek_secrets: bool = False) -> PeerClusterRelData:
         """Get the relation data as a PeerClusterRelData object."""
@@ -118,7 +120,7 @@ class PeerCluster(RelationState):
         )
         # we add the hash of the rel_data to only emit a change event
         # if the data has actually changed
-        self.update(
+        self.relation.data[self.app].update(
             {
                 "data": json.dumps(rel_data_redacted_dict),
             }
@@ -132,7 +134,8 @@ class PeerCluster(RelationState):
         if "data" not in self.relation.data[self.app]:
             logger.debug("No 'data' field found to delete.")
             return
-        del self.relation.data[self.app]["data"]
+
+        self.relation.data[self.app].pop("data", None)
 
     @property
     def rel_data_hash(self) -> str:
@@ -142,12 +145,12 @@ class PeerCluster(RelationState):
     @rel_data_hash.setter
     def rel_data_hash(self, value: str):
         """Set the hash of the relation data."""
-        self.update({"rel_data_hash": value})
+        self.relation.data[self.app].update({"rel_data_hash": value})
 
     @rel_data_hash.deleter
     def rel_data_hash(self):
         """Delete the 'rel_data_hash' field to notify related clusters."""
-        self.update({"rel_data_hash": ""})
+        self.relation.data[self.app].pop("rel_data_hash", None)
 
     def _protect_secrets_relation_data(
         self, rel_data: PeerClusterRelData | None
@@ -219,12 +222,12 @@ class PeerCluster(RelationState):
     @trigger.setter
     def trigger(self, value: str):
         """Set the value of 'trigger' in application databag."""
-        self.update({"trigger": value})
+        self.relation.data[self.app].update({"trigger": value})
 
     @trigger.deleter
     def trigger(self):
         """Delete the trigger field to notify related clusters."""
-        self.update({"trigger": ""})
+        self.relation.data[self.app].pop("trigger", None)
 
     @property
     def orchestrators(self) -> dict[str, Any]:
@@ -243,7 +246,7 @@ class PeerCluster(RelationState):
         if "orchestrators" not in self.relation.data[self.app]:
             logger.debug("No orchestrators field found to delete.")
             return
-        del self.relation.data[self.app]["orchestrators"]
+        self.relation.data[self.app].pop("orchestrators", None)
 
     @property
     def main_orchestrator_registered(self) -> str:
@@ -253,12 +256,12 @@ class PeerCluster(RelationState):
     @main_orchestrator_registered.setter
     def main_orchestrator_registered(self, value: bool):
         """Set the value of 'main_orchestrator_registered' in the databag."""
-        self.update({"main_orchestrator_registered": str(value)})
+        self.relation.data[self.app].update({"main_orchestrator_registered": str(value)})
 
     @main_orchestrator_registered.deleter
     def main_orchestrator_registered(self):
         """Delete the 'main_orchestrator_registered' field to notify related clusters."""
-        self.update({"main_orchestrator_registered": ""})
+        self.relation.data[self.app].pop("main_orchestrator_registered", None)
 
 
 class PeerClusterServer(RelationState):
@@ -276,7 +279,12 @@ class PeerClusterServer(RelationState):
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):
         """Update value of tls_ca_renewing from unit state."""
-        self.update({"tls_ca_renewing": str(value)})
+        self.relation.data[self.unit].update({"tls_ca_renewing": str(value)})
+
+    @tls_ca_renewing.deleter
+    def tls_ca_renewing(self):
+        """Remove value of 'tls_ca_renewing' from unit state."""
+        self.relation.data[self.unit].pop("tls_ca_renewing", None)
 
     @property
     def tls_ca_renewed(self) -> bool:
@@ -286,7 +294,12 @@ class PeerClusterServer(RelationState):
     @tls_ca_renewed.setter
     def tls_ca_renewed(self, value: bool):
         """Update value of 'tls_ca_renewed'"""
-        self.update({"tls_ca_renewed": str(value)})
+        self.relation.data[self.unit].update({"tls_ca_renewed": str(value)})
+
+    @tls_ca_renewed.deleter
+    def tls_ca_renewed(self):
+        """Remove value of 'tls_ca_renewed' from unit state."""
+        self.relation.data[self.unit].pop("tls_ca_renewed", None)
 
     @property
     def tls_configured(self) -> bool:
@@ -296,7 +309,7 @@ class PeerClusterServer(RelationState):
     @tls_configured.setter
     def tls_configured(self, value: bool):
         """Update the value of 'tls_configured'"""
-        self.update({"tls_configured": str(value)})
+        self.relation.data[self.unit].update({"tls_configured": str(value)})
 
     @property
     def snapshots_credentials_saved(self) -> str:
@@ -306,9 +319,9 @@ class PeerClusterServer(RelationState):
     @snapshots_credentials_saved.setter
     def snapshots_credentials_saved(self, value: bool):
         """Update the value of 'credentials_saved'"""
-        self.update({"credentials_saved": str(value)})
+        self.relation.data[self.unit].update({"credentials_saved": str(value)})
 
     @snapshots_credentials_saved.deleter
     def snapshots_credentials_saved(self):
         """Delete the 'credentials_saved' field to notify related clusters."""
-        self.update({"credentials_saved": ""})
+        self.relation.data[self.unit].pop("credentials_saved", None)

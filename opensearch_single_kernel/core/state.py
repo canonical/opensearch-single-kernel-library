@@ -216,8 +216,36 @@ class ClusterState(Object):
             if not must_have_units or len(rel.units) > 0
         ]
 
-    def peer_clusters_servers(self, is_provider: bool) -> list[PeerClusterServer]:
-        """Return the list of peer cluster servers for each relations."""
+    def local_peer_clusters_servers(self, is_provider: bool) -> list[PeerClusterServer]:
+        """Return the list of peer cluster servers for each relations.
+
+        This returns for each peer cluster relation, the server state object
+        for the current unit. This is used to write/read from unit databag for
+        each relation.
+        """
+        relation_name = (
+            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
+        )
+        return [
+            PeerClusterServer(
+                relation=rel,
+                data_interface=(
+                    self.peer_cluster_data_interface
+                    if not is_provider
+                    else self.peer_cluster_orchestrator_data_interface
+                ),
+                component=self.model.unit,
+            )
+            for rel in self.model.relations[relation_name]
+        ]
+
+    def related_peer_cluster_servers(self, is_provider: bool) -> list[PeerClusterServer]:
+        """Return the list of peer cluster servers for each relations.
+
+        This returns for each peer cluster relation, the server state object
+        for each unit in the relation. This include the remote units in the
+        related peer cluster, meaning we use this for reading only.
+        """
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
@@ -253,28 +281,6 @@ class ClusterState(Object):
                 component=self.model.unit,
             )
         return None
-
-    def related_peer_cluster_servers(self, is_provider: bool) -> list[PeerClusterServer]:
-        """Return the list of related peer cluster servers for each relations.
-
-        This returns the remote peer cluster servers related to the current peer-cluster.
-        """
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
-        return [
-            PeerClusterServer(
-                relation=rel,
-                data_interface=(
-                    self.peer_cluster_data_interface
-                    if not is_provider
-                    else self.peer_cluster_orchestrator_data_interface
-                ),
-                component=unit,
-            )
-            for rel in self.model.relations[relation_name]
-            for unit in rel.units
-        ]
 
     def related_peer_clusters(
         self, is_provider: bool, must_have_units: bool = True
@@ -503,17 +509,17 @@ class ClusterState(Object):
             # if the CA is not being renewed we don't have to do anything here
             return
 
-        peer_cluster_servers = self.peer_clusters_servers(
+        peer_cluster_servers = self.local_peer_clusters_servers(
             is_provider=False
-        ) + self.peer_clusters_servers(is_provider=True)
+        ) + self.local_peer_clusters_servers(is_provider=True)
         # if this flag is set, the CA rotation routine is complete for this unit
         if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster():
             # both CA rotation and certs rotation completed in the cluster
-            self.server.update({"tls_ca_renewing": ""})
-            self.server.update({"tls_ca_renewed": ""})
+            del self.server.tls_ca_renewing
+            del self.server.tls_ca_renewed
             for peer_cluster_server in peer_cluster_servers:
-                peer_cluster_server.update({"tls_ca_renewing": ""})
-                peer_cluster_server.update({"tls_ca_renewed": ""})
+                del peer_cluster_server.tls_ca_renewing
+                del peer_cluster_server.tls_ca_renewed
             return
         # this means only the CA rotation completed, still need to create certificates
         self.server.tls_ca_renewed = True

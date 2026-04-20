@@ -138,10 +138,19 @@ class PeerClusterOrchestratorManager(BaseManager):
             # if the data has actually changed
             if rel_data:
                 peer_cluster.set_data(rel_data, is_provider=True)
+            logger.debug(
+                f"boutou> Current rel error data for {peer_cluster.relation.app.name} is {peer_cluster.error_data}"
+            )
             # there is no error to broadcast - we clear any previously broadcasted error
             if not rel_err_data:
+                logger.debug(
+                    f"boutou> No rel error data to set for {peer_cluster.relation.app.name}. Deleting any existing error data."
+                )
                 del peer_cluster.error_data
             else:
+                logger.debug(
+                    f"boutou> Setting rel error data for {peer_cluster.relation.app.name} with blocked message: {rel_err_data.blocked_message}"
+                )
                 peer_cluster.error_data = rel_err_data
 
             # if no planned units, delete relation data as it won't get updated
