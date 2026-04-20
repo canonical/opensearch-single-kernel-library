@@ -12,7 +12,6 @@ from datetime import datetime
 from charmlibs.pathops import PathProtocol
 from cryptography import x509
 
-from opensearch_single_kernel.common.constants import KEYTOOL
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
@@ -68,7 +67,7 @@ def list_aliases(
         return None
 
     # we fetch the list of stored aliases
-    cmd = f"{KEYTOOL} -v -list -keystore {store_path} -storetype PKCS12"
+    cmd = f"{workload.keytool_cmd} -v -list -keystore {store_path} -storetype PKCS12"
     args = f"-storepass {store_pwd}"
 
     try:
@@ -156,7 +155,6 @@ def store_ca_chain(  # noqa: C901
     snap_user_with_write_permission: bool = False,
     add_read_perm: bool = False,
     use_sudo: bool = True,
-    keytool_cmd: str = KEYTOOL,
 ) -> bool:
     """Common implementation to store a CA chain into a PKCS12 keystore."""
     sudo_prefix = "sudo " if use_sudo else ""
@@ -181,7 +179,7 @@ def store_ca_chain(  # noqa: C901
         if keep_previous:
             try:
                 workload.run_cmd(
-                    f"{keytool_cmd} -changealias "
+                    f"{workload.keytool_cmd} -changealias "
                     f"-alias {internal_alias} -destalias {old_internal_alias} "
                     f"-keystore {store_path} -storetype PKCS12",
                     f"-storepass {store_pwd}",
@@ -203,7 +201,7 @@ def store_ca_chain(  # noqa: C901
             ) as tmp_path:
                 try:
                     workload.run_cmd(
-                        f"{keytool_cmd} -importcert -noprompt "
+                        f"{workload.keytool_cmd} -importcert -noprompt "
                         f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12",
                         f"-storepass {store_pwd}",
                     )
@@ -258,7 +256,6 @@ def remove_ca(
     alias: str,
     store_pwd: str,
     store_path: PathProtocol,
-    keytool_cmd: str = KEYTOOL,
 ) -> None:
     """Remove old CA cert from the truststore.
 
@@ -267,9 +264,8 @@ def remove_ca(
         alias: Alias to use for the CA certs.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
-        keytool_cmd: command to run the keytool command.
     """
-    list_cmd = f"{keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    list_cmd = f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
     list_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(list_cmd, list_args)
@@ -324,7 +320,7 @@ def _remove_ca_aliases(
         return
     logger.info("Aliases: %s going to be removed", ", ".join(aliases_to_remove))
     for name in aliases_to_remove:
-        del_cmd = f"{KEYTOOL} -delete -keystore {store_path} " f"-alias {name} -storetype PKCS12"
+        del_cmd = f"{workload.keytool_cmd} -delete -keystore {store_path} " f"-alias {name} -storetype PKCS12"
         del_args = f"-storepass {store_pwd}"
         try:
             workload.run_cmd(del_cmd, del_args)

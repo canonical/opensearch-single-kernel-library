@@ -222,7 +222,6 @@ CA_ALIAS = "ca"
 CA_TRUSTSTORE_P12 = "cacerts.p12"
 JDK_CACERTS_STORE_PASSWORD = "changeit"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
 OLD_CA_PREFIX = "old-"
 CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -244,13 +243,6 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detection-state",
     OPENSEARCH_NODE_LOCK_INDEX,
 ]
-# TLS
-CA_ALIAS = "ca"
-OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
-OLD_CA_PREFIX = "old-"
-CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 
 DEFAULT_EXTRA_USER_ROLE = "default"
 

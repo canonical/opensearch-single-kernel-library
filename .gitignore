@@ -68,3 +68,5 @@ terraform.rc
 
 coverage.xml
 last_written_value
+.zed
+*.log
