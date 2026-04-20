@@ -544,9 +544,9 @@ class SnapshotsManager(BaseManager):
         )
 
         # check all other clusters if they have saved the credentials
-        peer_clusters_servers = self.state.peer_clusters_servers(
+        peer_clusters_servers = self.state.related_peer_cluster_servers(
             is_provider=True
-        ) + self.state.peer_clusters_servers(is_provider=False)
+        ) + self.state.related_peer_cluster_servers(is_provider=False)
         for peer_cluster_server in peer_clusters_servers:
             if peer_cluster_server.snapshots_credentials_saved != credentials_hash:
                 logger.warning(

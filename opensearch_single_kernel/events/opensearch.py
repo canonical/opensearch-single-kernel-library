@@ -164,8 +164,6 @@ class OpenSearchEventsHandler(Object):
             logger.error("unable to get nodes")
             nodes = []
 
-        self.charm.config_manager.update_seeds_config(nodes)
-
         if self.charm.unit.is_leader():
             # we want to have the most up-to-date info broadcasted to related sub-clusters
 
@@ -182,19 +180,19 @@ class OpenSearchEventsHandler(Object):
             )
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
+            self._reconfigure_and_restart_if_needed()
             if self.charm.state.application.missing_relations:
                 # for failover promotions: this flag indicates that the user needs
                 # to relate integrators to this new main orchestrator
                 self.charm.peer_cluster_events.check_credentials_with_missing_relations()
                 if self.charm.state.peer_cluster_relations:
                     self.charm.peer_cluster_events.apply_orchestrator_status()
+
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            if self.charm.config_manager.update_opensearch_config():
-                self.charm.status.set(CharmStatuses.WAITING_TO_START)
-                logger.debug("Restarting opensearch due to reconfiguring node roles")
-                self.charm.restart_opensearch_event.emit()
+            self._reconfigure_and_restart_if_needed()
 
+        self.charm.config_manager.update_seeds_config(nodes)
         self.check_profile_missing_requirements()
 
         if not (unit_data := event.relation.data.get(event.unit)):
@@ -1287,3 +1285,10 @@ class OpenSearchEventsHandler(Object):
                 return
 
             self.request_new_admin_certificate()
+
+    def _reconfigure_and_restart_if_needed(self) -> None:
+        """Reconfigure and restart the unit if needed after a config change."""
+        if self.charm.config_manager.update_opensearch_config():
+            self.charm.status.set(CharmStatuses.WAITING_TO_START)
+            logger.debug("Restarting opensearch due to reconfiguring node roles")
+            self.charm.restart_opensearch_event.emit()

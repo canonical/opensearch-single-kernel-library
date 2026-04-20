@@ -152,7 +152,7 @@ class PeerClusterEventsHandler(Object):
         if (
             first_data_node := self.charm.peer_cluster_orchestrator_manager.first_data_node_in_all_clusters
         ):
-            self.state.application.first_data_node = first_data_node
+            self.charm.state.application.first_data_node = first_data_node
 
         # fetch emitting app planned units and broadcast
         related_peer_cluster_app = PeerClusterApp.from_str(data.get("app"))

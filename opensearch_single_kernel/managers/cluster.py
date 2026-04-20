@@ -103,6 +103,7 @@ class ClusterManager(BaseManager):
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
             self.state.application.deployment_desc = deployment_desc
             return False
+
         # update cluster deployment desc
         logger.debug("Existing deployment_desc before cluster setup: %s", current_deployment_desc)
         deployment_desc = self._existing_cluster_setup(user_config, current_deployment_desc)
@@ -113,8 +114,6 @@ class ClusterManager(BaseManager):
         # TODO: Should we add an entry on DeploymentDesc "errors" to reflect on status?
         self.state.application.deployment_desc = deployment_desc
 
-        # TODO: once peer clusters relation implemented, we should apply all directives
-        #  + removing them from queue. We currently only apply the status.
         return True
 
     def reconcile_cluster_config_with_relation_data(
@@ -623,7 +622,7 @@ class ClusterManager(BaseManager):
                 ip=node.ip,
                 app=node.app,
                 unit_number=node.unit_number,
-                temperature=node.temperature,
+                temperature=None,
             )
         logger.debug(
             "Roles after re-balancing %s",

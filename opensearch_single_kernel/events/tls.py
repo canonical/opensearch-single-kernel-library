@@ -211,9 +211,9 @@ class TLSEventsHandler(Object):
             # -> delete both tls_ca_renewing and tls_ca_renewed
             if current_stored_ca:
                 self.charm.state.server.tls_ca_renewing = True
-                peer_clusters_servers = self.charm.state.peer_clusters_servers(
+                peer_clusters_servers = self.charm.state.local_peer_clusters_servers(
                     is_provider=True
-                ) + self.charm.state.peer_clusters_servers(is_provider=False)
+                ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
                 for peer_cluster_server in peer_clusters_servers:
                     peer_cluster_server.tls_ca_renewing = True
                 self.on_tls_ca_rotation()
@@ -293,9 +293,9 @@ class TLSEventsHandler(Object):
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
         self.charm.state.server.update({"tls_configured": ""})
-        peer_clusters_servers = self.charm.state.peer_clusters_servers(
+        peer_clusters_servers = self.charm.state.local_peer_clusters_servers(
             is_provider=True
-        ) + self.charm.state.peer_clusters_servers(is_provider=False)
+        ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
         for peer_cluster_server in peer_clusters_servers:
             del peer_cluster_server.tls_configured
         try:
