@@ -728,7 +728,6 @@ class TlsManager(BaseManager):
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=cert_secrets.get("ca-cert"),
             keep_previous=True,
-            keytool_cmd=self.workload.keytool_cmd,
             use_sudo=self.state.substrate == Substrates.VM,
         ):
             return False
