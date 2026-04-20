@@ -704,7 +704,6 @@ class TlsManager(BaseManager):
                 alias=alias,
                 store_pwd=trust_store_pwd,
                 store_path=trust_store_path,
-                keytool_cmd=self.workload.keytool_cmd,
             )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
