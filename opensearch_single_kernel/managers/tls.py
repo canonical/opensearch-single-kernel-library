@@ -551,7 +551,7 @@ class TlsManager(BaseManager):
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             # create_store_pwd=False, passwords should already be in secrets
             # don't mutate secrets here
-            self.store_new_ca(admin_secrets, create_store_pwd=False)
+            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False)
 
         # recreate PKCS12 stores for all cert types we might need on startup.
         for scope, cert_type in [
