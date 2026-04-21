@@ -881,10 +881,10 @@ class OpenSearchClient:
         chain_path = self.workload.paths.certs / "chain.pem"
         try:
             if chain_path.exists():
-                chain_content = self.workload.read_text(chain_path)
-                if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
-                    self.workload.write_text(content=chain_content, path=staged_path, mode=0o644)
-                    return staged_path.as_posix()
+                self.workload.write_text(
+                    content=self.workload.read_text(chain_path), path=staged_path, mode=0o644
+                )
+                return staged_path.as_posix()
         except OpenSearchFileOperationError as e:
             logger.warning(
                 "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
@@ -894,12 +894,7 @@ class OpenSearchClient:
 
         # workload-side chain.pem unavailable, use last staged copy.
         if staged_path.exists():
-            try:
-                cached = staged_path.read_text()
-            except OSError:
-                cached = ""
-            if "BEGIN CERTIFICATE" in cached:
-                return staged_path.as_posix()
+            return staged_path.as_posix()
 
         raise OpenSearchHttpError(response_text="chain.pem not available yet")
 
