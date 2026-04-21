@@ -1198,7 +1198,7 @@ class ClusterState(Object):
     @property
     def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
-        # During early lifecycle (first pebble-ready), the deployment description may not
+        # During early lifecycle, the deployment description may not
         # be computed yet, callers should handle None.
         if not (deployment_desc := self.application.deployment_desc):
             return None

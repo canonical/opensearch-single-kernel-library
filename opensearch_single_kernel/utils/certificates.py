@@ -265,7 +265,9 @@ def remove_ca(
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
     """
-    list_cmd = f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    list_cmd = (
+        f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    )
     list_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(list_cmd, list_args)
@@ -320,7 +322,10 @@ def _remove_ca_aliases(
         return
     logger.info("Aliases: %s going to be removed", ", ".join(aliases_to_remove))
     for name in aliases_to_remove:
-        del_cmd = f"{workload.keytool_cmd} -delete -keystore {store_path} " f"-alias {name} -storetype PKCS12"
+        del_cmd = (
+            f"{workload.keytool_cmd} -delete -keystore {store_path} "
+            f"-alias {name} -storetype PKCS12"
+        )
         del_args = f"-storepass {store_pwd}"
         try:
             workload.run_cmd(del_cmd, del_args)

@@ -442,7 +442,6 @@ class OpenSearchEventsHandler(Object):
     def _on_install(self, event: InstallEvent) -> None:
         """Event handler for install event."""
         # For VM: install snap package
-        # For K8s: container preparation is handled in pebble-ready.
         if self.charm.state.substrate == Substrates.K8S:
             return
 
@@ -460,15 +459,13 @@ class OpenSearchEventsHandler(Object):
             logger.warning("Workload not ready for config changed, deferring.")
             event.defer()
             return
-        if self.charm.substrate == Substrates.VM:
-            # This concern only VM substrate
-            if (
-                self.charm.state.server.last_host_ip
-                and self.charm.state.host_ip != self.charm.state.server.last_host_ip
-            ):
-                self.charm.config_manager.update_opensearch_config()
-                # This happens when the unit IP has changed
-                self.on_unit_ip_changed(event)
+        if self.charm.substrate == Substrates.VM and (
+            self.charm.state.server.last_host_ip
+            and self.charm.state.host_ip != self.charm.state.server.last_host_ip
+        ):
+            self.charm.config_manager.update_opensearch_config()
+            # This happens when the unit IP has changed
+            self.on_unit_ip_changed(event)
 
         if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
             if (

@@ -205,19 +205,6 @@ class K8sWorkload(BaseWorkload):
             logger.warning("Failed to configure pebble plan: %s", e)
             # this might be called before container is ready
 
-    def prepare_container(self) -> None:
-        """Prepare the K8s workload container once it is connectable.
-
-        This is the only place where we apply:
-        - directory ownership/permissions
-        - pebble plan configuration
-        """
-        try:
-            self._configure_pebble_plan(enable_checks=False)
-        except ModelError as e:
-            logger.error("Failed to prepare container on pebble-ready: %s", e)
-            raise OpenSearchContainerPrepareError() from e
-
     def _build_pebble_layer(self) -> Layer:
         """Build Pebble layer for OpenSearch service."""
         opensearch_cmd = (self.paths.bin / "opensearch").as_posix()

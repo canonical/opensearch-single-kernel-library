@@ -151,14 +151,6 @@ class BaseWorkload(ABC):
         """Install the workload."""
         pass
 
-    def prepare_container(self) -> None:
-        """Prepare the workload runtime environment.
-
-        K8s workloads should override this to perform container preparation that requires Pebble
-        connectivity (e.g. permissions, and Pebble layer configuration).
-        """
-        return None
-
     @property
     @abstractmethod
     def paths(self) -> Paths:
@@ -177,15 +169,18 @@ class BaseWorkload(ABC):
         """Flag to check if workload is present and Pebble API is connectable."""
         pass
 
-    def write_text(self, content: str, path: pathops.PathProtocol) -> None:
+    def write_text(
+        self, content: str, path: pathops.PathProtocol, mode: int | None = None
+    ) -> None:
         """Write content to a file on disk.
 
         Args:
             content (str): The content to be written.
             path (str): The file path where the content should be written.
+            mode (int, optional): The mode/permissions to use when writing the file.
         """
         try:
-            path.write_text(content)
+            path.write_text(content, mode=mode)
         except (
             FileNotFoundError,
             LookupError,
