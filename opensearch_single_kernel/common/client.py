@@ -883,10 +883,9 @@ class OpenSearchClient:
             if chain_path.exists():
                 chain_content = self.workload.read_text(chain_path)
                 if isinstance(chain_content, str) and "BEGIN CERTIFICATE" in chain_content:
-                    staged_path.write_text(chain_content)
-                    staged_path.chmod(0o644)
+                    self.workload.write_text(content=chain_content, path=staged_path, mode=0o644)
                     return staged_path.as_posix()
-        except (PebbleConnectionError, OpenSearchFileOperationError) as e:
+        except OpenSearchFileOperationError as e:
             logger.warning(
                 "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
                 chain_path,
