@@ -521,7 +521,7 @@ class ClusterManager(BaseManager):
         if (
             deployment_desc := self.state.application.deployment_desc
         ).start == StartMode.WITH_GENERATED_ROLES:
-            updated_nodes = self.recompute_nodes_conf(
+            updated_nodes = self.reset_nodes_conf_to_default(
                 app_id=deployment_desc.app.id, nodes=current_nodes
             )
         else:
@@ -601,7 +601,7 @@ class ClusterManager(BaseManager):
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 
-    def recompute_nodes_conf(self, app_id: str, nodes: list[Node]) -> dict[str, Node]:
+    def reset_nodes_conf_to_default(self, app_id: str, nodes: list[Node]) -> dict[str, Node]:
         """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
         if not nodes:
             return {}
