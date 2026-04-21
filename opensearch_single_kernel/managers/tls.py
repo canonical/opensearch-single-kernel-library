@@ -204,18 +204,13 @@ class TlsManager(BaseManager):
         if cert_type == CertType.UNIT_HTTP:
             # HTTP cert must also be valid for the address clients use to reach this
             # unit (load balancer, ingress, or public IP).
-            publish_host = (
-                self.state.fqdn
-                if self.state.substrate == Substrates.K8S
-                else self.workload.get_publish_host()
-            )
-            if publish_host:
-                if self.state.substrate == Substrates.VM:
-                    # VM: the publish host is a public IP address.
-                    ips.add(publish_host)
-                else:
-                    # K8s: the publish host is a stable DNS name.
-                    dns.add(publish_host)
+            # we always add the fqdn as SAN even for VM
+            dns.add(self.state.fqdn)
+
+            if self.state.substrate == Substrates.VM and (
+                publish_host := self.workload.get_publish_host()
+            ):
+                ips.add(publish_host)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
         # so the certificate is accepted when clients connect by those names.
@@ -233,7 +228,10 @@ class TlsManager(BaseManager):
                 continue
 
         # empty strings would be invalid in SANs.
-        sans["sans_ip"] = [ip for ip in ips if ip.strip()]
+        # Do not return IPs in SANs for K8s
+        sans["sans_ip"] = (
+            [ip for ip in ips if ip.strip()] if self.state.substrate == Substrates.VM else []
+        )
         sans["sans_dns"] = [entry for entry in dns if entry.strip()]
 
         return sans
