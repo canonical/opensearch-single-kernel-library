@@ -162,7 +162,7 @@ class PeerClusterStatuses(Enum):
     )
     PEER_CLUSTER_WRONG_RELATION = StatusObject(
         status="blocked",
-        message="Cluster name don't match with related cluster. Remove relation.",
+        message="Cluster name doesn't match with related cluster. Remove relation.",
     )
     PEER_CLUSTER_WRONG_ROLES_PROVIDED = StatusObject(
         status="blocked", message="Cannot start cluster with current set of roles."

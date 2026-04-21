@@ -162,11 +162,12 @@ class OpenSearchServer(RelationState):
 
     @started.setter
     def started(self, value: str) -> None:
-        """Get the value of 'started' key from unit data bag"""
+        """Set the value of the 'started' key."""
         self.relation_data.update({"started": value})
 
     @started.deleter
     def started(self) -> None:
+        """Unset the value of the 'started' key."""
         if self.started:
             self.relation_data.update({"started": ""})
 

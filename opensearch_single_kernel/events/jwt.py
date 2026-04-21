@@ -170,7 +170,8 @@ class JWTEventsHandler(Object):
                 admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
             )
             logger.info("Updated Opensearch security index")
-        except OpenSearchCmdError:
+        except OpenSearchCmdError as e:
+            logger.debug(f"Error when updating the security index: {e.out}")
             # we need to come back in this case because there will not be a follow-up event
             event.defer()
             return

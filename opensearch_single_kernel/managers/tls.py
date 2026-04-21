@@ -43,6 +43,7 @@ from opensearch_single_kernel.utils.helpers import (
     generate_password,
     parse_tls_file,
 )
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -590,11 +591,11 @@ class TlsManager(BaseManager):
                 )
             if not self.state.tls_relation and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
-                self.state.add_status_if_not_present(
-                    TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
-                    "unit",
-                    self.name,
-                    {"certificates": ", ".join(missing)},
+                status_list.append(
+                    format_status(
+                        TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
+                        {"certificates": ", ".join(missing)},
+                    )
                 )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

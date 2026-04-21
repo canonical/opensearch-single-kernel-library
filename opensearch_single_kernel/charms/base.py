@@ -121,14 +121,14 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.status_handler = StatusHandler(
             self,
             self.profiles_manager,
-            self.cluster_manager,
-            self.internal_users_manager,
             self.tls_manager,
             self.health_manager,
+            self.cluster_manager,
             self.lock_manager,
+            self.snapshots_manager,
+            self.internal_users_manager,
             self.external_clients_manager,
             self.notifications_manager,
-            self.snapshots_manager,
         )
 
     def trigger_peer_rel_changed(
