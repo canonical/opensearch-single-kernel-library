@@ -798,8 +798,7 @@ class ClusterManager(BaseManager):
                 break
 
         return (
-            self.opensearch_client.is_node_up()
-            and len(
+            len(
                 [
                     app
                     for app in self.state.application.apps_in_fleet

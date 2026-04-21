@@ -282,11 +282,10 @@ class OpenSearchEventsHandler(Object):
                     self.charm.peer_cluster_manager.refresh_requirer_relation_data()
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
-            logger.debug(
-                "Checking if no cluster managers left: %s",
-                self.charm.cluster_manager.no_cluster_manager_left,
-            )
-            if self.charm.cluster_manager.no_cluster_manager_left:
+            if (
+                self.charm.cluster_manager.opensearch_client.is_node_up()
+                and self.charm.cluster_manager.no_cluster_manager_left
+            ):
                 logger.error(
                     "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
                 )
