@@ -712,6 +712,8 @@ class PeerClusterRelData(Model):
             credentials["admin_tls"] = secrets.resolve_credential(
                 credentials["admin_tls"], peek_secrets=peek_secrets
             )
+        else:
+            credentials["admin_tls"] = None
 
         if (
             credentials.get("s3")
