@@ -23,7 +23,7 @@ def test_on_install(harness, substrate):
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
     ) as install:
         harness.charm.on.install.emit()
-        # For K8s, install is not operational, container preparation is handled in pebble-ready.
+        # For K8s, install is not operational
         if substrate == "vm":
             install.assert_called_once()
         else:
@@ -37,7 +37,7 @@ def test_on_install_error(harness, substrate):
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
     ) as install:
         install.side_effect = OpenSearchInstallError()
-        # For K8s, install is not operational, container preparation is handled in pebble-ready.
+        # For K8s, install is not operational
         if substrate == "vm":
             with pytest.raises(OpenSearchInstallError):
                 harness.charm.on.install.emit()

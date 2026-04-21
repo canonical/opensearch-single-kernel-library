@@ -112,6 +112,10 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
     harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
 
     # The leader acquires the lock via the OpenSearch document.
+    assert not harness.charm.lock_manager.acquire()
+
+    monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id-new")
+
     assert harness.charm.lock_manager.acquire()
 
 
