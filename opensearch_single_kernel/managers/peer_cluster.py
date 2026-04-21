@@ -227,6 +227,11 @@ class PeerClusterManager(BaseManager):
             ):
                 blocked_msg = "Cannot relate 2 clusters with different 'cluster_name' values."
 
+        logger.debug(
+            f"This is cluster_name from provider: {peer_cluster_rel_data.cluster_name}, "
+            f"and this is cluster_name from requirer: {deployment_desc.config.cluster_name}"
+        )
+
         if blocked_msg:
             return PeerClusterRelErrorData(
                 cluster_name=peer_cluster_rel_data.cluster_name,

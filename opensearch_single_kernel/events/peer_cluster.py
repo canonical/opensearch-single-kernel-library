@@ -355,10 +355,11 @@ class PeerClusterEventsHandler(Object):
         data = PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.charm.state.secrets, data["data"]
         )
-
+        logger.debug(f"Checking Rquirer errors with data: {data}")
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
             orchestrators, deployment_desc, data, event.relation.id
         )
+        logger.debug(f"Requirer errors: {requirer_errors}")
         self.reconcile_peer_cluster_errors(
             label="error_from_requirer-%s" % event.relation.id,
             error=requirer_errors,

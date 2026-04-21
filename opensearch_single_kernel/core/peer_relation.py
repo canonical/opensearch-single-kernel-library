@@ -245,7 +245,7 @@ class OpenSearchServer(RelationState):
     @jwt_auth_configuration.deleter
     def jwt_auth_configuration(self) -> None:
         """Remove JWT auth configuration."""
-        self.update({"jwt-auth-configuration": ""})
+        self.relation.data[self.unit].pop("jwt-auth-configuration", None)
 
     @property
     def oauth_openid_connect_url(self) -> str | None:

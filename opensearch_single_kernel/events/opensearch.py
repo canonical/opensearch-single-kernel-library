@@ -440,12 +440,13 @@ class OpenSearchEventsHandler(Object):
                 # trigger roles change on the leader, other units will have their
                 # peer-rel-changed event triggered
                 self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
-            self.charm.status.apply_status_from_deployment_desc(
-                self.charm.state.application.deployment_desc
-            )
 
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
+
+        self.charm.status.apply_status_from_deployment_desc(
+            self.charm.state.application.deployment_desc
+        )
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
