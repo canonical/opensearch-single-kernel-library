@@ -45,8 +45,7 @@ class ProfilesManager(BaseManager):
 
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
-        meminfo_data = self.workload.meminfo()
-        memory_size = meminfo_data["MemTotal"]
+        memory_size = self.workload.meminfo()["MemTotal"]
 
         if (
             profile.memory_requirements.memory_size
