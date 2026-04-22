@@ -292,7 +292,8 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
-        self.charm.state.server.update({"tls_configured": ""})
+        del self.charm.state.server.tls_configured
+
         peer_clusters_servers = self.charm.state.local_peer_clusters_servers(
             is_provider=True
         ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
@@ -363,7 +364,7 @@ class TLSEventsHandler(Object):
                     # we delete the old ca and update the chain to only include the new one
                     if (
                         self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-                        and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+                        and self.charm.state.ca_and_certs_rotation_complete_in_cluster
                     ):
                         logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
                         self.charm.tls_manager.finalize_ca_certs_rotation()

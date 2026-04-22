@@ -113,6 +113,9 @@ class PeerCluster(RelationState):
         # replace the plaintext credentials in
         # rel_data with their corresponding secret IDs
         rel_data_redacted_dict = self._protect_secrets_relation_data(rel_data)
+        logger.debug(
+            "Setting peer cluster relation data with redacted secrets: %s", rel_data_redacted_dict
+        )
 
         # grant the secrets inside the rel_data to all the related clusters
         self.secrets.grant_secrets_to_peer_clusters(
@@ -310,6 +313,11 @@ class PeerClusterServer(RelationState):
     def tls_configured(self, value: bool):
         """Update the value of 'tls_configured'"""
         self.relation.data[self.unit].update({"tls_configured": str(value)})
+
+    @tls_configured.deleter
+    def tls_configured(self):
+        """Delete the 'tls_configured' field to notify related clusters."""
+        self.relation.data[self.unit].pop("tls_configured", None)
 
     @property
     def snapshots_credentials_saved(self) -> str:

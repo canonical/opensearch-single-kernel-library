@@ -327,6 +327,7 @@ class PeerClusterEventsHandler(Object):
             errors_data = self.charm.peer_cluster_manager.error_set_from_providers(
                 orchestrators, data
             )
+            logger.debug(f"Errors from providers: {errors_data}")
             self.reconcile_peer_cluster_errors(
                 label="error_from_providers-%s" % event.relation.id,
                 error=errors_data,
@@ -401,7 +402,9 @@ class PeerClusterEventsHandler(Object):
         # let the charm know this is an already bootstrapped cluster
         self.charm.state.application.bootstrapped = True
         # store the security related settings in secrets, peer_data, disk
+        logger.debug("We received this peer cluster relation data: %s", data)
         if data.credentials.admin_tls:
+            logger.debug("Admin TLS credentials received from peer cluster relation data.")
             self._set_security_conf(data)
 
         # check if there are any security misconfigurations / violations
@@ -625,6 +628,16 @@ class PeerClusterEventsHandler(Object):
         # set admin secrets
         self.charm.peer_cluster_manager.update_admin_secrets_from_relation(data)
 
+        # store the app admin TLS resources if not stored
+        logger.debug("Storing TLS resources from peer cluster relation data.")
+        self.charm.tls_manager.store_new_tls_resources(
+            CertType.APP_ADMIN, data.credentials.admin_tls
+        )
+
+        if self.charm.state.ca_rotation_complete_in_cluster:
+            # must only happen if no CA-rotation, otherwise will cause TLS errors for API-requests
+            self.charm.tls_manager.update_request_ca_bundle()
+
         # take over the internal users from the main orchestrator
         self.charm.internal_users_manager.put_internal_user(
             ADMIN_USER, data.credentials.admin_password_hash
@@ -632,13 +645,6 @@ class PeerClusterEventsHandler(Object):
         self.charm.internal_users_manager.put_internal_user(
             KIBANA_SERVER_USER, data.credentials.kibana_password_hash
         )
-        # store the app admin TLS resources if not stored
-        self.charm.tls_manager.store_new_tls_resources(
-            CertType.APP_ADMIN, data.credentials.admin_tls
-        )
-        if self.charm.state.ca_rotation_complete_in_cluster:
-            # must only happen if no CA-rotation, otherwise will cause TLS errors for API-requests
-            self.charm.tls_manager.update_request_ca_bundle()
 
         self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
 

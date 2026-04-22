@@ -383,7 +383,7 @@ class OpenSearchEventsHandler(Object):
         # we need to wait for them all to be ready before deleting the old CA
         if (
             self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
@@ -1090,6 +1090,9 @@ class OpenSearchEventsHandler(Object):
             if sys_user := user_from_hash_key(label_key):
                 self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
+        if is_leader and self.charm.peer_cluster_manager.is_peer_cluster_provider(typ="main"):
+            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
 
@@ -1158,7 +1161,7 @@ class OpenSearchEventsHandler(Object):
         # if all certs are stored and CA rotation is complete in the cluster
         if (
             self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
@@ -1171,9 +1174,13 @@ class OpenSearchEventsHandler(Object):
 
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
-        self.charm.state.server.update({"tls_configured": ""})
-        # TODO: Update peer cluster relation
-        # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
+        del self.charm.state.server.tls_configured
+        peer_cluster_servers = self.charm.state.local_peer_clusters_servers(
+            is_provider=True
+        ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
+
+        for peer_cluster_server in peer_cluster_servers:
+            del peer_cluster_server.tls_configured
 
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
             secret = (

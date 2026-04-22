@@ -75,6 +75,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             azure_credentials=azure_credentials,
             gcs_credentials=gcs_credentials,
         )
+        logger.debug("Built peer cluster relation data: %s", rel_data)
 
         orchestrators = self.state.application.orchestrators
         rel_err_data = self.build_peer_cluster_rel_err_data(

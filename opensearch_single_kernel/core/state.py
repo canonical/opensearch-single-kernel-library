@@ -457,11 +457,7 @@ class ClusterState(Object):
         if not self.peer_relation:
             return False
         for unit in self.all_units:
-            if (
-                self.peer_relation.data[unit].get("tls_configured", "").lower() != "true"
-                or "tls_ca_renewing" in self.peer_relation.data[unit]
-                or "tls_ca_renewed" in self.peer_relation.data[unit]
-            ):
+            if self.peer_relation.data[unit].get("tls_configured", "").lower() != "true":
                 return False
         return True
 
@@ -489,18 +485,41 @@ class ClusterState(Object):
         # if no unit is renewing the CA, or all of them renewed it, the rotation is complete
         return not rotation_in_progress or rotation_complete
 
+    @property
     def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
+        # Use related_peer_cluster_servers since we are reading remote data.
         all_units_in_fleet = (
             self.servers
             + self.related_peer_cluster_servers(is_provider=False)
             + self.related_peer_cluster_servers(is_provider=True)
         )
+        logger.debug(
+            "CA and certs rotation state"
+            "Units in fleet: %s | \
+                CA rotation complete in fleet: %s | \
+                TLS configured in fleet: %s",
+            [server.unit.name for server in all_units_in_fleet],
+            [server.tls_ca_renewed for server in all_units_in_fleet],
+            [server.tls_configured for server in all_units_in_fleet],
+        )
 
+        logger.debug(
+            "CA and certs rotation complete in cluster: %s",
+            all(
+                [
+                    server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
+                    for server in all_units_in_fleet
+                ]
+            ),
+        )
         # if the current unit is not in the relation.units list
         # or if tls is not configured or in the middle of rotation, return False
-        return all([server.tls_configured for server in all_units_in_fleet]) and all(
-            [server.tls_ca_renewing and not server.tls_ca_renewed for server in all_units_in_fleet]
+        return all(
+            [
+                server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
+                for server in all_units_in_fleet
+            ]
         )
 
     def reset_ca_rotation_state(self) -> None:
@@ -513,7 +532,7 @@ class ClusterState(Object):
             is_provider=False
         ) + self.local_peer_clusters_servers(is_provider=True)
         # if this flag is set, the CA rotation routine is complete for this unit
-        if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster():
+        if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster:
             # both CA rotation and certs rotation completed in the cluster
             del self.server.tls_ca_renewing
             del self.server.tls_ca_renewed

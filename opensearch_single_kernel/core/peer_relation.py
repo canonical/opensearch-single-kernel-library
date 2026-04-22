@@ -153,6 +153,11 @@ class OpenSearchServer(RelationState):
         """Update the value of 'tls_configured'"""
         self.update({"tls_configured": str(value)})
 
+    @tls_configured.deleter
+    def tls_configured(self):
+        """Delete the 'tls_configured' field to notify related clusters."""
+        self.relation.data[self.unit].pop("tls_configured", None)
+
     @property
     def update_ts(self) -> str:
         """Get the value of 'update-ts' from the unit databag."""
