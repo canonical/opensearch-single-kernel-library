@@ -784,13 +784,16 @@ class OpenSearchEventsHandler(Object):
         # - blocking directives
         # - admin user and security index configured/initialised
         # - cluster health
-        if not all(
-            [
-                not self.check_profile_missing_requirements(),
-                self.charm.cluster_manager.can_service_start(),
-            ]
-        ):
-            logger.info("Conditions not met to start opensearch. Will retry next event.")
+        try:
+            if (
+                self.check_profile_missing_requirements()
+                or not self.charm.cluster_manager.check_if_can_start()
+            ):
+                logger.info("Conditions not met to start opensearch. Will retry next event.")
+                event.defer()
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
             event.defer()
             return
 

@@ -172,8 +172,12 @@ class KeystoreManager(BaseManager):
         Returns:
             whether a reload was successful.
         """
-        self._create_if_needed()
-        self.workload.run_cmd(self.KEYSTORE, "upgrade")
+        try:
+            self._create_if_needed()
+            self.workload.run_cmd(self.KEYSTORE, "upgrade")
+        except OpenSearchCmdError as e:
+            logger.error("Keystore operation failed: %s", e)
+            return False
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup
