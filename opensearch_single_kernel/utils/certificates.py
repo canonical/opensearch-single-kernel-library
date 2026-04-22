@@ -96,7 +96,11 @@ def list_cas(
         If an alias is partitioned as <alias>-0, <alias>-1, ... in the store,
         they are reassembled and returned under the base <alias> key.
     """
-    if not store_path.exists():
+    try:
+        if not workload.exists(store_path):
+            return None
+    except OpenSearchFileOperationError as e:
+        logger.error("Error accessing the truststore path: %s", e)
         return None
 
     cmd = f"openssl pkcs12 -in {store_path}"

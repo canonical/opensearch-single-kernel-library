@@ -250,6 +250,9 @@ class BaseWorkload(ABC):
 
         Returns:
             bool: True if the file or directory exists, False otherwise.
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error accessing the file system.
         """
         try:
             return path.exists()

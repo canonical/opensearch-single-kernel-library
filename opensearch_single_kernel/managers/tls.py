@@ -104,9 +104,6 @@ class TlsManager(BaseManager):
         admin_secrets = self.state.application.admin_secrets
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug("Reading stored ca from %s", ca_trust_store)
-        if not (ca_trust_store.exists() and admin_secrets):
-            return None
-
         return read_ca(
             workload=self.workload,
             alias=alias,

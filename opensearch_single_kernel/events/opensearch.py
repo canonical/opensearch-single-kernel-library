@@ -24,7 +24,6 @@ from ops import (
     StorageDetachingEvent,
     UpdateStatusEvent,
 )
-from ops.pebble import ConnectionError as PebbleConnectionError
 
 from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
@@ -407,13 +406,10 @@ class OpenSearchEventsHandler(Object):
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
-        try:
-            old_ca_present = self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-        except OpenSearchFileOperationError as e:
-            logger.error("An error occurred while reading old stored CA: %s", str(e))
-            old_ca_present = False
-
-        if old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster():
+        if (
+            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+        ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
         # If relation not broken - leave
@@ -750,12 +746,9 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
-            except PebbleConnectionError as e:
-                logger.info("Container not ready for post-start init: %s", e)
-                event.defer()
-            except (OpenSearchHttpError, OpenSearchNotFullyReadyError):
+            except (OpenSearchHttpError, OpenSearchNotFullyReadyError, OpenSearchCmdError) as e:
                 # check if cluster should have started but is blocked
-                logger.debug("OpenSearch already started, but post-start init failed.")
+                logger.debug("OpenSearch already started, but post-start init failed: %s", e)
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
@@ -881,11 +874,6 @@ class OpenSearchEventsHandler(Object):
 
     def _post_start_init(self, event: StartOpenSearch) -> None:
         """Initialisation post OpenSearch start"""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for post-start init, deferring.")
-            event.defer()
-            return
-
         deployment_desc = self.charm.state.application.deployment_desc
         # initialize the security index if needed (and certs written on disk etc.)
         # this happens only on the first data node to join the cluster
@@ -1222,12 +1210,10 @@ class OpenSearchEventsHandler(Object):
         # If the reload through API failed, we restart the service
         # We remove the old CA and update the chain to only include the new one
         # if all certs are stored and CA rotation is complete in the cluster
-        try:
-            old_ca_present = self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-        except PebbleConnectionError as e:
-            logger.info("Container not ready while checking old CA in post_start_init: %s", e)
-            return
-        if old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster():
+        if (
+            self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+        ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
 
