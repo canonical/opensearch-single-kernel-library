@@ -405,7 +405,10 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            try:
+                self.charm.tls_manager.finalize_ca_certs_rotation()
+            except OpenSearchFileOperationError as e:
+                logger.error("Error finalizing CA rotation: %s", e)
         # If relation not broken - leave
         if self.charm.state.tls_relation:
             return
@@ -1215,7 +1218,10 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            try:
+                self.charm.tls_manager.finalize_ca_certs_rotation()
+            except OpenSearchFileOperationError as e:
+                logger.error("Error finalizing CA rotation: %s", e)
 
         # TODO: Handle case of peer cluster manager
         # if self.peers_data.get(Scope.UNIT, "cluster_manager_removed", default=False):

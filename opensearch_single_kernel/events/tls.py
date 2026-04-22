@@ -412,7 +412,12 @@ class TLSEventsHandler(Object):
             self.charm.state.reset_ca_rotation_state()
             if rotation_complete:
                 logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                self.charm.tls_manager.finalize_ca_certs_rotation()
+                try:
+                    self.charm.tls_manager.finalize_ca_certs_rotation()
+                except OpenSearchFileOperationError as e:
+                    logger.error("Error finalizing CA rotation: %s", e)
+                    event.defer()
+                    return
 
     def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""
