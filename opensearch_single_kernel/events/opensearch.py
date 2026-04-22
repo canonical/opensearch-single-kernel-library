@@ -747,6 +747,8 @@ class OpenSearchEventsHandler(Object):
             # if self.opensearch_peer_cm.is_provider(typ="main"):
             # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
             return
+        if self.charm.state.server.started:
+            self.charm.state.server.update({"started": ""})
 
         # Check if we can start. This means we will check
         # - profiles requirements
