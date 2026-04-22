@@ -160,8 +160,10 @@ class NotificationsEvents(Object):
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
             try:
-                credentials = self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
-                    config.smtp_account_id, smtp_data.user, smtp_data.password
+                credentials = (
+                    self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
+                        config.smtp_account_id, smtp_data.user, smtp_data.password
+                    )
                 )
             except OpenSearchCmdError as e:
                 logger.error("Failed to write SMTP credentials to keystore: %s", e)
