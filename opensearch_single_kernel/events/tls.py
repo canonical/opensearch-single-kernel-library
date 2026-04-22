@@ -220,17 +220,15 @@ class TLSEventsHandler(Object):
 
         if current_stored_ca != event.ca:
             try:
-                stored = self.charm.tls_manager.store_new_ca(
+                if not self.charm.tls_manager.store_new_ca(
                     cert_type,
                     create_store_pwd=is_leader_unit and is_main_orchestrator,
-                )
+                ):
+                    logger.debug("Could not store new CA certificate.")
+                    event.defer()
+                    return
             except OpenSearchFileOperationError as e:
                 logger.error("Error while storing new CA certificate: %s", e)
-                event.defer()
-                return
-
-            if not stored:
-                logger.debug("Could not store new CA certificate.")
                 event.defer()
                 return
 

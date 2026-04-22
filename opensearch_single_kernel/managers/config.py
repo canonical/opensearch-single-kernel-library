@@ -177,10 +177,7 @@ class ConfigManager(BaseManager):
 
     def _opensearch_host_config(self) -> dict[str, Any]:
         """Network publish host settings written to opensearch.yml."""
-        publish_host = (
-            self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
-        )
-        return {"network.publish_host": publish_host} if publish_host else {}
+        return {"network.publish_host": self.state.publish_host}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
         """Optional data temperature settings written to opensearch.yml."""

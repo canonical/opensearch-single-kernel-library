@@ -31,10 +31,6 @@ class HealthManager(BaseManager):
         super().__init__(state, workload)
         self.name = "health_manager"
 
-    def _preferred_local_https_host(self) -> str:
-        """Return the local HTTPS identity that matches the unit certificate."""
-        return self.state.fqdn if self.state.substrate == Substrates.K8S else self.state.host_ip
-
     def get(  # noqa: C901
         self,
         wait_for_green_first: bool = False,
@@ -58,7 +54,7 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = self._preferred_local_https_host() if use_localhost else None
+        host = self.state.publish_host if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)

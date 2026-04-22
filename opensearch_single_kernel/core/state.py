@@ -1349,3 +1349,8 @@ class ClusterState(Object):
             component=self.model.app,
             unit_name=self.unit_name,
         )
+
+    @property
+    def publish_host(self) -> str:
+        """Return the preferred host if configured."""
+        return self.fqdn if self.substrate == Substrates.K8S else self.host_ip
