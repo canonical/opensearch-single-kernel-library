@@ -232,10 +232,6 @@ class OpenSearchEventsHandler(Object):
         #        "Removing units during an upgrade is not supported. The charm may be in a broken,
         #  unrecoverable state"
         #    )
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for peer relation departed, deferring.")
-            event.defer()
-            return
 
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # that happens in the very last stages of the application removal
@@ -277,13 +273,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            # If the workload is not ready, we cannot just defer the event
-            # since data will be lost
-            raise OpenSearchHAError(
-                "Workload not ready for opensearch data storage detaching."
-                " Unable to safely detach storage, aborting unit removal to prevent data loss."
-            )
         # TODO: Warning in case of upgrade in progress
         planned_units = self.charm.app.planned_units()
 
@@ -342,11 +331,6 @@ class OpenSearchEventsHandler(Object):
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for update status, deferring.")
-            event.defer()
-            return
-
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
@@ -526,11 +510,6 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for leader elected, deferring.")
-            event.defer()
-            return
-
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
@@ -592,11 +571,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for start, deferring.")
-            event.defer()
-            return
-
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
             return
@@ -733,11 +707,6 @@ class OpenSearchEventsHandler(Object):
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # TODO: Update Peer Cluster relation data
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for start, deferring.")
-            event.defer()
-            return
-
         if (
             self.charm.cluster_manager.is_opensearch_started
             and not self.charm.workload.is_failed()
@@ -937,11 +906,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for restart, deferring.")
-            event.defer()
-            return
-
         if not self.charm.lock_manager.acquire():
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
@@ -1086,11 +1050,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for secret changed, deferring.")
-            event.defer()
-            return
-
         secret = event.secret
         secret.get_content(refresh=True)
 
