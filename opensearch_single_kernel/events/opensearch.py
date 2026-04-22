@@ -556,16 +556,13 @@ class OpenSearchEventsHandler(Object):
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
                 # Nodes Config updated, we would need to reconfigure and restart
                 try:
-                    restart_needed = self.charm.config_manager.update_opensearch_config()
-                except (OpenSearchFileOperationError, OpenSearchError) as e:
-                    logger.error("An error occurred while updating opensearch config: %s", str(e))
-                    event.defer()
-                    return
-
-                if restart_needed:
+                    self.charm.config_manager.update_opensearch_config()
                     self.charm.status.set(CharmStatuses.WAITING_TO_START)
                     logger.debug("Leader election reconfigured node roles; emitting restart.")
                     self.charm.restart_opensearch_event.emit()
+                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                    event.defer()
             return
 
         # TODO: check if cluster can start independently
