@@ -189,13 +189,12 @@ class TLSEventsHandler(Object):
             logger.debug("Unknown certificate available.")
             return
         # variables for better readability
-        is_leader_unit = self.charm.unit.is_leader()
         deployment_desc = self.charm.state.application.deployment_desc
         is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
         logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
 
-        if not is_leader_unit and scope == Scope.APP:
+        if not self.charm.unit.is_leader() and scope == Scope.APP:
             return
 
         old_cert = secrets.get("cert", None)
@@ -222,7 +221,7 @@ class TLSEventsHandler(Object):
             try:
                 if not self.charm.tls_manager.store_new_ca(
                     cert_type,
-                    create_store_pwd=is_leader_unit and is_main_orchestrator,
+                    create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
                 ):
                     logger.debug("Could not store new CA certificate.")
                     event.defer()
@@ -275,7 +274,7 @@ class TLSEventsHandler(Object):
 
         # store the admin certificates in non-leader units
         # if admin cert not available we need to defer, otherwise it will never be stored
-        if not is_leader_unit:
+        if not self.charm.unit.is_leader():
             if admin_secrets.get("cert"):
                 try:
                     self.charm.tls_manager.store_new_tls_resources(

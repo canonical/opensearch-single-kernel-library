@@ -136,11 +136,6 @@ class VMWorkload(BaseWorkload):
 
         self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
-    @override
-    def get_publish_host(self) -> str | None:
-        """Fetch the public address used for OpenSearch `http.publish_host`."""
-        return self.get_host_public_ip()
-
     @property
     @override
     def keytool_cmd(self) -> str:

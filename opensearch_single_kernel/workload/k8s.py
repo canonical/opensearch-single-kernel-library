@@ -365,30 +365,6 @@ class K8sWorkload(BaseWorkload):
             "%s"
         ) % (opensearch_home, opensearch_conf, java_home, path_value, command)
 
-    @override
-    def get_publish_host(self) -> str | None:
-        """Return the pod DNS name used for OpenSearch `http.publish_host`.
-
-        For K8s, this returns the pod DNS name instead of an IP address.
-        DNS names are stable and resolve to the current pod IP via K8s DNS.
-        """
-        # Only attempt container-derived names when the workload container is connectable.
-        # In unit tests run_cmd is patched with a MagicMock.
-        # When we can't obtain a real string value,
-        # return None so callers fall back to state.host_ip / ingress address.
-        try:
-            if not self.container.can_connect():
-                return None
-        except Exception:
-            return None
-
-        # Pebble is connectable: try to get pod FQDN first, most reliable method.
-        if fqdn := self._get_pod_fqdn():
-            return fqdn
-
-        # fallback: try to get pod hostname
-        return self._get_pod_hostname_with_fallback()
-
     @property
     @override
     def keytool_cmd(self) -> str:

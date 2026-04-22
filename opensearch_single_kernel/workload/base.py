@@ -302,11 +302,6 @@ class BaseWorkload(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_publish_host(self) -> Optional[str]:
-        """Return the host to use for OpenSearch `http.publish_host`."""
-        pass
-
     @property
     @abstractmethod
     def keytool_cmd(self) -> str:

@@ -56,7 +56,7 @@ class ConfigManager(BaseManager):
         Args:
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
-            seed_hosts: override seed hosts got from nodes_config.
+            seed_hosts: override seed hosts got from nodes_config. (Cluster Manager hosts to be written to unicast_hosts.txt)
 
         Returns:
             whether the config was changed.
@@ -157,17 +157,11 @@ class ConfigManager(BaseManager):
         if not (deployment_desc := self.state.application.deployment_desc):
             return {}
 
-        publish_host = (
-            self.state.fqdn
-            if self.state.substrate == Substrates.K8S
-            else self.workload.get_publish_host()
-        )
-
         return {
             "cluster.name": deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self._network_hosts(),
-            "http.publish_host": publish_host or self.state.network_ingress_address,
+            "http.publish_host": self.state.publish_host,
             "node.roles": sorted(roles),
             "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
             "path.data": self.workload.paths.data.as_posix(),

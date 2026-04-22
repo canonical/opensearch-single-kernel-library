@@ -866,7 +866,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.cluster_manager.wait_for_opensearch_up()
 
         # Wait for opensearch to be online and part of the cluster
-        self.charm.cluster_manager.wait_opensearch_part_of_cluster()
+        self.charm.cluster_manager.assert_node_in_cluster()
 
         if self.charm.state.server.is_bootstrap_contributor:
             # If the unit is leader we cleanup the application conf as well

@@ -411,14 +411,10 @@ class OpenSearchApplication(RelationState):
         cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
+    @property
     def apps_in_fleet(self) -> list[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
-        cluster_fleet_apps = self.get_object("cluster_fleet_apps")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
-        return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
+        return list(self.cluster_fleet_apps.values())
 
     @property
     def update_ts(self) -> str:
@@ -463,7 +459,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
-        data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
+        data_apps_in_fleet = [app for app in self.apps_in_fleet if "data" in app.roles]
         return bool(data_apps_in_fleet) and any(
             app.planned_units > 0 for app in data_apps_in_fleet
         )
@@ -1007,14 +1003,9 @@ class ClusterState(Object):
         - K8s: canonical endpoint FQDN for this unit service name.
         """
         if self.substrate == Substrates.K8S:
-            if deployment_desc := self.application.deployment_desc:
-                unit_prefix = str(self.unit_name).split(".", 1)[0]
-                service_name = f"{unit_prefix}.{deployment_desc.app.name}-endpoints"
-                try:
-                    return get_k8s_fqdn(service_name)
-                except RuntimeError:
-                    # DNS may not be resolvable yet in early hooks.
-                    pass
+            unit_prefix = str(self.unit_name).split(".", 1)[0]
+            service_name = f"{unit_prefix}.{self.application.name}-endpoints"
+            return get_k8s_fqdn(service_name)
         return socket.getfqdn()
 
     @property

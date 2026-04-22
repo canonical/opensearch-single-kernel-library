@@ -109,13 +109,21 @@ def get_k8s_fqdn(name: str) -> str:
             type=socket.SOCK_STREAM,
         )
     except socket.gaierror as e:
-        raise RuntimeError(f"Failed to resolve canonical name for {name}") from e
+        logger.warning(
+            "Failed to resolve canonical name for %s: %s. \nFalling back on default fqdn.",
+            name,
+            e,
+        )
+        return socket.getfqdn(name)
 
     for entry in info:
-        if (canonname := entry[3]) and is_srv_dns_record(canonname):
+        if canonname := entry[3]:
             return canonname
 
-    raise RuntimeError(f"Could not determine canonical name for {name}")
+    logger.warning(
+        "Failed to resolve canonical name for %s. \nFalling back on default fqdn.", name
+    )
+    return socket.getfqdn(name)
 
 
 def get_k8s_seed_host(unit_name: str, app_name: str) -> str:

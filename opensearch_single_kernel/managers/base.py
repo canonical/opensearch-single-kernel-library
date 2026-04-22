@@ -36,15 +36,10 @@ class BaseManager:
         # Keep substrate-specific host policy explicit:
         # - K8s: canonical DNS identity.
         # - VM: advertised public host, fallback to internal bind IP.
-        host = (
-            self.state.fqdn
-            if self.state.substrate == Substrates.K8S
-            else (self.workload.get_publish_host() or self.state.host_ip)
-        )
 
         return OpenSearchClient(
             self.workload,
-            host,
+            self.state.publish_host,
             OPENSEARCH_HTTP_PORT,
             self.state.application.admin_password,
         )

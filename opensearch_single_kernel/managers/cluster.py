@@ -320,8 +320,8 @@ class ClusterManager(BaseManager):
             or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         )
 
-    def wait_opensearch_part_of_cluster(self) -> None:
-        """Wait for opensearch to become part of the cluster."""
+    def assert_node_in_cluster(self) -> None:
+        """Assert that the node is part of the cluster, by checking its name is in the list of online nodes."""
         # Get online nodes
         try:
             nodes = self.get_nodes(use_localhost=self.opensearch_client.is_node_up())

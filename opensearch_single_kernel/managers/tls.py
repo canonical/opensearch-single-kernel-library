@@ -204,10 +204,8 @@ class TlsManager(BaseManager):
             # we always add the fqdn as SAN even for VM
             dns.add(self.state.fqdn)
 
-            if self.state.substrate == Substrates.VM and (
-                publish_host := self.workload.get_publish_host()
-            ):
-                ips.add(publish_host)
+            if self.state.substrate == Substrates.VM:
+                ips.add(self.state.publish_host)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
         # so the certificate is accepted when clients connect by those names.
