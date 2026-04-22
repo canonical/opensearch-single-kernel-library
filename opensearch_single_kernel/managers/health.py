@@ -11,7 +11,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from opensearch_single_kernel.common.constants import (
     HealthColors,
     StartMode,
-    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,

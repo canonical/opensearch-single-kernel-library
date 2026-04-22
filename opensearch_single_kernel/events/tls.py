@@ -351,7 +351,7 @@ class TLSEventsHandler(Object):
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
-    def on_tls_conf_set(
+    def on_tls_conf_set(  # noqa: C901
         self,
         event: CertificateAvailableEvent,
         scope: Scope,

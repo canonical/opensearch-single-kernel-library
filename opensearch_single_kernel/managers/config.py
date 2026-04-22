@@ -56,7 +56,8 @@ class ConfigManager(BaseManager):
         Args:
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
-            seed_hosts: override seed hosts got from nodes_config. (Cluster Manager hosts to be written to unicast_hosts.txt)
+            seed_hosts: override seed hosts got from nodes_config.
+                        (Cluster Manager hosts to be written to unicast_hosts.txt)
 
         Returns:
             whether the config was changed.

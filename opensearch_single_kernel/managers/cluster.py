@@ -321,7 +321,10 @@ class ClusterManager(BaseManager):
         )
 
     def assert_node_in_cluster(self) -> None:
-        """Assert that the node is part of the cluster, by checking its name is in the list of online nodes."""
+        """Assert that the node is part of the cluster.
+
+        Check if node's name name is in the list of online nodes.
+        """
         # Get online nodes
         try:
             nodes = self.get_nodes(use_localhost=self.opensearch_client.is_node_up())

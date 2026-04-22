@@ -32,9 +32,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
-    OpenSearchContainerPrepareError,
     OpenSearchFileOperationError,
-    OpenSearchHttpError,
     OpenSearchStartError,
     OpenSearchStopError,
 )
