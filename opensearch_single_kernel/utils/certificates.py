@@ -285,8 +285,6 @@ def remove_ca(
         # Anything else is a real error
         raise
 
-    # del_cmd = f"{keytool_cmd} -delete -keystore {store_path} -alias {alias} -storetype PKCS12"
-    # del_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(f"sudo chmod 0664 {store_path}")
     except OpenSearchCmdError as e:

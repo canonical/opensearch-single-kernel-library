@@ -408,3 +408,8 @@ class BaseWorkload(ABC):
         if missing_requirements:
             logger.error("Missing system requirements: %s", missing_requirements)
         return missing_requirements
+
+    @abstractmethod
+    def chain_path(self) -> str:
+        """Get the certificate chain to use for requests"""
+        raise NotImplementedError

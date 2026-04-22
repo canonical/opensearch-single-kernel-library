@@ -33,6 +33,8 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchContainerPrepareError,
+    OpenSearchFileOperationError,
+    OpenSearchHttpError,
     OpenSearchStartError,
     OpenSearchStopError,
 )
@@ -783,3 +785,29 @@ class K8sWorkload(BaseWorkload):
             PathProtocol: ContainerPath instance bound to the container.
         """
         return pathops.ContainerPath("/", container=self.container)
+
+    @override
+    def chain_path(self) -> str:
+        """Copy chain.pem from the workload container to charm-local /tmp and return the path.
+
+        Requests runs in the charm container, so chain.pem must be staged locally.
+        """
+        staged_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        staged_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        staged_path = staged_dir / "chain.pem"
+
+        try:
+            if self.paths.certs_chain.exists():
+                staged_path.write_text(self.read_text(self.paths.certs_chain), mode=0o644)
+                return staged_path.as_posix()
+        except OpenSearchFileOperationError as e:
+            logger.warning(
+                "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
+                self.paths.certs_chain.as_posix(),
+                e,
+            )
+
+        if staged_path.exists():
+            return staged_path.as_posix()
+
+        raise OpenSearchHttpError(response_text="chain.pem not available yet")

@@ -372,3 +372,8 @@ class VMWorkload(BaseWorkload):
     def root(self) -> PathProtocol:
         """Return the root path."""
         return pathops.LocalPath("/")
+
+    @override
+    def chain_path(self) -> str:
+        """Return the local path to chain.pem."""
+        return self.paths.certs_chain.as_posix()

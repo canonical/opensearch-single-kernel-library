@@ -13,8 +13,6 @@ from typing import Any
 
 import requests
 import urllib3
-from charmlibs import pathops
-from ops.pebble import ConnectionError as PebbleConnectionError
 from tenacity import (
     RetryCallState,
     Retrying,
@@ -35,7 +33,6 @@ from opensearch_single_kernel.common.constants import (
     ObjectStorageType,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
@@ -858,46 +855,6 @@ class OpenSearchClient:
         )
         return "acknowledged" in response
 
-    def _get_chain_pem_path(self) -> str:  # noqa: C901
-        """Get the path to chain.pem file for certificate verification.
-
-        For both VM and K8s, requests runs in the charm container, so we stage a copy of the
-        CA chain into the charm container filesystem.
-
-        TODO: Stop relying on a workload-side chain.pem file.
-        # Instead, retrieve the CA chain directly from Juju secrets
-        # and pass it to requests without persisting it on disk.
-
-        Returns:
-            str: Path to chain.pem file accessible from the charm container.
-
-        Raises:
-            OpenSearchHttpError: if the CA chain is not available yet.
-        """
-        staged_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
-        staged_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
-        staged_path = staged_dir / "chain.pem"
-
-        chain_path = self.workload.paths.certs / "chain.pem"
-        try:
-            if chain_path.exists():
-                self.workload.write_text(
-                    content=self.workload.read_text(chain_path), path=staged_path, mode=0o644
-                )
-                return staged_path.as_posix()
-        except OpenSearchFileOperationError as e:
-            logger.warning(
-                "Failed to read chain.pem from %s (%s); falling back to staged copy if present",
-                chain_path,
-                e,
-            )
-
-        # workload-side chain.pem unavailable, use last staged copy.
-        if staged_path.exists():
-            return staged_path.as_posix()
-
-        raise OpenSearchHttpError(response_text="chain.pem not available yet")
-
     def get_current_node(
         self, unit_name: str, unit_id: int, alt_hosts: list[str] | None
     ) -> Node | None:
@@ -1281,14 +1238,10 @@ class OpenSearchClient:
                     else:
                         s.auth = ("admin", self.admin_secret)
 
-                    # For K8s, chain.pem is in workload container
-                    # but requests runs in charm container
-                    # We need to get the file path that charm container can access.
-                    verify_path = self._get_chain_pem_path()
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,
-                        "verify": verify_path,
+                        "verify": self.workload.chain_path(),
                         "headers": {
                             "Accept": "application/json",
                             "Content-Type": "application/json",
