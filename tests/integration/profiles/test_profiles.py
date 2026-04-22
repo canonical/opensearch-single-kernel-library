@@ -84,6 +84,7 @@ async def test_build_and_deploy(
             APP_NAME,
             1,
             series=series,
+            constraints="mem=8G",
             config={"profile": "production"},
             resources=charm_resources,
         ),
@@ -232,6 +233,7 @@ async def test_large_deployment_cluster(
         "main",
         1,
         series=series,
+        constraints="mem=8G",
         config={"cluster_name": "test", "roles": "cluster_manager", "profile": "production"},
         resources=charm_resources,
     )
@@ -242,6 +244,7 @@ async def test_large_deployment_cluster(
         "data",
         1,
         series=series,
+        constraints="mem=8G",
         config={
             "cluster_name": "test",
             "init_hold": True,
