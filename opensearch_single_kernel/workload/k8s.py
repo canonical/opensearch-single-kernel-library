@@ -797,7 +797,7 @@ class K8sWorkload(BaseWorkload):
         staged_path = staged_dir / "chain.pem"
 
         try:
-            if self.paths.certs_chain.exists():
+            if self.exists(self.paths.certs_chain):
                 staged_path.write_text(self.read_text(self.paths.certs_chain), mode=0o644)
                 return staged_path.as_posix()
         except OpenSearchFileOperationError as e:
@@ -810,4 +810,4 @@ class K8sWorkload(BaseWorkload):
         if staged_path.exists():
             return staged_path.as_posix()
 
-        raise OpenSearchHttpError(response_text="chain.pem not available yet")
+        raise OpenSearchFileOperationError("chain.pem not available yet")

@@ -139,11 +139,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for peer relation changed, deferring.")
-            event.defer()
-            return
-
         # check requirements
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed.")
@@ -203,12 +198,11 @@ class OpenSearchEventsHandler(Object):
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
             try:
-
                 if self.charm.config_manager.update_opensearch_config():
                     self.charm.status.set(CharmStatuses.WAITING_TO_START)
                     logger.debug("Restarting opensearch due to reconfiguring node roles")
                     self.charm.restart_opensearch_event.emit()
-            except (OpenSearchFileOperationError, OpenSearchError) as e:
+            except OpenSearchFileOperationError as e:
                 logger.error("An error occurred while updating opensearch config: %s", str(e))
                 event.defer()
                 return
@@ -451,15 +445,16 @@ class OpenSearchEventsHandler(Object):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for config changed, deferring.")
-            event.defer()
-            return
         if self.charm.substrate == Substrates.VM and (
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
         ):
-            self.charm.config_manager.update_opensearch_config()
+            try:
+                self.charm.config_manager.update_opensearch_config()
+            except OpenSearchFileOperationError as e:
+                logger.error("An error occurred while updating opensearch config: %s", str(e))
+                event.defer()
+                return
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
 
@@ -556,7 +551,7 @@ class OpenSearchEventsHandler(Object):
                     self.charm.status.set(CharmStatuses.WAITING_TO_START)
                     logger.debug("Leader election reconfigured node roles; emitting restart.")
                     self.charm.restart_opensearch_event.emit()
-                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                except OpenSearchFileOperationError as e:
                     logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
             return
@@ -746,7 +741,12 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
-            except (OpenSearchHttpError, OpenSearchNotFullyReadyError, OpenSearchCmdError) as e:
+            except (
+                OpenSearchHttpError,
+                OpenSearchNotFullyReadyError,
+                OpenSearchCmdError,
+                OpenSearchFileOperationError,
+            ) as e:
                 # check if cluster should have started but is blocked
                 logger.debug("OpenSearch already started, but post-start init failed: %s", e)
                 if (
@@ -832,7 +832,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.config_manager.update_opensearch_config(
                 cm_names=cm_names, seed_hosts=seed_hosts
             )
-        except (OpenSearchFileOperationError, OpenSearchError) as e:
+        except OpenSearchFileOperationError as e:
             logger.info("Unable to configure OpenSearch node before start: %s", e)
             self.charm.lock_manager.release()
             event.defer()

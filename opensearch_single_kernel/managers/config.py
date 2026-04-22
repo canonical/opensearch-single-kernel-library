@@ -60,6 +60,9 @@ class ConfigManager(BaseManager):
 
         Returns:
             whether the config was changed.
+
+        Raises:
+            OpenSearchFileOperationError: if there is an error writing to any of the config files
         """
         if roles is None:
             roles = self._opensearch_roles
@@ -476,7 +479,11 @@ class ConfigManager(BaseManager):
         }
 
     def update_seeds_config(self) -> None:
-        """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config."""
+        """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config.
+
+        Raises:
+            OpenSearchFileOperationError: if there is an error writing to the seeds file.
+        """
         if nodes_config := self.state.application.nodes_config:
             if self.state.substrate == Substrates.K8S:
                 self._update_seeds_file(
@@ -492,7 +499,17 @@ class ConfigManager(BaseManager):
                 )
 
     def _update_seeds_file(self, seed_hosts: list[str] | None) -> None:
-        """Reconcile OpenSearch unicast_hosts.txt using provided values."""
+        """Reconcile OpenSearch unicast_hosts.txt using provided values.
+
+        Args:
+            seed_hosts: list of host IPs or DNS names to be written to unicast_hosts
+
+        Returns:
+            None
+
+        Raises:
+            OpenSearchFileOperationError: if there is an error writing to the seeds file.
+        """
         if not seed_hosts:
             return
         lines = "\n".join(sorted(set(seed_hosts)))

@@ -178,6 +178,9 @@ class BaseWorkload(ABC):
             content (str): The content to be written.
             path (str): The file path where the content should be written.
             mode (int, optional): The mode/permissions to use when writing the file.
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error during the file write operation.
         """
         try:
             path.write_text(content, mode=mode)
