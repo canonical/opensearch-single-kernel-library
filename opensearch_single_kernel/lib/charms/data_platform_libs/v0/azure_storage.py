@@ -187,6 +187,7 @@ class AzureStorageRequirerEventHandlers(RequirerEventHandlers):
 
         if relation.app == self.charm.app:
             logging.info("Secret changed event ignored for Secret Owner")
+            return
 
         remote_unit = None
         for unit in relation.units:

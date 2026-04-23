@@ -548,7 +548,7 @@ def test_restore_when_all_ok_then_health_apply_is_called(
         called["ok"] = True
 
     monkeypatch.setattr(
-        "opensearch_single_kernel.utils.status.Status.apply_health",
+        "opensearch_single_kernel.charms.base.OpenSearchBaseCharm.apply_health",
         lambda *_a, **_k: fake_apply(),
     )
     # When

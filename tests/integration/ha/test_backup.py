@@ -38,7 +38,7 @@ from opensearch_single_kernel.common.constants import (
     OPENSEARCH_BACKUP_ID_FORMAT,
     S3_REPOSITORY,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -58,6 +58,7 @@ from tests.integration.ha.helpers import (
 from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
+    EmptyBlockedStatus,
     app_name,
     get_application_units,
     get_leader_unit_id,
@@ -499,8 +500,6 @@ async def test_large_deployment_build_and_deploy(
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, "main", "failover", APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={
             TLS_CERTIFICATES_APP_NAME: 1,
             "main": 1,
@@ -596,9 +595,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     await wait_until(
         ops_test,
         apps=["main"],
-        apps_full_statuses={
-            "main": {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={"main": [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
     )
     logger.info("Opensearch is blocked by invalid config/credentials.")
@@ -619,11 +616,9 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     await wait_until(
         ops_test,
         apps=["failover", APP_NAME],
-        apps_full_statuses={
-            "failover": {
-                "blocked": [CharmStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value.message]
-            },
-            APP_NAME: {"blocked": [CharmStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value.message]},
+        apps_statuses={
+            "failover": [SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value],
+            APP_NAME: [SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value],
         },
         idle_period=IDLE_PERIOD,
     )
@@ -639,9 +634,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     await wait_until(
         ops_test,
         apps=["main"],
-        apps_full_statuses={
-            "main": {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={"main": [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
     )
 
@@ -652,8 +645,6 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
         await wait_until(
             ops_test,
             apps=["main"],
-            units_statuses=["active"],
-            apps_statuses=["active"],
             wait_for_exact_units=1,
             idle_period=IDLE_PERIOD,
         )
@@ -702,8 +693,6 @@ async def test_create_backup_and_restore(
     await wait_until(
         ops_test,
         apps=apps,
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
     )
@@ -769,8 +758,6 @@ async def test_remove_and_readd_backup_relation(
     await wait_until(
         ops_test,
         apps=apps,
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
         idle_period=IDLE_PERIOD,
         timeout=1400,
@@ -781,8 +768,6 @@ async def test_remove_and_readd_backup_relation(
     await wait_until(
         ops_test,
         apps=apps,
-        units_statuses=["active"],
-        apps_statuses=["active"],
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
         timeout=1400,
@@ -905,8 +890,6 @@ async def test_restore_to_new_cluster(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(ops_test.model.applications[app].units),
         idle_period=IDLE_PERIOD,
     )
@@ -987,8 +970,6 @@ async def _drop_s3_relation_if_any(ops_test: OpsTest, app: str) -> None:
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=len(ops_test.model.applications[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
@@ -1012,8 +993,6 @@ async def _drop_azure_relation_if_any(ops_test: OpsTest, app: str) -> None:
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=len(ops_test.model.applications[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
@@ -1034,8 +1013,6 @@ async def _drop_gcs_relation_if_any(ops_test: OpsTest, app: str) -> None:
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=len(ops_test.model.applications[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
@@ -1060,7 +1037,8 @@ async def _ensure_only_s3_integrator_related(
         await wait_until(
             ops_test,
             apps=[S3_INTEGRATOR],
-            units_statuses=["blocked"],
+            apps_statuses={S3_INTEGRATOR: [EmptyBlockedStatus]},
+            units_statuses={S3_INTEGRATOR: [EmptyBlockedStatus]},
             wait_for_exact_units=1,
             idle_period=10,
             timeout=1400,
@@ -1086,7 +1064,8 @@ async def _ensure_only_azure_integrator_related(ops_test: OpsTest, app: str) -> 
         await wait_until(
             ops_test,
             apps=[AZURE_INTEGRATOR],
-            units_statuses=["blocked"],
+            apps_statuses={AZURE_INTEGRATOR: [EmptyBlockedStatus]},
+            units_statuses={AZURE_INTEGRATOR: [EmptyBlockedStatus]},
             wait_for_exact_units=1,
             idle_period=10,
             timeout=1400,
@@ -1111,7 +1090,8 @@ async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> No
         await wait_until(
             ops_test,
             apps=[GCS_INTEGRATOR],
-            units_statuses=["blocked"],
+            apps_statuses={GCS_INTEGRATOR: [EmptyBlockedStatus]},
+            units_statuses={GCS_INTEGRATOR: [EmptyBlockedStatus]},
             wait_for_exact_units=1,
             idle_period=10,
             timeout=1400,
@@ -1154,8 +1134,6 @@ async def test_build_deploy_and_test_status(ops_test: OpsTest, charm, series) ->
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
             TLS_CERTIFICATES_APP_NAME: 1,
@@ -1213,9 +1191,7 @@ async def test_wrong_aws_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_full_statuses={
-            app: {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad credentials.")
 
@@ -1245,8 +1221,6 @@ async def test_wrong_aws_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1291,9 +1265,7 @@ async def test_wrong_microceph_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_full_statuses={
-            app: {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad credentials.")
 
@@ -1323,8 +1295,6 @@ async def test_wrong_microceph_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1370,8 +1340,6 @@ async def test_wrong_microceph_ca_blocked(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1391,9 +1359,7 @@ async def test_wrong_microceph_ca_blocked(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_full_statuses={
-            app: {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad CA.")
     # With bad CA, repository verification usually fails.
@@ -1405,8 +1371,6 @@ async def test_wrong_microceph_ca_blocked(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1458,11 +1422,7 @@ async def test_wrong_azure_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["blocked"],
-        apps_full_statuses={
-            app: {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
     )
     logger.info("Opensearch 1 app is blocked because of Azure bad credentials.")
@@ -1484,8 +1444,6 @@ async def test_wrong_azure_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1539,11 +1497,7 @@ async def test_wrong_gcs_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["blocked"],
-        apps_full_statuses={
-            app: {"blocked": [CharmStatuses.BACKUP_CREDENTIALS_INCORRECT.value.message]}
-        },
+        apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
     )
     logger.info("Opensearch app is blocked because of invalid GCS credentials.")
@@ -1555,8 +1509,6 @@ async def test_wrong_gcs_credentials(
     await wait_until(
         ops_test,
         apps=[app],
-        units_statuses=["active"],
-        apps_statuses=["active"],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
@@ -1626,8 +1578,6 @@ async def test_change_config_and_backup_restore(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(ops_test.model.applications[app].units),
         idle_period=IDLE_PERIOD,
     )

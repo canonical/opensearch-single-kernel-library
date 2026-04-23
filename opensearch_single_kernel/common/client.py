@@ -609,6 +609,28 @@ class OpenSearchClient:
 
         return resp
 
+    def get_user(self, user_name: str) -> dict[str, Any] | None:
+        """Get the given user from opensearch distribution.
+
+        Args:
+            user_name: name of the user to be removed.
+
+        Raises:
+            OpenSearchUserMgmtError: If the request fails, or if user_name is empty
+
+        Returns:
+            HTTP response to opensearch API request.
+        """
+        try:
+            resp = self.request("GET", f"{USER_ENDPOINT}/{user_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return None
+            raise e
+
+        logger.debug(resp)
+        return resp
+
     def remove_user(self, user_name: str) -> dict[str, Any]:
         """Remove the given user from opensearch distribution.
 
@@ -1006,7 +1028,7 @@ class OpenSearchClient:
         )
 
     def get_health(
-        self, host: str, wait_for_green: bool, alt_hosts: list[str] | None = None
+        self, host: str | None, wait_for_green: bool, alt_hosts: list[str] | None = None
     ) -> dict[str, Any] | None:
         """Fetch the cluster health."""
         endpoint = "/_cluster/health"
