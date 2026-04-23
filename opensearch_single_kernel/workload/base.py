@@ -18,6 +18,7 @@ from ops.pebble import Error as PebbleError
 
 from opensearch_single_kernel.common.constants import (
     BASE_SNAP_DIR,
+    DIR_PERMISSIONS_READONLY,
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
@@ -221,7 +222,7 @@ class BaseWorkload(ABC):
     def mkdir(
         self,
         path: pathops.PathProtocol,
-        mode: int = 0o777,
+        mode: int = DIR_PERMISSIONS_READONLY,
         parents: bool = False,
         exist_ok: bool = False,
     ) -> None:

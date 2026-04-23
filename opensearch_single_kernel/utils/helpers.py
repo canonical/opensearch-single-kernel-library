@@ -131,17 +131,7 @@ def get_k8s_seed_host(unit_name: str, app_name: str) -> str:
     # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
     pod_prefix = (unit_name or "").split(".", 1)[0]
     service_name = f"{pod_prefix}.{app_name}-endpoints"
-    try:
-        return get_k8s_fqdn(service_name)
-    except RuntimeError:
-        # Seed hosts follow the stable pod-headless-service DNS pattern. If the charm
-        # container cannot obtain a canonical DNS answer for a peer pod, derive the
-        # namespace/domain suffix from the current unit FQDN and keep progressing.
-        local_fqdn = socket.getfqdn()
-        local_parts = local_fqdn.split(".")
-        if len(local_parts) > 2:
-            return f"{service_name}.{'.'.join(local_parts[2:])}"
-        return service_name
+    return get_k8s_fqdn(service_name)
 
 
 def validate_index_name(index_name: str) -> bool:

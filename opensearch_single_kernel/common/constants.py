@@ -345,7 +345,7 @@ OPENSEARCH_PEBBLE_SERVICE_NAME = "opensearch"
 
 # File permissions as octal
 # standard directory permissions
-DIR_PERMISSIONS_READONLY = 0o755
+DIR_PERMISSIONS_READONLY = 0o750
 # certificates directory permissions
 # minimum permissions: daemon can write, root can list/read.
 DIR_PERMISSIONS_CERTIFICATES = 0o750
