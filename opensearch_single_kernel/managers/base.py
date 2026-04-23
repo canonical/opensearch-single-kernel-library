@@ -84,7 +84,7 @@ class BaseManager:
             if not node.is_cm_eligible():
                 continue
             if self.state.substrate == Substrates.K8S:
-                result.append(get_k8s_seed_host(node.name, node.app.name))
+                result.append(get_k8s_seed_host(node.name))
             else:
                 result.append(node.ip)
 

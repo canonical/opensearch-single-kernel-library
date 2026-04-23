@@ -479,7 +479,7 @@ class ConfigManager(BaseManager):
             if self.state.substrate == Substrates.K8S:
                 self._update_seeds_file(
                     [
-                        get_k8s_seed_host(node.name, node.app.name)
+                        get_k8s_seed_host(node.name)
                         for node in nodes_config.values()
                         if node.is_cm_eligible()
                     ]

@@ -1012,8 +1012,8 @@ class ClusterState(Object):
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
         if self.substrate == Substrates.K8S:
-            # K8s should bind on stable DNS identity.
-            return [self.fqdn]
+            # K8s we allow binding on all interfaces
+            return ["0.0.0.0"]
         return [socket.getfqdn(), self.host_ip]
 
     @property
