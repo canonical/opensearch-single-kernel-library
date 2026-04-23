@@ -526,31 +526,6 @@ class K8sWorkload(BaseWorkload):
             raise OpenSearchStartError() from e
 
     @override
-    def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values.
-
-        Returns:
-            dict[str, float]: The memory info values in kB. Returns empty dict on error.
-        """
-        try:
-            result = self.run_cmd("cat /proc/meminfo")
-            return self._parse_meminfo_output(result.out)
-        except OpenSearchCmdError as e:
-            # try to parse output from error message if it exists
-            if e.out:
-                if parsed := self._parse_meminfo_output(e.out):
-                    logger.debug(
-                        "Successfully parsed meminfo from command output despite non-zero exit code: %s",
-                        parsed,
-                    )
-                    return parsed
-            logger.warning("Failed to read meminfo: %s", e)
-            return {}
-        except OSError as e:
-            logger.warning("Failed to read meminfo: %s", e)
-            return {}
-
-    @override
     def check_missing_system_requirements(self) -> list[str]:
         """Checks the system requirements for K8s.
 

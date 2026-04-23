@@ -237,23 +237,6 @@ class VMWorkload(BaseWorkload):
             logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStartError()
 
-    @override
-    def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values.
-
-        According to the kernel source code, the values are always in kB:
-            https://github.com/torvalds/linux/blob/
-                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
-        Returns:
-            meminfo: The memory info values.
-        """
-        try:
-            with open("/proc/meminfo") as f:
-                return self._parse_meminfo_output(f.read())
-        except OSError as e:
-            logger.warning("Failed to read meminfo: %s", e)
-            return {}
-
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement.
 

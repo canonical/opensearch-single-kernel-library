@@ -342,19 +342,18 @@ class BaseWorkload(ABC):
         """Run Command in CLI"""
         pass
 
-    @abstractmethod
     def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values."""
-        pass
+        """Read the /proc/meminfo file and return the values in kB.
 
-    def _parse_meminfo_output(self, output: str) -> dict[str, float]:
-        """Parse meminfo output into a dictionary."""
+        Returns:
+            dict[str, float]: The memory info values in kB. Returns empty dict on error.
+        """
         try:
-            meminfo_lines = output.split("\n")
-            meminfo = [line.split() for line in meminfo_lines if line.strip()]
-            return {line[0][:-1]: float(line[1]) for line in meminfo if len(line) >= 2}
-        except (ValueError, IndexError, AttributeError) as parse_error:
-            logger.warning("Failed to parse meminfo output: %s", parse_error)
+            output = self.run_cmd("cat /proc/meminfo").out
+            lines = [line.split() for line in output.split("\n") if line.strip()]
+            return {line[0][:-1]: float(line[1]) for line in lines if len(line) >= 2}
+        except (OpenSearchCmdError, OSError, ValueError, IndexError, AttributeError) as e:
+            logger.warning("Failed to read meminfo: %s", e)
             return {}
 
     @abstractmethod
