@@ -566,37 +566,3 @@ class ConfigManager(BaseManager):
     def is_http_tls_configured(self) -> bool:
         """Check if HTTP TLS is configured."""
         return self._is_tls_layer_configured("http", "unit-http.p12")
-
-    def ensure_k8s_tls_config_present(self) -> bool:
-        """Ensure TLS config is present in opensearch.yml on K8s when TLS secrets are ready.
-
-        Returns:
-            bool: True when TLS config is already present or successfully written.
-                False when TLS secrets are not ready yet.
-        """
-        if self.state.substrate != Substrates.K8S:
-            return True
-
-        admin_secrets = (
-            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
-        transport_secrets = (
-            self.state.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True) or {}
-        )
-        http_secrets = (
-            self.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val, peek=True) or {}
-        )
-
-        truststore_pwd = admin_secrets.get("truststore-password")
-        transport_keystore_pwd = transport_secrets.get("keystore-password")
-        http_keystore_pwd = http_secrets.get("keystore-password")
-        if not (truststore_pwd and transport_keystore_pwd and http_keystore_pwd):
-            return False
-
-        if self.is_transport_tls_configured() and self.is_http_tls_configured():
-            return True
-
-        # /etc/opensearch may come from image defaults.
-        # Reconcile full config so TLS/admin DN are restored from state.
-        self.update_opensearch_config()
-        return True
