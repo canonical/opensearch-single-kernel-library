@@ -108,17 +108,6 @@ class StoreType(BaseStrEnum):
     TRUSTSTORE = "truststore"
 
 
-class TlsFileExt(BaseStrEnum):
-    """Extensions of TLS generated files."""
-
-    CA = ".ca"
-    CERT = ".cert"
-    CHAIN = ".chain"
-    CSR = ".csr"
-    KEY = ".key"
-    KEYPASS = ".key-password"
-
-
 class SmtpTransportSecurity(BaseStrEnum):
     """SMTP transport security protocol.
 

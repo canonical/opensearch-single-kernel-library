@@ -557,11 +557,3 @@ class ConfigManager(BaseManager):
             return keystore_path.exists() and truststore_path.exists() and cacert_path.exists()
         except Exception:
             return False
-
-    def is_transport_tls_configured(self) -> bool:
-        """Check if transport TLS is configured."""
-        return self._is_tls_layer_configured("transport", "unit-transport.p12")
-
-    def is_http_tls_configured(self) -> bool:
-        """Check if HTTP TLS is configured."""
-        return self._is_tls_layer_configured("http", "unit-http.p12")

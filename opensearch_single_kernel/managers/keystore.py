@@ -161,11 +161,6 @@ class KeystoreManager(BaseManager):
                     continue
                 raise
 
-    def list_keys(self) -> list[str]:
-        """List all keys in the keystore."""
-        self._create_if_needed()
-        return self.workload.run_cmd(self.KEYSTORE, "list").splitlines()
-
     def reload(self) -> bool:
         """Reload the keystore.
 

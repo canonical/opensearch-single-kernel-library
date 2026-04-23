@@ -1245,19 +1245,6 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
 
-    def update_external_clients_endpoints(self) -> None:
-        """Update the endpoints of all the external clients relations."""
-        for external_client in self.charm.state.external_clients:
-            if self.charm.unit.is_leader():
-                try:
-                    nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-                except OpenSearchHttpError as e:
-                    logger.error("unable to get nodes: %s", str(e))
-                    nodes = []
-                self.charm.external_clients_manager.update_relation_endpoints(
-                    external_client, nodes
-                )
-
     def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
         """Triggered when the unit IP is changed."""
         self.charm.status.set(CharmStatuses.TLS_NEW_CERTS_REQUESTED)

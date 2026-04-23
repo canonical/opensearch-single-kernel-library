@@ -88,16 +88,6 @@ def deployment_type(
     )
 
 
-def is_srv_dns_record(value: str) -> bool:
-    """Return True when value looks like an SRV-style DNS record."""
-    pattern = (
-        r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?"
-        r"\.([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+srv"
-        r"(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?){2,}\.?$"
-    )
-    return bool(re.match(pattern, value, re.IGNORECASE))
-
-
 def get_k8s_fqdn(name: str) -> str:
     """Resolve the canonical FQDN for a Kubernetes service or pod name."""
     try:
