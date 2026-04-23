@@ -29,8 +29,7 @@ class PluginManager(BaseManager):
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the plugin manager class."""
-        super().__init__(state, workload)
-        self.name = "plugin_manager"
+        super().__init__(state, workload, "plugin_manager")
 
     def put_plugin_config(
         self,

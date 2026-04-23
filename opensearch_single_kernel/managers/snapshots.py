@@ -3,11 +3,15 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Snapshots manager."""
+
 import json
 import logging
 from typing import Any
 
 from charmlibs.pathops import PathProtocol
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
@@ -19,9 +23,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
     OpenSearchHttpError,
+    OpenSearchInvalidStorageTypeError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchRestoreBackupError,
 )
+from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
     AzureRelData,
     GcsRelData,
@@ -55,8 +61,7 @@ class SnapshotsManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "backup_manager"
+        super().__init__(state, workload, "backup_manager")
 
     def storage_config_from_connection_info(  # noqa: C901
         self, object_storage_type: ObjectStorageType, connection_info: dict[str, str]
@@ -432,7 +437,9 @@ class SnapshotsManager(BaseManager):
             raise OpenSearchRestoreBackupError("Failed to close open indices. Error: %s." % str(e))
 
     def verify_stored_credentials(
-        self, object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
+        self,
+        object_storage_type: ObjectStorageType,
+        object_storage_config: ObjectStorageConfig,
     ) -> None:
         """Verify that the stored credentials are valid."""
         credential_dict = {}
@@ -454,7 +461,9 @@ class SnapshotsManager(BaseManager):
 
         credentials_hash = hash_credentials(credential_dict)
         logger.info(
-            "Verifying credentials for %s with hash %s", object_storage_type, credentials_hash
+            "Verifying credentials for %s with hash %s",
+            object_storage_type,
+            credentials_hash,
         )
 
         # TODO: Handle large deployments
@@ -474,3 +483,46 @@ class SnapshotsManager(BaseManager):
         return self.opensearch_client.is_snapshot_in_progress(
             self.alt_hosts
         ) or self.opensearch_client.is_restore_in_progress(self.alt_hosts)
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        if (
+            scope == "app"
+            and self.state.application.deployment_desc
+            and (object_storage_type := self.state.storage_type)
+        ):
+            if object_storage_type == ObjectStorageType.CONFLICT:
+                return [SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value]
+            try:
+                connection_info = self.state.get_storage_connection_info_from_relation(
+                    object_storage_type
+                )
+
+                if not (
+                    object_storage_config := (
+                        self.storage_config_from_connection_info(
+                            object_storage_type, connection_info
+                        )
+                    )
+                ):
+                    return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+
+                self.validate_storage_config(object_storage_config, object_storage_type)
+            except OpenSearchInvalidStorageTypeError:
+                return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+            except OpenSearchObjectStorageConfigValidationError:
+                return [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+            except OpenSearchBackupRelationDataIncompleteError:
+                return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+            except OpenSearchBackupCredentialsIncorrectError:
+                return [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+
+        return [GeneralStatuses.ACTIVE_IDLE.value]

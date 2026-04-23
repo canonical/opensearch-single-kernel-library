@@ -30,6 +30,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchLockError,
 )
+from opensearch_single_kernel.common.statuses import LockStatuses
 from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -43,7 +44,7 @@ class PeerLockManager(BaseManager):
     """Fallback lock when all units of OpenSearch are offline."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
+        super().__init__(state, workload, "lock_manager")
 
     def acquire(self) -> bool:
         """Attempt to acquire lock.
@@ -67,6 +68,10 @@ class PeerLockManager(BaseManager):
                 self.state.application_lock.unit_with_lock,
             )
             return False
+
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
 
         if (
             self.state.server.is_app_leader
@@ -110,6 +115,10 @@ class PeerLockManager(BaseManager):
             # A separate relation-changed event won't get fired
             self.refresh_lock()
 
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
+
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
         if not self.state.lock_relation:
@@ -150,9 +159,7 @@ class PeerLockManager(BaseManager):
 class LockManager(PeerLockManager):
     """OpenSearch Lock Manager."""
 
-    def __init__(self, state, workload):
-        self.name = "lock_manager"
-        super().__init__(state, workload)
+    OPENSEARCH_INDEX = ".charm_node_lock"
 
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""

@@ -18,6 +18,7 @@ from tests.integration.conftest import (
     SERIES,
 )
 from tests.integration.helpers import (
+    EmptyBlockedStatus,
     get_application_unit_ids,
     get_leader_unit_id,
     get_leader_unit_ip,
@@ -227,8 +228,6 @@ async def test_dashboard_relation(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS,
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=70,
     )
 
@@ -300,7 +299,6 @@ async def test_scaling(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS,
-        apps_statuses=["active"],
         idle_period=70,
     )
 
@@ -312,8 +310,6 @@ async def test_scaling(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS,
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1},
         idle_period=70,
     )
@@ -326,8 +322,6 @@ async def test_scaling(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS,
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids)},
         idle_period=50,  # slightly less than update-status-interval period
     )
@@ -371,8 +365,6 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm):
     await wait_until(
         ops_test,
         apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={
             OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1,
             CLIENT_APP_NAME: 1,
@@ -412,8 +404,6 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=70,
     )
 
@@ -450,8 +440,6 @@ async def test_admin_relation(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=70,
     )
 
@@ -615,8 +603,6 @@ async def test_relation_broken(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=70,
     )
 
@@ -632,15 +618,21 @@ async def test_relation_broken(ops_test: OpsTest):
         ),
     )
 
-    await asyncio.gather(
-        wait_until(ops_test, apps=[CLIENT_APP_NAME], apps_statuses=["blocked"], idle_period=70),
-        wait_until(
-            ops_test,
-            apps=[OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME, SECONDARY_CLIENT_APP_NAME],
-            apps_statuses=["active"],
-            units_statuses=["active"],
-            idle_period=70,
-        ),
+    await wait_until(
+        ops_test,
+        apps=[
+            OPENSEARCH_APP_NAME,
+            TLS_CERTIFICATES_APP_NAME,
+            SECONDARY_CLIENT_APP_NAME,
+            CLIENT_APP_NAME,
+        ],
+        apps_statuses={
+            CLIENT_APP_NAME: [EmptyBlockedStatus],
+        },
+        units_statuses={
+            CLIENT_APP_NAME: [EmptyBlockedStatus],
+        },
+        idle_period=70,
     )
 
     leader_ip = await get_leader_unit_ip(ops_test)
@@ -666,8 +658,6 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         idle_period=70,
     ),
 
