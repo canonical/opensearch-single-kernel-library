@@ -144,11 +144,6 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
-        if not self.charm.state.server.started:
-            logger.debug("Deferring peer relation changed because server haven't started yet")
-            event.defer()
-            return
-
         if is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up():
             health = self.charm.status.apply_health(app=self.charm.unit.is_leader())
 

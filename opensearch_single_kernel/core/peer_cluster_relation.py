@@ -80,10 +80,7 @@ class PeerCluster(RelationState):
     @cluster_fleet_apps.deleter
     def cluster_fleet_apps(self):
         """Delete the 'cluster_fleet_apps' field to notify related clusters."""
-        if "cluster_fleet_apps" not in self.relation.data[self.app]:
-            logger.debug("No cluster_fleet_apps field found to delete.")
-            return
-        del self.relation.data[self.app]["cluster_fleet_apps"]
+        self.relation.data[self.app].pop("cluster_fleet_apps", None)
 
     @property
     def error_data(self) -> PeerClusterRelErrorData | None:

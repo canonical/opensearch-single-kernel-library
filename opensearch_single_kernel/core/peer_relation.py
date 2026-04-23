@@ -594,7 +594,7 @@ class OpenSearchApplication(RelationState):
     @orchestrators.deleter
     def orchestrators(self) -> None:
         """Remove the value of 'orchestrators' from application databag."""
-        self.update({"orchestrators": ""})
+        self.relation.data[self.app].pop("orchestrators", None)
 
     @property
     def missing_relations(self) -> bool:
