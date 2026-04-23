@@ -260,6 +260,7 @@ def remove_ca(
     alias: str,
     store_pwd: str,
     store_path: PathProtocol,
+    use_sudo: bool = True,
 ) -> None:
     """Remove old CA cert from the truststore.
 
@@ -268,6 +269,7 @@ def remove_ca(
         alias: Alias to use for the CA certs.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
+        use_sudo: Whether to prefix chmod with sudo. False for K8s where sudo is unavailable.
     """
     list_cmd = (
         f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
@@ -289,8 +291,9 @@ def remove_ca(
         # Anything else is a real error
         raise
 
+    sudo_prefix = "sudo " if use_sudo else ""
     try:
-        workload.run_cmd(f"sudo chmod 0664 {store_path}")
+        workload.run_cmd(f"{sudo_prefix}chmod 0664 {store_path}")
     except OpenSearchCmdError as e:
         logger.warning(
             "Failed to chmod 0664 on %s before CA removal: %s%s",

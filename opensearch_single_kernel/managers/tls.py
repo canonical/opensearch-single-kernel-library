@@ -697,6 +697,7 @@ class TlsManager(BaseManager):
                 alias=alias,
                 store_pwd=trust_store_pwd,
                 store_path=trust_store_path,
+                use_sudo=self.state.substrate == Substrates.VM,
             )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
