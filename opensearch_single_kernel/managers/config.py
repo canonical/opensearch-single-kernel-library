@@ -11,7 +11,6 @@ from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CA_TRUSTSTORE_P12,
     CertType,
-    Scope,
     Substrates,
 )
 from opensearch_single_kernel.core.models import OpenSearchProfile
