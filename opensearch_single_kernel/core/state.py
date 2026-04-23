@@ -69,6 +69,7 @@ from opensearch_single_kernel.utils.certificates import normalized_tls_subject
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     get_k8s_fqdn,
+    get_k8s_seed_host,
     lock_unit_name,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
@@ -1116,21 +1117,20 @@ class ClusterState(Object):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def units_ips(self) -> dict[str, str]:
-        """Returns the mapping "unit id / ip address" of all units."""
-        unit_ip_map = {}
-        if not self.peer_relation:
-            return unit_ip_map
-
-        for unit in self.peer_relation.units:
-            unit_id = unit.name.split("/")[1]
-            unit_ip_map[unit_id] = self.unit_ip(unit)
-
-        # Sometimes the above command doesn't get the current node,
-        # so ensure we get this unit's ip.
-        unit_ip_map[self.model.unit.name.split("/")[1]] = self.host_ip
-
-        return unit_ip_map
+    def all_hosts(self) -> list[str]:
+        """Fetch the list of hosts for the current app."""
+        hosts = []
+        if self.all_units:
+            for unit in self.all_units:
+                if self.substrate == Substrates.K8S:
+                    hosts.append(
+                        get_k8s_seed_host(
+                            format_unit_name(unit, app=self.application.deployment_desc.app)
+                        )
+                    )
+                else:
+                    hosts.append(self.unit_ip(unit))
+        return hosts
 
     @property
     def all_units(self) -> list[Unit]:

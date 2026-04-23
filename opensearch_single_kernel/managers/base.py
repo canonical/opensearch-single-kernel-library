@@ -47,26 +47,29 @@ class BaseManager:
     @property
     def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
-        all_units_ips = self.state.units_ips
-        all_hosts = list(all_units_ips.values())
+        all_hosts = set(self.state.all_hosts)
 
         if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([node.ip for node in nodes_conf.values()])
+            all_hosts.update([node.ip for node in nodes_conf.values()])
 
         # TODO: Add getting relation data form state
         # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
         #    all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
-
-        random.shuffle(all_hosts)
 
         if not all_hosts:
             return None
 
         client = self.opensearch_client
 
-        return [
-            host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
+        active_hosts = [
+            host
+            for host in all_hosts
+            if host != self.state.publish_host and client.is_node_up(host)
         ]
+
+        random.shuffle(active_hosts)
+
+        return active_hosts
 
     def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
