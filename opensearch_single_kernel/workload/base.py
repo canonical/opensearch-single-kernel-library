@@ -335,9 +335,9 @@ class BaseWorkload(ABC):
     def run_cmd(
         self,
         command: str,
-        args: str = None,
+        args: str | None = None,
         use_errors_replace: bool = False,
-        stdin: str = None,
+        stdin: str | None = None,
     ) -> SimpleNamespace:
         """Run Command in CLI"""
         pass
