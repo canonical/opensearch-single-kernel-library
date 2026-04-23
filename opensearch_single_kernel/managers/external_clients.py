@@ -346,5 +346,6 @@ class ExternalClientsManager(BaseManager):
                     )
                 )
                 return
-        except OpenSearchHttpError:
+        except OpenSearchHttpError as e:
+            logger.error("Failed to check external client status: %s", str(e))
             return
