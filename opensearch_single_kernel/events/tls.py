@@ -333,7 +333,7 @@ class TLSEventsHandler(Object):
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
             )
-            logger.debug(" %s.%s TLS certificate expiring.", scope.val, cert_type.val)
+            logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return

@@ -390,32 +390,6 @@ class K8sWorkload(BaseWorkload):
             logger.debug("Failed to get FQDN via 'hostname -f', will try fallback. Error: %s", e)
         return None
 
-    def _get_pod_hostname_with_fallback(self) -> str | None:
-        """Get pod hostname with FQDN fallback attempt.
-
-        Returns:
-            str or None: Hostname or FQDN if successful, None otherwise.
-
-        """
-        try:
-            if (
-                (result := self.run_cmd("hostname"))
-                and result.returncode == 0
-                and isinstance(result.out, str)
-                and result.out.strip()
-            ):
-                hostname = result.out.strip()
-                # if hostname doesn't contain dots, verify it resolves via DNS
-                if "." not in hostname:
-                    if self._verify_hostname_resolves(hostname):
-                        return hostname
-                return hostname
-        except OpenSearchCmdError as e:
-            logger.warning(
-                "Failed to get pod hostname, cannot determine stable DNS name. Error: %s", e
-            )
-        return None
-
     def _verify_hostname_resolves(self, hostname: str) -> bool:
         """Verify that hostname resolves via DNS using getent.
 
