@@ -120,7 +120,8 @@ def get_k8s_seed_host(unit_name: str) -> str:
     """Return the canonical K8s seed host for a unit."""
     # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
     pod_prefix = (unit_name or "").split(".", 1)[0]
-    app_name = pod_prefix.split("-", 1)[0]
+    # remove the last -digit to get the app name: "app-0" -> "app"
+    app_name = "-".join(pod_prefix.split("-")[:-1])
     service_name = f"{pod_prefix}.{app_name}-endpoints"
     return get_k8s_fqdn(service_name)
 
