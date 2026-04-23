@@ -150,6 +150,8 @@ class ConfigManager(BaseManager):
     def _network_hosts(self) -> list[str]:
         """Compute network.host entries for opensearch.yml."""
         # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
+        if self.state.substrate == Substrates.K8S:
+            return ["0.0.0.0"]
         return ["_site_", "_local_", *sorted(self.state.network_hosts)]
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
