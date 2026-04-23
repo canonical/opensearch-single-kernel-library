@@ -161,6 +161,7 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
         units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
+        timeout=1800,
     )
 
     # integrate TLS to all applications

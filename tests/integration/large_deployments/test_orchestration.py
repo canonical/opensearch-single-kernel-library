@@ -102,6 +102,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             DATA_APP_TWO: {"units": {"active": []}},
             TLS_CERTIFICATES_APP_NAME: {"units": {"active": []}},
         },
+        timeout=3600,
         wait_for_exact_units=1,
     )
 

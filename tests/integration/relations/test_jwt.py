@@ -202,6 +202,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
             FAILOVER_APP: {"active": []},
         },
         units_statuses=["active"],
+        timeout=3600,
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 

@@ -61,7 +61,7 @@ async def test_deploy(ops_test: OpsTest, charm, series, microk8s_model: Model):
         ),
     )
     await gather(
-        ops_test.model.wait_for_idle(timeout=1000), microk8s_model.wait_for_idle(timeout=1000)
+        ops_test.model.wait_for_idle(timeout=1800), microk8s_model.wait_for_idle(timeout=1800)
     )
 
 

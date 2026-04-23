@@ -710,6 +710,12 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
+            except OpenSearchCmdError as e:
+                # This is case when the data node is not able to initialize the security index
+                # Because there is no
+                logger.warning("OpenSearch already started, but post-start command failed: %s", e)
+                event.defer()
+                return
             except (
                 OpenSearchHttpError,
                 OpenSearchNotFullyReadyError,
