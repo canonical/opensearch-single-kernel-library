@@ -400,7 +400,7 @@ class BaseWorkload(ABC):
             OpenSearchCmdError: If the kernel property value cannot be read
                 or if applying a system requirement fails.
         """
-        raise
+        raise NotImplementedError
 
     @abstractmethod
     def chain_path(self) -> str:
