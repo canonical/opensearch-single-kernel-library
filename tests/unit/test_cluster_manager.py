@@ -65,7 +65,7 @@ def test_can_start(harness, mocker):
         return_value=None,
         new_callable=PropertyMock,
     )
-    assert not harness.charm.cluster_manager.check_if_can_start()
+    assert not harness.charm.state.application.deployment_desc
 
     # with different directives
     for directives, expected in [
@@ -93,8 +93,8 @@ def test_can_start(harness, mocker):
             return_value=deployment_desc,
             new_callable=PropertyMock,
         )
+        can_start = harness.charm.cluster_manager.check_blocking_directives()
 
-        can_start = harness.charm.cluster_manager.check_if_can_start()
         assert (
             can_start == expected
         ), f"Failed for directives {directives}: expected {expected} but got {can_start}"

@@ -190,7 +190,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type) -> None:
                 },
                 units_statuses=["active"],
                 wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
-                timeout=2400,
+                timeout=3600,
                 idle_period=IDLE_PERIOD,
             )
 

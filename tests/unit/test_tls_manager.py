@@ -997,6 +997,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.create_cos_user"
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.refresh_relation_data"
+    )
     mocker.patch("socket.socket.connect")
 
     generate_csr.return_value = uuid.uuid4().hex.encode()
@@ -1038,7 +1041,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     # Leader ONLY
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)
-        harness.charm.state.application.security_index_initialised = True
+        harness.charm.state.application.is_security_index_initialised = True
 
         # We passed the 1st stage of the certificate renewalV
         harness.charm.state.server.tls_ca_renewing = True
@@ -1444,6 +1447,17 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
+    reset_ca_rotation_state = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.reset_ca_rotation_state"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ca_and_certs_rotation_complete_in_cluster",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.refresh_relation_data"
+    )
     reload_tls_certificates = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.reload_tls_certificates"
     )
@@ -1530,6 +1544,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         harness.set_leader(leader)
 
         # We passed the 1st stage of the certificate renewalV
+        harness.charm.state.server.tls_configured = True
         harness.charm.state.server.tls_ca_renewing = True
         harness.charm.state.server.tls_ca_renewed = True
 
@@ -1566,8 +1581,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         tempfile.call_args_list[0][1]["dir"]
     )
 
-    assert not harness.charm.state.server.tls_ca_renewing
-    assert not harness.charm.state.server.tls_ca_renewed
+    assert reset_ca_rotation_state.call_count == 1
 
     assert harness.model.unit.status.message == ""
     assert harness.model.unit.status == original_status
