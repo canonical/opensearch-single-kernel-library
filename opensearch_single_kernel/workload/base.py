@@ -23,7 +23,10 @@ from opensearch_single_kernel.common.constants import (
     SNAP_DATA,
     OpenSearchPaths,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -369,16 +372,27 @@ class BaseWorkload(ABC):
         """Start the opensearch service."""
         pass
 
-    @abstractmethod
-    def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
-        """Apply a system requirement."""
-        pass
+    def _get_kernel_property_value(self, prop: str) -> int:
+        """Get the value of a kernel parameter.
+
+        Args:
+            prop: Kernel property name (e.g., "vm.max_map_count").
+
+        Returns:
+            int: Kernel property value.
+
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read.
+        """
+        try:
+            return int(self.run_cmd("sysctl", args=f"-n {prop}").out.rstrip())
+        except OpenSearchCmdError as e:
+            error_message = e.err or e.out or str(e)
+            logger.warning("sysctl -n %s failed: %s", prop, error_message)
+            # Propagate error
+            raise e
 
     @abstractmethod
-    def _get_kernel_property_value(self, prop: str) -> int | None:
-        """Get the value of a kernel parameter."""
-        pass
-
     def check_missing_system_requirements(self) -> List[str]:
         """Checks the system requirements.
 
@@ -386,29 +400,7 @@ class BaseWorkload(ABC):
             OpenSearchCmdError: If the kernel property value cannot be read
                 or if applying a system requirement fails.
         """
-        missing_requirements = []
-
-        prop, val = "vm.max_map_count", 262144
-        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
-            prop, val
-        ):
-            missing_requirements.append(f"{prop} should be at least {val}")
-
-        prop, val = "vm.swappiness", 0
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, 0
-        ):
-            missing_requirements.append(f"{prop} should be at most {val}")
-
-        prop, val = "net.ipv4.tcp_retries2", 5
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, val
-        ):
-            missing_requirements.append(f"{prop} should be at most {val}")
-
-        if missing_requirements:
-            logger.error("Missing system requirements: %s", missing_requirements)
-        return missing_requirements
+        raise
 
     @abstractmethod
     def chain_path(self) -> str:

@@ -254,7 +254,6 @@ class VMWorkload(BaseWorkload):
             logger.warning("Failed to read meminfo: %s", e)
             return {}
 
-    @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement.
 
@@ -272,16 +271,36 @@ class VMWorkload(BaseWorkload):
             return False
 
     @override
-    def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter.
+    def check_missing_system_requirements(self) -> list[str]:
+        """Checks the system requirements.
 
-        Args:
-            prop (str): Kernel property name.
-
-        Returns:
-            value (int): Kernel property value.
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read
+                or if applying a system requirement fails.
         """
-        return int(self.run_cmd(f"sysctl -n {prop}").out.rstrip())
+        missing_requirements = []
+
+        prop, val = "vm.max_map_count", 262144
+        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at least {val}")
+
+        prop, val = "vm.swappiness", 0
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, 0
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        prop, val = "net.ipv4.tcp_retries2", 5
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        if missing_requirements:
+            logger.error("Missing system requirements: %s", missing_requirements)
+        return missing_requirements
 
     @override
     def run_cmd(

@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import Literal
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
@@ -550,15 +551,6 @@ class K8sWorkload(BaseWorkload):
             return {}
 
     @override
-    def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
-        """Apply a system requirement.
-
-        This method is kept only to satisfy the BaseWorkload interface.
-        """
-        logger.debug("Skipping sysctl apply for %s=%s on K8s workload", system_requirement, value)
-        return False
-
-    @override
     def check_missing_system_requirements(self) -> list[str]:
         """Checks the system requirements for K8s.
 
@@ -571,11 +563,10 @@ class K8sWorkload(BaseWorkload):
         missing_requirements = []
 
         # hard requirements (block if unmet).
-        hard_requirements = [
+        for property_name, required_value, comparison_op, config_method in [
             ("vm.max_map_count", 262144, "<", "node level: sysctl -w"),
             ("vm.swappiness", 0, ">", "node level: sysctl -w"),
-        ]
-        for property_name, required_value, comparison_op, config_method in hard_requirements:
+        ]:
             if error_message := self._check_kernel_property_requirement(
                 property_name, required_value, comparison_op, config_method
             ):
@@ -599,7 +590,11 @@ class K8sWorkload(BaseWorkload):
         return missing_requirements
 
     def _check_kernel_property_requirement(
-        self, property_name: str, required_value: int, comparison_op: str, config_method: str
+        self,
+        property_name: str,
+        required_value: int,
+        comparison_op: Literal["<", ">"],
+        config_method: str,
     ) -> str | None:
         """Check if a kernel property meets the required value.
 
@@ -622,6 +617,11 @@ class K8sWorkload(BaseWorkload):
             violates = current_value < required_value
         elif comparison_op == ">":
             violates = current_value > required_value
+        else:
+            logger.error(
+                "Invalid comparison operator '%s' for kernel property check", comparison_op
+            )
+            raise ValueError("Invalid comparison operator: %s" % comparison_op)
 
         if violates:
             comparison_text = "below" if comparison_op == "<" else "above"
@@ -638,28 +638,6 @@ class K8sWorkload(BaseWorkload):
             )
 
         return None
-
-    @override
-    def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter.
-
-        Args:
-            prop: Kernel property name (e.g., "vm.max_map_count").
-
-        Returns:
-            int: Kernel property value.
-
-        Raises:
-            OpenSearchCmdError: If the kernel property value cannot be read.
-        """
-        try:
-            result = self.run_cmd("sysctl", args="-n %s" % prop)
-            return int(result.out.rstrip())
-        except OpenSearchCmdError as e:
-            error_message = e.err or e.out or str(e)
-            logger.warning("sysctl -n %s failed: %s", prop, error_message)
-            # Propagate error
-            raise e
 
     @override
     def run_cmd(
