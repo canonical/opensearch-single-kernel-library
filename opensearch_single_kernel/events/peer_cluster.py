@@ -270,7 +270,8 @@ class PeerClusterEventsHandler(Object):
             and self.charm.tls_manager.is_fully_configured()
         ):
             self.charm.peer_cluster_manager.update_main_orchestrator_registered(
-                rel_id=event.relation.id, orchestrators=self.charm.state.application.orchestrators
+                rel_id=event.relation.id,
+                value=(self.charm.state.application.orchestrators.main_app is not None),
             )
 
         if not (data := event.relation.data.get(event.app)):
@@ -311,14 +312,14 @@ class PeerClusterEventsHandler(Object):
             # should we add a check where the failover rel has data while the main has none yet?
             if not orchestrators.main_app:
                 self.charm.peer_cluster_manager.update_main_orchestrator_registered(
-                    orchestrators.failover_rel_id, orchestrators=orchestrators
+                    orchestrators.failover_rel_id, value=False
                 )
                 logger.debug("Current cluster has no main orchestrator. Deferring event.")
                 event.defer()
                 return
 
             self.charm.peer_cluster_manager.update_main_orchestrator_registered(
-                orchestrators.failover_rel_id, orchestrators=orchestrators
+                orchestrators.failover_rel_id, value=True
             )
 
         reconcile_deployment_desc = False
@@ -462,7 +463,7 @@ class PeerClusterEventsHandler(Object):
         if event_src_cluster_type == "main" and orchestrators.failover_app:
             if orchestrators.failover_app.id != deployment_desc.app.id:
                 self.charm.peer_cluster_manager.update_main_orchestrator_registered(
-                    orchestrators.failover_rel_id, orchestrators=orchestrators
+                    orchestrators.failover_rel_id, value=False
                 )
             elif self.charm.peer_cluster_orchestrator_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
