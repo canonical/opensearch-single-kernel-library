@@ -29,7 +29,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses, SnapshotsStatuses
+from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
     AzureRelDataCredentials,
     GcsRelDataCredentials,
@@ -111,7 +111,11 @@ class SnapshotsEventsHandler(Object):
             or self.charm.snapshots_manager.is_peer_cluster_provider()
         ):
             if self.charm.unit.is_leader():
-                self.charm.status.set(CharmStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST, app=True)
+                self.charm.state.add_status_if_not_present(
+                    SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value,
+                    scope="app",
+                    component=self.charm.snapshots_manager.name,
+                )
             return
 
         if not (object_storage_type := self.charm.snapshots_manager.storage_type):
@@ -554,14 +558,19 @@ class SnapshotsEventsHandler(Object):
                         object_storage_type,
                     )
                     if self.charm.unit.is_leader():
-                        self.charm.status.set(
-                            CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED,
-                            app=True,
+                        self.charm.state.add_status_if_not_present(
+                            SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                            scope="app",
+                            component=self.charm.snapshots_manager.name,
                         )
                     event.defer()
                     return None
             if self.charm.unit.is_leader():
-                self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
+                self.charm.state.remove_status_if_present(
+                    SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                    scope="app",
+                    component=self.charm.snapshots_manager.name,
+                )
 
             tls_ca_chain = None
             if self.charm.snapshots_manager.s3_info_from_peer_cluster:
@@ -642,15 +651,20 @@ class SnapshotsEventsHandler(Object):
                     object_storage_type,
                 )
                 if self.charm.unit.is_leader():
-                    self.charm.status.set(
-                        CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED,
-                        app=True,
+                    self.charm.state.add_status_if_not_present(
+                        SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                        scope="app",
+                        component=self.charm.snapshots_manager.name,
                     )
                 event.defer()
                 return
 
         if self.charm.unit.is_leader():
-            self.charm.status.clear(CharmStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED, app=True)
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                scope="app",
+                component=self.charm.snapshots_manager.name,
+            )
 
         # clean S3 CA
         if self.charm.snapshots_manager.is_custom_s3_ca_stored():

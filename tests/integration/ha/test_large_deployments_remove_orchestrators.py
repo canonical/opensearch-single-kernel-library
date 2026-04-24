@@ -10,7 +10,7 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import PeerClusterStatuses
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     PeerClusterOrchestrators,
@@ -187,7 +187,7 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
         apps=[DATA_APP],
         apps_full_statuses={
             DATA_APP: {
-                "blocked": [CharmStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value.message]
+                "blocked": [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value.message]
             },
         },
         units_full_statuses={

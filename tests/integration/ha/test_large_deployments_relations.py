@@ -10,7 +10,7 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_CLUSTER_NO_RELATION
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.ha.helpers import all_nodes
@@ -100,13 +100,13 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         ops_test,
         apps=list(APP_UNITS.keys()),
         apps_full_statuses={
-            MAIN_APP: {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]},
+            MAIN_APP: {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]},
             FAILOVER_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
             DATA_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
             INVALID_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]}},
+            MAIN_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
             FAILOVER_APP: {"units": {"active": []}},
             DATA_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
             INVALID_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
@@ -126,16 +126,14 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP],
         apps_full_statuses={
-            MAIN_APP: {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]},
+            MAIN_APP: {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]},
             FAILOVER_APP: {
                 "waiting": ["TLS not fully configured in related 'main-orchestrator'."]
             },
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]}},
-            FAILOVER_APP: {
-                "units": {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]}
-            },
+            MAIN_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
+            FAILOVER_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
         },
         wait_for_exact_units={
             MAIN_APP: APP_UNITS[MAIN_APP],

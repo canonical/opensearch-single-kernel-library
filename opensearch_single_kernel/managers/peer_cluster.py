@@ -24,7 +24,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import PeerClusterStatuses
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     Node,
@@ -213,7 +213,7 @@ class PeerClusterManager(BaseManager):
                 provider_app_id in cluster_fleet_apps
                 and cluster_fleet_apps[provider_app_id].planned_units > 0
             ):
-                blocked_msg = CharmStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
+                blocked_msg = PeerClusterStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
         elif event_rel_id not in [
             orchestrators.main_rel_id,
             orchestrators.failover_rel_id,
