@@ -420,7 +420,6 @@ class TLSEventsHandler(Object):
                     and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
                 ):
                     logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                    # TODO MERGE possible exception hanlding missing
                     self.charm.tls_manager.finalize_ca_certs_rotation()
 
             else:
