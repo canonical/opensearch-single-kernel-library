@@ -28,7 +28,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
     CertificateExpiringEvent,
@@ -156,14 +156,25 @@ class TLSEventsHandler(Object):
         self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
         self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
+        self.charm.state.remove_status_if_present(
+            TlsStatuses.TLS_RELATION_MISSING.value, "unit", self.charm.tls_manager.name
+        )
+        if not self.charm.tls_manager.all_tls_resources_stored():
+            self.charm.state.add_status_if_not_present(
+                TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
+                "unit",
+                self.charm.tls_manager.name,
+            )
+
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
         # TODO: If upgrade log a warning
         if self.charm.tls_manager.all_tls_resources_stored():
             return
 
-        # Otherwise, we block.
-        self.charm.status.set(CharmStatuses.TLS_RELATION_BROKEN)
+        self.charm.state.add_status_if_not_present(
+            TlsStatuses.TLS_RELATION_MISSING.value, "unit", self.charm.tls_manager.name
+        )
 
     def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
         """Enable TLS when TLS certificate available.
@@ -317,7 +328,9 @@ class TLSEventsHandler(Object):
 
     def on_tls_ca_rotation(self) -> None:
         """Called when adding new CA to the trust store."""
-        self.charm.status.set(CharmStatuses.TLS_CA_ROTATION)
+        self.charm.state.add_status_if_not_present(
+            TlsStatuses.TLS_CA_ROTATION.value, "unit", self.charm.tls_manager.name
+        )
         logger.debug("Restarting opensearch due to CA rotation")
         self.charm.restart_opensearch_event.emit()
 
@@ -325,9 +338,7 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
-        logger.debug("Certificate expiring event received for certificate: %s", event.certificate)
-        if self.charm.state.server.tls_configured:
-            del self.charm.state.server.tls_configured
+        self.charm.state.server.tls_configured = False
         # TODO: Update peer cluster relation
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
@@ -383,38 +394,39 @@ class TLSEventsHandler(Object):
 
         # In case of renewal of the unit transport layer cert - restart opensearch
         if renewal and self.charm.state.application.is_admin_user_initialized:
-            if not self.charm.tls_manager.is_fully_configured():
+            if self.charm.tls_manager.is_fully_configured():
+                self.charm.state.remove_status_if_present(
+                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
+                    "unit",
+                    self.charm.tls_manager.name,
+                )
+                try:
+                    self.charm.tls_manager.reload_tls_certificates()
+                except OpenSearchHttpError:
+                    logger.error("Could not reload TLS certificates via API, will restart.")
+                    self.charm.restart_opensearch_event.emit()
+                    return
+
+                self.charm.state.reset_ca_rotation_state()
+                self.charm.state.remove_status_if_present(
+                    TlsStatuses.TLS_CA_ROTATION.value,
+                    "unit",
+                    self.charm.tls_manager.name,
+                )
+                # if all certs are stored and CA rotation is complete in the cluster
+                # we delete the old ca and update the chain to only include the new one
+                if (
+                    self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+                    and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+                ):
+                    logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
+                    # TODO MERGE possible exception hanlding missing
+                    self.charm.tls_manager.finalize_ca_certs_rotation()
+
+            else:
                 logger.debug("TLS not fully configured yet, deferring event.")
                 event.defer()
                 return
-
-            try:
-                self.charm.tls_manager.reload_tls_certificates()
-            except OpenSearchHttpError as e:
-                logger.error("Error while reloading TLS certificates: %s", e)
-                logger.error("Could not reload TLS certificates via API, will restart.")
-                self.charm.restart_opensearch_event.emit()
-                return
-
-            self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
-
-            old_ca_present = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
-
-            rotation_complete = (
-                old_ca_present and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-            )
-            # Clear local rotation flags after successful reload. If the CA rotation is
-            # complete in the cluster, also remove the old CA and shrink the request
-            # bundle to only include the new CA.
-            self.charm.state.reset_ca_rotation_state()
-            if rotation_complete:
-                logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                try:
-                    self.charm.tls_manager.finalize_ca_certs_rotation()
-                except OpenSearchFileOperationError as e:
-                    logger.error("Error finalizing CA rotation: %s", e)
-                    event.defer()
-                    return
 
     def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""

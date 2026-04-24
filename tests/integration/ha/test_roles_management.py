@@ -66,8 +66,6 @@ async def test_build_and_deploy(
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1, APP_NAME: 3},
         idle_period=IDLE_PERIOD,
     )
@@ -104,8 +102,6 @@ async def test_set_roles_manually(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(nodes),
         idle_period=IDLE_PERIOD,
     )
@@ -138,8 +134,6 @@ async def test_switch_back_to_auto_generated_roles(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(nodes),
         idle_period=IDLE_PERIOD,
     )

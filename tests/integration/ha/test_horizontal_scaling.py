@@ -9,7 +9,7 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import HealthStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -96,8 +96,6 @@ async def test_horizontal_scale_up(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count + 2,
         idle_period=IDLE_PERIOD,
     )
@@ -147,8 +145,6 @@ async def test_safe_scale_down_shards_realloc(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count + 1,
         idle_period=IDLE_PERIOD,
     )
@@ -179,8 +175,7 @@ async def test_safe_scale_down_shards_realloc(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_full_statuses={app: {"blocked": [CharmStatuses.CLUSTER_HEALTH_YELLOW.value.message]}},
-        units_statuses=["active"],
+        apps_statuses={app: [HealthStatuses.CLUSTER_HEALTH_YELLOW.value]},
         wait_for_exact_units=init_units_count,
         idle_period=IDLE_PERIOD,
     )
@@ -210,8 +205,6 @@ async def test_safe_scale_down_shards_realloc(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count + 1,
         idle_period=IDLE_PERIOD,
     )
@@ -262,8 +255,6 @@ async def test_safe_scale_down_remove_leaders(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=init_units_count + added_units,
             idle_period=IDLE_PERIOD,
             timeout=1800,
@@ -278,8 +269,6 @@ async def test_safe_scale_down_remove_leaders(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count - 1,
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -294,8 +283,6 @@ async def test_safe_scale_down_remove_leaders(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count - 2,
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -318,8 +305,6 @@ async def test_safe_scale_down_remove_leaders(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=init_units_count - 3,
         idle_period=IDLE_PERIOD,
         timeout=1800,

@@ -25,8 +25,7 @@ class NodesExclusionsManager(BaseManager):
     """OpenSearch Nodes Exclusions Manager."""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "exclusions_manager"
+        super().__init__(state, workload, "exclusions_manager")
 
     def add_current(
         self,
@@ -56,7 +55,9 @@ class NodesExclusionsManager(BaseManager):
                 )
             except OpenSearchHttpError as e:
                 logger.error(
-                    "Failed to add shard allocation exclusion: %s. Error: %s", node.name, e
+                    "Failed to add shard allocation exclusion: %s. Error: %s",
+                    node.name,
+                    e,
                 )
                 success = False
             finally:
@@ -273,7 +274,10 @@ class NodesExclusionsManager(BaseManager):
             existing = self.opensearch_client.fetch_allocation_exclusions(alt_hosts=self.alt_hosts)
             to_remove = set(allocs if allocs is not None else [node.name])
             res = self.opensearch_client.add_allocation_exclusions(
-                node, allocations=existing - to_remove, override=True, alt_hosts=self.alt_hosts
+                node,
+                allocations=existing - to_remove,
+                override=True,
+                alt_hosts=self.alt_hosts,
             )
             return res
         except OpenSearchHttpError:

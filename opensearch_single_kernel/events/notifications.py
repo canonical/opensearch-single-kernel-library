@@ -28,7 +28,9 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import (
+    NotificationsStatuses,
+)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     SecretError,
 )
@@ -37,10 +39,8 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SmtpDataAvailableEvent,
-    SmtpRequires,
 )
 from opensearch_single_kernel.utils.helpers import decode_plugin_secret_content
-from opensearch_single_kernel.utils.status import Status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -51,16 +51,16 @@ logger = logging.getLogger(__name__)
 class NotificationsEvents(Object):
     """Events handler for smtp events"""
 
-    relation_name = SMTP_RELATION
-
     def __init__(self, charm: "OpenSearchBaseCharm"):
         super().__init__(charm, "notifications_events")
         self.charm = charm
-        self.smtp = SmtpRequires(self.charm, self.relation_name)
 
-        self.framework.observe(self.smtp.on.smtp_data_available, self._on_smtp_credentials_changed)
         self.framework.observe(
-            self.charm.on[self.relation_name].relation_broken,
+            self.charm.state.smtp_requires.on.smtp_data_available,
+            self._on_smtp_credentials_changed,
+        )
+        self.framework.observe(
+            self.charm.on[SMTP_RELATION].relation_broken,
             self._on_smtp_credentials_gone,
         )
         self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
@@ -80,7 +80,11 @@ class NotificationsEvents(Object):
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if is_leader:
-                self.charm.status.set(CharmStatuses.SMTP_RELATION_INVALID, app=True)
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_RELATION_INVALID.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                )
             return
 
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -89,48 +93,70 @@ class NotificationsEvents(Object):
             return
 
         try:
-            smtp_data = self.smtp.get_relation_data_from_relation(event.relation)
-        except SecretError as exc:
-            logger.error(f"Could not read smtp relation data: {exc}")
+            smtp_data = self.charm.state.smtp_requires.get_relation_data_from_relation(
+                event.relation
+            )
+        except SecretError as e:
+            logger.error(f"Could not read smtp relation data: {e}")
             if is_leader:
-                self.charm.status.set(
-                    CharmStatuses.SMTP_COULD_NOT_READ_DATA,
-                    app=True,
-                    dynamic_params={"exc": str(exc)},
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_COULD_NOT_READ_DATA.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    {"id": event.relation.id, "exc": str(e)},
+                    {"id": event.relation.id},
                 )
                 return
 
         if is_leader:
-            self.charm.status.clear(
-                CharmStatuses.SMTP_COULD_NOT_READ_DATA,
-                app=True,
-                pattern=Status.CheckPattern.Interpolated,
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_COULD_NOT_READ_DATA.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
             )
 
         if not smtp_data:
             if is_leader:
-                self.charm.status.set(CharmStatuses.SMTP_NO_RELATION_DATA, app=True)
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    {"id": event.relation.id},
+                    {"id": event.relation.id},
+                )
             return
         if is_leader:
-            self.charm.status.clear(CharmStatuses.SMTP_NO_RELATION_DATA, app=True)
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
 
         try:
             config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
         except OpenSearchSmtpMissingParametersError as e:
             if self.charm.unit.is_leader():
-                self.charm.status.set(
-                    CharmStatuses.SMTP_MISSING_REQUIRED_PARAMETERS,
-                    app=True,
-                    dynamic_params={"params": ", ".join(e.missing_parameters)},
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_MISSING_REQUIRED_PARAMETERS.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    {"id": event.relation.id, "params": ", ".join(e.missing_parameters)},
+                    {"id": event.relation.id},
                 )
             return
-        else:
-            if self.charm.unit.is_leader():
-                self.charm.status.clear(
-                    CharmStatuses.SMTP_MISSING_REQUIRED_PARAMETERS,
-                    pattern=Status.CheckPattern.Interpolated,
-                    app=True,
-                )
+
+        if self.charm.unit.is_leader():
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_MISSING_REQUIRED_PARAMETERS.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
 
         # create/update SMTP sender config (config_id is relation-based)
         if self.charm.unit.is_leader():
@@ -148,14 +174,22 @@ class NotificationsEvents(Object):
                     config.smtp_account_id,
                     str(e),
                 )
-                self.charm.status.set(
-                    CharmStatuses.SMTP_CONFIGURATION_ERROR,
-                    app=True,
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    dynamic_params={"id": event.relation.id},
                 )
                 event.defer()
                 return
 
-            self.charm.status.clear(CharmStatuses.SMTP_CONFIGURATION_ERROR, app=True)
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
 
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
@@ -174,7 +208,7 @@ class NotificationsEvents(Object):
             self.charm.reload_keystore_event.emit()
             # store cleanup info per relation
             self.charm.plugin_manager.put_notifications_plugin_smtp_config(
-                config, credentials, self.charm.unit.is_leader(), self.relation_name
+                config, credentials, self.charm.unit.is_leader(), SMTP_RELATION
             )
         else:
             # No keystore entries for auth_type "none", still store smtp_account_id for cleanup
@@ -188,6 +222,14 @@ class NotificationsEvents(Object):
             return
         # create recipient group and email channel if recipients are provided
         if smtp_data.recipients:
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
+
             try:
                 self.charm.notifications_manager.put_email_group(
                     group_id=config.group_id,
@@ -205,16 +247,29 @@ class NotificationsEvents(Object):
                     config.group_id,
                     str(e),
                 )
-                self.charm.status.set(
-                    CharmStatuses.SMTP_CONFIGURATION_ERROR,
-                    app=True,
+                self.charm.state.add_status_if_not_present(
+                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    dynamic_params={"id": event.relation.id},
                 )
                 event.defer()
                 return
-            self.charm.status.clear(CharmStatuses.SMTP_WAITING_RECIPIENTS, app=True)
-            self.charm.status.clear(CharmStatuses.SMTP_CONFIGURATION_ERROR, app=True)
+            self.charm.state.remove_status_if_present(
+                NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+                "app",
+                self.charm.notifications_manager.name,
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
         else:
-            self.charm.status.set(CharmStatuses.SMTP_WAITING_RECIPIENTS, app=True)
+            self.charm.state.add_status_if_not_present(
+                NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
+                "app",
+                self.charm.notifications_manager.name,
+                {"id": event.relation.id},
+                {"id": event.relation.id},
+            )
 
         # propagate to subclusters if this is the main provider
         # if self.charm.opensearch_peer_cm.is_provider(typ="main"):
@@ -227,19 +282,22 @@ class NotificationsEvents(Object):
             event: RelationBrokenEvent
         """
         if self.charm.unit.is_leader():
-            self.charm.status.clear(CharmStatuses.SMTP_RELATION_INVALID, app=True)
-            self.charm.status.clear(CharmStatuses.SMTP_CONFIGURATION_ERROR, app=True)
-            self.charm.status.clear(CharmStatuses.SMTP_NO_RELATION_DATA, app=True)
-            self.charm.status.clear(
-                CharmStatuses.SMTP_MISSING_REQUIRED_PARAMETERS,
-                pattern=Status.CheckPattern.Interpolated,
-                app=True,
-            )
-            self.charm.status.clear(
-                CharmStatuses.SMTP_COULD_NOT_READ_DATA,
-                pattern=Status.CheckPattern.Interpolated,
-                app=True,
-            )
+            for status in NotificationsStatuses:
+                if status is NotificationsStatuses.SMTP_RELATION_INVALID:
+                    continue
+                self.charm.state.remove_status_if_present(
+                    status.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                    interpolated=True,
+                    search_parameters={"id": event.relation.id},
+                )
+            if not self.charm.state.smtp_relations:
+                self.charm.state.remove_status_if_present(
+                    NotificationsStatuses.SMTP_RELATION_INVALID.value,
+                    "app",
+                    self.charm.notifications_manager.name,
+                )
 
         label = self.charm.notifications_manager.label(event.relation.id)
         plugin_config = self.charm.state.server.plugin_config_info.get(label)

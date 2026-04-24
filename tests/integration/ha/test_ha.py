@@ -159,8 +159,6 @@ async def test_kill_db_process_node_with_primary_shard(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -219,8 +217,6 @@ async def test_kill_db_process_node_with_elected_cm(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -271,8 +267,6 @@ async def test_freeze_db_process_node_with_primary_shard(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -354,8 +348,6 @@ async def test_freeze_db_process_node_with_elected_cm(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -427,8 +419,6 @@ async def test_restart_db_process_node_with_elected_cm(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -478,8 +468,6 @@ async def test_restart_db_process_node_with_primary_shard(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )

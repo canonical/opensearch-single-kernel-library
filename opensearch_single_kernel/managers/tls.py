@@ -12,6 +12,9 @@ from datetime import datetime
 from typing import Any
 
 from charmlibs.pathops import PathProtocol
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
@@ -27,6 +30,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
+from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -44,6 +48,7 @@ from opensearch_single_kernel.utils.certificates import (
 from opensearch_single_kernel.utils.helpers import (
     generate_password,
 )
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -58,8 +63,7 @@ class TlsManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "tls_manager"
+        super().__init__(state, workload, "tls_manager")
 
     def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
         """Check if all TLS resources are stored and ready to use.
@@ -282,7 +286,12 @@ class TlsManager(BaseManager):
         return csr
 
     def update_certificate_secret_if_needed(
-        self, scope: Scope, cert_type: CertType, ca_chain: str, certificate: str, ca: str
+        self,
+        scope: Scope,
+        cert_type: CertType,
+        ca_chain: str,
+        certificate: str,
+        ca: str,
     ) -> None:
         """Update the certificate secrets if needed"""
         current_secret_obj = self.get_secrets_for_cert_type(cert_type)
@@ -432,11 +441,7 @@ class TlsManager(BaseManager):
                     mode="w+t", suffix=".cert", data=cert, dir=certs_dir_path
                 ) as tmp_cert,
             ):
-                cmd = (
-                    "openssl pkcs12 -export "
-                    f"-in {tmp_cert} -inkey {tmp_key} "
-                    f"-out {store_path} -name {name}"
-                )
+                cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
                 args = f"-passout pass:{store_pwd}"
                 if key_pwd:
                     args = f"{args} -passin pass:{key_pwd}"
@@ -598,35 +603,15 @@ class TlsManager(BaseManager):
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.application.admin_secrets
-        # Use host temp files, not workload.temp_file: the HTTPS request is made by the
-        # charm process. The cert paths are passed to requests, so they must be on the
-        # charm's filesystem.
-        tmp_cert_path: str | None = None
-        tmp_key_path: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as tmp_cert:
-                tmp_cert.write(admin_secret["cert"])
-                tmp_cert.flush()
-                tmp_cert_path = tmp_cert.name
-            os.chmod(tmp_cert_path, 0o600)
-
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as tmp_key:
-                tmp_key.write(admin_secret["key"])
-                tmp_key.flush()
-                tmp_key_path = tmp_key.name
-            os.chmod(tmp_key_path, 0o600)
-
-            self.opensearch_client.reload_tls_certificates(
-                cert_files=(tmp_cert_path, tmp_key_path)
-            )
-        finally:
-            for p in (tmp_cert_path, tmp_key_path):
-                if not p:
-                    continue
-                try:
-                    os.unlink(p)
-                except FileNotFoundError:
-                    pass
+        with (
+            self.workload.temp_file(
+                mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
+            ) as tmp_cert,
+            self.workload.temp_file(
+                mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
+            ) as tmp_key,
+        ):
+            self.opensearch_client.reload_tls_certificates(cert_files=(tmp_cert, tmp_key))
 
     def finalize_ca_certs_rotation(self) -> None:
         """Handle the completion of CA rotation."""
@@ -738,3 +723,35 @@ class TlsManager(BaseManager):
                 return self.state.server.transport_secrets
             case CertType.UNIT_HTTP:
                 return self.state.server.http_secrets
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit":
+            if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
+                status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
+            if not self.all_tls_resources_stored():
+                status_list.append(
+                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                    if self.state.tls_relation
+                    else TlsStatuses.TLS_RELATION_MISSING.value
+                )
+            if not self.state.tls_relation and (certs := self.check_certs_expiration()):
+                missing = [cert.val for cert in certs.keys()]
+                status_list.append(
+                    format_status(
+                        TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
+                        {"certificates": ", ".join(missing)},
+                    )
+                )
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

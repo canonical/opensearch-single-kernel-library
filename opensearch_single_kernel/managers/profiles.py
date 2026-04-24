@@ -3,9 +3,15 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch profiles."""
+
 import logging
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
+
 from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
     ProductionProfile,
@@ -22,8 +28,7 @@ class ProfilesManager(BaseManager):
     """Manage all profile related operations"""
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "profiles_manager"
+        super().__init__(state, workload, "profiles_manager")
         try:
             if self.profile.type == PerformanceType.TESTING:
                 logger.warning(
@@ -31,7 +36,8 @@ class ProfilesManager(BaseManager):
                 )
         except ValueError:
             logger.error(
-                "Invalid profile configuration. Value: %s", self.state.config.get("profile")
+                "Invalid profile configuration. Value: %s",
+                self.state.config.get("profile"),
             )
 
     def get_missing_requirements(self) -> list[str]:
@@ -84,7 +90,10 @@ class ProfilesManager(BaseManager):
             app.planned_units for app in cluster_fleet_apps.values() if "data" in app.roles
         )
 
-        match nbr_cm_nodes < profile.cluster_topology_requirements.cluster_managers, nbr_data_nodes < profile.cluster_topology_requirements.data:
+        match (
+            nbr_cm_nodes < profile.cluster_topology_requirements.cluster_managers,
+            nbr_data_nodes < profile.cluster_topology_requirements.data,
+        ):
             case (True, True):
                 error_message = f"At least {profile.cluster_topology_requirements.cluster_managers} cluster manager nodes and {profile.cluster_topology_requirements.data} data nodes are required."
             case (True, False):
@@ -110,3 +119,23 @@ class ProfilesManager(BaseManager):
             if PerformanceType(self.state.config.get("profile")) == PerformanceType.PRODUCTION
             else TestingProfile()
         )
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit":
+            try:
+                self.config_profile
+            except ValueError:
+                status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

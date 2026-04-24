@@ -15,7 +15,7 @@ from opensearch_single_kernel.common.constants import (
     OPENSEARCH_SNAP_REVISION,
     OPENSEARCH_SYSTEM_USERS,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.ha.continuous_writes import ContinuousWrites
 
 from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, config_opts_for_deployment
@@ -75,8 +75,6 @@ async def test_deploy_and_remove_single_unit(
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=1,
     )
     assert len(ops_test.model.applications[APP_NAME].units) == 1
@@ -119,10 +117,8 @@ async def test_build_and_deploy(
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=units,
-        apps_full_statuses={
-            APP_NAME: {"blocked": [CharmStatuses.TLS_RELATION_MISSING.value.message]}
-        },
+        wait_for_exact_units=DEFAULT_NUM_UNITS,
+        units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
     )
     assert len(ops_test.model.applications[APP_NAME].units) == units
 
@@ -147,9 +143,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
-        wait_for_exact_units=units,
+        wait_for_exact_units=DEFAULT_NUM_UNITS,
     )
 
     leader_ip = await get_leader_unit_ip(ops_test)

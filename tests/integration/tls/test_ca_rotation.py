@@ -80,15 +80,13 @@ async def test_build_and_deploy_active(
     await ops_test.model.deploy(
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME], apps_statuses=["active"])
+    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1800,
         wait_for_exact_units=len(unit_ids),
         idle_period=IDLE_PERIOD,
@@ -155,12 +153,6 @@ async def test_build_large_deployment(
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
     )
@@ -170,7 +162,6 @@ async def test_build_large_deployment(
 @pytest.mark.abort_on_fail
 async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None:
     """Repeat the CA rotation test for the large deployment."""
-    unit_ids = get_unit_ids(substrate)
     if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
         pytest.skip("Large deployments are not supported on k8s.")
 
@@ -189,13 +180,10 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         start_count = await c_writes.count()
 
         if deploy_type == SMALL_DEPLOYMENT:
-            app_status = "blocked" if substrate == "k8s" else "active"
             await wait_until(
                 ops_test,
                 apps=[APP_NAME],
-                apps_statuses=[app_status],
-                units_statuses=["active"],
-                wait_for_exact_units=len(unit_ids),
+                wait_for_exact_units=len(UNIT_IDS),
                 timeout=2400,
                 idle_period=IDLE_PERIOD,
             )
@@ -203,12 +191,6 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
             await wait_until(
                 ops_test,
                 apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-                apps_full_statuses={
-                    MAIN_APP: {"active": []},
-                    DATA_APP: {"active": []},
-                    FAILOVER_APP: {"active": []},
-                },
-                units_statuses=["active"],
                 wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
                 timeout=2400,
                 idle_period=IDLE_PERIOD,

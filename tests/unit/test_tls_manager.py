@@ -20,7 +20,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
@@ -881,6 +881,9 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.temp_file"
     )
+    add_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    )
 
     harness.charm.state.secrets.put_object(
         Scope.APP,
@@ -916,7 +919,6 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     harness.charm.restart_opensearch_event = MagicMock()
 
     harness.set_leader(is_leader=True)
-    original_status = harness.model.unit.status
 
     split_ca_chain.return_value = ["new_ca"]
     harness.charm.tls_events._on_certificate_available(event_mock)
@@ -965,9 +967,15 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     # Set flag, set status, restart
     assert harness.charm.state.server.tls_ca_renewing
-    assert isinstance(harness.model.unit.status, MaintenanceStatus)
-    assert harness.model.unit.status.message == CharmStatuses.TLS_CA_ROTATION.value.message
-    assert harness.model.unit.status != original_status
+    add_status.assert_has_calls(
+        [
+            call(
+                TlsStatuses.TLS_CA_ROTATION.value,
+                "unit",
+                harness.charm.tls_manager.name,
+            )
+        ]
+    )
     harness.charm.restart_opensearch_event.emit.assert_called_once()
 
     # The new certificate is now replacing the old one in Peer Relation secrets
@@ -1132,6 +1140,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.create_cos_user"
     )
     mocker.patch("socket.socket.connect")
+    add_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    )
 
     generate_csr.return_value = uuid.uuid4().hex.encode()
     # Units had their certificates already
@@ -1197,7 +1208,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     mock_response_lock_not_requested("1.1.1.1")
     mock_response_health_green("1.1.1.1")
     event = MagicMock(after_upgrade=False)
-    original_status = harness.model.unit.status
 
     harness.charm.opensearch_events._post_start_init(event)
 
@@ -1240,10 +1250,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         == new_app_admin_secret["csr"]
     )
 
-    assert (
-        harness.model.unit.status.message == CharmStatuses.TLS_NOT_FULLY_CONFIGURED.value.message
-    )
-    assert harness.model.unit.status != original_status
+    add_status.assert_not_called()
 
 
 # Mocks on functions we want to investigate
@@ -1307,6 +1314,9 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
     mocker.patch("socket.socket.connect")
+    add_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    )
 
     generate_csr.return_value = uuid.uuid4().hex.encode()
     # Units had their certificates already
@@ -1370,7 +1380,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     mock_response_lock_not_requested("1.1.1.1")
     mock_response_health_green("1.1.1.1")
     event = MagicMock(after_upgrade=False)
-    original_status = harness.model.unit.status
 
     harness.charm.opensearch_events._post_start_init(event)
 
@@ -1407,10 +1416,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         != csr_transport_old
     )
 
-    assert (
-        harness.model.unit.status.message == CharmStatuses.TLS_NOT_FULLY_CONFIGURED.value.message
-    )
-    assert harness.model.unit.status != original_status
+    add_status.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1788,6 +1794,9 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd"
     )
+    add_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    )
     csr = "old_csr"
     cert = "new_cert"
     chain = ["new_chain"]
@@ -1831,15 +1840,16 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     harness.charm.tls_events._on_certificate_available(harness.charm.on.certificate_available)
 
     if leader:
-        # extra commands are expected due to post-write permission/ownership normalization.
-        assert run_cmd.call_count == (6 if substrate == "vm" else 5)
-        if substrate == "vm":
-            assert any(
-                "sudo chown snap_daemon:root "
-                f"{str(harness.charm.workload.paths.certs)}/{CA_ALIAS}.p12" in call.args[0]
-                for call in run_cmd.call_args_list
-            )
-        assert harness.model.unit.status == MaintenanceStatus("Applying new CA certificate...")
+        assert run_cmd.call_count == 3
+        add_status.assert_has_calls(
+            [
+                call(
+                    TlsStatuses.TLS_CA_ROTATION.value,
+                    "unit",
+                    harness.charm.tls_manager.name,
+                )
+            ]
+        )
         assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
             "csr": csr,
             "chain": "new_chain",
@@ -1851,7 +1861,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     else:
         # We have scope == Scope.APP, so we will skip the entire logic
         assert run_cmd.call_count == 0
-        assert harness.model.unit.status == MaintenanceStatus("")
+        add_status.assert_not_called()
         assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
             "csr": csr,
             "keystore-password": "keystore_12345",

@@ -9,6 +9,10 @@ import time
 from datetime import datetime
 from typing import Any
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
+from pydantic import ValidationError
 from shortuuid import ShortUUID
 from tenacity import (
     Retrying,
@@ -35,6 +39,12 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchNotFullyReadyError,
     OpenSearchProvidedRolesException,
     OpenSearchStartTimeoutError,
+)
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    JwtStatuses,
+    OAuthStatuses,
+    PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.models import (
     App,
@@ -66,8 +76,7 @@ class ClusterManager(BaseManager):
     CONFIG_YML = "opensearch.yml"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "cluster_manager"
+        super().__init__(state, workload, "cluster_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
     def start(self, wait_until_http_200: bool = True) -> None:
@@ -713,7 +722,7 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        self.state.server.update({"started": ""})
+        del self.state.server.started
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -745,3 +754,50 @@ class ClusterManager(BaseManager):
             # in the opensearch.yml, nor APIs is responding. Therefore, we need to catch
             # the KeyError here and report the appropriate response.
             return None
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        current_status_list = self.state.statuses.get(scope, self.name).root
+        if not recompute:
+            return current_status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit":
+            if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
+                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
+            self._add_unit_statuses(status_list)
+
+        if scope == "app":
+            self._add_app_statuses(status_list)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _add_unit_statuses(self, status_list: list[StatusObject]) -> None:
+        """Compute the manager's unit statuses and append them to list."""
+        if (
+            (deployment_desc := self.state.application.deployment_desc)
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.state.application.is_security_index_initialised
+        ):
+            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
+
+    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
+        """Compute the manager's app statuses and append them to list."""
+        if (
+            deployment_desc := self.state.application.deployment_desc
+        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            if self.state.oauth_relation:
+                status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
+            if self.state.jwt_relation:
+                status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
+        elif self.state.jwt_relation:
+            try:
+                self.state.jwt.auth_configuration
+            except ValidationError:
+                status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
