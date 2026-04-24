@@ -103,10 +103,10 @@ async def test_build_and_deploy_not_autogen(ops_test: OpsTest, charm, series) ->
     await wait_until(
         ops_test,
         apps=list(NON_AUTOGEN_APP_UNITS.keys()),
-        apps_full_statuses={
+        apps_statuses={
             INVALID_FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
-        units_full_statuses={
+        units_statuses={
             INVALID_FAILOVER_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},
@@ -174,7 +174,7 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
     await wait_until(
         ops_test,
         apps=list(AUTOGEN_APP_UNITS.keys()),
-        apps_full_statuses={
+        apps_statuses={
             MAIN_APP_AUTOGEN: [
                 ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
@@ -182,7 +182,7 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
             FAILOVER_APP_AUTOGEN: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             DATA_APP_AUTOGEN: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
-        units_full_statuses={
+        units_statuses={
             MAIN_APP_AUTOGEN: [
                 ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
@@ -206,7 +206,7 @@ async def test_invalid_inherit_cluster_name_integration(ops_test: OpsTest) -> No
     await wait_until(
         ops_test,
         apps=[MAIN_APP_NOT_AUTOGEN, INVALID_FAILOVER_APP],
-        apps_full_statuses={
+        apps_statuses={
             INVALID_FAILOVER_APP: [
                 PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value
             ],

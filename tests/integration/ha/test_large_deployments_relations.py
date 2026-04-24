@@ -101,13 +101,13 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=list(APP_UNITS.keys()),
-        apps_full_statuses={
+        apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
-            FAILOVER_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
-            DATA_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
-            INVALID_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
+            FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
-        units_full_statuses={
+        units_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
             DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
             INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
@@ -126,11 +126,11 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP],
-        apps_full_statuses={
+        apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
             FAILOVER_APP: [PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value],
         },
-        units_full_statuses={
+        units_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
             FAILOVER_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
         },
@@ -149,11 +149,11 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP, INVALID_APP],
-        apps_full_statuses={
+        apps_statuses={
             DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
-        units_full_statuses={
+        units_statuses={
             DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
             INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
@@ -177,12 +177,12 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, INVALID_APP],
-        apps_full_statuses={
+        apps_statuses={
             INVALID_APP: [
                 PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value
             ],
         },
-        units_full_statuses={
+        units_statuses={
             DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={MAIN_APP: APP_UNITS[MAIN_APP], INVALID_APP: APP_UNITS[INVALID_APP]},

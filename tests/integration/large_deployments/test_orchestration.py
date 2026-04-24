@@ -239,13 +239,13 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
-        apps_full_statuses={
+        apps_statuses={
             MAIN_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             DATA_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
             DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
-        units_full_statuses={
+        units_statuses={
             DATA_APP: [ProfileStatuses.MISSING_REQUIREMENTS.value],
         },
     )

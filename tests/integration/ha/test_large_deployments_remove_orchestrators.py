@@ -175,10 +175,8 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_full_statuses={
-            DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]
-        },
-        units_full_statuses={
+        apps_statuses={DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]},
+        units_statuses={
             DATA_APP: [
                 ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
             ]
