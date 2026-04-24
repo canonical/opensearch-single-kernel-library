@@ -1039,7 +1039,7 @@ class ClusterState(Object, StatusesStateProtocol):
         )
 
     @property
-    def node_host(self) -> str | None:
+    def node_host(self) -> str:
         """Return a connectable host for the current unit.
 
         On K8s this is the unit DNS name. On VM this is the unit IP address.
@@ -1179,19 +1179,23 @@ class ClusterState(Object, StatusesStateProtocol):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def all_hosts(self) -> list[str]:
+    def all_hosts(self) -> set[str]:
         """Fetch the list of hosts for the current app."""
-        hosts = []
-        if self.all_units:
-            for unit in self.all_units:
-                if self.substrate == Substrates.K8S:
-                    hosts.append(
-                        get_k8s_seed_host(
-                            format_unit_name(unit, app=self.application.deployment_desc.app)
-                        )
+        hosts = set()
+
+        if not (all_units := self.all_units):
+            return hosts
+
+        for unit in all_units:
+            if self.substrate == Substrates.K8S:
+                hosts.add(
+                    get_k8s_seed_host(
+                        format_unit_name(unit, app=self.application.deployment_desc.app)
                     )
-                else:
-                    hosts.append(self.unit_ip(unit))
+                )
+            else:
+                hosts.add(self.unit_ip(unit))
+
         return hosts
 
     @property
@@ -1392,11 +1396,6 @@ class ClusterState(Object, StatusesStateProtocol):
             component=self.model.app,
             unit_name=self.unit_name,
         )
-
-    @property
-    def publish_host(self) -> str:
-        """Return the preferred host if configured."""
-        return self.fqdn if self.substrate == Substrates.K8S else self.host_ip
 
     def add_status_if_not_present(
         self,

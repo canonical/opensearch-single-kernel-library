@@ -26,6 +26,7 @@ from ops import (
     StorageDetachingEvent,
     UpdateStatusEvent,
 )
+from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
@@ -49,6 +50,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchLockError,
     OpenSearchMissingError,
     OpenSearchNotFullyReadyError,
     OpenSearchStartError,
@@ -281,10 +283,21 @@ class OpenSearchEventsHandler(Object):
 
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
-        if planned_units > 1 and not self.charm.lock_manager.acquire():
-            # Raise uncaught exception to prevent Juju from removing unit
-            raise Exception("Unable to acquire lock: Another unit is starting or stopping.")
+        if planned_units > 0:
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+                with attempt:
+                    if not self.charm.lock_manager.acquire():
+                        logger.debug(
+                            "Unable to acquire lock: Another unit is starting or stopping."
+                        )
+                        # Raise uncaught exception to prevent Juju from removing unit
+                        raise OpenSearchLockError(
+                            "Unable to acquire lock: Another unit is starting or stopping."
+                        )
 
+        logger.info(
+            "Unit %s is being removed. Starting pre-removal process.", self.charm.unit.name
+        )
         # if the leader is departing, and this hook fails "leader elected" won't trigger,
         # so we want to re-balance the node roles from here
         if self.charm.unit.is_leader():
@@ -804,12 +817,6 @@ class OpenSearchEventsHandler(Object):
             return
         if self.charm.state.server.started:
             del self.charm.state.server.started
-        self.charm.status_handler.set_running_status(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.cluster_manager.name,
-        )
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -885,6 +892,13 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
+        )
+
         try:
             self.charm.cluster_manager.start(
                 wait_until_http_200=(
@@ -904,6 +918,9 @@ class OpenSearchEventsHandler(Object):
             logger.debug("error of type: %s", type(e).__name__)
             self.charm.lock_manager.release()
             logger.warning(e)
+            self.charm.state.remove_status_if_present(
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+            )
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",

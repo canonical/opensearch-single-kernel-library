@@ -207,7 +207,7 @@ class TlsManager(BaseManager):
             dns.add(self.state.fqdn)
 
             if self.state.substrate == Substrates.VM:
-                ips.add(self.state.publish_host)
+                ips.add(self.state.node_host)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
         # so the certificate is accepted when clients connect by those names.

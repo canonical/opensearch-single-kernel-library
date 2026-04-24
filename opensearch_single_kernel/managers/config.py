@@ -162,7 +162,7 @@ class ConfigManager(BaseManager):
             "cluster.name": deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self._network_hosts(),
-            "http.publish_host": self.state.publish_host,
+            "http.publish_host": self.state.node_host,
             "node.roles": sorted(roles),
             "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
             "path.data": self.workload.paths.data.as_posix(),
@@ -172,7 +172,7 @@ class ConfigManager(BaseManager):
 
     def _opensearch_host_config(self) -> dict[str, Any]:
         """Network publish host settings written to opensearch.yml."""
-        return {"network.publish_host": self.state.publish_host}
+        return {"network.publish_host": self.state.node_host}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
         """Optional data temperature settings written to opensearch.yml."""

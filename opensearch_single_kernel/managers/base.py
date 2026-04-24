@@ -41,7 +41,7 @@ class BaseManager(ManagerStatusProtocol):
 
         return OpenSearchClient(
             self.workload,
-            self.state.publish_host,
+            self.state.node_host,
             OPENSEARCH_HTTP_PORT,
             self.state.application.admin_password,
         )
@@ -49,7 +49,7 @@ class BaseManager(ManagerStatusProtocol):
     @property
     def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
-        all_hosts = set(self.state.all_hosts)
+        all_hosts = self.state.all_hosts
 
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.update([node.ip for node in nodes_conf.values()])
@@ -64,9 +64,7 @@ class BaseManager(ManagerStatusProtocol):
         client = self.opensearch_client
 
         active_hosts = [
-            host
-            for host in all_hosts
-            if host != self.state.publish_host and client.is_node_up(host)
+            host for host in all_hosts if host != self.state.node_host and client.is_node_up(host)
         ]
 
         random.shuffle(active_hosts)
