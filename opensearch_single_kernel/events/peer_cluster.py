@@ -25,7 +25,6 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     DeploymentType,
     Directive,
-    ObjectStorageType,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
@@ -88,7 +87,9 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        self.reconcile_peer_relation_data(event)
+        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            event.relation.id if hasattr(event, "relation") else None
+        )
 
     def _on_peer_cluster_orchestrator_relation_changed(  # noqa: C901
         self, event: RelationChangedEvent
@@ -125,7 +126,9 @@ class PeerClusterEventsHandler(Object):
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
             # check if any credentials exist without relations
             self.check_credentials_with_missing_relations()
-            if self.reconcile_peer_relation_data(event):
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id
+            ):
                 event.defer()
             return
 
@@ -134,7 +137,10 @@ class PeerClusterEventsHandler(Object):
         )
         # Do not defer the event if we are waiting for a peer cluster relation
         # Once the relation is established and the cluster starts we will re-process the event
-        if self.reconcile_peer_relation_data(event) and not is_waiting_for_peer_relation:
+        if (
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+            and not is_waiting_for_peer_relation
+        ):
             event.defer()
 
         if is_waiting_for_peer_relation:
@@ -172,7 +178,7 @@ class PeerClusterEventsHandler(Object):
             self.handle_joining_data_node()
 
         if data.get("is_candidate_failover_orchestrator") != "true":
-            self.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
             return
 
         # This is run to elect failover
@@ -183,7 +189,7 @@ class PeerClusterEventsHandler(Object):
         target_relation_ids = self.charm.state.peer_clusters_relations_ids(is_provider=True)
         if orchestrators.failover_app and orchestrators.failover_rel_id in target_relation_ids:
             logger.info("A failover cluster orchestrator is already registered.")
-            self.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
             return
 
         # register the new failover in the current main peer relation data
@@ -285,15 +291,15 @@ class PeerClusterEventsHandler(Object):
         trigger = data.get("trigger")
 
         # Get orchestrators from remote peer cluster
-        related_peer_cluster = self.charm.state.remote_peer_cluster_by_relation_id(
-            relation_id=event.relation.id, is_provider=False
+        remote_peer_cluster = self.charm.state.peer_cluster_by_relation_id(
+            relation_id=event.relation.id, is_provider=False, remote=True
         )
-        if not related_peer_cluster or not related_peer_cluster.orchestrators:
+        if not remote_peer_cluster or not remote_peer_cluster.orchestrators:
             logger.warning("No orchestrators found in remote peer cluster data.")
             return
 
         orchestrators = self.charm.peer_cluster_manager.reconcile_orchestrators_from_provider_data(
-            related_peer_cluster,
+            remote_peer_cluster,
             data,
             trigger,
             relation_id=event.relation.id,
@@ -377,7 +383,7 @@ class PeerClusterEventsHandler(Object):
             deployment_desc = self.charm.state.application.deployment_desc
             # demoted main orchestrator should remove secrets it created for plugins
             self.charm.plugin_manager.remove_plugin_secrets()
-            self.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
         # we need to differentiate between plugins being None and {}
         # when an empty dict, plugins have been removed from the main orchestrator
@@ -469,7 +475,9 @@ class PeerClusterEventsHandler(Object):
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
-                self.reconcile_peer_relation_data(event)
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
                 # clear previously set errors due to this relation
 
         self.reconcile_peer_cluster_errors(
@@ -491,50 +499,10 @@ class PeerClusterEventsHandler(Object):
             return
 
         # the current is an orchestrator, let's broadcast the new conf to all related apps
-        for related_peer_cluster in self.charm.state.local_peer_clusters(
-            is_provider=True, must_have_units=False
+        for local_peer_cluster in self.charm.state.peer_clusters(
+            is_provider=True, must_have_units=False, remote=False
         ):
-            related_peer_cluster.cluster_fleet_apps = (
-                self.charm.state.application.cluster_fleet_apps
-            )
-
-    def reconcile_peer_relation_data(self, event: RelationChangedEvent | None = None) -> bool:
-        """Reconcile peer relation data.
-
-        The function will get backup credentials and returns
-        whether a defer is required.
-        """
-        s3_credentials = None
-        azure_credentials = None
-        gcs_credentials = None
-        if self.charm.state.s3_relation:
-            connection_info = (
-                self.charm.snapshots_events.get_storage_connection_info_from_relation(
-                    ObjectStorageType.S3
-                )
-            )
-            s3_credentials = self.charm.snapshots_manager.s3_credentials(connection_info)
-        if self.charm.state.azure_relation:
-            connection_info = (
-                self.charm.snapshots_events.get_storage_connection_info_from_relation(
-                    ObjectStorageType.AZURE
-                )
-            )
-            azure_credentials = self.charm.snapshots_manager.azure_credentials(connection_info)
-        if self.charm.state.gcs_relation:
-            connection_info = (
-                self.charm.snapshots_events.get_storage_connection_info_from_relation(
-                    ObjectStorageType.GCS
-                )
-            )
-            gcs_credentials = self.charm.snapshots_manager.gcs_credentials(connection_info)
-
-        return self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-            event_rel_id=event.relation.id if hasattr(event, "relation") else None,
-            s3_credentials=s3_credentials,
-            azure_credentials=azure_credentials,
-            gcs_credentials=gcs_credentials,
-        )
+            local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
 
     def check_credentials_with_missing_relations(self) -> None:
         """Checks if the relation data has credentials for non-related apps"""

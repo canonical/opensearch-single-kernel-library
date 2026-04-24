@@ -422,9 +422,7 @@ class TlsManager(BaseManager):
         # Mark this unit as tls configured
         if self.is_fully_configured():
             self.state.server.tls_configured = True
-            peer_cluster_servers = self.state.local_peer_clusters_servers(
-                is_provider=True
-            ) + self.state.local_peer_clusters_servers(is_provider=False)
+            peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
                 peer_cluster_server.tls_configured = True
 

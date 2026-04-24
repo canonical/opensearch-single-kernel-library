@@ -170,7 +170,7 @@ class OpenSearchEventsHandler(Object):
             # we want to have the most up-to-date info broadcasted to related sub-clusters
 
             if self.charm.peer_cluster_orchestrator_manager.is_peer_cluster_provider():
-                self.charm.peer_cluster_events.reconcile_peer_relation_data()
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
             # update any orchestrators about planned units
             if self.charm.peer_cluster_manager.is_peer_cluster_consumer():
@@ -276,7 +276,9 @@ class OpenSearchEventsHandler(Object):
             )
             if planned_units == 0:
                 if self.charm.cluster_manager.is_peer_cluster_provider():
-                    self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None,
+                    )
                     logger.debug("demoting main orchestrator")
                     self.charm.cluster_manager.demote_deployment_type()
                     del self.charm.state.application.orchestrators
@@ -808,7 +810,9 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
                     and self.charm.unit.is_leader()
                 ):
-                    self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None
+                    )
             return
 
         if self.charm.state.server.started:
@@ -931,7 +935,9 @@ class OpenSearchEventsHandler(Object):
                 self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
             ):
-                self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
             pass
 
     def _post_start_init(self, event: StartOpenSearch) -> None:
@@ -952,7 +958,9 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.application.deployment_desc.typ
                 == DeploymentType.MAIN_ORCHESTRATOR
             ):
-                if self.charm.peer_cluster_events.reconcile_peer_relation_data(event):
+                if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                ):
                     event.defer()
                     return
             else:
@@ -1017,7 +1025,9 @@ class OpenSearchEventsHandler(Object):
         # TODO: Handle event.after_upgrade
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.cluster_manager.is_peer_cluster_provider() and self.charm.unit.is_leader():
-            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
 
         self.post_start_ca_rotation()
 
@@ -1244,7 +1254,9 @@ class OpenSearchEventsHandler(Object):
                 self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
         if is_leader and self.charm.peer_cluster_manager.is_peer_cluster_provider(typ="main"):
-            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
@@ -1330,9 +1342,7 @@ class OpenSearchEventsHandler(Object):
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
         del self.charm.state.server.tls_configured
-        peer_cluster_servers = self.charm.state.local_peer_clusters_servers(
-            is_provider=True
-        ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
+        peer_cluster_servers = self.charm.state.all_peer_clusters_servers(remote=False)
 
         for peer_cluster_server in peer_cluster_servers:
             del peer_cluster_server.tls_configured

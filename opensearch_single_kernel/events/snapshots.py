@@ -271,7 +271,7 @@ class SnapshotsEventsHandler(Object):
             interpolated=True,
         )
         # Refresh peer relations
-        self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: CredentialsGoneEvent | StorageConnectionInfoGoneEvent
@@ -340,7 +340,9 @@ class SnapshotsEventsHandler(Object):
 
         if self.charm.unit.is_leader():
             # Refresh peer relations
-            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
 
         self.charm.state.remove_status_if_present(
             SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,

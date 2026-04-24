@@ -265,7 +265,7 @@ class NotificationsEvents(Object):
 
         # propagate to subclusters if this is the main provider
         if self.charm.notifications_manager.is_peer_cluster_provider():
-            if self.charm.peer_cluster_events.reconcile_peer_relation_data():
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
@@ -309,7 +309,7 @@ class NotificationsEvents(Object):
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.notifications_manager.is_peer_cluster_provider():
-                    if self.charm.peer_cluster_events.reconcile_peer_relation_data():
+                    if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                         event.defer()
             return
 
@@ -339,7 +339,7 @@ class NotificationsEvents(Object):
         self.charm.plugin_manager.remove_plugin_secret(label)
 
         if self.charm.notifications_manager.is_peer_cluster_provider():
-            if self.charm.peer_cluster_events.reconcile_peer_relation_data(None):
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:

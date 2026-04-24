@@ -222,9 +222,7 @@ class TLSEventsHandler(Object):
             # -> delete both tls_ca_renewing and tls_ca_renewed
             if current_stored_ca:
                 self.charm.state.server.tls_ca_renewing = True
-                peer_clusters_servers = self.charm.state.local_peer_clusters_servers(
-                    is_provider=True
-                ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
+                peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
                 for peer_cluster_server in peer_clusters_servers:
                     peer_cluster_server.tls_ca_renewing = True
                 self.on_tls_ca_rotation()
@@ -281,7 +279,7 @@ class TLSEventsHandler(Object):
         if self.charm.unit.is_leader() and self.charm.tls_manager.is_peer_cluster_provider(
             typ="main"
         ):
-            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
         renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
             old_cert is not None and old_cert != event.certificate
@@ -307,9 +305,7 @@ class TLSEventsHandler(Object):
         """Request the new certificate when old certificate is expiring."""
         del self.charm.state.server.tls_configured
 
-        peer_clusters_servers = self.charm.state.local_peer_clusters_servers(
-            is_provider=True
-        ) + self.charm.state.local_peer_clusters_servers(is_provider=False)
+        peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
         for peer_cluster_server in peer_clusters_servers:
             del peer_cluster_server.tls_configured
         try:
@@ -424,7 +420,7 @@ class TLSEventsHandler(Object):
             label = password_key(user_name)
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
-            self.charm.peer_cluster_events.reconcile_peer_relation_data(event)
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
         except OpenSearchError as e:
             event.fail(f"Failed changing the password: {e}")
         except RuntimeError as e:
