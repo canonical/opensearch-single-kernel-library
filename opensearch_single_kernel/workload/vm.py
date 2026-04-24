@@ -102,8 +102,14 @@ class VMWorkload(BaseWorkload):
         suffix: str | None = None,
     ):
         """Create a temporary file and return the file, clean it once context is closed."""
+
         f = tempfile.NamedTemporaryFile(
-            mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
+            mode=mode,
+            encoding=encoding,
+            dir=dir.as_posix() if dir else None,
+            delete=False,
+            errors=errors,
+            suffix=suffix,
         )
         if chown is not None:
             command = "sudo chown {} {}".format(chown, f.name)

@@ -284,6 +284,7 @@ class BaseWorkload(ABC):
             raise OpenSearchFileOperationError(e)
 
     @contextmanager
+    @abstractmethod
     def temp_file(
         self,
         mode: str = "w+b",
@@ -296,7 +297,7 @@ class BaseWorkload(ABC):
         suffix=None,
     ):
         """Context manager for creating temporary files."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def is_service_started(self, paused: Optional[bool] = False) -> bool:
