@@ -10,7 +10,10 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
-from opensearch_single_kernel.common.statuses import PeerClusterStatuses
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterStatuses,
+    ProfileStatuses,
+)
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     PeerClusterOrchestrators,
@@ -76,8 +79,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
     )
@@ -92,8 +93,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -109,8 +108,6 @@ async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) 
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -120,8 +117,6 @@ async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) 
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -147,11 +142,6 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[FAILOVER_APP, DATA_APP],
-        apps_full_statuses={
-            FAILOVER_APP: {"active": []},
-            DATA_APP: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={
             DATA_APP: APP_UNITS[DATA_APP],
             FAILOVER_APP: APP_UNITS[FAILOVER_APP],
@@ -186,18 +176,12 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
         ops_test,
         apps=[DATA_APP],
         apps_full_statuses={
-            DATA_APP: {
-                "blocked": [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value.message]
-            },
+            DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]
         },
         units_full_statuses={
-            DATA_APP: {
-                "units": {
-                    "blocked": [
-                        "Missing requirements: At least 1 cluster manager nodes are required."
-                    ]
-                }
-            },
+            DATA_APP: [
+                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+            ]
         },
         wait_for_exact_units={
             DATA_APP: APP_UNITS[DATA_APP],

@@ -27,7 +27,10 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
-from opensearch_single_kernel.common.statuses import PeerClusterStatuses
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterErrorDataStatuses,
+    PeerClusterStatuses,
+)
 from opensearch_single_kernel.core.models import (
     PeerClusterApp,
     PeerClusterRelData,
@@ -660,7 +663,7 @@ class PeerClusterEventsHandler(Object):
         # clean the status if it is set
         if not peer_cluster_requirer_relations:
             self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value,
+                PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value,
                 scope="app",
                 component=self.charm.peer_cluster_manager.name,
             )

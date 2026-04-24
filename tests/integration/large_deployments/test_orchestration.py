@@ -9,6 +9,11 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterErrorDataStatuses,
+    PeerClusterStatuses,
+    ProfileStatuses,
+)
 from opensearch_single_kernel.core.models import PeerClusterOrchestrators
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.helpers import (
@@ -94,15 +99,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO, TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
-        units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"active": []}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP_TWO: {"units": {"active": []}},
-            TLS_CERTIFICATES_APP_NAME: {"units": {"active": []}},
-        },
-        timeout=3600,
         wait_for_exact_units=1,
     )
 
@@ -142,18 +138,6 @@ async def test_demotion_through_relation_removal(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-            DATA_APP: {"active": []},
-            DATA_APP_TWO: {"active": []},
-        },
-        units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"active": []}},
-            DATA_APP_TWO: {"units": {"active": []}},
-        },
         wait_for_exact_units=1,
     )
 
@@ -190,12 +174,6 @@ async def test_failover_election_after_restoring_integration(ops_test: OpsTest) 
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
-        apps_statuses=["active"],
-        units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"active": []}},
-            DATA_APP_TWO: {"units": {"active": []}},
-        },
         wait_for_exact_units=1,
     )
 
@@ -235,16 +213,6 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            DATA_APP_TWO: {"active": []},
-        },
-        units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"active": []}},
-            DATA_APP_TWO: {"units": {"active": []}},
-        },
         wait_for_exact_units=1,
     )
 
@@ -272,30 +240,13 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
         apps_full_statuses={
-            MAIN_APP: {
-                "waiting": [
-                    "Waiting for peer cluster relation to be created in related 'failover-orchestrator'."
-                ]
-            },
-            FAILOVER_APP: {"blocked": ["Cannot start. Waiting for peer cluster relation..."]},
-            DATA_APP: {
-                "waiting": [
-                    "Waiting for peer cluster relation to be created in related 'failover-orchestrator'."
-                ]
-            },
-            DATA_APP_TWO: {
-                "waiting": [
-                    "Waiting for peer cluster relation to be created in related 'failover-orchestrator'."
-                ]
-            },
+            MAIN_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
+            FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            DATA_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
+            DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP: {
-                "units": {"active": ["Missing requirements: At least 1 data nodes are required."]}
-            },
-            DATA_APP_TWO: {"units": {"active": []}},
+            DATA_APP: [ProfileStatuses.MISSING_REQUIREMENTS.value],
         },
     )
 
@@ -310,17 +261,6 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-            DATA_APP: {"active": []},
-            DATA_APP_TWO: {"active": []},
-        },
-        units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"active": []}},
-            DATA_APP_TWO: {"units": {"active": []}},
-        },
         wait_for_exact_units=1,
     )
 

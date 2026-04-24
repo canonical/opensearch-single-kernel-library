@@ -195,9 +195,6 @@ class PeerClusterStatuses(Enum):
         status="waiting",
         message="Main-cluster-orchestrator removed, waiting for failover promotion.",
     )
-    PEER_CLUSTER_MAIN_IS_REQUIRER = StatusObject(
-        status="blocked", message="Main orchestrator cannot be a requirer"
-    )
 
 
 class PeerClusterErrorDataStatuses(Enum):
@@ -241,6 +238,22 @@ class PeerClusterErrorDataStatuses(Enum):
     COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER = StatusObject(
         status="waiting",
         message="Could not fetch nodes in related {deployment_desc.typ} sub-cluster.",
+    )
+    PEER_CLUSTER_MAIN_IS_REQUIRER = StatusObject(
+        status="blocked", message="Main orchestrator cannot be a requirer"
+    )
+    CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER = StatusObject(
+        status="blocked",
+        message="A cluster can only be related to 1 main and 1 failover-clusters at most.",
+    )
+    CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME = StatusObject(
+        status="blocked", message="Cannot relate 2 clusters with different 'cluster_name' values."
+    )
+    CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS = StatusObject(
+        status="blocked", message="CA certificate mismatch between clusters."
+    )
+    CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE = StatusObject(
+        status="blocked", message="CA truststore-password not available."
     )
 
 

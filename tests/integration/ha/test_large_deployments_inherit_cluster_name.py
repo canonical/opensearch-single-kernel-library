@@ -9,7 +9,11 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from opensearch_single_kernel.common.constants import PEER_CLUSTER_NO_RELATION
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterErrorDataStatuses,
+    PeerClusterStatuses,
+    ProfileStatuses,
+)
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.ha.helpers import all_nodes
@@ -84,8 +88,6 @@ async def test_build_and_deploy_not_autogen(ops_test: OpsTest, charm, series) ->
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
     )
@@ -102,12 +104,10 @@ async def test_build_and_deploy_not_autogen(ops_test: OpsTest, charm, series) ->
         ops_test,
         apps=list(NON_AUTOGEN_APP_UNITS.keys()),
         apps_full_statuses={
-            MAIN_APP_NOT_AUTOGEN: {"active": []},
-            INVALID_FAILOVER_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
+            INVALID_FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
         units_full_statuses={
-            MAIN_APP_NOT_AUTOGEN: {"units": {"active": []}},
-            INVALID_FAILOVER_APP: {"units": {"blocked": [NO_DATA_NODE_STATUS_MESSAGE]}},
+            INVALID_FAILOVER_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -157,8 +157,6 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
         timeout=1800,
@@ -177,30 +175,23 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
         ops_test,
         apps=list(AUTOGEN_APP_UNITS.keys()),
         apps_full_statuses={
-            MAIN_APP_AUTOGEN: {
-                "blocked": [
-                    NO_DATA_NODE_STATUS_MESSAGE,
-                    "Cannot run cluster with current roles. Waiting for data node...",
-                ]
-            },
-            FAILOVER_APP_AUTOGEN: {"blocked": [PEER_CLUSTER_NO_RELATION]},
-            DATA_APP_AUTOGEN: {"blocked": [PEER_CLUSTER_NO_RELATION]},
+            MAIN_APP_AUTOGEN: [
+                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            FAILOVER_APP_AUTOGEN: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            DATA_APP_AUTOGEN: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
         units_full_statuses={
-            MAIN_APP_AUTOGEN: {
-                "units": {
-                    "blocked": [
-                        NO_DATA_NODE_STATUS_MESSAGE,
-                        "Cannot run cluster with current roles. Waiting for data node...",
-                    ]
-                }
-            },
-            FAILOVER_APP_AUTOGEN: {"units": {"blocked": [NO_DATA_NODE_STATUS_MESSAGE]}},
-            DATA_APP_AUTOGEN: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
+            MAIN_APP_AUTOGEN: [
+                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            FAILOVER_APP_AUTOGEN: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            DATA_APP_AUTOGEN: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={app: units for app, units in AUTOGEN_APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
-        timeout=1800,
     )
 
 
@@ -216,14 +207,9 @@ async def test_invalid_inherit_cluster_name_integration(ops_test: OpsTest) -> No
         ops_test,
         apps=[MAIN_APP_NOT_AUTOGEN, INVALID_FAILOVER_APP],
         apps_full_statuses={
-            MAIN_APP_NOT_AUTOGEN: {"active": []},
-            INVALID_FAILOVER_APP: {
-                "blocked": ["Cannot relate 2 clusters with different 'cluster_name' values."]
-            },
-        },
-        units_full_statuses={
-            MAIN_APP_NOT_AUTOGEN: {"units": {"active": []}},
-            INVALID_FAILOVER_APP: {"units": {"active": []}},
+            INVALID_FAILOVER_APP: [
+                PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value
+            ],
         },
         wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -241,11 +227,6 @@ async def test_cluster_name_inheritence_and_integration(ops_test: OpsTest) -> No
     await wait_until(
         ops_test,
         apps=[MAIN_APP_AUTOGEN, DATA_APP_AUTOGEN],
-        apps_full_statuses={
-            MAIN_APP_AUTOGEN: {"active": []},
-            DATA_APP_AUTOGEN: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={
             app: AUTOGEN_APP_UNITS[app] for app in [MAIN_APP_AUTOGEN, DATA_APP_AUTOGEN]
         },
@@ -262,12 +243,6 @@ async def test_cluster_name_inheritence_and_integration(ops_test: OpsTest) -> No
     await wait_until(
         ops_test,
         apps=[MAIN_APP_AUTOGEN, DATA_APP_AUTOGEN, FAILOVER_APP_AUTOGEN],
-        apps_full_statuses={
-            MAIN_APP_AUTOGEN: {"active": []},
-            DATA_APP_AUTOGEN: {"active": []},
-            FAILOVER_APP_AUTOGEN: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={
             app: AUTOGEN_APP_UNITS[app]
             for app in [MAIN_APP_AUTOGEN, DATA_APP_AUTOGEN, FAILOVER_APP_AUTOGEN]

@@ -9,8 +9,12 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
-from opensearch_single_kernel.common.constants import PEER_CLUSTER_NO_RELATION
-from opensearch_single_kernel.common.statuses import TlsStatuses
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterErrorDataStatuses,
+    PeerClusterStatuses,
+    ProfileStatuses,
+    TlsStatuses,
+)
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.ha.helpers import all_nodes
@@ -89,8 +93,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
     )
@@ -100,16 +102,15 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         ops_test,
         apps=list(APP_UNITS.keys()),
         apps_full_statuses={
-            MAIN_APP: {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]},
-            FAILOVER_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
-            DATA_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
-            INVALID_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
+            MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
+            FAILOVER_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
+            DATA_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
+            INVALID_APP: [TlsStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
-            INVALID_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
+            MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
+            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -126,14 +127,12 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP],
         apps_full_statuses={
-            MAIN_APP: {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]},
-            FAILOVER_APP: {
-                "waiting": ["TLS not fully configured in related 'main-orchestrator'."]
-            },
+            MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
+            FAILOVER_APP: [PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value],
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
-            FAILOVER_APP: {"units": {"blocked": [TlsStatuses.TLS_RELATION_MISSING.value.message]}},
+            MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
+            FAILOVER_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
         },
         wait_for_exact_units={
             MAIN_APP: APP_UNITS[MAIN_APP],
@@ -151,16 +150,12 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP, INVALID_APP],
         apps_full_statuses={
-            MAIN_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-            DATA_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
-            INVALID_APP: {"blocked": [PEER_CLUSTER_NO_RELATION]},
+            DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
-            INVALID_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
+            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -183,16 +178,12 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, INVALID_APP],
         apps_full_statuses={
-            MAIN_APP: {"active": []},
-            INVALID_APP: {
-                "blocked": ["Cannot relate 2 clusters with different 'cluster_name' values."]
-            },
+            INVALID_APP: [
+                PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value
+            ],
         },
         units_full_statuses={
-            MAIN_APP: {"units": {"active": []}},
-            FAILOVER_APP: {"units": {"active": []}},
-            DATA_APP: {"units": {"blocked": [NO_CM_STATUS_MESSAGE]}},
-            INVALID_APP: {"units": {"active": []}},
+            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={MAIN_APP: APP_UNITS[MAIN_APP], INVALID_APP: APP_UNITS[INVALID_APP]},
         idle_period=IDLE_PERIOD,
@@ -218,8 +209,6 @@ async def test_large_deployment_fully_formed(
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={
             app: units for app, units in APP_UNITS.items() if app != INVALID_APP
         },

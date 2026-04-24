@@ -26,7 +26,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterErrorDataStatuses,
+    TlsStatuses,
+)
 from opensearch_single_kernel.core.models import (
     PeerClusterRelData,
     PeerClusterRelErrorData,
@@ -571,12 +575,16 @@ class TlsManager(BaseManager):
                 Scope.UNIT, CertType.UNIT_TRANSPORT.val
             )["ca-cert"]
             if unit_transport_ca_cert != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]:
-                blocked_msg = "CA certificate mismatch between clusters."
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
+                )
                 should_sever_relation = True
 
         if not peer_cluster_rel_data.credentials.admin_tls["truststore-password"]:
             logger.info("Relation data for TLS is missing.")
-            blocked_msg = "CA truststore-password not available."
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE.value.message
+            )
             should_sever_relation = True
 
         if not blocked_msg:
