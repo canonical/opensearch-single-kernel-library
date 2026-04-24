@@ -16,6 +16,7 @@ from datetime import datetime
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
+from data_platform_helpers.advanced_statuses import StatusObject
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -41,6 +42,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
+from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 
 logger = logging.getLogger(__name__)
 
@@ -776,6 +778,41 @@ class PeerClusterRelErrorData(Model):
     should_wait: bool
     blocked_message: str
     deployment_desc: DeploymentDescription | None
+
+    def get_status(self) -> StatusObject | None:
+        """Get the status of the error data."""
+        # We need to find the status based on the blocked_message
+        # and the should_wait which means its a waiting status
+        for status in PeerClusterErrorDataStatuses:
+            if status.value.status == "blocked" and self.should_wait:
+                continue
+            if status.value.status == "waiting" and not self.should_wait:
+                continue
+
+            escaped_message = re.escape(status.value.message)
+
+            # Substitute the escaped curly brace blocks with non-greedy wildcard
+            # Note the triple backslashes: \\\{ matches the literal string "\{"
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
+
+            if re.match(regex_pattern, self.blocked_message):
+                # set message to the original message with placeholders
+                new_status = status.value.model_copy()
+                new_status.message = self.blocked_message
+                return new_status
+        return None
+
+    @staticmethod
+    def get_status_from_message(message: str) -> StatusObject | None:
+        """Get the status of the error data based on the message."""
+        for status in PeerClusterErrorDataStatuses:
+            escaped_message = re.escape(status.value.message)
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
+            if re.match(regex_pattern, message):
+                new_status = status.value.model_copy()
+                new_status.message = message
+                return new_status.value
+        return None
 
 
 class PeerClusterOrchestrators(Model):

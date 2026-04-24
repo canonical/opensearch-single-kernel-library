@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 from opensearch_single_kernel.core.models import (
     AzureRelDataCredentials,
     DeploymentDescription,
@@ -344,12 +345,18 @@ class PeerClusterOrchestratorManager(BaseManager):
         message_suffix = f"in related '{deployment_desc.typ}'"
 
         if not deployment_desc:
-            blocked_msg = "'main/failover'-orchestrators not configured yet."
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.MAIN_OR_FAILOVER_NOT_CONFIGURED.value.message
+            )
         elif deployment_desc.typ == DeploymentType.OTHER:
             should_sever_relation, should_retry = True, False
-            blocked_msg = "Related to non 'main/failover'-orchestrator cluster."
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.RELATED_TO_NON_MAIN_OR_FAILOVER.value.message
+            )
         elif Directive.WAIT_FOR_PEER_CLUSTER_RELATION in deployment_desc.pending_directives:
-            blocked_msg = f"Waiting for peer cluster relation to be created {message_suffix}."
+            blocked_msg = PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value.message.format(
+                message_suffix=message_suffix
+            )
         elif (
             orchestrators.main_app
             and orchestrators.main_app.id != deployment_desc.app.id
@@ -357,20 +364,28 @@ class PeerClusterOrchestratorManager(BaseManager):
             and orchestrators.failover_app.id != deployment_desc.app.id
         ):
             should_sever_relation, should_retry = True, False
-            blocked_msg = (
-                "Cannot have 2 'failover'-orchestrators. Relate to the existing failover."
-            )
+            blocked_msg = PeerClusterErrorDataStatuses.CANNOT_HAVE_TWO_FAILOVERS.value.message
         elif not self.state.application.is_admin_user_initialized:
-            blocked_msg = f"Admin user not fully configured {message_suffix}."
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.ADMIN_USER_NOT_FULLY_CONFIGURED.value.message.format(
+                    message_suffix=message_suffix
+                )
+            )
         elif not self.state.is_tls_full_configured_in_cluster:
-            blocked_msg = f"TLS not fully configured {message_suffix}."
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value.message.format(
+                    message_suffix=message_suffix
+                )
+            )
             should_retry = False
         elif (
             "data" in deployment_desc.config.roles
             or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         ):
             if not self.state.application.is_security_index_initialised:
-                blocked_msg = f"Security index not initialized {message_suffix}."
+                blocked_msg = PeerClusterErrorDataStatuses.SECURITY_INDEX_NOT_INITIALIZED.value.message.format(
+                    message_suffix=message_suffix
+                )
         elif (
             self.state.application.is_data_role_in_cluster_fleet_apps
             and self.state.application.is_security_index_initialised
@@ -380,19 +395,30 @@ class PeerClusterOrchestratorManager(BaseManager):
             # This avoids a potential deadlock where both orchestrator and data units
             # wait on each other to proceed.
             if not self.is_every_unit_marked_as_started:
-                blocked_msg = f"Waiting for every unit {message_suffix} to start."
+                blocked_msg = PeerClusterErrorDataStatuses.WAITING_FOR_EVERY_UNIT_TO_START.value.message.format(
+                    message_suffix=message_suffix
+                )
             elif not self.state.secrets.get(Scope.APP, password_key(COS_USER)):
-                blocked_msg = f"'{COS_USER}' user not created yet."
+                blocked_msg = PeerClusterErrorDataStatuses.COS_USER_PASSWORD_NOT_AVAILABLE.value.message.format(
+                    COS_USER=COS_USER
+                )
             else:
                 try:
                     if not self.fetch_current_app_cm_nodes(deployment_desc):
-                        blocked_msg = f"No 'cluster_manager' eligible nodes found {message_suffix}"
+                        blocked_msg = PeerClusterErrorDataStatuses.NO_CLUSTER_MANAGER_ELIGIBLE_NODES.value.message.format(
+                            message_suffix=message_suffix
+                        )
                 except OpenSearchHttpError as e:
                     logger.error(e)
-                    blocked_msg = f"Could not fetch nodes {message_suffix}"
+                    blocked_msg = (
+                        PeerClusterErrorDataStatuses.COULD_NOT_FETCH_NODES.value.message.format(
+                            message_suffix=message_suffix
+                        )
+                    )
         elif rel_data and not rel_data.cm_nodes:
-            blocked_msg = f"Could not fetch nodes in related {deployment_desc.typ} sub-cluster."
-
+            blocked_msg = PeerClusterErrorDataStatuses.COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER.value.message.format(
+                deployment_desc=deployment_desc
+            )
         if not blocked_msg:
             return None
 

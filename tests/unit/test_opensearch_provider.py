@@ -3,7 +3,7 @@
 
 from unittest.mock import MagicMock, PropertyMock
 
-from ops.model import ActiveStatus, BlockedStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
     CLIENT_RELATION,
@@ -144,7 +144,7 @@ def test_on_index_requested(harness, mocker):
 
     create_users.side_effect = OpenSearchUserMgmtError()
     harness.charm.external_clients_events._on_index_requested(event)
-    assert isinstance(harness.charm.unit.status, BlockedStatus)
+    assert isinstance(harness.charm.unit.status, MaintenanceStatus)
     set_username.assert_not_called()
     set_password.assert_not_called()
     set_version.assert_not_called()

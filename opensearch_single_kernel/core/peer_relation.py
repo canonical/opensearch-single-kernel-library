@@ -113,6 +113,16 @@ class OpenSearchServer(RelationState):
         """Get the value of 'started' key from unit data bag"""
         return self.relation_data.get("started", "")
 
+    @started.setter
+    def started(self, value: str):
+        """Set the value of 'started' key in unit data bag"""
+        self.relation.data[self.unit].update({"started": value})
+
+    @started.deleter
+    def started(self):
+        """Remove the value of 'started' key from unit data bag"""
+        self.relation.data[self.unit].pop("started", None)
+
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""

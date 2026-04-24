@@ -8,13 +8,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from ops import (
-    BlockedStatus,
     Object,
     Relation,
     RelationChangedEvent,
     RelationDepartedEvent,
     RelationJoinedEvent,
-    WaitingStatus,
 )
 
 from opensearch_single_kernel.common.constants import (
@@ -561,18 +559,27 @@ class PeerClusterEventsHandler(Object):
         """Set error status from the passed errors and store for future deletion."""
         if error:
             err_message = error.blocked_message
-            self.charm.app.status = (
-                BlockedStatus(err_message)
-                if error.should_sever_relation
-                else WaitingStatus(err_message)
-            )
+            status = error.get_status()
+            if status:
+                # set the message
+                self.charm.state.add_status_if_not_present(
+                    status,
+                    scope="app",
+                    component=self.charm.peer_cluster_manager.name,
+                )
 
             # we should keep track of set messages for targeted deletion later
             self.charm.state.application.update({label: err_message})
         else:
             # if there is no error, we should clear the status and stored message for this label
             error_message = self.charm.state.application.relation_data.get(label, "")
-            self.charm.status.clear_blocked_status(error_message, app=True)
+            status = PeerClusterRelErrorData.get_status_from_message(error_message)
+            if status:
+                self.charm.state.remove_status_if_present(
+                    status,
+                    scope="app",
+                    component=self.charm.peer_cluster_manager.name,
+                )
             self.charm.state.application.update({label: ""})
 
     def apply_orchestrator_status(self) -> None:
@@ -662,6 +669,6 @@ class PeerClusterEventsHandler(Object):
         """Reconcile the deployment desc from the peer cluster relation data."""
         self.charm.cluster_manager.reconcile_cluster_config_with_relation_data(data)
         self.charm.config_manager.update_seeds_config(data.cm_nodes)
-        self.charm.status.apply_status_from_deployment_desc(
+        self.charm.opensearch_events.apply_status_from_deployment_desc(
             self.charm.state.application.deployment_desc
         )

@@ -453,9 +453,7 @@ class OpenSearchEventsHandler(Object):
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
-        self.charm.status.apply_status_from_deployment_desc(
-            self.charm.state.application.deployment_desc
-        )
+        self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
@@ -627,7 +625,7 @@ class OpenSearchEventsHandler(Object):
         else:
             # Apply status from deployment desc, to reflect any blocking status if needed
             if is_leader_unit:
-                self.charm.status.apply_status_from_deployment_desc(
+                self.apply_status_from_deployment_desc(
                     self.charm.state.application.deployment_desc, show_status_only_once=False
                 )
             logger.debug("Blocking directives present. Deferring start event.")
@@ -635,7 +633,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         if is_leader_unit:
-            self.charm.status.apply_status_from_deployment_desc(
+            self.apply_status_from_deployment_desc(
                 self.charm.state.application.deployment_desc,
                 show_status_only_once=False,
             )

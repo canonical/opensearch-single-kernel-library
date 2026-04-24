@@ -200,6 +200,50 @@ class PeerClusterStatuses(Enum):
     )
 
 
+class PeerClusterErrorDataStatuses(Enum):
+    """Collection of charm statuses that are propagated from provider."""
+
+    MAIN_OR_FAILOVER_NOT_CONFIGURED = StatusObject(
+        status="waiting", message="'main/failover'-orchestrators not configured yet."
+    )
+    RELATED_TO_NON_MAIN_OR_FAILOVER = StatusObject(
+        status="blocked", message="Related to non 'main/failover'-orchestrator cluster"
+    )
+    WAITING_FOR_PEER_RELATION_CREATED = StatusObject(
+        status="waiting",
+        message="Waiting for peer cluster relation to be created {message_suffix}.",
+    )
+    CANNOT_HAVE_TWO_FAILOVERS = StatusObject(
+        status="blocked",
+        message="Cannot have 2 'failover'-orchestrators. Relate to the existing failover.",
+    )
+    ADMIN_USER_NOT_FULLY_CONFIGURED = StatusObject(
+        status="waiting", message="Admin user not fully configured {message_suffix}."
+    )
+    TLS_NOT_FULLY_CONFIGURED = StatusObject(
+        status="blocked", message="TLS not fully configured {message_suffix}."
+    )
+    SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
+        status="waiting", message="Security index not initialized {message_suffix}."
+    )
+    WAITING_FOR_EVERY_UNIT_TO_START = StatusObject(
+        status="waiting", message="Waiting for every unit {message_suffix} to start."
+    )
+    COS_USER_NOT_CREATED = StatusObject(
+        status="waiting", message="'{COS_USER}' user not created yet."
+    )
+    NO_CLUSTER_MANAGER_ELIGIBLE_NODES = StatusObject(
+        status="waiting", message="No 'cluster_manager' eligible nodes found {message_suffix}"
+    )
+    COULD_NOT_FETCH_NODES = StatusObject(
+        status="waiting", message="Could not fetch nodes {message_suffix}"
+    )
+    COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER = StatusObject(
+        status="waiting",
+        message="Could not fetch nodes in related {deployment_desc.typ} sub-cluster.",
+    )
+
+
 class SnapshotsStatuses(Enum):
     """Collection of charm statuses related to snapshots manager."""
 
