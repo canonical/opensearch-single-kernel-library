@@ -223,11 +223,12 @@ class TLSEventsHandler(Object):
 
         try:
             current_stored_ca = self.charm.tls_manager.read_stored_ca()
+
         except OpenSearchFileOperationError as e:
             logger.error("Error while reading stored CA certificate: %s", e)
             event.defer()
             return
-
+        logger.debug("Current stored CA: %s, New CA: %s", current_stored_ca, event.ca)
         if current_stored_ca != event.ca:
             try:
                 if not self.charm.tls_manager.store_new_ca(

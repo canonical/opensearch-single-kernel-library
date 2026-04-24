@@ -3,7 +3,7 @@
 
 """Unit Tests for Charm related operations."""
 
-from unittest.mock import MagicMock, PropertyMock, call, patch
+from unittest.mock import PropertyMock, call, patch
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,

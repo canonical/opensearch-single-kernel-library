@@ -117,7 +117,7 @@ async def test_build_and_deploy(
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=DEFAULT_NUM_UNITS,
+        wait_for_exact_units=units,
         units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
     )
     assert len(ops_test.model.applications[APP_NAME].units) == units
@@ -143,7 +143,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=DEFAULT_NUM_UNITS,
+        wait_for_exact_units=units,
     )
 
     leader_ip = await get_leader_unit_ip(ops_test)

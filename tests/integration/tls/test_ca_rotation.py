@@ -165,6 +165,8 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
     if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
         pytest.skip("Large deployments are not supported on k8s.")
 
+    unit_ids = get_unit_ids(substrate)
+
     if deploy_type == SMALL_DEPLOYMENT:
         app = APP_NAME
     else:
@@ -183,7 +185,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
             await wait_until(
                 ops_test,
                 apps=[APP_NAME],
-                wait_for_exact_units=len(UNIT_IDS),
+                wait_for_exact_units=len(unit_ids),
                 timeout=2400,
                 idle_period=IDLE_PERIOD,
             )

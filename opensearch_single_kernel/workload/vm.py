@@ -102,7 +102,6 @@ class VMWorkload(BaseWorkload):
         suffix: str | None = None,
     ):
         """Create a temporary file and return the file, clean it once context is closed."""
-
         f = tempfile.NamedTemporaryFile(
             mode=mode,
             encoding=encoding,

@@ -5,9 +5,7 @@
 """OpenSearch TLS manager."""
 
 import logging
-import os
 import socket
-import tempfile
 from datetime import datetime
 from typing import Any
 
