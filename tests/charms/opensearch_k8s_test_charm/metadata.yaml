@@ -25,6 +25,8 @@ peers:
     # DA056 - Upgrading in-place upgrade protocol
     # https://docs.google.com/document/d/1H7qy5SAwLiCOKO9xMQJbbQP5_-jGV6Lhi-mJOk4gZ08/edit
     interface: upgrade
+  status-peers:
+    interface: status-peers
 
 provides:
   peer-cluster-orchestrator:
@@ -46,7 +48,7 @@ requires:
     limit: 1
   peer-cluster:
     interface: peer_cluster
-    limit: 2  # (main+failover)_cluster_orchestrator(s)
+    limit: 2 # (main+failover)_cluster_orchestrator(s)
     optional: true
   s3-credentials:
     interface: s3
