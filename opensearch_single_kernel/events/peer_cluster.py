@@ -513,7 +513,7 @@ class PeerClusterEventsHandler(Object):
         missing_relations = plugins_missing_relations + backup_missing_relations
         if missing_relations:
             self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS,
+                PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
                 dynamic_params={"relation": missing_relations[0]},
@@ -524,7 +524,7 @@ class PeerClusterEventsHandler(Object):
         # No missing relations, clean up any previous state
         self.charm.state.application.update({"missing_relations": ""})
         self.charm.state.remove_status_if_present(
-            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS,
+            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
             scope="app",
             component=self.charm.peer_cluster_orchestrator_manager.name,
             interpolated=True,
@@ -534,7 +534,7 @@ class PeerClusterEventsHandler(Object):
         """Start Opensearch on a cluster-manager node when a data-node is joining"""
         if self.charm.state.server.started:
             self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
             )
@@ -589,24 +589,24 @@ class PeerClusterEventsHandler(Object):
 
         if orchestrators.main_app:
             self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED,
+                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
             )
             self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION,
+                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
             )
         elif orchestrators.failover_app:
             self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION,
+                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
             )
         else:
             self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED,
+                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
                 scope="app",
                 component=self.charm.peer_cluster_orchestrator_manager.name,
             )
@@ -653,7 +653,7 @@ class PeerClusterEventsHandler(Object):
         # clean the status if it is set
         if not peer_cluster_requirer_relations:
             self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER,
+                PeerClusterStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value,
                 scope="app",
                 component=self.charm.peer_cluster_manager.name,
             )

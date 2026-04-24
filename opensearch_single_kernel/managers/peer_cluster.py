@@ -53,8 +53,7 @@ class PeerClusterManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "peer_cluster_manager"
+        super().__init__(state, workload, "peer_cluster_manager")
 
     def set_current_app_in_cluster_fleet(
         self, rel_id: int, deployment_desc: DeploymentDescription, is_provider: bool

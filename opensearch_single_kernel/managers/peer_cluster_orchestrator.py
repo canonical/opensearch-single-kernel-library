@@ -51,8 +51,7 @@ class PeerClusterOrchestratorManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "peer_cluster_orchestrator_manager"
+        super().__init__(state, workload, "peer_cluster_orchestrator_manager")
 
     def refresh_relation_data(  # noqa: C901
         self,
