@@ -521,9 +521,7 @@ class ClusterState(Object):
     def ca_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
         # Use related_peer_cluster_servers since we are reading remote data.
-        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(
-            is_provider=False, remote=True
-        )
+        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
 
         # check peer units and current unit
         rotation_in_progress = any([server.tls_ca_renewing for server in all_units_in_fleet])
