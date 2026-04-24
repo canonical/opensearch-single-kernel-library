@@ -75,8 +75,7 @@ class SnapshotsManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "snapshots_manager"
+        super().__init__(state, workload, "snapshots_manager")
 
     def read_snapshots_data_from_peer_cluster(
         self,

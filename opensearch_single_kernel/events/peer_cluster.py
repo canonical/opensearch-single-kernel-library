@@ -96,12 +96,12 @@ class PeerClusterEventsHandler(Object):
         """Handle peer cluster orchestrator relation changed event."""
         logger.debug("Peer cluster orchestrator relation changed: %s", event)
         if deployment_desc := self.charm.state.application.deployment_desc:
-            # TODO: This will be handled once advanced status is incorporated
             self.charm.opensearch_events.check_profile_requirements()
 
         if not self.charm.unit.is_leader():
             logger.debug("Node not a leader. Skipping refresh relation data")
             return
+
         if not event.relation.active:
             logger.debug("Relation no longer active")
             return
