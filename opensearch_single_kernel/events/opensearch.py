@@ -333,7 +333,7 @@ class OpenSearchEventsHandler(Object):
                         "1 or more 'primary' shards are not assigned, please scale your application up."
                     )
         finally:
-            if planned_units > 1 and (
+            if planned_units > 0 and (
                 self.charm.cluster_manager.opensearch_client.is_node_up()
                 or self.charm.cluster_manager.alt_hosts
             ):
