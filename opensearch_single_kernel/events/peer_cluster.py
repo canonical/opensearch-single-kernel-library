@@ -285,7 +285,7 @@ class PeerClusterEventsHandler(Object):
         trigger = data.get("trigger")
 
         # Get orchestrators from remote peer cluster
-        related_peer_cluster = self.charm.state.related_peer_cluster_by_relation_id(
+        related_peer_cluster = self.charm.state.remote_peer_cluster_by_relation_id(
             relation_id=event.relation.id, is_provider=False
         )
         if not related_peer_cluster or not related_peer_cluster.orchestrators:
@@ -491,7 +491,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         # the current is an orchestrator, let's broadcast the new conf to all related apps
-        for related_peer_cluster in self.charm.state.peer_clusters(
+        for related_peer_cluster in self.charm.state.local_peer_clusters(
             is_provider=True, must_have_units=False
         ):
             related_peer_cluster.cluster_fleet_apps = (

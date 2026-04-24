@@ -5,7 +5,6 @@
 
 """OpenSearch Charm literals."""
 
-
 from enum import Enum
 
 from opensearch_single_kernel.utils.enum import BaseStrEnum
@@ -274,6 +273,8 @@ CLIENT_RELATION = "opensearch-client"
 COS_RELATION = "cos-agent"
 JWT_CONFIG_RELATION = "jwt-configuration"
 OAUTH_RELATION = "oauth"
+STATUS_PEERS_RELATION = "status-peers"
+SMTP_RELATION = "smtp"
 
 
 # Paths

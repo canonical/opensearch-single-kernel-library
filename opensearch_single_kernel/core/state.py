@@ -6,10 +6,13 @@
 """Object representing the global state of OpenSearch Charm."""
 import json
 import logging
+import re
 import socket
 from json import JSONDecodeError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
@@ -26,10 +29,14 @@ from opensearch_single_kernel.common.constants import (
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
     S3_RELATION,
+    SMTP_RELATION,
+    STATUS_PEERS_RELATION,
     TLS_RELATION,
+    ObjectStorageType,
     StartMode,
     Substrates,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchInvalidStorageTypeError
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
@@ -54,15 +61,24 @@ from opensearch_single_kernel.core.relations import (
     PeerClusterOrchestratorData,
 )
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
+    AzureStorageRequires,
+)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,
     DataPeerUnitData,
     OpenSearchProvidesData,
 )
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
+    GcsStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     lock_unit_name,
 )
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -74,7 +90,15 @@ logger = logging.getLogger(__name__)
 class ClusterState(Object):
     """The global OpenSearch Cluster State ."""
 
-    def __init__(self, charm: "OpenSearchBaseCharm", substrate: Substrates):
+    def __init__(
+        self,
+        charm: "OpenSearchBaseCharm",
+        substrate: Substrates,
+        smtp_requires: SmtpRequires,
+        s3_requirer: S3Requirer,
+        azure_requires: AzureStorageRequires,
+        gcs_requires: GcsStorageRequires,
+    ):
         super().__init__(charm, "cluster_state")
         self.config = charm.config
         self.substrate = substrate
@@ -82,6 +106,7 @@ class ClusterState(Object):
         # Secrets  FIXME: Handle this separately.
         self.secrets = OpenSearchSecrets(charm, peer_relation=PEER_RELATION)
 
+        self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
         # TODO: Add secrets
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
@@ -95,6 +120,10 @@ class ClusterState(Object):
         self.peer_cluster_orchestrator_data_interface = PeerClusterOrchestratorData(
             model=charm.model, relation_name=PEER_CLUSTER_ORCHESTRATOR_RELATION
         )
+        self.smtp_requires = smtp_requires
+        self.s3_requirer = s3_requirer
+        self.azure_requires = azure_requires
+        self.gcs_requires = gcs_requires
 
     # -- Relations
 
@@ -143,16 +172,31 @@ class ClusterState(Object):
         """Get OpenSearch client relation."""
         return self.model.relations.get(CLIENT_RELATION, [])
 
+    @property
+    def jwt_relation(self) -> Relation | None:
+        """Get JWT relation."""
+        return self.model.get_relation(JWT_CONFIG_RELATION)
+
+    @property
+    def oauth_relation(self) -> Relation | None:
+        """Get OAuth relation."""
+        return self.model.get_relation(OAUTH_RELATION)
+
+    @property
+    def smtp_relations(self) -> list[Relation]:
+        """Get SMTP relations."""
+        return self.model.relations.get(SMTP_RELATION, [])
+
     def relation_exists(self, relation_name) -> bool:
         """Check if the relation exists"""
         return bool(self.model.get_relation(relation_name))
 
-    def peer_cluster_relation_exists(self, relation_id: int) -> bool:
+    def peer_cluster_orchestrator_relation_exists(self, relation_id: int) -> bool:
         """Check if the relation with id exists"""
         relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
         return bool(relation)
 
-    def peer_cluster_by_relation_id(
+    def local_peer_cluster_by_relation_id(
         self, is_provider: bool, relation_id: int
     ) -> PeerCluster | None:
         """Return the current related peer cluster if any."""
@@ -172,7 +216,7 @@ class ClusterState(Object):
             )
         return None
 
-    def related_peer_cluster_by_relation_id(
+    def remote_peer_cluster_by_relation_id(
         self, is_provider: bool, relation_id: int
     ) -> PeerCluster | None:
         """Return the related peer cluster for the given relation id.
@@ -196,7 +240,9 @@ class ClusterState(Object):
             )
         return None
 
-    def peer_clusters(self, is_provider: bool, must_have_units: bool = True) -> list[PeerCluster]:
+    def local_peer_clusters(
+        self, is_provider: bool, must_have_units: bool = True
+    ) -> list[PeerCluster]:
         """Return the list of peer clusters for each relations."""
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
@@ -239,7 +285,7 @@ class ClusterState(Object):
             for rel in self.model.relations[relation_name]
         ]
 
-    def related_peer_cluster_servers(self, is_provider: bool) -> list[PeerClusterServer]:
+    def remote_peer_cluster_servers(self, is_provider: bool) -> list[PeerClusterServer]:
         """Return the list of peer cluster servers for each relations.
 
         This returns for each peer cluster relation, the server state object
@@ -263,7 +309,7 @@ class ClusterState(Object):
             for unit in rel.units
         ]
 
-    def peer_cluster_server_by_relation_id(
+    def local_peer_cluster_server_by_relation_id(
         self, is_provider: bool, relation_id: int
     ) -> PeerClusterServer | None:
         """Return the peer cluster server for the given relation id."""
@@ -282,7 +328,7 @@ class ClusterState(Object):
             )
         return None
 
-    def related_peer_clusters(
+    def remote_peer_clusters(
         self, is_provider: bool, must_have_units: bool = True
     ) -> list[PeerCluster]:
         """Return the list of related peer clusters.
@@ -333,7 +379,7 @@ class ClusterState(Object):
         )
 
     @property
-    def servers(self) -> list[OpenSearchServer]:
+    def application_servers(self) -> list[OpenSearchServer]:
         """Return all opensearch servers using peer relation."""
         return [
             OpenSearchServer(
@@ -397,6 +443,67 @@ class ClusterState(Object):
                 # if any(key.name == "opensearch-dashboards" for key in relation.data.keys()):
                 result.append(external_client)
         return result
+
+    @property
+    def jwt(self) -> JwtState:
+        """Get JWT state."""
+        return JwtState(
+            relation=self.jwt_relation,
+            data_interface=JwtData(self.model, JWT_CONFIG_RELATION),
+            component=self.model.app,
+        )
+
+    @property
+    def server_lock(self) -> LockServerState:
+        """Get state of lock relation for current unit."""
+        return LockServerState(
+            relation=self.lock_relation,
+            data_interface=DataPeerUnitData(model=self.model, relation_name=NODE_LOCK_RELATION),
+            component=self.model.unit,
+        )
+
+    @property
+    def lock_granted_server(self) -> LockServerState | None:
+        """Get state of lock relation for unit granted with lock."""
+        return (
+            LockServerState(
+                relation=self.lock_relation,
+                data_interface=DataPeerUnitData(
+                    model=self.model, relation_name=NODE_LOCK_RELATION
+                ),
+                component=self.get_unit(lock_unit_name(granted_unit_name)),
+            )
+            if (granted_unit_name := self.application_lock.unit_with_lock)
+            else None
+        )
+
+    @property
+    def server_locks(self) -> list[LockServerState]:
+        """Get state of lock relation for all units in it."""
+        return (
+            [
+                LockServerState(
+                    relation=self.lock_relation,
+                    data_interface=DataPeerUnitData(
+                        model=self.model, relation_name=NODE_LOCK_RELATION
+                    ),
+                    component=unit,
+                )
+                for unit in (self.server.unit, *self.lock_relation.units)
+            ]
+            if self.lock_relation
+            else []
+        )
+
+    @property
+    def application_lock(self) -> LockAppState:
+        """Get application state of lock relation."""
+        return LockAppState(
+            relation=self.lock_relation,
+            data_interface=DataPeerData(model=self.model, relation_name=NODE_LOCK_RELATION),
+            component=self.model.app,
+            unit_name=self.unit_name,
+        )
 
     # -- Cluster State Properties
 
@@ -466,9 +573,9 @@ class ClusterState(Object):
         """Check whether the CA rotation completed in all units."""
         # Use related_peer_cluster_servers since we are reading remote data.
         all_units_in_fleet = (
-            self.servers
-            + self.related_peer_cluster_servers(is_provider=False)
-            + self.related_peer_cluster_servers(is_provider=True)
+            self.application_servers
+            + self.remote_peer_cluster_servers(is_provider=False)
+            + self.remote_peer_cluster_servers(is_provider=True)
         )
 
         # check peer units and current unit
@@ -490,9 +597,9 @@ class ClusterState(Object):
         """Check whether the CA rotation completed in all units."""
         # Use related_peer_cluster_servers since we are reading remote data.
         all_units_in_fleet = (
-            self.servers
-            + self.related_peer_cluster_servers(is_provider=False)
-            + self.related_peer_cluster_servers(is_provider=True)
+            self.application_servers
+            + self.remote_peer_cluster_servers(is_provider=False)
+            + self.remote_peer_cluster_servers(is_provider=True)
         )
         logger.debug(
             "CA and certs rotation state"
@@ -540,6 +647,7 @@ class ClusterState(Object):
                 del peer_cluster_server.tls_ca_renewing
                 del peer_cluster_server.tls_ca_renewed
             return
+
         # this means only the CA rotation completed, still need to create certificates
         self.server.tls_ca_renewed = True
         for peer_cluster_server in peer_cluster_servers:
@@ -679,7 +787,7 @@ class ClusterState(Object):
 
         if orchestrators.main_app is None:
             return None
-        peer_cluster = self.peer_cluster_by_relation_id(
+        peer_cluster = self.local_peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id
         )
         if not peer_cluster:
@@ -687,73 +795,130 @@ class ClusterState(Object):
 
         return peer_cluster.first_data_node
 
-    @property
-    def jwt_relation(self) -> Relation | None:
-        """Get JWT relation."""
-        return self.model.get_relation(JWT_CONFIG_RELATION)
+    def add_status_if_not_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        dynamic_params: dict[str, Any] | None = None,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Add charm status if not present already.
 
-    @property
-    def jwt(self) -> JwtState:
-        """Get JWT state."""
-        return JwtState(
-            relation=self.jwt_relation,
-            data_interface=JwtData(self.model, JWT_CONFIG_RELATION),
-            component=self.model.app,
-        )
+        Args:
+            status: charm status to be added.
+            scope: scope of the added charm status.
+            component: name of the responsible component of the added status.
+            dynamic_params: params to format added status message with.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                For example, if one of the parameters is a relation id, you want for search to be
+                performed only through specific relation, while other parameters should be loosen
+                by search regex. E.g. if you have a two parameters `relation_id` and `exception`,
+                you may want to add a status with {"relation_id": 1, "exception": "err"} but with
+                search parameters {"relation_id": 1, "exception": "{}"} in order to not override
+                the same statuses from different relations. Note: "{}" placeholder makes
+                parameter loosen.
+        """
+        if scope == "app" and not self.server.is_app_leader:
+            return
 
-    @property
-    def oauth_relation(self) -> Relation | None:
-        """Get OAuth relation."""
-        return self.model.get_relation(OAUTH_RELATION)
+        present_statuses = self.statuses.get(scope, component)
 
-    @property
-    def server_lock(self) -> LockServerState:
-        """Get state of lock relation for current unit."""
-        return LockServerState(
-            relation=self.lock_relation,
-            data_interface=DataPeerUnitData(model=self.model, relation_name=NODE_LOCK_RELATION),
-            component=self.model.unit,
-        )
+        if not dynamic_params and status not in present_statuses:
+            self.statuses.add(status, scope, component)
 
-    @property
-    def lock_granted_server(self) -> LockServerState | None:
-        """Get state of lock relation for unit granted with lock."""
-        return (
-            LockServerState(
-                relation=self.lock_relation,
-                data_interface=DataPeerUnitData(
-                    model=self.model, relation_name=NODE_LOCK_RELATION
-                ),
-                component=self.get_unit(lock_unit_name(granted_unit_name)),
-            )
-            if (granted_unit_name := self.application_lock.unit_with_lock)
-            else None
-        )
-
-    @property
-    def server_locks(self) -> list[LockServerState]:
-        """Get state of lock relation for all units in it."""
-        return (
-            [
-                LockServerState(
-                    relation=self.lock_relation,
-                    data_interface=DataPeerUnitData(
-                        model=self.model, relation_name=NODE_LOCK_RELATION
-                    ),
-                    component=unit,
+        if dynamic_params and (
+            not (
+                present_status := self._search_interpolated_status(
+                    status, scope, component, search_parameters
                 )
-                for unit in (self.server.unit, *self.lock_relation.units)
-            ]
-            if self.lock_relation
-            else []
-        )
+            )
+            or present_status.message != format_status(status, dynamic_params).message
+        ):
+            # Updates dynamic params if status already present.
+            self.remove_status_if_present(status, scope, component, interpolated=True)
+            self.statuses.add(format_status(status, dynamic_params), scope, component)
 
-    @property
-    def application_lock(self) -> LockAppState:
-        """Get application state of lock relation."""
-        return LockAppState(
-            relation=self.lock_relation,
-            data_interface=DataPeerData(model=self.model, relation_name=NODE_LOCK_RELATION),
-            component=self.model.app,
-            unit_name=self.unit_name,
+    def remove_status_if_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated: bool = False,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated: perform a regex search by the status message to find
+                statuses formatted with dynamic parameters.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                Note: "{}" placeholder makes parameter loosen.
+        """
+        if scope == "app" and not self.server.is_app_leader:
+            return
+
+        present_statuses = self.statuses.get(scope, component)
+
+        if not interpolated and status in present_statuses:
+            self.statuses.delete(status, scope, component)
+
+        if interpolated and (
+            present_status := self._search_interpolated_status(
+                status, scope, component, search_parameters
+            )
+        ):
+            self.statuses.delete(present_status, scope, component)
+
+    def _search_interpolated_status(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated_parameters: dict[str, Any] | None = None,
+    ) -> StatusObject | None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated_parameters: params to format searched status message with prior to
+                interpolated search. Helps to differentiate between statuses with multiple
+                dynamic parameters. Note: "{}" placeholder makes parameter loosen.
+
+        Returns:
+            status if it was found.
+        """
+        regex_pattern = re.sub(
+            r"\{.*?\}",
+            r"(?s:.*?)",
+            format_status(status, interpolated_parameters).message,
         )
+        for present_status in self.statuses.get(scope, component):
+            if re.fullmatch(regex_pattern, present_status.message) is not None:
+                return present_status
+        return None
+
+    def get_storage_connection_info_from_relation(
+        self, object_storage_type: ObjectStorageType
+    ) -> dict[str, str]:
+        """Returns the storage connection info from the active relation.."""
+        match object_storage_type:
+            case ObjectStorageType.S3:
+                return self.s3_requirer.get_s3_connection_info() or {}
+            case ObjectStorageType.AZURE:
+                return self.azure_requires.get_azure_storage_connection_info() or {}
+            case ObjectStorageType.GCS:
+                if not self.gcs_relation:
+                    return {}
+                return self.gcs_requires.get_storage_connection_info(self.gcs_relation) or {}
+            case _:
+                raise OpenSearchInvalidStorageTypeError(
+                    "Unsupported object storage type: %s" % object_storage_type
+                )

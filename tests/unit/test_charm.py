@@ -5,12 +5,10 @@
 
 from unittest.mock import PropertyMock, call, patch
 
-from ops import ActiveStatus, BlockedStatus
-
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
-    OpenSearchInstallError,
 )
+from opensearch_single_kernel.common.statuses import InternalUsersStatuses
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -19,14 +17,6 @@ def test_on_install(harness):
     with patch("opensearch_single_kernel.workload.vm.VMWorkload.install") as install:
         harness.charm.on.install.emit()
         install.assert_called_once()
-
-
-def test_on_install_error(harness):
-    """Test the install event callback on error."""
-    with patch("opensearch_single_kernel.workload.vm.VMWorkload.install") as install:
-        install.side_effect = OpenSearchInstallError()
-        harness.charm.on.install.emit()
-        assert isinstance(harness.model.unit.status, BlockedStatus)
 
 
 def test_on_leader_elected(harness, mocker):
@@ -42,6 +32,9 @@ def test_on_leader_elected(harness, mocker):
     put_or_update_internal_user_leader = mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
+    set_running_status = mocker.patch(
+        "data_platform_helpers.advanced_statuses.StatusHandler.set_running_status"
+    )
 
     harness.set_leader(True)
 
@@ -56,11 +49,20 @@ def test_on_leader_elected(harness, mocker):
         ],
         any_order=True,
     )
-    assert isinstance(harness.model.unit.status, ActiveStatus)
+    set_running_status.assert_has_calls(
+        [
+            call(
+                InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
+                "unit",
+                component_name=harness.charm.internal_users_manager.name,
+            )
+        ]
+    )
 
     # Reset mocks
     purge_initial_default_users.reset_mock()
     put_or_update_internal_user_leader.reset_mock()
+    set_running_status.reset_mock()
 
     # Set admin user initialized
     harness.charm.state.application.is_admin_user_initialized = True
@@ -74,6 +76,7 @@ def test_on_leader_elected(harness, mocker):
         ],
         any_order=True,
     )
+    set_running_status.assert_not_called()
 
 
 def test_on_leader_elected_index_initialised(harness, mocker):
@@ -133,8 +136,8 @@ def test_on_start(harness, mocker):
     should_ignore_lock = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.should_ignore_lock"
     )
-    is_fully_configured = mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.is_fully_configured"
+    all_tls_resources_stored = mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored"
     )
     is_admin_user_initialized = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.is_admin_user_initialized",
@@ -147,8 +150,8 @@ def test_on_start(harness, mocker):
     can_service_start = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
     )
-    check_profile_missing_requirements = mocker.patch(
-        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_missing_requirements"
+    check_profile_requirements = mocker.patch(
+        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_requirements"
     )
     unit_allowed_to_start = mocker.patch(
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.unit_allowed_to_start"
@@ -172,13 +175,13 @@ def test_on_start(harness, mocker):
     is_node_up.return_value = True
     harness.charm.state.application.is_security_index_initialised = True
     harness.charm.on.start.emit()
-    is_fully_configured.assert_not_called()
+    all_tls_resources_stored.assert_not_called()
     is_admin_user_initialized.assert_not_called()
 
     # test when setup not complete
     is_node_up.return_value = False
     harness.charm.state.application.update({"security_index_initialised": ""})
-    is_fully_configured.return_value = False
+    all_tls_resources_stored.return_value = False
     is_admin_user_initialized.return_value = False
     harness.charm.on.start.emit()
     update_opensearch_config.assert_not_called()
@@ -194,11 +197,11 @@ def test_on_start(harness, mocker):
     mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_failed", return_value=False)
     start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
     # _get_nodes succeeds
-    is_fully_configured.return_value = True
+    all_tls_resources_stored.return_value = True
     is_admin_user_initialized.return_value = True
     get_nodes.side_effect = None
     can_service_start.return_value = False
-    check_profile_missing_requirements.return_value = True
+    check_profile_requirements.return_value = False
     harness.charm.on.start.emit()
     update_opensearch_config.assert_not_called()
     initialise_security_index.assert_not_called()
@@ -209,7 +212,7 @@ def test_on_start(harness, mocker):
     update_opensearch_config.reset_mock()
     harness.charm.state.application.update({"security_index_initialised": ""})
     can_service_start.return_value = True
-    check_profile_missing_requirements.return_value = False
+    check_profile_requirements.return_value = True
     harness.set_leader(True)
     lock_acquire.return_value = True
     unit_allowed_to_start.return_value = True

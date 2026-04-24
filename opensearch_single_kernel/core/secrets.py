@@ -304,7 +304,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
     def grant_secret_to_subclusters(self, secret_id: str, is_provider: bool) -> bool:
         """Returns True if secret is successfully granted to all subclusters"""
-        for related_peer_cluster in self.charm.state.peer_clusters(is_provider=is_provider):
+        for related_peer_cluster in self.charm.state.local_peer_clusters(is_provider=is_provider):
             if not self.grant_secret_to_relation(secret_id, related_peer_cluster.relation):
                 return False
         return True
@@ -325,7 +325,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
             if key == "admin_username":
                 continue
 
-            for related_peer_cluster in self.charm.state.peer_clusters(is_provider=is_provider):
+            for related_peer_cluster in self.charm.state.local_peer_clusters(
+                is_provider=is_provider
+            ):
                 if relation := related_peer_cluster.relation:
                     if key == "s3":
                         if secret_id["access-key"]:

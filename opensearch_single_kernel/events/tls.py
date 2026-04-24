@@ -28,7 +28,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
     CertificateExpiringEvent,
@@ -151,14 +151,25 @@ class TLSEventsHandler(Object):
         self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
         self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
+        self.charm.state.remove_status_if_present(
+            TlsStatuses.TLS_RELATION_MISSING.value, "unit", self.charm.tls_manager.name
+        )
+        if not self.charm.tls_manager.all_tls_resources_stored():
+            self.charm.state.add_status_if_not_present(
+                TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
+                "unit",
+                self.charm.tls_manager.name,
+            )
+
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
         # TODO: If upgrade log a warning
         if self.charm.tls_manager.all_tls_resources_stored():
             return
 
-        # Otherwise, we block.
-        self.charm.status.set(CharmStatuses.TLS_RELATION_BROKEN)
+        self.charm.state.add_status_if_not_present(
+            TlsStatuses.TLS_RELATION_MISSING.value, "unit", self.charm.tls_manager.name
+        )
 
     def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
         """Enable TLS when TLS certificate available.
@@ -284,7 +295,9 @@ class TLSEventsHandler(Object):
 
     def on_tls_ca_rotation(self) -> None:
         """Called when adding new CA to the trust store."""
-        self.charm.status.set(CharmStatuses.TLS_CA_ROTATION)
+        self.charm.state.add_status_if_not_present(
+            TlsStatuses.TLS_CA_ROTATION.value, "unit", self.charm.tls_manager.name
+        )
         logger.debug("Restarting opensearch due to CA rotation")
         self.charm.restart_opensearch_event.emit()
 
@@ -352,14 +365,23 @@ class TLSEventsHandler(Object):
         # In case of renewal of the unit transport layer cert - restart opensearch
         if renewal and self.charm.state.application.is_admin_user_initialized:
             if self.charm.tls_manager.is_fully_configured():
+                self.charm.state.remove_status_if_present(
+                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
+                    "unit",
+                    self.charm.tls_manager.name,
+                )
                 try:
                     self.charm.tls_manager.reload_tls_certificates()
                 except OpenSearchHttpError:
                     logger.error("Could not reload TLS certificates via API, will restart.")
                     self.charm.restart_opensearch_event.emit()
                 else:
-                    self.charm.status.clear(CharmStatuses.TLS_NOT_FULLY_CONFIGURED)
                     self.charm.state.reset_ca_rotation_state()
+                    self.charm.state.remove_status_if_present(
+                        TlsStatuses.TLS_CA_ROTATION.value,
+                        "unit",
+                        self.charm.tls_manager.name,
+                    )
                     # if all certs are stored and CA rotation is complete in the cluster
                     # we delete the old ca and update the chain to only include the new one
                     if (

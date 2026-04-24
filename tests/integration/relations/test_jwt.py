@@ -16,13 +16,14 @@ from pytest_operator.plugin import OpsTest
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import JwtStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
     MODEL_CONFIG,
 )
 from tests.integration.helpers import (
+    EmptyBlockedStatus,
     get_leader_unit_ip,
     http_request,
     wait_until,
@@ -65,13 +66,13 @@ async def test_deploy_small_cluster(charm, series, ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
     )
 
     await ops_test.model.deploy("jwt-integrator", channel="1/edge")
-    await wait_until(ops_test, apps=[JWT_APP_NAME], apps_statuses=["blocked"])
+    await wait_until(
+        ops_test, apps=[JWT_APP_NAME], apps_statuses={JWT_APP_NAME: [EmptyBlockedStatus]}
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -103,8 +104,6 @@ async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME, JWT_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={APP_NAME: DEFAULT_NUM_UNITS, JWT_APP_NAME: 1},
     )
 
@@ -129,8 +128,6 @@ async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
     )
 
@@ -196,14 +193,8 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-        },
-        units_statuses=["active"],
-        timeout=3600,
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        timeout=3600,
     )
 
     logger.info(f"Integrating {DATA_APP} with {JWT_APP_NAME} - this will result in blocked status")
@@ -214,8 +205,8 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_full_statuses={
-            DATA_APP: {"blocked": [CharmStatuses.JWT_RELATION_INVALID.value.message]},
+        apps_statuses={
+            DATA_APP: [JwtStatuses.JWT_RELATION_INVALID.value],
         },
         wait_for_exact_units={DATA_APP: 3},
     )
@@ -238,8 +229,6 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_full_statuses={DATA_APP: {"active": []}},
-        units_statuses=["active"],
         wait_for_exact_units={DATA_APP: 3},
     )
 
@@ -251,12 +240,6 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 

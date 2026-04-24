@@ -98,7 +98,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         # flag the trigger of the rel changed update on the consumer side
         if event_rel_id:
-            peer_cluster = self.state.peer_cluster_by_relation_id(
+            peer_cluster = self.state.local_peer_cluster_by_relation_id(
                 relation_id=event_rel_id, is_provider=True
             )
             if peer_cluster:
@@ -116,7 +116,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
-        for peer_cluster in self.state.peer_clusters(is_provider=True):
+        for peer_cluster in self.state.local_peer_clusters(is_provider=True):
             orchestrators = peer_cluster.orchestrators
             logger.debug(
                 "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
@@ -273,7 +273,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             return True
 
         # check all other clusters if they have initialised the security index
-        for related_peer_cluster in self.state.related_peer_clusters(is_provider=True):
+        for related_peer_cluster in self.state.remote_peer_clusters(is_provider=True):
             if related_peer_cluster.security_index_initialised:
                 return True
         return False
@@ -284,7 +284,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         if first_data_node := self.state.application.first_data_node:
             return first_data_node
 
-        for related_peer_cluster in self.state.related_peer_clusters(is_provider=True):
+        for related_peer_cluster in self.state.remote_peer_clusters(is_provider=True):
             if related_peer_cluster.first_data_node:
                 return related_peer_cluster.first_data_node
         return None
@@ -304,7 +304,7 @@ class PeerClusterOrchestratorManager(BaseManager):
     def is_every_unit_marked_as_started(self) -> bool:
         """Check if every unit in the cluster is marked as started."""
         all_started = True
-        for server in self.state.servers:
+        for server in self.state.application_servers:
             if not server.started:
                 all_started = False
                 break
@@ -402,11 +402,11 @@ class PeerClusterOrchestratorManager(BaseManager):
         if not rel_err_data or not rel_err_data.should_sever_relation:
             return False
 
-        for peer_cluster in self.state.peer_clusters(is_provider=True):
+        for peer_cluster in self.state.local_peer_clusters(is_provider=True):
             peer_cluster.error_data = rel_err_data
 
         # delete trigger
-        if peer_cluster := self.state.peer_cluster_by_relation_id(
+        if peer_cluster := self.state.local_peer_cluster_by_relation_id(
             relation_id=event_rel_id, is_provider=True
         ):
             logger.warning(
@@ -440,7 +440,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         # In case we want to add another app
         if p_cluster_app:
             update_cluster_fleet(cluster_fleet_apps, p_cluster_app)
-        for peer_cluster in self.state.peer_clusters(is_provider=True):
+        for peer_cluster in self.state.local_peer_clusters(is_provider=True):
             peer_cluster.cluster_fleet_apps = cluster_fleet_apps
 
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
@@ -457,7 +457,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         This runs on the failover application.
         """
         # check how many related apps are disconnected from main orchestrator
-        related_peer_clusters = self.state.related_peer_clusters(is_provider=True)
+        related_peer_clusters = self.state.remote_peer_clusters(is_provider=True)
         n_disconnected = sum(
             1
             for p_cluster in related_peer_clusters
@@ -480,7 +480,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         orchestrators.promote_failover()
         self.state.application.orchestrators = orchestrators
 
-        related_peer_clusters = self.state.peer_clusters(is_provider=True)
+        related_peer_clusters = self.state.local_peer_clusters(is_provider=True)
         for p_cluster in related_peer_clusters:
             p_cluster.trigger = "main"
 
@@ -494,7 +494,7 @@ class PeerClusterOrchestratorManager(BaseManager):
     def broadcast_new_failover_app(self, peer_cluster_app: PeerClusterApp) -> None:
         """Broadcasts the new failover in all the cluster fleet"""
         candidate_failover_app = peer_cluster_app.app
-        for p_cluster in self.state.peer_clusters(is_provider=True):
+        for p_cluster in self.state.local_peer_clusters(is_provider=True):
             logger.debug(
                 "Broadcasting failover: %s to relation id: %s",
                 peer_cluster_app.app.name,
@@ -507,12 +507,14 @@ class PeerClusterOrchestratorManager(BaseManager):
 
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""
-        for peer_cluster in self.state.peer_clusters(is_provider=True):
+        for peer_cluster in self.state.local_peer_clusters(is_provider=True):
             self._delete_rel_data(peer_cluster.relation.id)
 
     def _delete_rel_data(self, rel_id: int) -> None:
         """Deletes relation data"""
-        peer_cluster = self.state.peer_cluster_by_relation_id(is_provider=True, relation_id=rel_id)
+        peer_cluster = self.state.local_peer_cluster_by_relation_id(
+            is_provider=True, relation_id=rel_id
+        )
         if peer_cluster:
             peer_cluster.delete_data()
             del peer_cluster.rel_data_hash

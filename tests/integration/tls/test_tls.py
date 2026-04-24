@@ -16,6 +16,7 @@ from tests.integration.conftest import (
     UNIT_IDS,
 )
 from tests.integration.helpers import (
+    EmptyBlockedStatus,
     check_cluster_formation_successful,
     cluster_health,
     get_application_unit_ids,
@@ -63,15 +64,13 @@ async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None
     await ops_test.model.deploy(
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME], apps_statuses=["active"])
+    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(UNIT_IDS),
     )
     assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
@@ -120,8 +119,6 @@ async def test_tls_renewal(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(UNIT_IDS),
         idle_period=15,
         timeout=60,
@@ -145,8 +142,6 @@ async def test_tls_renewal(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(UNIT_IDS),
         idle_period=5,
         timeout=30,
@@ -176,7 +171,7 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.deploy(
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME], apps_statuses=["active"])
+    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Deploy Opensearch operator
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -192,7 +187,7 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses=["blocked"],
+        units_statuses={APP_NAME: [EmptyBlockedStatus]},
         wait_for_exact_units=1,
     )
 
@@ -214,7 +209,6 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses=["active"],
         wait_for_exact_units=1,
     )
 

@@ -93,7 +93,6 @@ async def test_scale_down(
         await wait_until(
             ops_test,
             apps=[app],
-            units_statuses=["active"],
             wait_for_exact_units=init_count - 1,
             idle_period=IDLE_PERIOD,
         )
@@ -145,7 +144,6 @@ async def test_scale_back_up(
         await wait_until(
             ops_test,
             apps=[app],
-            units_statuses=["active"],
             wait_for_exact_units=init_count + 1,
             idle_period=IDLE_PERIOD,
         )

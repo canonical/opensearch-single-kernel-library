@@ -4,226 +4,27 @@
 
 """Helpers for Charm."""
 import logging
-import re
-from typing import TYPE_CHECKING
+from typing import Any
 
-from ops.model import ActiveStatus, BlockedStatus
-
-from opensearch_single_kernel.common.constants import Directive, HealthColors
-from opensearch_single_kernel.common.statuses import (
-    CharmStatuses,
-)
-from opensearch_single_kernel.core.models import DeploymentDescription
-from opensearch_single_kernel.utils.enum import BaseStrEnum
-
-if TYPE_CHECKING:
-    from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
+from data_platform_helpers.advanced_statuses import StatusObject
 
 logger = logging.getLogger(__name__)
 
 
-class Status:
-    """Class for managing the various status changes in a charm."""
+def format_status(status: StatusObject, params: dict[str, Any] | None) -> StatusObject:
+    """Get the copy of the status object with the message formatted to params.
 
-    class CheckPattern(BaseStrEnum):
-        """Enum for types of status comparison."""
-
-        Equal = "equal"
-        Start = "start"
-        End = "end"
-        Contain = "contain"
-        Interpolated = "interpolated"
-
-    def __init__(self, charm: "OpenSearchBaseCharm"):
-        self.charm = charm
-
-    def apply_status_from_deployment_desc(
-        self,
-        deployment_desc: DeploymentDescription | None = None,
-        show_status_only_once: bool = True,
-    ) -> None:
-        """Resolve and applies corresponding status from the deployment state."""
-        if not (
-            deployment_desc := deployment_desc or self.charm.state.application.deployment_desc
-        ):
-            return
-
-        if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
-            return
-
-        # remove show_status directive which is applied below
-        if show_status_only_once:
-            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
-
-        blocked_status = [
-            CharmStatuses.CM_ROLE_REMOVAL_FORBIDDEN,
-            CharmStatuses.CM_VO_PROVIDED_INVALID,
-            CharmStatuses.DATA_ROLE_REMOVAL_FORBIDDEN,
-            CharmStatuses.PEER_CLUSTER_NO_RELATION,
-            CharmStatuses.PEER_CLUSTER_WRONG_RELATION,
-            CharmStatuses.PEER_CLUSTER_WRONG_ROLES_PROVIDED,
-        ]
-        blocked_status_messages = [status.value.message for status in blocked_status]
-        if deployment_desc.state.message not in blocked_status_messages:
-            for status in blocked_status:
-                self.charm.status.clear(status, app=True)
-            return
-        self.charm.app.status = BlockedStatus(deployment_desc.state.message)
-
-    def apply_health(
-        self,
-        wait_for_green_first: bool = False,
-        use_localhost: bool = True,
-        app: bool = True,
-        unit: bool = True,
-    ):
-        """Fetch cluster health and set it on the app status."""
-        status = self.charm.health_manager.get(
-            wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
-        )
-        logger.info("Current health of cluster: %s", status)
-
-        if unit:
-            self._apply_health_for_unit(status)
-        if app:
-            self._apply_health_for_app(status)
-
+    If params are empty, returns original status.
+    """
+    if params is None:
         return status
 
-    def _apply_health_for_app(self, status: str) -> None:
-        """Cluster wide / app status."""
-        if not self.charm.unit.is_leader():
-            self.charm.trigger_peer_rel_changed(self.charm, on_other_units=True)
-            return
+    class SafeDict(dict):
+        def __missing__(self, key):
+            return "{}"
 
-        if status == HealthColors.GREEN:
-            # health green: cluster healthy
-            self.charm.status.clear(CharmStatuses.CLUSTER_HEALTH_RED, app=True)
-            self.charm.status.clear(CharmStatuses.CLUSTER_HEALTH_YELLOW, app=True)
-            self.charm.status.clear(CharmStatuses.WAITING_FOR_BUSY_SHARDS, app=True)
-        elif status == HealthColors.RED:
-            # health RED: some primary shards are unassigned
-            self.charm.status.set(CharmStatuses.CLUSTER_HEALTH_RED, app=True)
-        elif status == HealthColors.YELLOW_TEMP:
-            # health is yellow but temporarily (shards are relocating or initializing)
-            self.charm.status.set(CharmStatuses.WAITING_FOR_BUSY_SHARDS, app=True)
-        elif status == HealthColors.YELLOW:
-            # health is yellow permanently (some replica shards are unassigned)
-            self.charm.status.set(CharmStatuses.CLUSTER_HEALTH_YELLOW, app=True)
-
-    def _apply_health_for_unit(self, status: str, host: str | None = None):
-        """Apply the health status on the current unit."""
-        if status != HealthColors.YELLOW_TEMP:
-            self.charm.status.clear(
-                CharmStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS,
-                pattern=Status.CheckPattern.Interpolated,
-            )
-            return
-
-        busy_shards = self.charm.health_manager.opensearch_client.get_busy_shards_by_unit(
-            host=host, alt_hosts=self.charm.health_manager.alt_hosts
-        )
-        if not busy_shards:
-            self.charm.status.clear(
-                CharmStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS,
-                pattern=Status.CheckPattern.Interpolated,
-            )
-            return
-
-        message = sorted([f"{key}/{','.join(val)}" for key, val in busy_shards.items()])
-        self.charm.status.set(
-            CharmStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS,
-            dynamic_params={"shards": " - ".join(message)},
-        )
-
-    def clear_blocked_status(
-        self,
-        status_message: str,
-        pattern: CheckPattern = CheckPattern.Equal,
-        app: bool = False,
-    ):
-        """Resets the unit/app status if it was previously blocked with message."""
-        context = self.charm.app if app else self.charm.unit
-
-        condition: bool
-        if pattern == Status.CheckPattern.Equal:
-            condition = context.status.message == status_message
-        elif pattern == Status.CheckPattern.Start:
-            condition = context.status.message.startswith(status_message)
-        elif pattern == Status.CheckPattern.End:
-            condition = context.status.message.endswith(status_message)
-        elif pattern == Status.CheckPattern.Interpolated:
-            condition = (
-                re.fullmatch(status_message.replace("{}", "(?s:.*?)"), context.status.message)
-                is not None
-            )
-        else:
-            condition = status_message in context.status.message
-
-        if condition:
-            context.status = ActiveStatus()
-
-    def clear(
-        self,
-        status: CharmStatuses,
-        pattern: CheckPattern = CheckPattern.Equal,
-        app: bool = False,
-        match_message: str | None = None,
-    ):
-        """Resets the unit status if it was previously blocked/maintenance with message."""
-        status_message = status.value.message
-        context = self.charm.app if app else self.charm.unit
-
-        condition: bool
-        if pattern == Status.CheckPattern.Equal:
-            condition = context.status.message == status_message
-        elif pattern == Status.CheckPattern.Start:
-            condition = context.status.message.startswith(status_message)
-        elif pattern == Status.CheckPattern.End:
-            condition = context.status.message.endswith(status_message)
-        elif pattern == Status.CheckPattern.Interpolated:
-            regex_pattern = re.sub(r"\{.*?\}", r"(?s:.*?)", status_message)
-            condition = re.fullmatch(regex_pattern, context.status.message) is not None
-        else:
-            condition = status_message in context.status.message
-
-        if condition:
-            # if (
-            # not app
-            # TODO: Make sure to revisit this once we take upgrade as a refactoring subject
-            # and self.charm._upgrade
-            # and (status := self.charm._upgrade.get_unit_juju_status())
-            # ):
-            # context.status = status
-            # else:
-            context.status = ActiveStatus()
-
-    def set(
-        self,
-        charm_status: CharmStatuses,
-        app: bool = False,
-        dynamic_params: dict[str, str] | None = None,
-    ):
-        """Set status on unit or app IF not already set.
-
-        This is seemingly useless, but it is unfortunately needed to avoid updating unnecessarily
-        the "last active since" field on the model, which prevents it from stabilizing on small
-        machines on integration tests (colliding with "idle period").
-        """
-        status = charm_status.value
-        context = self.charm.app if app else self.charm.unit
-        # TODO: Make sure to uncomment and handle this once we take upgrade for refactor
-        # Upgrade app status takes priority over other app statuses
-        # if app and self.charm._upgrade and (upgrade_status := self.charm._upgrade.app_status):
-        # context.status = upgrade_status
-        # return
-        if dynamic_params:
-            # We need to update the default message
-            status_message = charm_status.value.message.format(**dynamic_params)
-            status_class = status.__class__
-            status = status_class(status_message)
-
-        if context.status == status:
-            return
-
-        context.status = status
+    return StatusObject(
+        status=status.status,
+        message=status.message.format_map(SafeDict(params)),
+        running=status.running,
+    )

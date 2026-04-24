@@ -8,11 +8,15 @@ import logging
 import random
 from typing import Literal
 
+from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_HTTP_PORT,
     DeploymentType,
 )
+from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node, PeerClusterRelData
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -20,15 +24,16 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 logger = logging.getLogger(__name__)
 
 
-class BaseManager:
+class BaseManager(ManagerStatusProtocol):
     """Base OpenSearch Manager.
 
     Include a set of functions and properties useful to other managers.
     """
 
-    def __init__(self, state: ClusterState, workload: BaseWorkload):
-        self.state: ClusterState = state
+    def __init__(self, state: ClusterState, workload: BaseWorkload, name: str):
+        self.state: ClusterState = state  # type: ignore[override]
         self.workload = workload
+        self.name = name
 
     @property
     def opensearch_client(self) -> OpenSearchClient:
@@ -218,3 +223,14 @@ class BaseManager:
             return of_failover
         else:
             return of_main or of_failover
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        return [GeneralStatuses.ACTIVE_IDLE.value]

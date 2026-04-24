@@ -87,8 +87,6 @@ async def test_multi_clusters_db_isolation(
     await wait_until(
         ops_test,
         apps=[app, SECOND_APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={app: len(unit_ids), SECOND_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
         timeout=1600,
