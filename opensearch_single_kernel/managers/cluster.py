@@ -825,10 +825,10 @@ class ClusterManager(BaseManager):
         if orchestrators.main_app is None:
             return None
 
-        related_peer_cluster = self.state.peer_cluster_by_relation_id(
+        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
-        peer_cluster_data = related_peer_cluster.data()
+        peer_cluster_data = remote_peer_cluster.data()
 
         logger.debug(f"get_cluster_first_data_node : data read: {peer_cluster_data}")
 
