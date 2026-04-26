@@ -614,7 +614,7 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
         object_storage_type = ObjectStorageType.GCS
 
     mocker.patch(
-        "opensearch_single_kernel.managers.snapshots.SnapshotsManager.storage_type",
+        "opensearch_single_kernel.core.state.ClusterState.storage_type",
         new_callable=PropertyMock,
         return_value=object_storage_type,
     )

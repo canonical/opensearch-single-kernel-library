@@ -47,7 +47,10 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import (
     CredentialsChangedEvent,
     CredentialsGoneEvent,
 )
-from opensearch_single_kernel.utils.object_storage import repository_name
+from opensearch_single_kernel.utils.object_storage import (
+    repository_name,
+    storage_config_from_connection_info,
+)
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -107,8 +110,8 @@ class SnapshotsEventsHandler(Object):
 
         # block non-main orchestrators only when they are in a multi-app topology.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
-            self.charm.snapshots_manager.is_peer_cluster_consumer()
-            or self.charm.snapshots_manager.is_peer_cluster_provider()
+            self.charm.state.is_peer_cluster_consumer()
+            or self.charm.state.is_peer_cluster_provider()
         ):
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
@@ -118,7 +121,7 @@ class SnapshotsEventsHandler(Object):
                 )
             return
 
-        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
+        if not (object_storage_type := self.charm.state.storage_type):
             logger.warning("No object storage type could be determined.")
             return
 
@@ -145,9 +148,7 @@ class SnapshotsEventsHandler(Object):
 
             if not (
                 object_storage_config := (
-                    self.charm.snapshots_manager.storage_config_from_connection_info(
-                        object_storage_type, connection_info
-                    )
+                    storage_config_from_connection_info(object_storage_type, connection_info)
                 )
             ):
                 self.charm.state.add_status_if_not_present(
@@ -365,7 +366,7 @@ class SnapshotsEventsHandler(Object):
         self, event: VerifySnapshotsCredentialsEvent
     ) -> None:
         """Verify that stored backup credentials are still valid."""
-        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
+        if not (object_storage_type := self.charm.state.storage_type):
             logger.warning(
                 "No object storage type could be determined for backup credentials verification."
             )
@@ -387,7 +388,7 @@ class SnapshotsEventsHandler(Object):
 
         # Get config using the connection info
         if not (
-            object_storage_config := self.charm.snapshots_manager.storage_config_from_connection_info(
+            object_storage_config := storage_config_from_connection_info(
                 object_storage_type, connection_info
             )
         ):
@@ -684,7 +685,7 @@ class SnapshotsEventsHandler(Object):
         Returns:
             A string representing the missing prerequisites.
         """
-        if not (object_storage_type := self.charm.snapshots_manager.storage_type):
+        if not (object_storage_type := self.charm.state.storage_type):
             logger.warning("Missing object storage type for create backup action.")
             return "Missing relation with an object storage integrator."
 
@@ -719,15 +720,13 @@ class SnapshotsEventsHandler(Object):
         if object_storage_type not in pcluster_types:
             try:
                 if (
-                    not (storage_type := self.charm.snapshots_manager.storage_type)
+                    not (storage_type := self.charm.state.storage_type)
                     or not (
                         conn_inf := self.charm.state.get_storage_connection_info_from_relation(
                             storage_type
                         )
                     )
-                    or not self.charm.snapshots_manager.storage_config_from_connection_info(
-                        storage_type, conn_inf
-                    )
+                    or not storage_config_from_connection_info(storage_type, conn_inf)
                 ):
                     return "Object storage configuration not ready."
                 if not self.charm.snapshots_manager.opensearch_client.is_repository_created(

@@ -9,7 +9,7 @@ import logging
 import re
 import socket
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -53,6 +53,7 @@ from opensearch_single_kernel.core.models import (
     Node,
     ObjectStorageConfig,
     PeerClusterApp,
+    PeerClusterRelData,
     S3RelDataCredentials,
 )
 from opensearch_single_kernel.core.peer_cluster_relation import (
@@ -85,6 +86,9 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequ
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     lock_unit_name,
+)
+from opensearch_single_kernel.utils.object_storage import (
+    storage_config_from_connection_info,
 )
 from opensearch_single_kernel.utils.status import format_status
 
@@ -844,6 +848,159 @@ class ClusterState(Object):
                 return present_status
         return None
 
+    def is_peer_cluster_provider(self, typ: Literal["main", "failover"] | None = None) -> bool:
+        """Return whether the current app is a related to provider / orchestrator."""
+        if not (deployment_desc := self.application.deployment_desc):
+            return False
+
+        if deployment_desc.typ == DeploymentType.OTHER:
+            return False
+
+        # the current app is not related as an orchestrator to any app
+        if not self.peer_cluster_orchestrator_relations:
+            return False
+
+        # check if the current app is elected orchestrator
+        if not (orchestrators := self.application.orchestrators):
+            # not populated yet
+            return False
+
+        current_app_id = deployment_desc.app.id
+
+        is_main = orchestrators.main_app and orchestrators.main_app.id == current_app_id
+        is_failover = (
+            orchestrators.failover_app and orchestrators.failover_app.id == current_app_id
+        )
+
+        if typ == "main":
+            return is_main
+        elif typ == "failover":
+            return is_failover
+        else:
+            return is_main or is_failover
+
+    def is_peer_cluster_consumer(self, of: Literal["main", "failover"] | None = None) -> bool:
+        """Check if the current app is a consumer of the peer-cluster-relation."""
+        if not (deployment_desc := self.application.deployment_desc):
+            return False
+
+        # the current app is not related to any orchestrator app
+        if not self.peer_cluster_relations:
+            return False
+
+        # check if the current app is elected orchestrator
+        if not (orchestrators := self.application.orchestrators):
+            # not populated yet
+            return False
+
+        if orchestrators.main_app and orchestrators.main_app.id == deployment_desc.app.id:
+            # there is a wrong relation happening - where current is the main orchestrator
+            # yet related to another "orchestrator"
+            return False
+
+        of_main = (
+            orchestrators.main_app
+            and self.peer_cluster_by_relation_id(
+                relation_id=orchestrators.main_rel_id,
+                is_provider=True,
+                remote=True,
+            )
+            is not None
+        )
+        of_failover = (
+            orchestrators.failover_app
+            and self.peer_cluster_by_relation_id(
+                is_provider=True, relation_id=orchestrators.failover_rel_id, remote=True
+            )
+            is not None
+        )
+        if of == "main":
+            return of_main
+        elif of == "failover":
+            return of_failover
+        else:
+            return of_main or of_failover
+
+    def get_rel_data_from_main_orchestrator(
+        self, peek_secrets: bool = False
+    ) -> PeerClusterRelData | None:
+        """Get the data from the main orchestrator relation.
+
+        Returns:
+            data: peer cluster rel data if any.
+
+        """
+        if not self.is_peer_cluster_consumer(of="main"):
+            return None
+
+        if not (orchestrators := self.application.orchestrators) or not orchestrators.main_rel_id:
+            logger.info("no orchestrators found")
+            return None
+
+        if not self.peer_cluster_orchestrator_relation_exists(orchestrators.main_rel_id):
+            logger.info(
+                "relation with id %s not found for main orchestrator", orchestrators.main_rel_id
+            )
+            return None
+
+        if not (
+            remote_peer_cluster := self.peer_cluster_by_relation_id(
+                is_provider=True,
+                relation_id=orchestrators.main_rel_id,
+                remote=True,
+            )
+        ):
+            logger.info(
+                "related peer cluster not found for relation id %s of main orchestrator",
+                orchestrators.main_rel_id,
+            )
+            return None
+
+        return remote_peer_cluster.data(peek_secrets=peek_secrets)
+
+    @property
+    def storage_type(self) -> ObjectStorageType | None:  # noqa: C901
+        """Get the active object storage type from relations/peer-cluster.
+
+        Returns:
+            Optional[ObjectStorageType]: the active object storage type.
+        """
+        if not (deployment_desc := self.application.deployment_desc):
+            logger.debug("Deployment description missing; storage type unknown.")
+            return None
+
+        if deployment_desc.typ in {DeploymentType.MAIN_ORCHESTRATOR}:
+            active = [
+                r
+                for r in [
+                    self.s3_relation,
+                    self.azure_relation,
+                    self.gcs_relation,
+                ]
+                if r
+            ]
+            if len(active) == 0:
+                return None
+            if len(active) > 1:
+                return ObjectStorageType.CONFLICT
+            if self.s3_relation:
+                return ObjectStorageType.S3
+            if self.azure_relation:
+                return ObjectStorageType.AZURE
+            if self.gcs_relation:
+                return ObjectStorageType.GCS
+
+        # non-main orchestrator
+        peer_data = self.get_rel_data_from_main_orchestrator(peek_secrets=True)
+        if not peer_data or not peer_data.credentials:
+            return None
+        if peer_data.credentials.s3:
+            return ObjectStorageType.S3_PCLUSTER
+        if peer_data.credentials.azure:
+            return ObjectStorageType.AZURE_PCLUSTER
+        if peer_data.credentials.gcs:
+            return ObjectStorageType.GCS_PCLUSTER
+
     def get_storage_connection_info_from_relation(
         self, object_storage_type: ObjectStorageType
     ) -> dict[str, str]:
@@ -864,16 +1021,14 @@ class ClusterState(Object):
 
     def gcs_credentials(self, connection_info: dict[str, str]) -> GcsRelDataCredentials | None:
         """Retrieve GCS storage credentials."""
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            if not self.state.gcs_relation:
+            if not self.gcs_relation:
                 return None
 
             try:
                 object_storage_config = (
-                    self.storage_config_from_connection_info(
-                        ObjectStorageType.GCS, connection_info
-                    )
+                    storage_config_from_connection_info(ObjectStorageType.GCS, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:
@@ -891,31 +1046,29 @@ class ClusterState(Object):
             secret_key = gcs.credentials.secret_key
 
             # set the secrets in the charm
-            self.state.secrets.put(Scope.APP, "gcs-secret-key", secret_key)
+            self.secrets.put(Scope.APP, "gcs-secret-key", secret_key)
 
             return GcsRelDataCredentials(secret_key=secret_key)
 
         # Non-main orchestrators: only return creds if we already have them
-        if not self.state.secrets.get(Scope.APP, "gcs-secret-key"):
+        if not self.secrets.get(Scope.APP, "gcs-secret-key"):
             return None
 
         # Return what we have received from the peer relation
         return GcsRelDataCredentials(
-            secret_key=self.state.secrets.get(Scope.APP, "gcs-secret-key"),
+            secret_key=self.secrets.get(Scope.APP, "gcs-secret-key"),
         )
 
     def azure_credentials(self, connection_info: dict[str, str]) -> AzureRelDataCredentials | None:
         """Retrieve Azure storage credentials."""
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            if not self.state.azure_relation:
+            if not self.azure_relation:
                 return None
 
             try:
                 object_storage_config = (
-                    self.storage_config_from_connection_info(
-                        ObjectStorageType.AZURE, connection_info
-                    )
+                    storage_config_from_connection_info(ObjectStorageType.AZURE, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:
@@ -935,29 +1088,29 @@ class ClusterState(Object):
 
             # set the secrets in the charm
             # TODO Move this to azure relation and include both in one secret
-            self.state.secrets.put(Scope.APP, "azure-storage-account", storage_account)
-            self.state.secrets.put(Scope.APP, "azure-secret-key", secret_key)
+            self.secrets.put(Scope.APP, "azure-storage-account", storage_account)
+            self.secrets.put(Scope.APP, "azure-secret-key", secret_key)
 
             return AzureRelDataCredentials(storage_account=storage_account, secret_key=secret_key)
 
-        if not self.state.secrets.get(Scope.APP, "azure-storage-account"):
+        if not self.secrets.get(Scope.APP, "azure-storage-account"):
             return None
 
         # Return what we have received from the peer relation
         return AzureRelDataCredentials(
-            storage_account=self.state.secrets.get(Scope.APP, "azure-storage-account"),
-            secret_key=self.state.secrets.get(Scope.APP, "azure-secret-key"),
+            storage_account=self.secrets.get(Scope.APP, "azure-storage-account"),
+            secret_key=self.secrets.get(Scope.APP, "azure-secret-key"),
         )
 
     def s3_credentials(self, connection_info: dict[str, str]) -> S3RelDataCredentials | None:
         """Retrieve S3 storage credentials."""
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            if not self.state.s3_relation:
+            if not self.s3_relation:
                 return None
             try:
                 object_storage_config = (
-                    self.storage_config_from_connection_info(ObjectStorageType.S3, connection_info)
+                    storage_config_from_connection_info(ObjectStorageType.S3, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:
@@ -983,21 +1136,21 @@ class ClusterState(Object):
 
             # set the secrets in the charm
             # TODO Move this to s3 relation and include both in one secret
-            self.state.secrets.put(Scope.APP, "s3-access-key", access_key)
-            self.state.secrets.put(Scope.APP, "s3-secret-key", secret_key)
+            self.secrets.put(Scope.APP, "s3-access-key", access_key)
+            self.secrets.put(Scope.APP, "s3-secret-key", secret_key)
             if s3_tls_ca_chain:
-                self.state.secrets.put(Scope.APP, "s3-tls-ca-chain", s3_tls_ca_chain)
+                self.secrets.put(Scope.APP, "s3-tls-ca-chain", s3_tls_ca_chain)
 
             return S3RelDataCredentials(
                 access_key=access_key, secret_key=secret_key, s3_tls_ca_chain=s3_tls_ca_chain
             )
 
-        if not self.state.secrets.get(Scope.APP, "s3-access-key"):
+        if not self.secrets.get(Scope.APP, "s3-access-key"):
             return None
 
         # Return what we have received from the peer relation
         return S3RelDataCredentials(
-            access_key=self.state.secrets.get(Scope.APP, "s3-access-key"),
-            secret_key=self.state.secrets.get(Scope.APP, "s3-secret-key"),
-            s3_tls_ca_chain=self.state.secrets.get(Scope.APP, "s3-tls-ca-chain"),
+            access_key=self.secrets.get(Scope.APP, "s3-access-key"),
+            secret_key=self.secrets.get(Scope.APP, "s3-secret-key"),
+            s3_tls_ca_chain=self.secrets.get(Scope.APP, "s3-tls-ca-chain"),
         )

@@ -12,7 +12,6 @@ from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
-from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
     AZURE_CREDENTIALS,
@@ -23,7 +22,6 @@ from opensearch_single_kernel.common.constants import (
     S3_CREDENTIALS,
     S3_RELATION,
     STORE_PASSWORD,
-    DeploymentType,
     ObjectStorageType,
     Scope,
 )
@@ -39,13 +37,10 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
-    AzureRelData,
     AzureRelDataCredentials,
-    GcsRelData,
     GcsRelDataCredentials,
     ObjectStorageConfig,
     PeerClusterRelData,
-    S3RelData,
     S3RelDataCredentials,
 )
 from opensearch_single_kernel.core.state import ClusterState
@@ -58,6 +53,7 @@ from opensearch_single_kernel.utils.certificates import (
 )
 from opensearch_single_kernel.utils.helpers import hash_credentials
 from opensearch_single_kernel.utils.object_storage import (
+    storage_config_from_connection_info,
     verify_azure_credentials,
     verify_gcs_credentials,
     verify_s3_credentials,
@@ -148,34 +144,6 @@ class SnapshotsManager(BaseManager):
             return
 
         peer_cluster_server.snapshots_credentials_saved = hash_credentials(credentials)
-
-    def storage_config_from_connection_info(  # noqa: C901
-        self, object_storage_type: ObjectStorageType, connection_info: dict[str, str]
-    ) -> ObjectStorageConfig | None:
-        """Get the active object storage config from relations/peer-cluster.
-
-        Args:
-            object_storage_type (ObjectStorageType): the type of the object storage
-            to get the config for.
-            connection_info (dict[str, str]): the raw connection info to build the config from.
-
-        Returns:
-            ObjectStorageConfig | None: the active object storage config.
-        """
-        match object_storage_type:
-            case ObjectStorageType.S3:
-                data_model = S3RelData
-            case ObjectStorageType.AZURE:
-                data_model = AzureRelData
-            case ObjectStorageType.GCS:
-                data_model = GcsRelData
-            case _:
-                return
-        try:
-            rel_data = data_model.from_relation(connection_info) if connection_info else None
-        except ValidationError as e:
-            raise OpenSearchObjectStorageConfigValidationError(e) from e
-        return ObjectStorageConfig(**{object_storage_type.value: rel_data}) if rel_data else None
 
     def validate_storage_config(
         self, config: ObjectStorageConfig, storage_type: ObjectStorageType
@@ -394,7 +362,7 @@ class SnapshotsManager(BaseManager):
         Returns:
             str: The ID of the created snapshot.
         """
-        object_storage_type = self.storage_type
+        object_storage_type = self.state.storage_type
         # Create a new snapshot
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
@@ -414,7 +382,7 @@ class SnapshotsManager(BaseManager):
         Raises:
             OpenSearchHttpError: If the snapshot status cannot be fetched.
         """
-        object_storage_type = self.storage_type
+        object_storage_type = self.state.storage_type
         # Fetch the new snapshot for sanity check
         snapshot = self.opensearch_client.get_snapshot(
             object_storage_type=object_storage_type,
@@ -436,7 +404,7 @@ class SnapshotsManager(BaseManager):
         Raises:
             OpenSearchListBackupsError: If the snapshot listing fails.
         """
-        object_storage_type = self.storage_type
+        object_storage_type = self.state.storage_type
         return self.opensearch_client.list_snapshots(
             object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
         )
@@ -456,7 +424,7 @@ class SnapshotsManager(BaseManager):
             OpenSearchRestoreBackupError: If the restore operation fails.
 
         """
-        object_storage_type = self.storage_type
+        object_storage_type = self.state.storage_type
         # Fetch the snapshot with the corresponding ID
         try:
             if not (
@@ -637,52 +605,9 @@ class SnapshotsManager(BaseManager):
             )
 
     @property
-    def storage_type(self) -> ObjectStorageType | None:  # noqa: C901
-        """Get the active object storage type from relations/peer-cluster.
-
-        Returns:
-            Optional[ObjectStorageType]: the active object storage type.
-        """
-        if not (deployment_desc := self.state.application.deployment_desc):
-            logger.debug("Deployment description missing; storage type unknown.")
-            return None
-
-        if deployment_desc.typ in {DeploymentType.MAIN_ORCHESTRATOR}:
-            active = [
-                r
-                for r in [
-                    self.state.s3_relation,
-                    self.state.azure_relation,
-                    self.state.gcs_relation,
-                ]
-                if r
-            ]
-            if len(active) == 0:
-                return None
-            if len(active) > 1:
-                return ObjectStorageType.CONFLICT
-            if self.state.s3_relation:
-                return ObjectStorageType.S3
-            if self.state.azure_relation:
-                return ObjectStorageType.AZURE
-            if self.state.gcs_relation:
-                return ObjectStorageType.GCS
-
-        # non-main orchestrator
-        peer_data = self.get_rel_data_from_main_orchestrator(peek_secrets=True)
-        if not peer_data or not peer_data.credentials:
-            return None
-        if peer_data.credentials.s3:
-            return ObjectStorageType.S3_PCLUSTER
-        if peer_data.credentials.azure:
-            return ObjectStorageType.AZURE_PCLUSTER
-        if peer_data.credentials.gcs:
-            return ObjectStorageType.GCS_PCLUSTER
-
-    @property
     def s3_info_from_peer_cluster(self) -> dict[str, str] | None:
         """Read S3 credentials from peer cluster relation."""
-        data = self.get_rel_data_from_main_orchestrator()
+        data = self.state.get_rel_data_from_main_orchestrator()
         if not data or not data.credentials or not data.credentials.s3:
             logger.warning("no S3 credentials found.")
             return None
@@ -702,7 +627,7 @@ class SnapshotsManager(BaseManager):
     @property
     def azure_info_from_peer_cluster(self) -> dict[str, str] | None:
         """Read Azure credentials from peer cluster relation."""
-        data = self.get_rel_data_from_main_orchestrator()
+        data = self.state.get_rel_data_from_main_orchestrator()
         if not data or not data.credentials or not data.credentials.azure:
             logger.warning("no azure credentials found.")
             return None
@@ -719,7 +644,7 @@ class SnapshotsManager(BaseManager):
     @property
     def gcs_info_from_peer_cluster(self) -> dict[str, str] | None:
         """Read GCS credentials from peer cluster relation."""
-        data = self.get_rel_data_from_main_orchestrator()
+        data = self.state.get_rel_data_from_main_orchestrator()
         logger.debug("provided data: %s", data)
 
         if not data or not data.credentials or not data.credentials.gcs:
@@ -758,9 +683,7 @@ class SnapshotsManager(BaseManager):
 
                 if not (
                     object_storage_config := (
-                        self.storage_config_from_connection_info(
-                            object_storage_type, connection_info
-                        )
+                        storage_config_from_connection_info(object_storage_type, connection_info)
                     )
                 ):
                     return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]

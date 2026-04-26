@@ -246,9 +246,9 @@ class YamlConfigSetter(ConfigSetter):
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
-        old_content = path.read_text()
+        old_content = path.read_text().strip()
         self.__dump(target, OutputType.file, config_file)
-        new_content = path.read_text()
+        new_content = path.read_text().strip()
         return old_content != new_content
 
     @override

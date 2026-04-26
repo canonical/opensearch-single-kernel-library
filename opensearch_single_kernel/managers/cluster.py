@@ -340,7 +340,7 @@ class ClusterManager(BaseManager):
         if "data" in prev_roles and "data" not in new_roles:
             # this is dangerous as this might induce downtime + error on start when data on disk
             # we need to check if there are other sub-clusters with the data roles
-            if not self.is_peer_cluster_consumer():
+            if not self.state.is_peer_cluster_consumer():
                 raise OpenSearchProvidedRolesException(DATA_ROLE_REMOVAL_FORBIDDEN)
 
             # todo guarantee unicity of unit names on peer_relation_joined

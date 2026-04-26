@@ -169,11 +169,11 @@ class OpenSearchEventsHandler(Object):
         if self.charm.unit.is_leader():
             # we want to have the most up-to-date info broadcasted to related sub-clusters
 
-            if self.charm.peer_cluster_orchestrator_manager.is_peer_cluster_provider():
+            if self.charm.state.is_peer_cluster_provider():
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
             # update any orchestrators about planned units
-            if self.charm.peer_cluster_manager.is_peer_cluster_consumer():
+            if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
             # Update all external clients with new endpoints
@@ -275,7 +275,7 @@ class OpenSearchEventsHandler(Object):
                 is_last_unit=planned_units == 0
             )
             if planned_units == 0:
-                if self.charm.cluster_manager.is_peer_cluster_provider():
+                if self.charm.state.is_peer_cluster_provider():
                     self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                         event.relation.id if hasattr(event, "relation") else None,
                     )
@@ -283,7 +283,7 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.demote_deployment_type()
                     del self.charm.state.application.orchestrators
                     self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
-                elif self.charm.cluster_manager.is_peer_cluster_consumer():
+                elif self.charm.state.is_peer_cluster_consumer():
                     self.charm.peer_cluster_manager.refresh_requirer_relation_data()
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
@@ -728,12 +728,12 @@ class OpenSearchEventsHandler(Object):
 
         if (
             is_leader_unit
-            and self.charm.cluster_manager.is_peer_cluster_consumer()
+            and self.charm.state.is_peer_cluster_consumer()
             and (local_first_data_node := self.charm.state.get_local_first_data_node())
         ):
             # lock requested
             if not (
-                peer_cluster_rel_data := self.charm.cluster_manager.get_rel_data_from_main_orchestrator()
+                peer_cluster_rel_data := self.charm.state.get_rel_data_from_main_orchestrator()
             ):
                 # main orchestrator has not chosen the first data node yet
                 logger.debug(
@@ -754,7 +754,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
-        if self.charm.cluster_manager.is_peer_cluster_consumer():
+        if self.charm.state.is_peer_cluster_consumer():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
         if (
@@ -778,7 +778,7 @@ class OpenSearchEventsHandler(Object):
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
-                    and self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
+                    and self.charm.state.is_peer_cluster_provider(typ="main")
                 ):
                     # In large deployments with cluster-manager-only-nodes,
                     # the startup might fail if the cluster was bootstrapped earlier
@@ -805,7 +805,7 @@ class OpenSearchEventsHandler(Object):
                 event.defer()
             finally:
                 if (
-                    self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
+                    self.charm.state.is_peer_cluster_provider(typ="main")
                     and self.charm.unit.is_leader()
                 ):
                     self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
@@ -815,12 +815,6 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.state.server.started:
             del self.charm.state.server.started
-        self.charm.status_handler.set_running_status(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.cluster_manager.name,
-        )
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -896,6 +890,13 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
+        )
+
         try:
             self.charm.cluster_manager.start(
                 wait_until_http_200=(
@@ -915,6 +916,9 @@ class OpenSearchEventsHandler(Object):
             logger.debug("error of type: %s", type(e).__name__)
             self.charm.lock_manager.release()
             logger.warning(e)
+            self.charm.state.remove_status_if_present(
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+            )
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -930,7 +934,7 @@ class OpenSearchEventsHandler(Object):
             # for the cluster-manager if a joining data node did not yet initialize the
             # security index. We still want to update and broadcast the latest relation data.
             if (
-                self.charm.cluster_manager.is_peer_cluster_provider(typ="main")
+                self.charm.state.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
             ):
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
@@ -1022,7 +1026,7 @@ class OpenSearchEventsHandler(Object):
 
         # TODO: Handle event.after_upgrade
         # update the peer cluster rel data with new IP in case of main cluster manager
-        if self.charm.cluster_manager.is_peer_cluster_provider() and self.charm.unit.is_leader():
+        if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )
@@ -1251,7 +1255,7 @@ class OpenSearchEventsHandler(Object):
             if sys_user := user_from_hash_key(label_key):
                 self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
-        if is_leader and self.charm.peer_cluster_manager.is_peer_cluster_provider(typ="main"):
+        if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )

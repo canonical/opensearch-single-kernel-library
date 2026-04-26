@@ -169,17 +169,17 @@ class PeerClusterOrchestratorManager(BaseManager):
         azure_credentials = None
         gcs_credentials = None
 
-        if self.charm.state.s3_relation:
+        if self.state.s3_relation:
             connection_info = self.state.get_storage_connection_info_from_relation(
                 ObjectStorageType.S3
             )
             s3_credentials = self.state.s3_credentials(connection_info)
-        if self.charm.state.azure_relation:
+        if self.state.azure_relation:
             connection_info = self.state.get_storage_connection_info_from_relation(
                 ObjectStorageType.AZURE
             )
             azure_credentials = self.state.azure_credentials(connection_info)
-        if self.charm.state.gcs_relation:
+        if self.state.gcs_relation:
             connection_info = self.state.get_storage_connection_info_from_relation(
                 ObjectStorageType.GCS
             )

@@ -264,7 +264,7 @@ class NotificationsEvents(Object):
             )
 
         # propagate to subclusters if this is the main provider
-        if self.charm.notifications_manager.is_peer_cluster_provider():
+        if self.charm.state.is_peer_cluster_provider():
             if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
@@ -308,7 +308,7 @@ class NotificationsEvents(Object):
             self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
-                if self.charm.notifications_manager.is_peer_cluster_provider():
+                if self.charm.state.is_peer_cluster_provider():
                     if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                         event.defer()
             return
@@ -338,7 +338,7 @@ class NotificationsEvents(Object):
 
         self.charm.plugin_manager.remove_plugin_secret(label)
 
-        if self.charm.notifications_manager.is_peer_cluster_provider():
+        if self.charm.state.is_peer_cluster_provider():
             if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 

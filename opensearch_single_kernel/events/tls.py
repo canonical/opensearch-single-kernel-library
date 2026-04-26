@@ -276,9 +276,7 @@ class TLSEventsHandler(Object):
                 return
 
         # broadcast secret updates for certs and CA to related sub-clusters
-        if self.charm.unit.is_leader() and self.charm.tls_manager.is_peer_cluster_provider(
-            typ="main"
-        ):
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
         renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (

@@ -149,7 +149,7 @@ class TlsManager(BaseManager):
             store_pwd = secrets.get(f"{store_type.val}-password")
 
         if not store_pwd and not (
-            self.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
+            self.state.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
         ):
 
             self.state.secrets.put_object(
