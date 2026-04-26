@@ -825,8 +825,8 @@ class ClusterManager(BaseManager):
         if orchestrators.main_app is None:
             return None
 
-        related_peer_cluster = self.state.related_peer_cluster_by_relation_id(
-            is_provider=False, relation_id=orchestrators.main_rel_id
+        related_peer_cluster = self.state.peer_cluster_by_relation_id(
+            is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
         peer_cluster_data = related_peer_cluster.data()
 
