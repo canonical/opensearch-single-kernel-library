@@ -300,6 +300,27 @@ class ClusterState(Object):
             for unit in get_units(rel)
         ]
 
+    def local_peer_cluster_server_by_relation_id(
+        self,
+        is_provider: bool,
+        relation_id: int,
+    ) -> PeerClusterServer | None:
+        """Return the peer cluster server for the given relation id."""
+        relation_name = (
+            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
+        )
+        if relation := self.model.get_relation(relation_name, relation_id):
+            return PeerClusterServer(
+                relation=relation,
+                data_interface=(
+                    self.peer_cluster_data_interface
+                    if not is_provider
+                    else self.peer_cluster_orchestrator_data_interface
+                ),
+                component=self.model.unit,
+            )
+        return None
+
     def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServer]:
         """Return the list of all peer cluster servers for each relations."""
         return self._peer_clusters_servers(

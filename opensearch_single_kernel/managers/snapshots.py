@@ -131,7 +131,7 @@ class SnapshotsManager(BaseManager):
             return
 
         # set the credentials_saved in the unit data bag with the main orchestrator
-        peer_cluster_server = self.state.peer_cluster_server_by_relation_id(
+        peer_cluster_server = self.state.local_peer_cluster_server_by_relation_id(
             is_provider=True, relation_id=orchestrators.main_rel_id
         )
 

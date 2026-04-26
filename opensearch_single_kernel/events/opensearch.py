@@ -182,7 +182,10 @@ class OpenSearchEventsHandler(Object):
             )
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
-            self._reconfigure_and_restart_if_needed()
+            if self.charm.state.server.started:
+                # make sure that we only restart if the node has already
+                # gone through the start workflow
+                self._reconfigure_and_restart_if_needed()
             if self.charm.state.application.missing_relations:
                 # for failover promotions: this flag indicates that the user needs
                 # to relate integrators to this new main orchestrator
@@ -192,7 +195,10 @@ class OpenSearchEventsHandler(Object):
 
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            self._reconfigure_and_restart_if_needed()
+            if self.charm.state.server.started:
+                # make sure that we only restart if the node has already
+                # gone through the start workflow
+                self._reconfigure_and_restart_if_needed()
 
         self.charm.config_manager.update_seeds_config(nodes)
 
