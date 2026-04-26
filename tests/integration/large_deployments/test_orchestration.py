@@ -246,7 +246,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
             DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
         units_statuses={
-            DATA_APP: [ProfileStatuses.MISSING_REQUIREMENTS.value],
+            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
     )
 
