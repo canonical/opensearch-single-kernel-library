@@ -37,7 +37,7 @@ class GeneralStatuses(Enum):
     )
     BLOCKING_DIRECTIVE = StatusObject(
         status="blocked",
-        message="{block_directive}",
+        message="{directive}",
     )
 
 

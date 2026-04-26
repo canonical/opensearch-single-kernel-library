@@ -669,10 +669,16 @@ class SnapshotsManager(BaseManager):
                 GeneralStatuses.ACTIVE_IDLE.value
             ]
 
+        pcluster_types = {
+            ObjectStorageType.S3_PCLUSTER,
+            ObjectStorageType.AZURE_PCLUSTER,
+            ObjectStorageType.GCS_PCLUSTER,
+        }
         if (
             scope == "app"
             and self.state.application.deployment_desc
             and (object_storage_type := self.state.storage_type)
+            and object_storage_type not in pcluster_types
         ):
             if object_storage_type == ObjectStorageType.CONFLICT:
                 return [SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value]
