@@ -14,7 +14,6 @@ from tests.integration.conftest import (
     CONFIG_OPTS,
     MODEL_CONFIG,
     UNIT_IDS,
-    get_unit_ids,
 )
 from tests.integration.helpers import (
     EmptyBlockedStatus,
@@ -54,7 +53,6 @@ async def test_build_and_deploy_active(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
-    unit_ids = get_unit_ids(substrate)
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await deploy_opensearch(
@@ -62,7 +60,7 @@ async def test_build_and_deploy_active(
         charm,
         substrate,
         APP_NAME,
-        len(unit_ids),
+        len(UNIT_IDS),
         series=series,
         config=CONFIG_OPTS,
         resources=charm_resources,
@@ -80,9 +78,9 @@ async def test_build_and_deploy_active(
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=len(unit_ids),
+        wait_for_exact_units=len(UNIT_IDS),
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == len(unit_ids)
+    assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
 
 
 @pytest.mark.abort_on_fail
@@ -112,8 +110,6 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
 @pytest.mark.abort_on_fail
 async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
     """Test that renewed TLS certificates are reloaded immediately without restarting."""
-    if substrate == "k8s":
-        pytest.skip("Skipping TLS renewal test on k8s until scale up/down is implemented")
 
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     leader_id = await get_leader_unit_id(ops_test)
