@@ -369,7 +369,9 @@ def _collect_aliases_to_remove(
 
     aliases_to_remove: list[str] = []
     for name in all_aliases:
-        if name.startswith(f"{alias_base}-"):
+        if name == alias_base:
+            aliases_to_remove.append(name)
+        elif name.startswith(f"{alias_base}-"):
             # Verify the suffix is a digit
             suffix = name.split("-")[-1]
             if suffix.isdigit():
