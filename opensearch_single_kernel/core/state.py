@@ -665,9 +665,11 @@ class ClusterState(Object):
         return self.model.uuid
 
     @property
-    def current_peer_cluster_app(self) -> PeerClusterApp:
+    def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
         deployment_desc = self.application.deployment_desc
+        if not deployment_desc:
+            return None
         logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,

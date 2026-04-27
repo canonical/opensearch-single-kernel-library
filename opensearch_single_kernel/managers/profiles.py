@@ -76,7 +76,7 @@ class ProfilesManager(BaseManager):
         current_app = self.state.current_peer_cluster_app
         # backwards compatibility for revisions that do not set generated roles
         # in cluster_fleet_apps
-        if not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps:
+        if current_app and (not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps):
             cluster_fleet_apps[current_app.app.id] = current_app
 
         logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)

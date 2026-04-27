@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
@@ -21,7 +22,6 @@ from tests.integration.ha.helpers_data import (
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
-    EmptyBlockedStatus,
     app_name,
     get_application_unit_ids_ips,
     get_leader_unit_id,
@@ -86,6 +86,11 @@ TEXT_EMBEDDING_MODEL = {
     "model_format": "TORCH_SCRIPT",
 }
 
+CosBlockedStatus = StatusObject(
+    status="blocked",
+    message="Missing ['grafana-cloud-config']|['grafana-dashboards-provider']|['logging-consumer']|['send-remote-write'] for cos-agent",
+)
+
 
 async def _wait_for_units(
     ops_test: OpsTest,
@@ -108,7 +113,7 @@ async def _wait_for_units(
             await wait_until(
                 ops_test,
                 apps=[COS_APP_NAME],
-                units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
+                units_statuses={COS_APP_NAME: [CosBlockedStatus]},
                 timeout=1800,
                 idle_period=IDLE_PERIOD,
             )
@@ -134,7 +139,7 @@ async def _wait_for_units(
         await wait_until(
             ops_test,
             apps=[COS_APP_NAME],
-            units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
+            units_statuses={COS_APP_NAME: [CosBlockedStatus]},
             timeout=1800,
             idle_period=IDLE_PERIOD,
         )

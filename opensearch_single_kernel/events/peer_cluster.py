@@ -560,7 +560,7 @@ class PeerClusterEventsHandler(Object):
         except ValueError:
             return
 
-        if self.charm.opensearch_events.check_profile_requirements():
+        if not self.charm.opensearch_events.check_profile_requirements():
             return
 
         self.charm.config_manager._update_jvm_heap_size(
