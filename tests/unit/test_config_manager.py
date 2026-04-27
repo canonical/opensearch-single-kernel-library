@@ -113,12 +113,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
         state=DeploymentState(value=State.ACTIVE),
         promotion_time=None,
     )
-    if substrate == "vm":
-        mocker.patch(
-            "opensearch_single_kernel.workload.vm.VMWorkload.get_publish_host",
-            return_value="30.30.30.30",
-        )
-    else:
+    if substrate != "vm":
         mocker.patch(
             "opensearch_single_kernel.core.state.ClusterState.fqdn",
             return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
@@ -170,13 +165,16 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate):
 
     assert opensearch_conf["node.attr.temp"] == "hot"
     assert opensearch_conf["node.attr.app_id"] == app.id
-    assert opensearch_conf["network.host"] == ["_site_", "_local_", "10.10.10.10"]
-    assert opensearch_conf["network.publish_host"] == "20.20.20.20"
     expected_publish_host = (
-        "30.30.30.30"
+        "20.20.20.20"
         if substrate == "vm"
         else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
     )
+    expected_network_host = (
+        ["_site_", "_local_", "10.10.10.10"] if substrate == "vm" else ["0.0.0.0"]
+    )
+    assert opensearch_conf["network.host"] == expected_network_host
+    assert opensearch_conf["network.publish_host"] == expected_publish_host
     assert opensearch_conf["http.publish_host"] == expected_publish_host
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
