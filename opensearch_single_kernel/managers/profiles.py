@@ -139,11 +139,12 @@ class ProfilesManager(BaseManager):
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
 
-            status_list.append(
-                format_status(
-                    ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                    {"requirements": " - ".join(missing_requirements)},
+            if missing_requirements:
+                status_list.append(
+                    format_status(
+                        ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                        {"requirements": " - ".join(missing_requirements)},
+                    )
                 )
-            )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

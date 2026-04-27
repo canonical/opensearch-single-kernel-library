@@ -942,7 +942,7 @@ class ClusterManager(BaseManager):
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
-        if Directive.SHOW_STATUS in deployment_desc.pending_directives:
+        if deployment_desc.pending_directives and deployment_desc.state.message:
             status_list.append(
                 format_status(
                     GeneralStatuses.BLOCKING_DIRECTIVE.value,
