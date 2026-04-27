@@ -14,7 +14,7 @@ from tests.integration.conftest import (
     CONFIG_OPTS,
     IDLE_PERIOD,
     MODEL_CONFIG,
-    get_unit_ids,
+    UNIT_IDS,
 )
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.helpers import (
@@ -61,7 +61,6 @@ async def test_build_and_deploy_active(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
-    unit_ids = get_unit_ids(substrate)
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await deploy_opensearch(
@@ -69,7 +68,7 @@ async def test_build_and_deploy_active(
         charm,
         substrate,
         APP_NAME,
-        len(unit_ids),
+        len(UNIT_IDS),
         series=series,
         config=CONFIG_OPTS,
         resources=charm_resources,
@@ -88,7 +87,7 @@ async def test_build_and_deploy_active(
         ops_test,
         apps=[APP_NAME],
         timeout=1800,
-        wait_for_exact_units=len(unit_ids),
+        wait_for_exact_units=len(UNIT_IDS),
         idle_period=IDLE_PERIOD,
     )
 
@@ -165,8 +164,6 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
     if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
         pytest.skip("Large deployments are not supported on k8s.")
 
-    unit_ids = get_unit_ids(substrate)
-
     if deploy_type == SMALL_DEPLOYMENT:
         app = APP_NAME
     else:
@@ -185,7 +182,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
             await wait_until(
                 ops_test,
                 apps=[APP_NAME],
-                wait_for_exact_units=len(unit_ids),
+                wait_for_exact_units=len(UNIT_IDS),
                 timeout=2400,
                 idle_period=IDLE_PERIOD,
             )
