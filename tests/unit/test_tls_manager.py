@@ -13,7 +13,6 @@ import responses
 from ops import MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
-    CA_ALIAS,
     CertType,
     DeploymentType,
     Scope,
