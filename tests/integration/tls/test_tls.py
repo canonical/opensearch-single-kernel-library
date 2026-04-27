@@ -110,7 +110,6 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
 @pytest.mark.abort_on_fail
 async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
     """Test that renewed TLS certificates are reloaded immediately without restarting."""
-
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     leader_id = await get_leader_unit_id(ops_test)
     non_leader_id = [
