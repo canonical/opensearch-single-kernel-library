@@ -53,7 +53,7 @@ def test_node_lock_has_online_hosts_init_leader(
     harness, lock_rel_id, mock_deployment_desc, mocker
 ):
     """Initially no one has the lock if there is a leader."""
-    mocker.patch("socket.socket.connect")
+    mocker.patch("socket.create_connection")
     mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
     mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)
 
@@ -92,12 +92,12 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
 ):
     """Leader acquires lock via OpenSearch document when online nodes are present."""
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
-    mocker.patch("socket.socket.connect")
-    mocker.patch(
+    mocker.patch("socket.create_connection")
+    create_lock_index_if_needed = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_lock_index_if_needed",
         return_value=True,
     )
-    mocker.patch(
+    create_lock_document = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_lock_document",
         return_value=True,
     )
@@ -111,12 +111,11 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
     harness.set_leader(is_leader=True)
     harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
 
-    # The leader acquires the lock via the OpenSearch document.
-    assert not harness.charm.lock_manager.acquire()
-
-    monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id-new")
-
+    # The leader acquires the lock via the OpenSearch document without waiting for another
+    # Juju event.
     assert harness.charm.lock_manager.acquire()
+    create_lock_index_if_needed.assert_called_once()
+    create_lock_document.assert_called_once()
 
 
 def test_node_lock_no_online_nodes_departing_node_doesnt_break(
@@ -148,7 +147,7 @@ def test_node_lock_has_online_nodes_departing_node_doesnt_break(
     https://github.com/canonical/opensearch-operator/issues/323
     """
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
-    mocker.patch("socket.socket.connect")
+    mocker.patch("socket.create_connection")
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_lock_index_if_needed",
         return_value=True,
