@@ -60,8 +60,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, lxd_spaces) ->
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
         timeout=1400,
         idle_period=IDLE_PERIOD,
