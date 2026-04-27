@@ -58,6 +58,7 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import deployment_type
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -932,3 +933,19 @@ class ClusterManager(BaseManager):
                 self.state.jwt.auth_configuration
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
+        if (
+            (deployment_desc := self.state.application.deployment_desc)
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.state.application.is_security_index_initialised
+        ):
+            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
+
+        if Directive.SHOW_STATUS in deployment_desc.pending_directives:
+            status_list.append(
+                format_status(
+                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                    params={"directive": deployment_desc.state.message},
+                )
+            )

@@ -8,6 +8,9 @@ import json
 import logging
 from typing import Any, MutableMapping
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
@@ -24,7 +27,11 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
-from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterErrorDataStatuses,
+    PeerClusterStatuses,
+)
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     Node,
@@ -197,7 +204,7 @@ class PeerClusterManager(BaseManager):
         orchestrators: PeerClusterOrchestrators,
         deployment_desc: DeploymentDescription,
         peer_cluster_rel_data: PeerClusterRelData,
-        event_rel_id: int,
+        event_rel_id: int | None,
     ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
         blocked_msg = None
@@ -215,10 +222,13 @@ class PeerClusterManager(BaseManager):
                 blocked_msg = (
                     PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
                 )
-        elif event_rel_id not in [
-            orchestrators.main_rel_id,
-            orchestrators.failover_rel_id,
-        ]:
+        elif event_rel_id and (
+            event_rel_id
+            not in [
+                orchestrators.main_rel_id,
+                orchestrators.failover_rel_id,
+            ]
+        ):
             blocked_msg = (
                 PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message
             )
@@ -384,3 +394,47 @@ class PeerClusterManager(BaseManager):
             self.set_current_app_in_cluster_fleet(
                 rel_id=rel.id, deployment_desc=deployment_desc, is_provider=False
             )
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "app":
+            if orchestrators := self.state.application.orchestrators:
+                if not orchestrators.main_app and orchestrators.failover_app:
+                    status_list.append(
+                        PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
+                    )
+                elif not orchestrators.main_app and not orchestrators.failover_app:
+                    status_list.append(
+                        PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
+                    )
+                # Provider errors
+                errors_from_provider = self.error_set_from_providers(orchestrators, None)
+                if errors_from_provider and (status_error := errors_from_provider.get_status()):
+                    status_list.append(status_error)
+                # Requirer errors
+                for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                    self._add_relation_statuses(status_list, peer_cluster)
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _add_relation_statuses(
+        self, status_list: list[StatusObject], peer_cluster: PeerCluster
+    ) -> None:
+        """Compute the manager's app statuses for relation and append them to list."""
+        if (deployment_desc := self.state.application.deployment_desc) and (
+            peer_cluster_rel_data := peer_cluster.data()
+        ):
+            errors_from_requirer = self.requirer_errors(
+                self.state.application.orchestrators, deployment_desc, peer_cluster_rel_data, None
+            )
+            if errors_from_requirer and (status_error := errors_from_requirer.get_status()):
+                status_list.append(status_error)

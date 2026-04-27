@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
+    DeploymentType,
     Scope,
     StoreType,
 )
@@ -623,12 +624,18 @@ class TlsManager(BaseManager):
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
-            if not self.all_tls_resources_stored():
-                status_list.append(
-                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                    if self.state.tls_relation
-                    else TlsStatuses.TLS_RELATION_MISSING.value
-                )
+            # If it is the main orchestrator then it will create all resources
+            # Other types will wait for the Peer cluster Main
+            if (
+                (deployment_desc := self.state.application.deployment_desc)
+                and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            ) or self.state.peer_clusters(remote=True, is_provider=False):
+                if not self.all_tls_resources_stored():
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
             if not self.state.tls_relation and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
@@ -637,5 +644,11 @@ class TlsManager(BaseManager):
                         {"certificates": ", ".join(missing)},
                     )
                 )
+        if scope == "app" and self.state.peer_clusters(remote=True, is_provider=False):
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                if (
+                    rel_error_data := self.peer_cluster_error_from_tls(peer_cluster.data())
+                ) and rel_error_data.get_status():
+                    status_list.append(rel_error_data.get_status())
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

@@ -19,6 +19,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -131,11 +132,18 @@ class ProfilesManager(BaseManager):
             ]
 
         status_list: list[StatusObject] = []
-
+        missing_requirements = self.get_missing_requirements()
         if scope == "unit":
             try:
                 self.config_profile
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+
+            status_list.append(
+                format_status(
+                    ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                    {"requirements": " - ".join(missing_requirements)},
+                )
+            )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

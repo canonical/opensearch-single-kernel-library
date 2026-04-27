@@ -797,8 +797,7 @@ class PeerClusterRelErrorData(Model):
 
             if re.match(regex_pattern, self.blocked_message):
                 # set message to the original message with placeholders
-                new_status = status.value.model_copy()
-                new_status.message = self.blocked_message
+                new_status = status.value.model_copy(update={"message": status.value.message})
                 return new_status
         return None
 
@@ -809,9 +808,8 @@ class PeerClusterRelErrorData(Model):
             escaped_message = re.escape(status.value.message)
             regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
             if re.match(regex_pattern, message):
-                new_status = status.value.model_copy()
-                new_status.message = message
-                return new_status.value
+                new_status = status.value.model_copy(update={"message": status.value.message})
+                return new_status
         return None
 
 

@@ -35,7 +35,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchRestoreBackupError,
     OpenSearchSnapshotsPeerClusterDataConflictError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterStatuses,
+    SnapshotsStatuses,
+)
 from opensearch_single_kernel.core.models import (
     AzureRelDataCredentials,
     GcsRelDataCredentials,
@@ -58,6 +62,7 @@ from opensearch_single_kernel.utils.object_storage import (
     verify_gcs_credentials,
     verify_s3_credentials,
 )
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -658,7 +663,7 @@ class SnapshotsManager(BaseManager):
         }
 
     @override
-    def get_statuses(
+    def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
@@ -701,5 +706,14 @@ class SnapshotsManager(BaseManager):
                 return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
             except OpenSearchBackupCredentialsIncorrectError:
                 return [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+        if scope == "app" and self.state.application.missing_relations:
+            missing_relations = self.missing_backup_relations()
+            if missing_relations:
+                return [
+                    format_status(
+                        PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                        {"relation": missing_relations[0]},
+                    )
+                ]
 
         return [GeneralStatuses.ACTIVE_IDLE.value]

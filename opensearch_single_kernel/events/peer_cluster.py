@@ -510,14 +510,22 @@ class PeerClusterEventsHandler(Object):
             return
 
         plugins_missing_relations = self.charm.plugin_manager.missing_plugins_relations()
-        backup_missing_relations = self.charm.snapshots_manager.missing_backup_relations()
-        missing_relations = plugins_missing_relations + backup_missing_relations
-        if missing_relations:
+        snapshots_missing_relations = self.charm.snapshots_manager.missing_backup_relations()
+        if plugins_missing_relations:
             self.charm.state.add_status_if_not_present(
                 PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
-                dynamic_params={"relation": missing_relations[0]},
+                component=self.charm.plugin_manager.name,
+                dynamic_params={"relation": plugins_missing_relations[0]},
+            )
+            self.charm.state.application.missing_relations = True
+            return
+        elif snapshots_missing_relations:
+            self.charm.state.add_status_if_not_present(
+                PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                scope="app",
+                component=self.charm.snapshots_manager.name,
+                dynamic_params={"relation": snapshots_missing_relations[0]},
             )
             self.charm.state.application.missing_relations = True
             return
@@ -527,7 +535,13 @@ class PeerClusterEventsHandler(Object):
         self.charm.state.remove_status_if_present(
             PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
             scope="app",
-            component=self.charm.peer_cluster_orchestrator_manager.name,
+            component=self.charm.plugin_manager.name,
+            interpolated=True,
+        )
+        self.charm.state.remove_status_if_present(
+            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+            scope="app",
+            component=self.charm.snapshots_manager.name,
             interpolated=True,
         )
 

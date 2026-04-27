@@ -13,13 +13,21 @@ config-changed, upgrade, s3-credentials-changed, etc.
 import json
 import logging
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ModelError, SecretNotFoundError
+from overrides import override
 
 from opensearch_single_kernel.common.constants import Scope
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterStatuses,
+)
 from opensearch_single_kernel.core.models import PluginConfigInfo, SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import diff
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -169,3 +177,28 @@ class PluginManager(BaseManager):
             for relation_name in plugin_relation_names
             if self.state.relation_exists(relation_name)
         ]
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "app":
+            if self.state.application.missing_relations:
+                missing_relations = self.missing_plugins_relations()
+                if missing_relations:
+                    status_list.append(
+                        format_status(
+                            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                            {"relation": missing_relations[0]},
+                        )
+                    )
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
