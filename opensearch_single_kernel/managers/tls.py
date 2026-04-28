@@ -9,6 +9,7 @@ import socket
 from datetime import datetime
 from typing import Any
 
+from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -619,14 +620,19 @@ class TlsManager(BaseManager):
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.application.admin_secrets
+        # the certs need to be created on the charm container filesystem
+        # because the OpenSearch client library expects file paths for the cert and key
+        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
         with (
             self.workload.temp_file(
                 mode="w+t",
                 data=admin_secret["cert"],
+                dir=charm_container_tmp_dir,
             ) as tmp_cert,
             self.workload.temp_file(
                 mode="w+t",
                 data=admin_secret["key"],
+                dir=charm_container_tmp_dir,
             ) as tmp_key,
         ):
             self.opensearch_client.reload_tls_certificates(
