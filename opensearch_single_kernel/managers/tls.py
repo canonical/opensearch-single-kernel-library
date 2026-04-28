@@ -72,8 +72,11 @@ class TlsManager(BaseManager):
 
         # google style docstring
         Args:
-            only_unit_resources (bool): If True, only check for unit TLS resources (transport and HTTP certs). If False, also check for app-level admin TLS resources.
-            reconcile (bool): If True, perform reconciliation of K8s runtime TLS resources before checking.
+            only_unit_resources (bool):
+                If True, only check for unit TLS resources (transport and HTTP certs).
+                If False, also check for app-level admin TLS resources.
+            reconcile (bool):
+                If True, perform reconciliation of K8s runtime TLS resources before checking.
 
         Returns:
             bool: True if all required TLS resources are stored and valid, False otherwise.
@@ -756,7 +759,8 @@ class TlsManager(BaseManager):
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
 
             try:
-                # We do not reconcile because get_statuses needs to stay fast as it is called on every hook.
+                # We do not reconcile because get_statuses
+                # needs to stay fast as it is called on every hook.
                 if not self.all_tls_resources_stored(reconcile=False):
                     status_list.append(
                         TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
