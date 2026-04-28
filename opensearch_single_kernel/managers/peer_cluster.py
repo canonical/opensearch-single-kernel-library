@@ -396,7 +396,7 @@ class PeerClusterManager(BaseManager):
             )
 
     @override
-    def get_statuses(
+    def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
@@ -422,24 +422,26 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
-                # Provider errors
-                errors_from_provider = self.error_set_from_providers(orchestrators, None)
-                if errors_from_provider and (status_error := errors_from_provider.get_status()):
-                    status_list.append(status_error)
-                # Requirer errors
-                for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                    self._add_relation_statuses(status_list, peer_cluster)
-        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                if self.state.application.relation_data.get(
+                    f"error_from_providers-{peer_cluster.relation.id}"
+                ):
+                    status = PeerClusterRelErrorData.get_status_from_message(
+                        self.state.application.relation_data[
+                            f"error_from_providers-{peer_cluster.relation.id}"
+                        ]
+                    )
+                    if status:
+                        status_list.append(status)
+                if self.state.application.relation_data.get(
+                    f"error_from_requirer-{peer_cluster.relation.id}"
+                ):
+                    status = PeerClusterRelErrorData.get_status_from_message(
+                        self.state.application.relation_data[
+                            f"error_from_requirer-{peer_cluster.relation.id}"
+                        ]
+                    )
+                    if status:
+                        status_list.append(status)
 
-    def _add_relation_statuses(
-        self, status_list: list[StatusObject], peer_cluster: PeerCluster
-    ) -> None:
-        """Compute the manager's app statuses for relation and append them to list."""
-        if (deployment_desc := self.state.application.deployment_desc) and (
-            peer_cluster_rel_data := peer_cluster.data()
-        ):
-            errors_from_requirer = self.requirer_errors(
-                self.state.application.orchestrators, deployment_desc, peer_cluster_rel_data, None
-            )
-            if errors_from_requirer and (status_error := errors_from_requirer.get_status()):
-                status_list.append(status_error)
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

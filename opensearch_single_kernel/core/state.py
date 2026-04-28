@@ -925,7 +925,7 @@ class ClusterState(Object):
             orchestrators.main_app
             and self.peer_cluster_by_relation_id(
                 relation_id=orchestrators.main_rel_id,
-                is_provider=True,
+                is_provider=False,
                 remote=True,
             )
             is not None
@@ -933,7 +933,7 @@ class ClusterState(Object):
         of_failover = (
             orchestrators.failover_app
             and self.peer_cluster_by_relation_id(
-                is_provider=True, relation_id=orchestrators.failover_rel_id, remote=True
+                is_provider=False, relation_id=orchestrators.failover_rel_id, remote=True
             )
             is not None
         )
