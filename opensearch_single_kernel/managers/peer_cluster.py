@@ -411,12 +411,9 @@ class PeerClusterManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
-        status_list: list[StatusObject] = self.state.statuses.get(scope, self.name).root
+        status_list: list[StatusObject] = self.state.statuses.get(
+            scope, self.name, running_status_only=True
+        ).root
 
         if scope == "app":
             # Only if we are a requirer and we have some orchestrators

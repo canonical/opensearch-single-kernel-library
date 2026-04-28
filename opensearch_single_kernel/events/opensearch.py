@@ -1195,12 +1195,13 @@ class OpenSearchEventsHandler(Object):
                     "app",
                     self.charm.cluster_manager.name,
                 )
-        self.charm.state.add_status_if_not_present(
-            status=GeneralStatuses.BLOCKING_DIRECTIVE.value,
-            scope="app",
-            component=self.charm.cluster_manager.name,
-            dynamic_params={"directive": deployment_desc.state.message},
-        )
+        if deployment_desc.state.message:
+            self.charm.state.add_status_if_not_present(
+                status=GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                scope="app",
+                component=self.charm.cluster_manager.name,
+                dynamic_params={"directive": deployment_desc.state.message},
+            )
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
