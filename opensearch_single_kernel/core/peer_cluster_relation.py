@@ -38,6 +38,24 @@ class PeerCluster(RelationState):
         self.secrets = secrets
 
     @property
+    def is_candidate_failover_orchestrator(self) -> bool:
+        """Return whether this cluster is a candidate failover orchestrator."""
+        return (
+            self.relation.data[self.app].get("is_candidate_failover_orchestrator", "").lower()
+            == "true"
+        )
+
+    @is_candidate_failover_orchestrator.setter
+    def is_candidate_failover_orchestrator(self, value: bool):
+        """Set whether this cluster is a candidate failover orchestrator."""
+        self.relation.data[self.app].update({"is_candidate_failover_orchestrator": str(value)})
+
+    @is_candidate_failover_orchestrator.deleter
+    def is_candidate_failover_orchestrator(self):
+        """Delete the 'is_candidate_failover_orchestrator' field to notify related clusters."""
+        self.relation.data[self.app].pop("is_candidate_failover_orchestrator", None)
+
+    @property
     def first_data_node(self) -> str:
         """Get the value of 'first_data_node' in application databag."""
         return self.relation.data[self.app].get("first_data_node", "")

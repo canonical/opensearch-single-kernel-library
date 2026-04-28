@@ -531,7 +531,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         # No missing relations, clean up any previous state
-        self.charm.state.application.update({"missing_relations": ""})
+        del self.charm.state.application.missing_relations
         self.charm.state.remove_status_if_present(
             PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
             scope="app",

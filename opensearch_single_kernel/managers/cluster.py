@@ -370,8 +370,8 @@ class ClusterManager(BaseManager):
     def update_bootstrap_state(self, cleanup_application: bool = False) -> None:
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
         if cleanup_application:
-            self.state.application.update({"bootstrapped": "True"})
-        self.state.server.update({"bootstrap_contributor": ""})
+            self.state.application.bootstrapped = True
+        del self.state.server.is_bootstrap_contributor
 
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
@@ -658,21 +658,13 @@ class ClusterManager(BaseManager):
     def cleanup_on_last_unit_removal(self) -> None:
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
-            self.state.application.update(
-                {
-                    "bootstrap_contributors_count": "",
-                    "nodes_config": "",
-                }
-            )
+            del self.state.application.bootstrap_contributors_count
+            del self.state.application.nodes_config
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
-                self.state.application.update(
-                    {
-                        "is_security_index_initialised": "",
-                        "bootstrapped": "",
-                    }
-                )
+                del self.state.application.is_security_index_initialised
+                del self.state.self.application.bootstrapped
 
     def flush_translog_to_disk(self) -> None:
         """Flush OpenSearch translog to disk."""

@@ -4,7 +4,6 @@
 
 """A set of utility functions for managing peer clusters."""
 
-from typing import Any
 
 from opensearch_single_kernel.core.models import (
     PeerClusterApp,
@@ -13,7 +12,7 @@ from opensearch_single_kernel.core.models import (
 
 
 def update_cluster_fleet(
-    fleet_dict: dict[str, dict[str, Any]], app: PeerClusterApp, key: str | None = None
+    fleet_dict: dict[str, dict[str, PeerClusterApp]], app: PeerClusterApp, key: str | None = None
 ) -> None:
     """Update fleet dictionary with the app, or remove the entry if no planned units."""
     if not key:

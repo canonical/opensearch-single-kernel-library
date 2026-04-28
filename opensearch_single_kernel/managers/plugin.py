@@ -191,14 +191,14 @@ class PluginManager(BaseManager):
         status_list: list[StatusObject] = []
 
         if scope == "app":
-            if self.state.application.missing_relations:
-                missing_relations = self.missing_plugins_relations()
-                if missing_relations:
-                    status_list.append(
-                        format_status(
-                            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                            {"relation": missing_relations[0]},
-                        )
+            if self.state.application.missing_relations and (
+                missing_relations := self.missing_plugins_relations()
+            ):
+                status_list.append(
+                    format_status(
+                        PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                        {"relation": missing_relations[0]},
                     )
+                )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

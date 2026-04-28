@@ -355,17 +355,18 @@ class PeerClusterManager(BaseManager):
         if not deployment_desc:
             return
 
-        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
+        local_peer_cluster = self.state.peer_cluster_by_relation_id(
             relation_id=relation_id,
             is_provider=False,
-            remote=True,
+            remote=False,
         )
-        if not remote_peer_cluster:
+
+        if not local_peer_cluster:
             return
         if deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR:
-            remote_peer_cluster.update({"is_candidate_failover_orchestrator": "true"})
+            local_peer_cluster.is_candidate_failover_orchestrator = True
         else:
-            remote_peer_cluster.update({"is_candidate_failover_orchestrator": ""})
+            del local_peer_cluster.is_candidate_failover_orchestrator
 
     def delete_departed_orchestrator(self, event_src_cluster_type: str) -> None:
         """Delete the orchestrator that left the relation from the state and cluster fleet."""
@@ -389,8 +390,9 @@ class PeerClusterManager(BaseManager):
             if key.startswith("error_from_provider") or key.startswith("error_from_requirer"):
                 # get the relation id from key
                 rel_id = int(key.split("-")[-1])
-                if rel_id not in self.state.peer_cluster_relations:
-                    self.state.application.relation_data.pop(key, None)
+                relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
+                if rel_id not in relation_ids:
+                    self.state.application.relation_data.pop(key)
 
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).

@@ -93,6 +93,11 @@ class OpenSearchServer(RelationState):
         """Set the value of 'bootstrap_contributor' in application state."""
         self.update({"bootstrap_contributor": str(value)})
 
+    @is_bootstrap_contributor.deleter
+    def is_bootstrap_contributor(self):
+        """Remove the value of 'bootstrap_contributor' from application state."""
+        self.relation.data[self.unit].pop("bootstrap_contributor", None)
+
     @property
     def is_cluster_manager_removed(self) -> bool:
         """Get value of 'cluster_manager_removed'"""
@@ -106,7 +111,7 @@ class OpenSearchServer(RelationState):
     @is_cluster_manager_removed.deleter
     def is_cluster_manager_removed(self):
         """Remove value of 'cluster_manager_removed'"""
-        self.update({"cluster_manager_removed": ""})
+        self.relation.data[self.unit].pop("cluster_manager_removed", None)
 
     @property
     def started(self) -> str:
@@ -114,12 +119,12 @@ class OpenSearchServer(RelationState):
         return self.relation_data.get("started", "")
 
     @started.setter
-    def started(self, value: str):
+    def started(self, value: str) -> None:
         """Set the value of 'started' key in unit data bag"""
         self.relation.data[self.unit].update({"started": value})
 
     @started.deleter
-    def started(self):
+    def started(self) -> None:
         """Remove the value of 'started' key from unit data bag"""
         self.relation.data[self.unit].pop("started", None)
 
@@ -129,14 +134,14 @@ class OpenSearchServer(RelationState):
         return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
 
     @tls_ca_renewing.setter
-    def tls_ca_renewing(self, value: bool):
+    def tls_ca_renewing(self, value: bool) -> None:
         """Update value of tls_ca_renewing from unit state."""
         self.update({"tls_ca_renewing": str(value)})
 
     @tls_ca_renewing.deleter
-    def tls_ca_renewing(self):
+    def tls_ca_renewing(self) -> None:
         """Remove value of 'tls_ca_renewing' from unit state."""
-        self.update({"tls_ca_renewing": ""})
+        self.relation.data[self.unit].pop("tls_ca_renewing", None)
 
     @property
     def tls_ca_renewed(self) -> bool:
@@ -144,14 +149,14 @@ class OpenSearchServer(RelationState):
         return self.relation.data[self.unit].get("tls_ca_renewed", "").lower() == "true"
 
     @tls_ca_renewed.setter
-    def tls_ca_renewed(self, value: bool):
+    def tls_ca_renewed(self, value: bool) -> None:
         """Update value of 'tls_ca_renewed'"""
         self.update({"tls_ca_renewed": str(value)})
 
     @tls_ca_renewed.deleter
-    def tls_ca_renewed(self):
+    def tls_ca_renewed(self) -> None:
         """Remove value of 'tls_ca_renewed' from unit state."""
-        self.update({"tls_ca_renewed": ""})
+        self.relation.data[self.unit].pop("tls_ca_renewed", None)
 
     @property
     def tls_configured(self) -> bool:
@@ -159,12 +164,12 @@ class OpenSearchServer(RelationState):
         return self.relation.data[self.unit].get("tls_configured", "").lower() == "true"
 
     @tls_configured.setter
-    def tls_configured(self, value: bool):
+    def tls_configured(self, value: bool) -> None:
         """Update the value of 'tls_configured'"""
         self.update({"tls_configured": str(value)})
 
     @tls_configured.deleter
-    def tls_configured(self):
+    def tls_configured(self) -> None:
         """Delete the 'tls_configured' field to notify related clusters."""
         self.relation.data[self.unit].pop("tls_configured", None)
 
@@ -174,7 +179,7 @@ class OpenSearchServer(RelationState):
         return self.relation_data.get("update-ts", "")
 
     @update_ts.setter
-    def update_ts(self, timestamp: int):
+    def update_ts(self, timestamp: int) -> None:
         """Update the value of 'update-ts' in the unit databag."""
         self.update({"update-ts": str(timestamp)})
 
@@ -184,7 +189,7 @@ class OpenSearchServer(RelationState):
         return self.relation_data.get("certs_exp_checked_at", "1970-01-01 00:00:00")
 
     @certs_exp_checked_at.setter
-    def certs_exp_checked_at(self, value: str):
+    def certs_exp_checked_at(self, value: str) -> None:
         """Update the value of 'certs_exp_checked_at'"""
         self.update({"certs_exp_checked_at": value})
 
@@ -241,7 +246,7 @@ class OpenSearchServer(RelationState):
     def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
         """Returns configuration information for plugins this unit is managing"""
         if not value:
-            self.update({"plugin_config_info": ""})
+            self.relation.data[self.unit].pop("plugin_config_info", None)
             return
         self.put_object("plugin_config_info", value)
 
@@ -350,6 +355,11 @@ class OpenSearchApplication(RelationState):
         """Set value of bootstrap contributors count in application state."""
         self.update({"bootstrap_contributors_count": str(value)})
 
+    @bootstrap_contributors_count.deleter
+    def bootstrap_contributors_count(self) -> None:
+        """Remove value of 'bootstrap_contributors_count' from application state."""
+        self.relation.data[self.app].pop("bootstrap_contributors_count", None)
+
     @is_admin_user_initialized.setter
     def is_admin_user_initialized(self, value: bool) -> None:
         """Update the value of 'admin_user_initialized' in application state."""
@@ -365,6 +375,11 @@ class OpenSearchApplication(RelationState):
         """Update the value of 'security_index_initialised' in application state."""
         self.update({"security_index_initialised": str(value)})
 
+    @is_security_index_initialised.deleter
+    def is_security_index_initialised(self) -> None:
+        """Remove value of 'security_index_initialised' from application state."""
+        self.relation.data[self.app].pop("security_index_initialised", None)
+
     @property
     def nodes_config(self) -> dict[str, Node]:
         """Return the value of 'nodes_config' in application state"""
@@ -378,6 +393,11 @@ class OpenSearchApplication(RelationState):
         """Set the value of 'nodes_config' in application state."""
         self.put_object("nodes_config", {name: node.to_dict() for name, node in value.items()})
 
+    @nodes_config.deleter
+    def nodes_config(self) -> None:
+        """Remove the value of 'nodes_config' from application state."""
+        self.relation.data[self.app].pop("nodes_config", None)
+
     @property
     def bootstrapped(self) -> bool:
         """Return the value of 'bootstrapped' in application state"""
@@ -387,6 +407,11 @@ class OpenSearchApplication(RelationState):
     def bootstrapped(self, value: bool) -> None:
         """Set the value of 'bootstrapped' in application state."""
         self.update({"bootstrapped": str(value)})
+
+    @bootstrapped.deleter
+    def bootstrapped(self) -> None:
+        """Remove the value of 'bootstrapped' from application state."""
+        self.relation.data[self.app].pop("bootstrapped", None)
 
     @property
     def deployment_desc(self) -> DeploymentDescription | None:
@@ -504,7 +529,7 @@ class OpenSearchApplication(RelationState):
     def plugin_config_info(self, value: dict[str, PluginConfigInfo]) -> None:
         """Returns configuration information for plugins this app is managing"""
         if not value:
-            self.update({"plugin_config_info": ""})
+            self.relation.data[self.app].pop("plugin_config_info", None)
             return
         self.put_object("plugin_config_info", value)
 
@@ -616,6 +641,11 @@ class OpenSearchApplication(RelationState):
         """Set the value of 'missing_relations' in application databag."""
         self.update({"missing_relations": str(value)})
 
+    @missing_relations.deleter
+    def missing_relations(self) -> None:
+        """Remove the value of 'missing_relations' from application databag."""
+        self.relation.data[self.app].pop("missing_relations", None)
+
     @property
     def first_data_node(self) -> str:
         """Return the value of 'first_data_node' in application databag."""
@@ -629,4 +659,4 @@ class OpenSearchApplication(RelationState):
     @first_data_node.deleter
     def first_data_node(self) -> None:
         """Remove the value of 'first_data_node' from the application databag."""
-        self.update({"first_data_node": ""})
+        self.relation.data[self.app].pop("first_data_node", None)
