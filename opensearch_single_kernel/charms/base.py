@@ -133,6 +133,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.profiles_manager,
             self.tls_manager,
             self.health_manager,
+            self.peer_cluster_manager,
+            self.peer_cluster_orchestrator_manager,
             self.cluster_manager,
             self.lock_manager,
             self.snapshots_manager,

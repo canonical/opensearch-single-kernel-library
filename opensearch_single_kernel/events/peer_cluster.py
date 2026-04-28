@@ -551,7 +551,7 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.remove_status_if_present(
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
+                component=self.charm.peer_cluster_manager.name,
             )
             return
 
@@ -589,7 +589,9 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.application.update({label: err_message})
         else:
             # if there is no error, we should clear the status and stored message for this label
-            error_message = self.charm.state.application.relation_data.get(label, "")
+            error_message = self.charm.state.application.relation.data[self.model.app].get(
+                label, ""
+            )
             status = PeerClusterRelErrorData.get_status_from_message(error_message)
             if status:
                 self.charm.state.remove_status_if_present(
@@ -597,7 +599,7 @@ class PeerClusterEventsHandler(Object):
                     scope="app",
                     component=self.charm.peer_cluster_manager.name,
                 )
-            self.charm.state.application.update({label: ""})
+            self.charm.state.application.relation.data[self.model.app].pop(label, None)
 
     def apply_orchestrator_status(self) -> None:
         """Sets or clears status based on presence of local orchestrators."""
@@ -615,24 +617,24 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.remove_status_if_present(
                 PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
+                component=self.charm.peer_cluster_manager.name,
             )
             self.charm.state.remove_status_if_present(
                 PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
+                component=self.charm.peer_cluster_manager.name,
             )
         elif orchestrators.failover_app:
             self.charm.state.add_status_if_not_present(
                 PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
+                component=self.charm.peer_cluster_manager.name,
             )
         else:
             self.charm.state.add_status_if_not_present(
                 PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
                 scope="app",
-                component=self.charm.peer_cluster_orchestrator_manager.name,
+                component=self.charm.peer_cluster_manager.name,
             )
 
     def _set_security_conf(self, data: PeerClusterRelData) -> None:

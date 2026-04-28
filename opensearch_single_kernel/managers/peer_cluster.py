@@ -405,10 +405,15 @@ class PeerClusterManager(BaseManager):
                 GeneralStatuses.ACTIVE_IDLE.value
             ]
 
-        status_list: list[StatusObject] = []
+        status_list: list[StatusObject] = self.state.statuses.get(scope, self.name).root
 
         if scope == "app":
-            if orchestrators := self.state.application.orchestrators:
+            # Only if we are a requirer and we have some orchestrators
+            if (
+                self.state.is_peer_cluster_consumer()
+                and self.state.peer_clusters(is_provider=False, remote=True)
+                and (orchestrators := self.state.application.orchestrators)
+            ):
                 if not orchestrators.main_app and orchestrators.failover_app:
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
