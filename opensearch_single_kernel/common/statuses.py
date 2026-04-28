@@ -190,6 +190,7 @@ class PeerClusterStatuses(Enum):
     PEER_CLUSTER_ORCHESTRATORS_REMOVED = StatusObject(
         status="blocked",
         message="Main-cluster-orchestrator removed, and no failover cluster related.",
+        running="async",
     )
     PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION = StatusObject(
         status="waiting",
