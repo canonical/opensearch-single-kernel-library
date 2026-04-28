@@ -35,6 +35,10 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
+    WORKLOAD_FILESYSTEM_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="Waiting for the OpenSearch workload filesystem to become available.",
+    )
 
 
 class HealthStatuses(Enum):

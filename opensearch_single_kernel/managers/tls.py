@@ -63,12 +63,25 @@ class TlsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "tls_manager")
 
-    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
+    def all_tls_resources_stored(
+        self, only_unit_resources: bool = False, reconcile: bool = True
+    ) -> bool:  # noqa: C901
         """Check if all TLS resources are stored and ready to use.
 
         For K8s, we need first to save TLS resources from secrets.
+
+        # google style docstring
+        Args:
+            only_unit_resources (bool): If True, only check for unit TLS resources (transport and HTTP certs). If False, also check for app-level admin TLS resources.
+            reconcile (bool): If True, perform reconciliation of K8s runtime TLS resources before checking.
+
+        Returns:
+            bool: True if all required TLS resources are stored and valid, False otherwise.
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error accessing the filesystem to check TLS resources
         """
-        if self.state.substrate == Substrates.K8S:
+        if self.state.substrate == Substrates.K8S and reconcile:
             self.reconcile_k8s_runtime_resources()
 
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
@@ -84,7 +97,7 @@ class TlsManager(BaseManager):
 
         for cert_type in cert_types:
             cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
-            if not cert_type_path.exists():
+            if not self.workload.exists(cert_type_path):
                 return False
 
             secret = self.get_secrets_for_cert_type(cert_type)
@@ -369,14 +382,16 @@ class TlsManager(BaseManager):
             self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
         # if the chain.pem already contains the current CA chain, we can skip rewriting it
-        bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
+        bundle_content = (
+            self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
+        )
         if ca_chain not in bundle_content:
             self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
         bundle_path = self.workload.paths.certs_chain
-        if not bundle_path.exists():
+        if not self.workload.exists(bundle_path):
             return
 
         bundle_content = self.workload.read_text(bundle_path)
@@ -499,18 +514,18 @@ class TlsManager(BaseManager):
     def _k8s_runtime_tls_artifacts_ready(self) -> bool:
         """Return whether K8s TLS runtime files required by current secrets already exist."""
         certs_dir = self.workload.paths.certs
-        if not certs_dir.exists():
+        if not self.workload.exists(certs_dir):
             return False
 
         admin_secrets = (
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            if not (certs_dir / CA_TRUSTSTORE_P12).exists():
+            if not self.workload.exists(certs_dir / CA_TRUSTSTORE_P12):
                 return False
-            if not (certs_dir / f"{CA_ALIAS}.p12").exists():
+            if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
                 return False
-            if not (certs_dir / "chain.pem").exists():
+            if not self.workload.exists(certs_dir / "chain.pem"):
                 return False
 
         for scope, cert_type in [
@@ -523,7 +538,7 @@ class TlsManager(BaseManager):
                 secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
             ):
                 continue
-            if not (certs_dir / f"{cert_type.val}.p12").exists():
+            if not self.workload.exists(certs_dir / f"{cert_type.val}.p12"):
                 return False
 
         return True
@@ -737,12 +752,18 @@ class TlsManager(BaseManager):
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
-            if not self.all_tls_resources_stored():
-                status_list.append(
-                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                    if self.state.tls_relation
-                    else TlsStatuses.TLS_RELATION_MISSING.value
-                )
+
+            try:
+                # We do not reconcile because get_statuses needs to stay fast as it is called on every hoook.
+                if not self.all_tls_resources_stored(reconcile=False):
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
+            except OpenSearchFileOperationError as e:
+                logger.error("Error checking TLS resources on disk: %s", e)
+                status_list.append(GeneralStatuses.WORKLOAD_FILESYSTEM_UNAVAILABLE.value)
             if not self.state.tls_relation and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
