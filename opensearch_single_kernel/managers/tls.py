@@ -621,10 +621,12 @@ class TlsManager(BaseManager):
         admin_secret = self.state.application.admin_secrets
         with (
             self.workload.temp_file(
-                mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
+                mode="w+t",
+                data=admin_secret["cert"],
             ) as tmp_cert,
             self.workload.temp_file(
-                mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
+                mode="w+t",
+                data=admin_secret["key"],
             ) as tmp_key,
         ):
             self.opensearch_client.reload_tls_certificates(
