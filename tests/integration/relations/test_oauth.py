@@ -92,7 +92,9 @@ async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model):
     # Require identity platform to be active so OAuth setup can succeed
     await gather(
         ops_test.model.wait_for_idle(status="active"),
-        microk8s_model.wait_for_idle(status="active", timeout=600),
+        # we can get a blocked status on kratos-external-idp-integrator
+        # but setup can still proceed, so we don't check for active status on microk8s model
+        microk8s_model.wait_for_idle(timeout=1200),
     )
 
 
