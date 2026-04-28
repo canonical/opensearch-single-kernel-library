@@ -408,3 +408,8 @@ class BaseWorkload(ABC):
     def chain_path(self) -> str:
         """Get the certificate chain to use for requests"""
         raise NotImplementedError
+
+    @abstractmethod
+    def get_workload_version(self) -> str:
+        """Get the workload version."""
+        raise NotImplementedError

@@ -712,3 +712,10 @@ class K8sWorkload(BaseWorkload):
             return staged_path.as_posix()
 
         raise OpenSearchFileOperationError("chain.pem not available yet")
+
+    @override
+    def get_workload_version(self) -> str:
+        """Get the workload version."""
+        return self.run_cmd(
+            f"{self.paths.bin}/opensearch", args="--version 2>/dev/null"
+        ).out.strip()

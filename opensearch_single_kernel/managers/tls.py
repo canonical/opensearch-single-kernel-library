@@ -623,6 +623,7 @@ class TlsManager(BaseManager):
         # the certs need to be created on the charm container filesystem
         # because the OpenSearch client library expects file paths for the cert and key
         charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
         with (
             self.workload.temp_file(
                 mode="w+t",

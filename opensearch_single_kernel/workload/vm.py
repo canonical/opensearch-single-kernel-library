@@ -376,3 +376,8 @@ class VMWorkload(BaseWorkload):
     def chain_path(self) -> str:
         """Return the local path to chain.pem."""
         return self.paths.certs_chain.as_posix()
+
+    @override
+    def get_workload_version(self) -> str:
+        """Return the workload version."""
+        return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()

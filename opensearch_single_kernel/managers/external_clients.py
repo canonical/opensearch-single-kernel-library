@@ -281,10 +281,9 @@ class ExternalClientsManager(BaseManager):
         """Returns the version number of this opensearch instance."""
         # Will have a format similar to:
         # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
-        result = self.workload.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null")
-        output = result.out.strip()
-        logger.debug("version call output: %s", output)
-        return output.split(", ")[0].split(": ")[1]
+        result = self.workload.get_workload_version()
+        logger.debug("version call output: %s", result)
+        return result.split(", ")[0].split(": ")[1]
 
     @override
     def get_statuses(
