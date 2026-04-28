@@ -754,7 +754,7 @@ class TlsManager(BaseManager):
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
 
             try:
-                # We do not reconcile because get_statuses needs to stay fast as it is called on every hoook.
+                # We do not reconcile because get_statuses needs to stay fast as it is called on every hook.
                 if not self.all_tls_resources_stored(reconcile=False):
                     status_list.append(
                         TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
