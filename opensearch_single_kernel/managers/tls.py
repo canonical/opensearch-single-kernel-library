@@ -82,7 +82,7 @@ class TlsManager(BaseManager):
             bool: True if all required TLS resources are stored and valid, False otherwise.
 
         Raises:
-            OpenSearchFileOperationError: If there is an error accessing the filesystem to check TLS resources
+            OpenSearchFileOperationError: Error accessing the filesystem to check TLS resources
         """
         if self.state.substrate == Substrates.K8S and reconcile:
             self.reconcile_k8s_runtime_resources()
