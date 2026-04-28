@@ -628,14 +628,19 @@ class TlsManager(BaseManager):
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
             # If it is the main orchestrator then it will create all resources
-            # Other types will wait for the Peer cluster Main
+            # Other types will wait for the Peer cluster Main, we also need to check
+            # That the orchestrators field has been populated, otherwise it might
+            # be a relation that is prohibited
             # Even the failover
             if (
                 (
                     (deployment_desc := self.state.application.deployment_desc)
                     and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 )
-                or self.state.peer_clusters(remote=True, is_provider=False)
+                or (
+                    self.state.application.orchestrators
+                    and self.state.peer_clusters(remote=True, is_provider=False)
+                )
                 or self.state.peer_clusters(remote=True, is_provider=True)
             ):
                 if not self.all_tls_resources_stored():

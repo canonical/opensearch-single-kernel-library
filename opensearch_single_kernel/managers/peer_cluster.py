@@ -383,6 +383,15 @@ class PeerClusterManager(BaseManager):
         orchestrators.delete(event_src_cluster_type)
         self.state.application.orchestrators = orchestrators
 
+    def cleanup_error_in_relation_data(self) -> None:
+        """Clean up the error data in relation data when the error is resolved."""
+        for key, _ in self.state.application.relation_data.items():
+            if key.startswith("error_from_provider") or key.startswith("error_from_requirer"):
+                # get the relation id from key
+                rel_id = int(key.split("-")[-1])
+                if rel_id not in self.state.peer_cluster_relations:
+                    self.state.application.relation_data.pop(key, None)
+
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).
 
@@ -422,6 +431,8 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
+            # Clean up any lingering errors
+            self.cleanup_error_in_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 if self.state.application.relation_data.get(
                     f"error_from_providers-{peer_cluster.relation.id}"
