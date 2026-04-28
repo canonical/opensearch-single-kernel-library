@@ -7,6 +7,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -100,7 +101,7 @@ class VMWorkload(BaseWorkload):
         *,
         errors: str | None = None,
         suffix: str | None = None,
-    ):
+    ) -> Generator[PathProtocol, None, None]:
         """Create a temporary file and return the file, clean it once context is closed."""
         f = tempfile.NamedTemporaryFile(
             mode=mode,

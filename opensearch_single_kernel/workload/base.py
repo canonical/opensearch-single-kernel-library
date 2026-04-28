@@ -7,6 +7,7 @@
 import logging
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import List, Optional
@@ -295,7 +296,7 @@ class BaseWorkload(ABC):
         *,
         errors=None,
         suffix=None,
-    ):
+    ) -> Generator[PathProtocol, None, None]:
         """Context manager for creating temporary files."""
         raise NotImplementedError
 

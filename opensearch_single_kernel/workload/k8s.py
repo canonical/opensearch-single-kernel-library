@@ -6,7 +6,7 @@
 import logging
 import shlex
 import uuid
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Literal
@@ -260,7 +260,7 @@ class K8sWorkload(BaseWorkload):
         *,
         errors: str | None = None,
         suffix: str | None = None,
-    ):
+    ) -> Generator[PathProtocol, None, None]:
         """Create a temporary file in the container and return the file path.
 
         Args:

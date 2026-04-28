@@ -203,7 +203,7 @@ class TlsManager(BaseManager):
         # Base DNS names: how this unit can be addressed by clients and other nodes.
         # unit_name is the Juju unit, gethostname/getfqdn cover short and fully-qualified
         # hostnames used in configs or DNS.
-        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn}
+        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn, "localhost"}
         logger.info(f"This is the current DNS {dns}")
         # VM certificates must be reachable by the unit IP. On K8s, pod IPs are ephemeral
         # across pod recreation, so only stable DNS names should be included.
@@ -624,7 +624,9 @@ class TlsManager(BaseManager):
                 mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
             ) as tmp_key,
         ):
-            self.opensearch_client.reload_tls_certificates(cert_files=(tmp_cert, tmp_key))
+            self.opensearch_client.reload_tls_certificates(
+                cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
+            )
 
     def finalize_ca_certs_rotation(self) -> None:
         """Handle the completion of CA rotation."""
