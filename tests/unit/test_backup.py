@@ -62,7 +62,7 @@ def _mock_backup(
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
-    mocker, backend_setup, context
+    mocker, harness, backend_setup, context
 ):
     # Given
     create_snapshot = mocker.patch(
