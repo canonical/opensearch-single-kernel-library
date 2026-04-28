@@ -612,6 +612,16 @@ class TlsManager(BaseManager):
             case CertType.UNIT_HTTP:
                 return self.state.server.http_secrets
 
+    def cleanup_peer_cluster_error_relation_data(self) -> None:
+        """Clean up the error data in relation data when the error is resolved."""
+        for key, _ in self.state.application.relation_data.items():
+            if key.startswith("error_from_tls"):
+                # get the relation id from key
+                rel_id = int(key.split("-")[-1])
+                relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
+                if rel_id not in relation_ids:
+                    self.state.application.relation_data.pop(key)
+
     @override
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
@@ -667,11 +677,19 @@ class TlsManager(BaseManager):
                         if self.state.tls_relation
                         else TlsStatuses.TLS_RELATION_MISSING.value
                     )
-            if self.state.peer_clusters(remote=True, is_provider=False):
-                for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                    if (
-                        rel_error_data := self.peer_cluster_error_from_tls(peer_cluster.data())
-                    ) and rel_error_data.get_status():
-                        status_list.append(rel_error_data.get_status())
+
+            # Clean up any lingering errors
+            self.cleanup_peer_cluster_error_relation_data()
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                if self.state.application.relation_data.get(
+                    f"error_from_tls-{peer_cluster.relation.id}"
+                ):
+                    status = PeerClusterRelErrorData.get_status_from_message(
+                        self.state.application.relation_data[
+                            f"error_from_tls-{peer_cluster.relation.id}"
+                        ]
+                    )
+                    if status:
+                        status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
