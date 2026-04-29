@@ -628,7 +628,11 @@ class TlsManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
-        if not self.state.tls_relation:
+        if (
+            not self.state.tls_relation
+            and self.state.application.deployment_desc
+            and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        ):
             # Unit will fail if we combine the two iF
             if scope == "unit":
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
