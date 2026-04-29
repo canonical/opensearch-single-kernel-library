@@ -628,6 +628,9 @@ class TlsManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
+        if not self.state.tls_relation:
+            status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
+            return status_list
 
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:

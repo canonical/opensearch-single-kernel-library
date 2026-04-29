@@ -131,7 +131,7 @@ def test_on_start(harness, mocker):
         new_callable=PropertyMock,
     )
     check_blocking_directives = mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.check_blocking_directives"
+        "opensearch_single_kernel.managers.cluster.ClusterManager.no_blocking_directives"
     )
     should_ignore_lock = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.should_ignore_lock"

@@ -93,7 +93,7 @@ def test_can_start(harness, mocker):
             return_value=deployment_desc,
             new_callable=PropertyMock,
         )
-        can_start = harness.charm.cluster_manager.check_blocking_directives()
+        can_start = harness.charm.cluster_manager.no_blocking_directives()
 
         assert (
             can_start == expected
