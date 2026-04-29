@@ -6,13 +6,13 @@ import json
 import logging
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION
 from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
-    ProfileStatuses,
 )
 from opensearch_single_kernel.core.models import PeerClusterOrchestrators
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
@@ -31,6 +31,15 @@ DATA_APP_TWO = "opensearch-data-two"
 CLUSTER_NAME = "app"
 
 APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 1, DATA_APP_TWO: 1}
+
+NO_DATA_NODE_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 data nodes are required.",
+)
+NO_CM_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 cluster manager nodes are required.",
+)
 
 
 @pytest.mark.abort_on_fail
@@ -246,7 +255,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
             DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
         units_statuses={
-            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            DATA_APP: [NO_DATA_NODE_STATUS],
         },
     )
 

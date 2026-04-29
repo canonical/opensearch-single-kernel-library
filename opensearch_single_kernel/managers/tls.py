@@ -629,7 +629,9 @@ class TlsManager(BaseManager):
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
         if not self.state.tls_relation:
-            status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
+            # Unit will fail if we combine the two iF
+            if scope == "unit":
+                status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list
 
         if scope == "unit":

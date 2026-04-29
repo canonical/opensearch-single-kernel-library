@@ -7,12 +7,12 @@ import logging
 import time
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
-    ProfileStatuses,
     TlsStatuses,
 )
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
@@ -41,6 +41,15 @@ INVALID_CLUSTER_NAME = "timeseries"
 APP_UNITS = {MAIN_APP: 3, FAILOVER_APP: 3, DATA_APP: 2, INVALID_APP: 1}
 
 NO_CM_STATUS_MESSAGE = "Missing requirements: At least 1 cluster manager nodes are required."
+
+NO_DATA_NODE_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 data nodes are required.",
+)
+NO_CM_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 cluster manager nodes are required.",
+)
 
 
 @pytest.mark.abort_on_fail
@@ -109,8 +118,8 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         },
         units_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
-            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
-            INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            DATA_APP: [NO_CM_STATUS],
+            INVALID_APP: [NO_CM_STATUS],
         },
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -154,8 +163,8 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
             INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
         units_statuses={
-            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
-            INVALID_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            DATA_APP: [NO_CM_STATUS],
+            INVALID_APP: [NO_CM_STATUS],
         },
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -183,7 +192,7 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
             ],
         },
         units_statuses={
-            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            DATA_APP: [NO_CM_STATUS],
         },
         wait_for_exact_units={MAIN_APP: APP_UNITS[MAIN_APP], INVALID_APP: APP_UNITS[INVALID_APP]},
         idle_period=IDLE_PERIOD,

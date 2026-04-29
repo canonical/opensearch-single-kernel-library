@@ -7,12 +7,12 @@ import json
 import logging
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
 from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
-    ProfileStatuses,
 )
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
@@ -38,6 +38,15 @@ DATA_APP = "opensearch-data"
 CLUSTER_NAME = "app"
 
 APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 3, DATA_APP: 1}
+
+NO_DATA_NODE_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 data nodes are required.",
+)
+NO_CM_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 cluster manager nodes are required.",
+)
 
 
 @pytest.mark.abort_on_fail
@@ -176,11 +185,7 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
         ops_test,
         apps=[DATA_APP],
         apps_statuses={DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]},
-        units_statuses={
-            DATA_APP: [
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-            ]
-        },
+        units_statuses={DATA_APP: [NO_CM_STATUS]},
         wait_for_exact_units={
             DATA_APP: APP_UNITS[DATA_APP],
         },

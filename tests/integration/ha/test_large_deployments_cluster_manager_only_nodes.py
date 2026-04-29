@@ -7,11 +7,11 @@ import logging
 import time
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
-    ProfileStatuses,
 )
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
@@ -35,6 +35,15 @@ DATA_APP = "opensearch-data"
 CLUSTER_NAME = "log-app"
 
 APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 2}
+
+NO_DATA_NODE_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 data nodes are required.",
+)
+NO_CM_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 cluster manager nodes are required.",
+)
 
 
 @pytest.mark.abort_on_fail
@@ -94,7 +103,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         apps=list(APP_UNITS.keys()),
         apps_statuses={
             MAIN_APP: [
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                NO_DATA_NODE_STATUS,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
             ],
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
@@ -102,11 +111,11 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         },
         units_statuses={
             MAIN_APP: [
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                NO_DATA_NODE_STATUS,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
             ],
-            FAILOVER_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
-            DATA_APP: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            FAILOVER_APP: [NO_DATA_NODE_STATUS],
+            DATA_APP: [NO_CM_STATUS],
         },
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,

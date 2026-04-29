@@ -507,7 +507,7 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
         return False
 
 
-def storage_config_from_connection_info(  # noqa: C901
+def storage_config_from_connection_info(
     object_storage_type: ObjectStorageType, connection_info: dict[str, str]
 ) -> ObjectStorageConfig | None:
     """Get the active object storage config from relations/peer-cluster.
