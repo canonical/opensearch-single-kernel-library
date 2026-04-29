@@ -631,8 +631,7 @@ class TlsManager(BaseManager):
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
             if (
-                scope == "unit"
-                and self.state.application.deployment_desc
+                self.state.application.deployment_desc
                 and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
