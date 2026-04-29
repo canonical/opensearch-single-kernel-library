@@ -216,7 +216,14 @@ def _check_status(status: Status, check: StatusObject) -> bool:
         + r"(?s:.*?)"
     )
 
-    return re.fullmatch(regex_pattern, status.message or "") is not None
+    if (
+        status.message == check.message
+        or status.message.startswith(check.message)
+        or status.message.startswith(f"{check.message:.40}")
+        or re.fullmatch(regex_pattern, status.message or "") is not None
+    ):
+        return True
+    return False
 
 
 def _is_every_condition_on_app_met(
