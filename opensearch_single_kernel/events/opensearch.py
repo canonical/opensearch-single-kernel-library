@@ -75,6 +75,7 @@ from opensearch_single_kernel.utils.secrets import (
     password_key,
     user_from_hash_key,
 )
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -459,7 +460,6 @@ class OpenSearchEventsHandler(Object):
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
-        self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
@@ -621,7 +621,7 @@ class OpenSearchEventsHandler(Object):
                 return
 
         # apply the directives computed and emitted by the peer cluster manager
-        if self.charm.cluster_manager.check_blocking_directives():
+        if self.charm.cluster_manager.no_blocking_directives():
             try:
                 self.charm.cluster_manager.get_nodes(False)
             except OpenSearchHttpError:
@@ -629,20 +629,10 @@ class OpenSearchEventsHandler(Object):
                 event.defer()
                 return
         else:
-            # Apply status from deployment desc, to reflect any blocking status if needed
-            if is_leader_unit:
-                self.apply_status_from_deployment_desc(
-                    self.charm.state.application.deployment_desc, show_status_only_once=False
-                )
             logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
-
-        if is_leader_unit:
-            self.apply_status_from_deployment_desc(
-                self.charm.state.application.deployment_desc,
-                show_status_only_once=False,
-            )
+        self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
@@ -1181,12 +1171,20 @@ class OpenSearchEventsHandler(Object):
         ):
             return
 
+        logger.debug(f"boutou> We are applying status from deployment desc: {deployment_desc}")
+
         if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
+            logger.debug(
+                "boutou> No show status directive in deployment description, skipping status application."
+            )
             return
 
         # remove show_status directive which is applied below
         if show_status_only_once:
+            logger.debug("boutou> Removing show status directive from cluster manager.")
             self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+
+        logger.debug("boutou> Current status message %s", deployment_desc.state.message)
 
         for status in PeerClusterStatuses:
             if status.value.message != deployment_desc.state.message:
@@ -1196,11 +1194,24 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.name,
                 )
         if deployment_desc.state.message:
+            logger.debug(
+                "boutou> Adding status %s with message: %s",
+                GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                deployment_desc.state.message,
+            )
             self.charm.state.add_status_if_not_present(
-                status=GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                status=format_status(
+                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                    params={"directive": deployment_desc.state.message},
+                ),
                 scope="app",
                 component=self.charm.cluster_manager.name,
-                dynamic_params={"directive": deployment_desc.state.message},
+            )
+            logger.debug(
+                "boutou> %s",
+                self.charm.state.statuses.get(
+                    "app", self.charm.cluster_manager.name, running_status_only=True
+                ).root,
             )
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901

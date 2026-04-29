@@ -721,7 +721,8 @@ class ClusterState(Object):
             and not self.application.is_security_index_initialised
         ):
             self.server.is_cluster_manager_removed = True
-            computed_roles.remove("cluster_manager")
+            if "cluster_manager" in computed_roles:
+                computed_roles.remove("cluster_manager")
 
         if computed_roles == ["coordinating"]:
             computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list

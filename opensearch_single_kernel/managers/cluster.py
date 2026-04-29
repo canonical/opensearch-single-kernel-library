@@ -58,6 +58,7 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import deployment_type
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -466,9 +467,7 @@ class ClusterManager(BaseManager):
                 if not self.opensearch_client.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
-    def check_blocking_directives(
-        self, deployment_desc: DeploymentDescription | None = None
-    ) -> bool:
+    def no_blocking_directives(self, deployment_desc: DeploymentDescription | None = None) -> bool:
         """Return If we have any blocking directives."""
         if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
@@ -692,7 +691,7 @@ class ClusterManager(BaseManager):
         if not (deployment_desc := self.state.application.deployment_desc):
             return False
 
-        if not self.check_blocking_directives(deployment_desc):
+        if not self.no_blocking_directives(deployment_desc):
             return False
 
         if not self.state.application.is_admin_user_initialized:
@@ -884,14 +883,8 @@ class ClusterManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
         current_status_list = self.state.statuses.get(scope, self.name).root
-        if not recompute:
-            return current_status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        running_status_list = self.state.statuses.get(
-            scope, self.name, running_status_only=True
-        ).root
-
-        status_list: list[StatusObject] = running_status_list
+        status_list: list[StatusObject] = []
 
         if scope == "unit":
             if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
@@ -936,3 +929,16 @@ class ClusterManager(BaseManager):
             and not self.state.application.is_security_index_initialised
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
+
+        if (
+            not self.no_blocking_directives(deployment_desc)
+            and deployment_desc
+            and deployment_desc.state.value != State.ACTIVE
+            and deployment_desc.state.message
+        ):
+            status_list.append(
+                format_status(
+                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                    params={"directive": deployment_desc.state.message},
+                )
+            )
