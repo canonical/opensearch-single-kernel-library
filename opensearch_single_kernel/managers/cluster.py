@@ -58,7 +58,6 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import deployment_type
-from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -888,7 +887,11 @@ class ClusterManager(BaseManager):
         if not recompute:
             return current_status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        status_list: list[StatusObject] = []
+        running_status_list = self.state.statuses.get(
+            scope, self.name, running_status_only=True
+        ).root
+
+        status_list: list[StatusObject] = running_status_list
 
         if scope == "unit":
             if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
@@ -933,12 +936,3 @@ class ClusterManager(BaseManager):
             and not self.state.application.is_security_index_initialised
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
-
-        if deployment_desc.pending_directives and deployment_desc.state.message:
-            status_message = deployment_desc.state.message
-            status_list.append(
-                format_status(
-                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
-                    params={"directive": status_message},
-                )
-            )

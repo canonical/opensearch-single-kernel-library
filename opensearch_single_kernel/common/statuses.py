@@ -35,9 +35,12 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
+    # Blocking directive should be a running status since it is set based on the presence
+    # of a SHOW_STATUS directive and once the status set we remove the directive
     BLOCKING_DIRECTIVE = StatusObject(
         status="blocked",
         message="{directive}",
+        running="async",
     )
 
 
@@ -195,6 +198,7 @@ class PeerClusterStatuses(Enum):
     PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION = StatusObject(
         status="waiting",
         message="Main-cluster-orchestrator removed, waiting for failover promotion.",
+        running="async",
     )
 
 

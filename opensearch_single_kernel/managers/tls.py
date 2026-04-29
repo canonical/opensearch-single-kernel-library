@@ -648,7 +648,7 @@ class TlsManager(BaseManager):
                     and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 )
                 or (
-                    self.state.application.orchestrators
+                    self.state.application.orchestrators_dict
                     and self.state.peer_clusters(remote=True, is_provider=False)
                 )
                 or self.state.peer_clusters(remote=True, is_provider=True)
