@@ -12,11 +12,18 @@ from opensearch_single_kernel.common.statuses import InternalUsersStatuses
 from tests.unit.helpers import deployment_descriptions
 
 
-def test_on_install(harness):
+def test_on_install(harness, substrate):
     """Test the install event callback on success."""
-    with patch("opensearch_single_kernel.workload.vm.VMWorkload.install") as install:
+    workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
+    with patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.install"
+    ) as install:
         harness.charm.on.install.emit()
-        install.assert_called_once()
+        # For K8s, install is not operational
+        if substrate == "vm":
+            install.assert_called_once()
+        else:
+            install.assert_not_called()
 
 
 def test_on_leader_elected(harness, mocker):
@@ -123,7 +130,7 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 # TODO: Add large deployment unit tests
 
 
-def test_on_start(harness, mocker):
+def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
     lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
@@ -164,10 +171,13 @@ def test_on_start(harness, mocker):
     )
 
     is_node_up = mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.is_node_up")
+    workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
+    )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
-    mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_service_started")
 
     # test when setup complete
     should_ignore_lock.return_value = False
@@ -186,7 +196,9 @@ def test_on_start(harness, mocker):
     harness.charm.on.start.emit()
     update_opensearch_config.assert_not_called()
 
-    mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_service_started")
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
+    )
     # when _get_nodes fails
     get_nodes.side_effect = OpenSearchHttpError()
     harness.charm.on.start.emit()
@@ -194,7 +206,10 @@ def test_on_start(harness, mocker):
 
     get_nodes.reset_mock()
 
-    mocker.patch("opensearch_single_kernel.workload.vm.VMWorkload.is_failed", return_value=False)
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_failed",
+        return_value=False,
+    )
     start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
     # _get_nodes succeeds
     all_tls_resources_stored.return_value = True

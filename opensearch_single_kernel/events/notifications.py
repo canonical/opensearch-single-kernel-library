@@ -24,6 +24,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
 )
@@ -192,9 +193,16 @@ class NotificationsEvents(Object):
 
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
-            credentials = self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
-                config.smtp_account_id, smtp_data.user, smtp_data.password
-            )
+            try:
+                credentials = (
+                    self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
+                        config.smtp_account_id, smtp_data.user, smtp_data.password
+                    )
+                )
+            except OpenSearchCmdError as e:
+                logger.error("Failed to write SMTP credentials to keystore: %s", e)
+                event.defer()
+                return
 
             # reload secure settings
             self.charm.reload_keystore_event.emit()
@@ -326,7 +334,10 @@ class NotificationsEvents(Object):
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:
-            self.charm.keystore_manager.remove_entries(keys)
+            try:
+                self.charm.keystore_manager.remove_entries(keys)
+            except OpenSearchCmdError as e:
+                logger.error("Failed to remove SMTP credentials from keystore: %s", e)
             self.charm.reload_keystore_event.emit()
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
@@ -372,5 +383,10 @@ class NotificationsEvents(Object):
             },
         )
 
-        self.charm.keystore_manager.put_entries(keys)
+        try:
+            self.charm.keystore_manager.put_entries(keys)
+        except OpenSearchCmdError as e:
+            logger.error("Failed to write SMTP credentials to keystore: %s", e)
+            event.defer()
+            return
         self.charm.reload_keystore_event.emit()

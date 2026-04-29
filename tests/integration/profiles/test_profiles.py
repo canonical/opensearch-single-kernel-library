@@ -21,39 +21,22 @@ from tests.integration.conftest import (
     APP_NAME,
     MODEL_CONFIG,
 )
-from tests.integration.helpers import wait_until
+from tests.integration.helpers import (
+    deploy_opensearch,
+    get_cloud_type,
+    get_leader_unit_ip,
+    wait_until,
+)
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
-
-
-async def get_cloud_type(ops_test: OpsTest) -> str:
-    """Return current cloud type of the selected controller.
-
-    Args:
-        ops_test (OpsTest): ops_test plugin
-
-    Returns:
-        string: current type of the underlying cloud
-    """
-    assert ops_test.model, "Model must be present"
-    controller = await ops_test.model.get_controller()
-    cloud = await controller.cloud()
-    return cloud.cloud.type_
-
-
-async def get_constraints(ops_test: OpsTest) -> str | None:
-    """Get constraints for the OpenSearch charm based on the cloud type."""
-    cloud_type = await get_cloud_type(ops_test)
-    if cloud_type == "lxd":
-        return "mem=8G"
-    return None
 
 
 async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str = APP_NAME):
     """A dummy test to make pytest happy when all other tests are skipped."""
     os_app = ops_test.model.applications[app_name]
     unit = os_app.units[0]
+    unit_ip = await get_leader_unit_ip(ops_test, app=app_name)
 
     action = await unit.run_action("get-password")
     action = await action.wait()
@@ -66,7 +49,7 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
     # request the OpenSearch endpoint to get the JVM settings
     jvm_response = request(
         "GET",
-        f"https://{unit.public_address}:9200/_nodes/stats/jvm",
+        f"https://{unit_ip}:9200/_nodes/stats/jvm",
         verify=False,
         auth=("admin", password),
     )
@@ -84,23 +67,28 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+@pytest.mark.skip_if_substrate("k8s")
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
-    constraints = await get_constraints(ops_test)
-    logger.info(f"Using constraints: {constraints}")
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(
+        deploy_opensearch(
+            ops_test,
             charm,
-            num_units=1,
+            substrate,
+            APP_NAME,
+            1,
             series=series,
-            constraints=constraints,
+            constraints="mem=8G",
             config={"profile": "production"},
+            resources=charm_resources,
         ),
     )
 
@@ -109,8 +97,13 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
-    """Wait for blocked cluster with cluster topology error"""
+    """Wait for blocked cluster with cluster topology error.
+
+    (VM only: production profile with 1 unit)
+    TODO: Add equivalent K8s profile coverage once base capabilities are implemented.
+    """
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -120,6 +113,7 @@ async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_scale_to_active(ops_test: OpsTest) -> None:
     """Scale the OpenSearch cluster to the active state."""
     os_app = ops_test.model.applications[APP_NAME]
@@ -134,7 +128,9 @@ async def test_scale_to_active(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -> None:
+async def test_insufficient_memory(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test insufficient memory scenario."""
     cloud_name = await get_cloud_type(ops_test)
     if cloud_name != "lxd":
@@ -143,12 +139,16 @@ async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=3,
+        substrate,
+        APP_NAME,
+        3,
         series=series,
         constraints="mem=3G",
         config={"profile": "production"},
+        resources=charm_resources,
     )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     # we do not wait for idle in this wait because the 3 units will keep trying
@@ -163,14 +163,22 @@ async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -
 
 
 @pytest.mark.abort_on_fail
-async def test_testing_profile(ops_test: OpsTest, charm: str, series: str) -> None:
+async def test_testing_profile(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test testing profile"""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test)
 
-    await ops_test.model.deploy(
-        charm, num_units=1, series=series, config={"profile": "testing"}, constraints=constraints
+    await deploy_opensearch(
+        ops_test,
+        charm,
+        substrate,
+        APP_NAME,
+        1,
+        series=series,
+        config={"profile": "testing"},
+        resources=charm_resources,
     )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
@@ -182,7 +190,9 @@ async def test_testing_profile(ops_test: OpsTest, charm: str, series: str) -> No
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_config_changed_to_production(ops_test: OpsTest) -> None:
+    """Switch to production profile and expect blocked (VM only, K8s stays at 1 unit)."""
     os_app = ops_test.model.applications[APP_NAME]
     await os_app.set_config({"profile": "production"})
     await wait_until(
@@ -195,31 +205,38 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="Skipping large deployment")
-async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: str) -> None:
+async def test_large_deployment_cluster(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test)
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        application_name="main",
-        num_units=1,
+        substrate,
+        "main",
+        1,
         series=series,
+        constraints="mem=8G",
         config={"cluster_name": "test", "roles": "cluster_manager", "profile": "production"},
-        constraints=constraints,
+        resources=charm_resources,
     )
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        application_name="data",
-        num_units=1,
+        substrate,
+        "data",
+        1,
         series=series,
+        constraints="mem=8G",
         config={
             "cluster_name": "test",
             "init_hold": True,
             "roles": "data",
             "profile": "production",
         },
-        constraints=constraints,
+        resources=charm_resources,
     )
 
     # integrate TLS to all applications

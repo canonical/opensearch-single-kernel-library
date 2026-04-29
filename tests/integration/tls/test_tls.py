@@ -19,6 +19,7 @@ from tests.integration.helpers import (
     EmptyBlockedStatus,
     check_cluster_formation_successful,
     cluster_health,
+    deploy_opensearch,
     get_application_unit_ids,
     get_application_unit_ids_ips,
     get_application_unit_ips_names,
@@ -48,15 +49,21 @@ SECRET_EXPIRY_WAIT_TIME = SECRET_EXPIRY_TIME + 60
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy_active(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=len(UNIT_IDS),
+        substrate,
+        APP_NAME,
+        len(UNIT_IDS),
         series=series,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Deploy TLS Certificates operator.
@@ -101,7 +108,7 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_tls_renewal(ops_test: OpsTest) -> None:
+async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
     """Test that renewed TLS certificates are reloaded immediately without restarting."""
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     leader_id = await get_leader_unit_id(ops_test)
@@ -155,7 +162,9 @@ async def test_tls_renewal(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
+async def test_tls_expiration(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Test that expiring TLS certificates are renewed."""
     # before we can run this test, need to clean up and deploy with different config
     if APP_NAME in ops_test.model.applications:
@@ -177,11 +186,15 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.set_config(MODEL_CONFIG)
 
     logger.info("Deploying OpenSearch")
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=1,
+        substrate,
+        APP_NAME,
+        1,
         series=series,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     await wait_until(
@@ -197,8 +210,13 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     search_expression = "expire=self._get_next_secret_expiry_time\\(certificate\\)"
     replace_expression = f"expire=timedelta\\(seconds={SECRET_EXPIRY_TIME}\\)"
     python_version = "python3.12" if series == "noble" else "python3.10"
+
     lib_file = f"/var/lib/juju/agents/unit-opensearch-{unit_id}/charm/venv/lib/{python_version}/site-packages/opensearch_single_kernel/lib/charms/tls_certificates_interface/v3/tls_certificates.py"
-    cmd = f"juju ssh {APP_NAME}/{unit_id} sudo sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
+    sudo = ""
+    # VM uses root user
+    if substrate == "vm":
+        sudo = "sudo"
+    cmd = f"juju ssh {APP_NAME}/{unit_id} {sudo} sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
     logger.info(f"Running command: {cmd}")
     subprocess.check_output(cmd, shell=True)
 

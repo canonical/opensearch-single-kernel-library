@@ -21,6 +21,7 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
     CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN,
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
     GENERATED_ROLES,
@@ -55,7 +56,11 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type, format_unit_name
+from opensearch_single_kernel.utils.helpers import (
+    deployment_type,
+    format_unit_name,
+    mask_sensitive_information,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -88,10 +93,13 @@ class ClusterManager(BaseManager):
             return
 
         # start the opensearch service
+        logger.debug("Starting OpenSearch workload service")
         self.workload.start_service()
 
         start = datetime.now()
-        while not (connected := _is_connected()) and (datetime.now() - start).seconds < 180:
+        while (
+            not (connected := _is_connected()) and (datetime.now() - start).total_seconds() < 180
+        ):
             time.sleep(3)
         if not connected:
             logger.debug("Waited %s but OpenSearch did not start", datetime.now() - start)
@@ -321,8 +329,11 @@ class ClusterManager(BaseManager):
             or self.state.application.deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         )
 
-    def wait_opensearch_part_of_cluster(self) -> None:
-        """Wait for opensearch to become part of the cluster."""
+    def assert_node_in_cluster(self) -> None:
+        """Assert that the node is part of the cluster.
+
+        Check if node's name name is in the list of online nodes.
+        """
         # Get online nodes
         try:
             nodes = self.get_nodes(use_localhost=self.opensearch_client.is_node_up())
@@ -330,11 +341,17 @@ class ClusterManager(BaseManager):
             logger.info("Failed to get online nodes")
             raise e
 
+        if not (expected_name := self.state.unit_name):
+            raise OpenSearchNotFullyReadyError(
+                "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
+            )
         for node in nodes:
-            if node.name == self.state.unit_name:
+            if node.name == expected_name:
                 break
         else:
-            raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
+            raise OpenSearchNotFullyReadyError(
+                "Node online but not in cluster (expected node.name=%s)." % expected_name
+            )
 
     def initialise_security_index(self) -> None:
         """Initialise security Index.
@@ -345,18 +362,20 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
+        # Use a connectable host for the securityadmin CLI.
+        securityadmin_host = self.state.node_host
         admin_secrets = self.state.application.admin_secrets
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-            f"-h {self.state.host_ip}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-h {securityadmin_host}",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tsalias ca",
             "-tst PKCS12",
-            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-ks {(self.workload.paths.certs / f'{CertType.APP_ADMIN.val}.p12')}",
             f"-kspass {admin_secrets['keystore-password']}",
-            f"-ksalias {CertType.APP_ADMIN}",
+            f"-ksalias {CertType.APP_ADMIN.val}",
             "-kst PKCS12",
         ]
 
@@ -364,9 +383,14 @@ class ClusterManager(BaseManager):
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
+        logger.info(
+            "Executing securityadmin.sh with args: %s",
+            mask_sensitive_information(" ".join(args)),
+        )
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
+        logger.info("securityadmin.sh execution completed successfully")
         self._put_security_index_initialised()
 
     def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
@@ -378,7 +402,7 @@ class ClusterManager(BaseManager):
             f"-f {self.workload.paths.conf}/{file}",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
             f"-h {self.state.host_ip}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tst PKCS12",
             f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
@@ -557,7 +581,7 @@ class ClusterManager(BaseManager):
     @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
+        reachable = self.workload.is_reachable(self.state.node_host, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -683,19 +707,11 @@ class ClusterManager(BaseManager):
 
         return True
 
-    def is_started(self) -> bool:
-        """Return whether the opensearch service is started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
-        if not reachable:
-            logger.debug("Cannot connect to the OpenSearch server...")
-
-        return reachable
-
     def stop_workload(self) -> None:
         """Stop the opensearch service."""
         self.workload.stop()
         start = datetime.now()
-        while self.is_started() and (datetime.now() - start).seconds < 60:
+        while self.is_opensearch_started and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
         del self.state.server.started

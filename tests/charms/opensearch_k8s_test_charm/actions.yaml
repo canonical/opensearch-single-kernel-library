@@ -79,3 +79,11 @@ force-upgrade:
     Use to
     - force incompatible upgrade and/or
     - continue upgrade if 1+ upgraded units have non-active status
+
+status-detail:
+  description: Gets statuses of the charm
+  params:
+    recompute:
+      type: boolean
+      default: false
+      description: a boolean indicating whether a unit should recompute all statuses.   - continue upgrade if 1+ upgraded units have non-active status

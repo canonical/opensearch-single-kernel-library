@@ -201,7 +201,7 @@ class SnapshotsEventsHandler(Object):
         # Catch file operation exceptions
         try:
             self.update_stored_credentials(object_storage_type, object_storage_config)
-        except OpenSearchFileOperationError:
+        except (OpenSearchFileOperationError, OpenSearchCmdError):
             logger.error("Failed to update stored backup credentials.")
             return
 

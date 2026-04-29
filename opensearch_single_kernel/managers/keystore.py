@@ -160,19 +160,18 @@ class KeystoreManager(BaseManager):
                     continue
                 raise
 
-    def list_keys(self) -> list[str]:
-        """List all keys in the keystore."""
-        self._create_if_needed()
-        return self.workload.run_cmd(self.KEYSTORE, "list").splitlines()
-
     def reload(self) -> bool:
         """Reload the keystore.
 
         Returns:
             whether a reload was successful.
         """
-        self._create_if_needed()
-        self.workload.run_cmd(self.KEYSTORE, "upgrade")
+        try:
+            self._create_if_needed()
+            self.workload.run_cmd(self.KEYSTORE, "upgrade")
+        except OpenSearchCmdError as e:
+            logger.error("Keystore operation failed: %s", e)
+            return False
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup

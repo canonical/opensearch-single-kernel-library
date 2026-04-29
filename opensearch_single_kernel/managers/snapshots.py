@@ -18,6 +18,7 @@ from opensearch_single_kernel.common.constants import (
     S3_CA_ALIAS,
     STORE_PASSWORD,
     ObjectStorageType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
@@ -183,6 +184,7 @@ class SnapshotsManager(BaseManager):
             alias=S3_CA_ALIAS,
             store_pwd=STORE_PASSWORD,
             store_path=store_path,
+            use_sudo=self.state.substrate == Substrates.VM,
         )
 
     def store_s3_ca(self, s3_tls_ca_chain: str | None) -> None:
@@ -207,6 +209,7 @@ class SnapshotsManager(BaseManager):
             alias=S3_CA_ALIAS,
             store_pwd=STORE_PASSWORD,
             store_path=store_path,
+            use_sudo=self.state.substrate == Substrates.VM,
         )
 
         # Import fresh CA

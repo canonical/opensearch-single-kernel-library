@@ -107,7 +107,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.notifications_manager = NotificationsManager(self.state, self.workload)
         self.snapshots_manager = SnapshotsManager(self.state, self.workload)
 
-        # Event Handlers
+        # Events
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
         self.external_clients_events = ExternalClientsEventsHandler(self)

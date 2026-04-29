@@ -1,4 +1,5 @@
 venv/
+.venv/
 build/
 *.charm
 .tox/
@@ -67,3 +68,5 @@ terraform.rc
 
 coverage.xml
 last_written_value
+.zed
+*.log

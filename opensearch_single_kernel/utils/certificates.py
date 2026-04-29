@@ -3,20 +3,53 @@
 # See LICENSE file for licensing details.
 
 """Utilities for reading / writing certificates."""
+import base64
 import logging
+import math
 import re
+from datetime import datetime, timezone
 
 from charmlibs.pathops import PathProtocol
+from cryptography import x509
 
-from opensearch_single_kernel.common.constants import KEYTOOL
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.utils.helpers import is_alias_missing_error
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def normalized_tls_subject(subject: str) -> str:
+    """Removes any / character from a subject."""
+    if subject.startswith("/"):
+        subject = subject[1:]
+    return subject.replace("/", ",")
+
+
+def cert_expiration_remaining_hours(cert: str) -> int:
+    """Returns the remaining hours for the cert to expire."""
+    certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
+    time_difference = certificate_object.not_valid_after - datetime.now(timezone.utc)
+    return math.floor(time_difference.total_seconds() / 3600)
+
+
+def parse_tls_file(raw_content: str) -> bytes:
+    """Parse TLS files from both plain text or base64 format."""
+    if re.match(r"(-+(BEGIN|END) [A-Z ]+-+)", raw_content):
+        return re.sub(
+            r"(-+(BEGIN|END) [A-Z ]+-+)",
+            "\\1",
+            raw_content,
+        ).encode("utf-8")
+    return base64.b64decode(raw_content)
+
+
+def is_alias_missing_error(exc: OpenSearchCmdError, alias: str) -> bool:
+    """Return True if keytool says that given alias does not exist."""
+    msg = (exc.out or "") + (exc.err or "")
+    return f"Alias <{alias}> does not exist" in msg
 
 
 def read_ca(
@@ -34,7 +67,7 @@ def list_aliases(
         return None
 
     # we fetch the list of stored aliases
-    cmd = f"{KEYTOOL} -v -list -keystore {store_path} -storetype PKCS12"
+    cmd = f"{workload.keytool_cmd} -v -list -keystore {store_path} -storetype PKCS12"
     args = f"-storepass {store_pwd}"
 
     try:
@@ -63,7 +96,11 @@ def list_cas(
         If an alias is partitioned as <alias>-0, <alias>-1, ... in the store,
         they are reassembled and returned under the base <alias> key.
     """
-    if not store_path.exists():
+    try:
+        if not workload.exists(store_path):
+            return None
+    except OpenSearchFileOperationError as e:
+        logger.error("Error accessing the truststore path: %s", e)
         return None
 
     cmd = f"openssl pkcs12 -in {store_path}"
@@ -121,17 +158,20 @@ def store_ca_chain(  # noqa: C901
     keep_previous: bool,
     snap_user_with_write_permission: bool = False,
     add_read_perm: bool = False,
+    use_sudo: bool = True,
 ) -> bool:
     """Common implementation to store a CA chain into a PKCS12 keystore."""
+    sudo_prefix = "sudo " if use_sudo else ""
     tmpdir = store_path.parent
     starter_mode = "0664"
     snap_user = "snap_daemon:root"
+    should_restore_snap_owner = snap_user_with_write_permission and use_sudo
     final_mode = "0640"
     # import root first, then intermediates
     certs = list(reversed(split_ca_chain(ca)))
     if snap_user_with_write_permission and store_path.exists():
         try:
-            workload.run_cmd(f"sudo chmod {starter_mode} {store_path}")
+            workload.run_cmd(f"{sudo_prefix}chmod {starter_mode} {store_path}")
         except OpenSearchCmdError:
             pass
 
@@ -143,7 +183,7 @@ def store_ca_chain(  # noqa: C901
         if keep_previous:
             try:
                 workload.run_cmd(
-                    f"{KEYTOOL} -changealias "
+                    f"{workload.keytool_cmd} -changealias "
                     f"-alias {internal_alias} -destalias {old_internal_alias} "
                     f"-keystore {store_path} -storetype PKCS12",
                     f"-storepass {store_pwd}",
@@ -165,7 +205,7 @@ def store_ca_chain(  # noqa: C901
             ) as tmp_path:
                 try:
                     workload.run_cmd(
-                        f"{KEYTOOL} -importcert -noprompt "
+                        f"{workload.keytool_cmd} -importcert -noprompt "
                         f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12",
                         f"-storepass {store_pwd}",
                     )
@@ -185,10 +225,17 @@ def store_ca_chain(  # noqa: C901
     # post-actions
     try:
         command = ""
-        if snap_user_with_write_permission:
-            command = f"sudo chown {snap_user} {store_path}; sudo chmod {final_mode} {store_path};"
+        # Only the VM/snap path needs ownership restored to snap_daemon after keytool rewrites
+        # the PKCS12 file. K8s uses direct container ownership and should only normalize mode.
+        if should_restore_snap_owner:
+            command = (
+                f"{sudo_prefix}chown {snap_user} {store_path}; "
+                f"{sudo_prefix}chmod {final_mode} {store_path};"
+            )
+        elif snap_user_with_write_permission:
+            command = f"{sudo_prefix}chmod {final_mode} {store_path};"
         if add_read_perm:
-            command += f"sudo chmod +r {store_path}"
+            command += f"{sudo_prefix}chmod +r {store_path}"
         if command:
             workload.run_cmd(command)
     except OpenSearchCmdError:
@@ -197,8 +244,23 @@ def store_ca_chain(  # noqa: C901
     return True
 
 
+def _is_keystore_missing_error(exc: OpenSearchCmdError, keystore_path: str) -> bool:
+    """Return True if the exception indicates the keystore file does not exist."""
+    msg = (exc.out or "") + (exc.err or "")
+    # keytool messages change a bit between JDKs, we keep this intentionally.
+    return (
+        "Keystore file does not exist" in msg
+        or ("FileNotFoundException" in msg and keystore_path in msg)
+        or ("No such file or directory" in msg and keystore_path in msg)
+    )
+
+
 def remove_ca(
-    workload: BaseWorkload, alias: str, store_pwd: str, store_path: PathProtocol
+    workload: BaseWorkload,
+    alias: str,
+    store_pwd: str,
+    store_path: PathProtocol,
+    use_sudo: bool = True,
 ) -> None:
     """Remove old CA cert from the truststore.
 
@@ -207,17 +269,31 @@ def remove_ca(
         alias: Alias to use for the CA certs.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
+        use_sudo: Whether to prefix chmod with sudo. False for K8s where sudo is unavailable.
     """
-    if not alias:
-        logger.debug("remove_ca called with empty alias, nothing to do.")
-        return
-
-    if not workload.exists(store_path):
-        logger.debug("Trust store %s does not exist, nothing to remove.", store_path)
-        return
-
+    list_cmd = (
+        f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    )
+    list_args = f"-storepass {store_pwd}"
     try:
-        workload.run_cmd(f"sudo chmod 0664 {store_path}")
+        workload.run_cmd(list_cmd, list_args)
+    except OpenSearchCmdError as e:
+        if _is_keystore_missing_error(e, str(store_path)):
+            logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
+            return
+        if is_alias_missing_error(e, alias):
+            logger.debug(
+                "Alias %s not found in %s when listing before delete, ignoring.",
+                alias,
+                store_path,
+            )
+            return
+        # Anything else is a real error
+        raise
+
+    sudo_prefix = "sudo " if use_sudo else ""
+    try:
+        workload.run_cmd(f"{sudo_prefix}chmod 0664 {store_path}")
     except OpenSearchCmdError as e:
         logger.warning(
             "Failed to chmod 0664 on %s before CA removal: %s%s",
@@ -251,7 +327,10 @@ def _remove_ca_aliases(
         return
     logger.info("Aliases: %s going to be removed", ", ".join(aliases_to_remove))
     for name in aliases_to_remove:
-        del_cmd = f"{KEYTOOL} -delete -keystore {store_path} " f"-alias {name} -storetype PKCS12"
+        del_cmd = (
+            f"{workload.keytool_cmd} -delete -keystore {store_path} "
+            f"-alias {name} -storetype PKCS12"
+        )
         del_args = f"-storepass {store_pwd}"
         try:
             workload.run_cmd(del_cmd, del_args)
@@ -290,7 +369,9 @@ def _collect_aliases_to_remove(
 
     aliases_to_remove: list[str] = []
     for name in all_aliases:
-        if name.startswith(f"{alias_base}-"):
+        if name == alias_base:
+            aliases_to_remove.append(name)
+        elif name.startswith(f"{alias_base}-"):
             # Verify the suffix is a digit
             suffix = name.split("-")[-1]
             if suffix.isdigit():

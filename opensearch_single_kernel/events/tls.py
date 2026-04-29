@@ -112,6 +112,11 @@ class TLSEventsHandler(Object):
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
         # TODO: Defer when upgrade is in progress
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for TLS relation created, deferring.")
+            event.defer()
+            return
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
@@ -127,7 +132,6 @@ class TLSEventsHandler(Object):
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 Scope.APP, CertType.APP_ADMIN
             )
-
             self.certs.request_certificate_creation(certificate_signing_request=csr)
         elif not self.charm.state.application.admin_secrets.get("truststore-password"):
             logger.debug("Truststore-password from main-orchestrator not available yet.")
@@ -148,6 +152,7 @@ class TLSEventsHandler(Object):
         unit_http_csr = self.charm.tls_manager.create_certificate_signing_request(
             Scope.UNIT, CertType.UNIT_HTTP
         )
+
         self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
         self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
@@ -176,6 +181,16 @@ class TLSEventsHandler(Object):
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.
         """
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for certificate available, deferring.")
+            event.defer()
+            return
+
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            logger.debug("Deployment description not yet computed, deferring event.")
+            event.defer()
+            return
+
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate_signing_request, "csr"
@@ -184,19 +199,19 @@ class TLSEventsHandler(Object):
         except TypeError:
             logger.debug("Unknown certificate available.")
             return
-
         # variables for better readability
-        is_leader_unit = self.charm.unit.is_leader()
-
         deployment_desc = self.charm.state.application.deployment_desc
         is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
-        # seems like the admin certificate is also broadcast to non leader units on refresh request
-        if not is_leader_unit and scope == Scope.APP:
+        logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
+
+        if not self.charm.unit.is_leader() and scope == Scope.APP:
             return
 
         old_cert = secrets.get("cert", None)
         ca_chain = "\n".join(event.chain[::-1])
+
+        is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
         self.charm.tls_manager.update_certificate_secret_if_needed(
             scope=scope,
@@ -206,15 +221,28 @@ class TLSEventsHandler(Object):
             ca=event.ca,
         )
 
-        current_stored_ca = self.charm.tls_manager.read_stored_ca()
+        try:
+            current_stored_ca = self.charm.tls_manager.read_stored_ca()
+
+        except OpenSearchFileOperationError as e:
+            logger.error("Error while reading stored CA certificate: %s", e)
+            event.defer()
+            return
+        logger.debug("Current stored CA: %s, New CA: %s", current_stored_ca, event.ca)
         if current_stored_ca != event.ca:
-            if not self.charm.tls_manager.store_new_ca(
-                cert_type,
-                create_store_pwd=is_leader_unit and is_main_orchestrator,
-            ):
-                logger.debug("Could not store new CA certificate.")
+            try:
+                if not self.charm.tls_manager.store_new_ca(
+                    cert_type,
+                    create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
+                ):
+                    logger.debug("Could not store new CA certificate.")
+                    event.defer()
+                    return
+            except OpenSearchFileOperationError as e:
+                logger.error("Error while storing new CA certificate: %s", e)
                 event.defer()
                 return
+
             # replacing the current CA initiates a rolling restart and certificate renewal
             # the workflow is the following:
             # get new CA -> set tls_ca_renewing -> restart -> post_start_init -> set tls_ca_renewed
@@ -229,17 +257,26 @@ class TLSEventsHandler(Object):
                 self.on_tls_ca_rotation()
                 return
 
-        # store the certificates and keys in a key store
-        self.charm.tls_manager.store_new_tls_resources(
-            cert_type,
-            self.charm.tls_manager.get_secrets_for_cert_type(cert_type),
-        )
+        try:
+            # store the certificates and keys in a key store
+            self.charm.tls_manager.store_new_tls_resources(
+                cert_type, self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+            )
+        except OpenSearchFileOperationError as e:
+            logger.info("Unable to store TLS resources yet: %s", e)
+            event.defer()
+            return
 
         # apply the chain.pem file for API requests, only if the CA cert has not been updated
         admin_secrets = self.charm.state.application.admin_secrets
-        if admin_secrets.get("chain") and not self.charm.tls_manager.read_stored_ca(
-            alias=OLD_CA_ALIAS
-        ):
+        try:
+            old_ca_present = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS)
+        except OpenSearchFileOperationError as e:
+            logger.error("Error while reading stored CA certificate: %s", e)
+            event.defer()
+            return
+
+        if admin_secrets.get("chain") and not old_ca_present:
             try:
                 self.charm.tls_manager.update_request_ca_bundle()
             except OpenSearchFileOperationError as e:
@@ -280,7 +317,7 @@ class TLSEventsHandler(Object):
         # if self.charm.unit.is_leader() and self.charm.opensearch_peer_cm.is_provider(typ="main"):
         # self.charm.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
 
-        renewal = self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS) is not None or (
+        renewal = old_ca_present is not None or (
             old_cert is not None and old_cert != event.certificate
         )
 
@@ -312,9 +349,7 @@ class TLSEventsHandler(Object):
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
-
         old_csr = secrets["csr"].encode("utf-8")
-
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=scope, cert_type=cert_type, secret=secrets, tls_file=False
         )
@@ -328,7 +363,7 @@ class TLSEventsHandler(Object):
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
-    def on_tls_conf_set(
+    def on_tls_conf_set(  # noqa: C901
         self,
         event: CertificateAvailableEvent,
         scope: Scope,
@@ -340,6 +375,10 @@ class TLSEventsHandler(Object):
         - Store the cert on the file system, on all nodes for APP certificates
         - Update the corresponding yaml conf files
         - Run the security admin script
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error while operating with certificate
+              files.
         """
         if scope == Scope.UNIT:
             admin_secrets = self.charm.state.application.admin_secrets
@@ -367,21 +406,23 @@ class TLSEventsHandler(Object):
                 except OpenSearchHttpError:
                     logger.error("Could not reload TLS certificates via API, will restart.")
                     self.charm.restart_opensearch_event.emit()
-                else:
-                    self.charm.state.reset_ca_rotation_state()
-                    self.charm.state.remove_status_if_present(
-                        TlsStatuses.TLS_CA_ROTATION.value,
-                        "unit",
-                        self.charm.tls_manager.name,
-                    )
-                    # if all certs are stored and CA rotation is complete in the cluster
-                    # we delete the old ca and update the chain to only include the new one
-                    if (
-                        self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-                        and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
-                    ):
-                        logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                        self.charm.tls_manager.finalize_ca_certs_rotation()
+                    return
+
+                self.charm.state.reset_ca_rotation_state()
+                self.charm.state.remove_status_if_present(
+                    TlsStatuses.TLS_CA_ROTATION.value,
+                    "unit",
+                    self.charm.tls_manager.name,
+                )
+                # if all certs are stored and CA rotation is complete in the cluster
+                # we delete the old ca and update the chain to only include the new one
+                if (
+                    self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+                    and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+                ):
+                    logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
+                    self.charm.tls_manager.finalize_ca_certs_rotation()
+
             else:
                 logger.debug("TLS not fully configured yet, deferring event.")
                 event.defer()

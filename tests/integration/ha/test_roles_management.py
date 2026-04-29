@@ -10,8 +10,8 @@ from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import (
     APP_NAME,
-    CONFIG_OPTS,
     MODEL_CONFIG,
+    config_opts_for_deployment,
 )
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.ha.helpers import (
@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 @pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -44,11 +46,19 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
+    os_deploy_kwargs = {
+        "application_name": APP_NAME,
+        "num_units": 3,
+        "series": series,
+        "config": config_opts_for_deployment(substrate, 3),
+    }
+    if substrate == "k8s":
+        os_deploy_kwargs["resources"] = charm_resources
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(charm, num_units=3, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(charm, **os_deploy_kwargs),
     )
 
     # Relate it to OpenSearch to set up TLS.

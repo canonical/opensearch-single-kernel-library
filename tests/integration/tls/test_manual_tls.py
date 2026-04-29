@@ -8,10 +8,16 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
+from tests.integration.conftest import (
+    APP_NAME,
+    CONFIG_OPTS,
+    MODEL_CONFIG,
+    UNIT_IDS,
+)
 from tests.integration.helpers import (
     EmptyActiveStatus,
     EmptyMaintenanceStatus,
+    deploy_opensearch,
     wait_until,
 )
 from tests.integration.tls.helpers_manual_tls import (
@@ -24,17 +30,23 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy_with_manual_tls(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy prod cluster of OpenSearch with Manual TLS Operator integration."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    os_app: Application = await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=len(UNIT_IDS),
+        substrate,
+        APP_NAME,
+        len(UNIT_IDS),
         series=series,
-        application_name=APP_NAME,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
+    os_app: Application = ops_test.model.applications[APP_NAME]
 
     # Deploy TLS Certificates operator.
     tls_app: Application = await ops_test.model.deploy(
@@ -69,6 +81,10 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
         timeout=2000,
     )
     assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
+
+    if substrate == "k8s":
+        # K8s integration currently supports only a single OpenSearch unit.
+        return
 
     # Scale up the application by adding a new unit
     logger.info("Scaling up the application by adding a new unit")

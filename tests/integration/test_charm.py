@@ -18,12 +18,13 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.ha.continuous_writes import ContinuousWrites
 
-from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
+from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, config_opts_for_deployment
 from .ha.helpers import (
     assert_continuous_writes_consistency,
     assert_continuous_writes_increasing,
 )
 from .helpers import (
+    deploy_opensearch,
     get_application_unit_ids,
     get_conf_as_dict,
     get_leader_unit_id,
@@ -37,19 +38,32 @@ from .tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_NUM_UNITS = 2
+DEFAULT_VM_NUM_UNITS = 2
+
+
+def default_num_units(substrate: str) -> int:
+    """Return the default unit count for the tested substrate."""
+    # TODO: Revisit when K8s supported multi-unit topology
+    return 1 if substrate == "k8s" else DEFAULT_VM_NUM_UNITS
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_and_remove_single_unit(charm, series, ops_test: OpsTest) -> None:
+@pytest.mark.skip_if_deployed
+async def test_deploy_and_remove_single_unit(
+    charm, series, ops_test: OpsTest, substrate, charm_resources
+) -> None:
     """Build and deploy OpenSearch with a single unit and remove it."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=1,
+        substrate,
+        APP_NAME,
+        1,
         series=series,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
@@ -79,31 +93,40 @@ async def test_deploy_and_remove_single_unit(charm, series, ops_test: OpsTest) -
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(charm, series, ops_test: OpsTest) -> None:
+@pytest.mark.skip_if_deployed
+async def test_build_and_deploy(
+    charm, series, ops_test: OpsTest, substrate, charm_resources
+) -> None:
     """Build and deploy a couple of OpenSearch units."""
     model_config = MODEL_CONFIG
     model_config["update-status-hook-interval"] = "1m"
+    units = default_num_units(substrate)
 
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=DEFAULT_NUM_UNITS,
+        substrate,
+        APP_NAME,
+        units,
         series=series,
-        config=CONFIG_OPTS,
+        config=config_opts_for_deployment(substrate, units),
+        resources=charm_resources,
     )
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=DEFAULT_NUM_UNITS,
+        wait_for_exact_units=units,
         units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == DEFAULT_NUM_UNITS
+    assert len(ops_test.model.applications[APP_NAME].units) == units
 
 
 @pytest.mark.abort_on_fail
-async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
+async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
     """Test the retrieval of admin secrets."""
+    units = default_num_units(substrate)
     leader_id = await get_leader_unit_id(ops_test)
 
     # 1. run the action prior to finishing the config of TLS
@@ -120,7 +143,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        wait_for_exact_units=DEFAULT_NUM_UNITS,
+        wait_for_exact_units=units,
     )
 
     leader_ip = await get_leader_unit_ip(ops_test)
@@ -257,6 +280,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_check_pinned_revision(ops_test: OpsTest) -> None:
     """Test check the pinned revision."""
     leader_id = await get_leader_unit_id(ops_test)
@@ -284,6 +308,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
     """Test to check if the workload_version file is updated."""
     leader_id = await get_leader_unit_id(ops_test)
@@ -320,8 +345,10 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_all_units_have_all_local_users(ops_test: OpsTest) -> None:
     """Compare the internal_users.yaml of all units."""
+    # TODO: Add K8s equivalent when multi-unit K8s is supported.
     # Get the leader's version of internal_users.yml
     leader_id = await get_leader_unit_id(ops_test)
     leader_name = f"{APP_NAME}/{leader_id}"
@@ -336,8 +363,10 @@ async def test_all_units_have_all_local_users(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_all_units_have_internal_users_synced(ops_test: OpsTest) -> None:
     """Compare the internal_users.yaml of all units."""
+    # TODO: Add K8s equivalent when multi-unit K8s is supported.
     # Get the leader's version of internal_users.yml
     leader_id = await get_leader_unit_id(ops_test)
     leader_name = f"{APP_NAME}/{leader_id}"

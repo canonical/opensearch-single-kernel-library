@@ -122,6 +122,7 @@ jobs:
       matrix:
         path:
           - tests/charms/opensearch_test_charm
+          - tests/charms/opensearch_k8s_test_charm
           - tests/integration/relations/opensearch_provider/application-charm
     steps:
       - name: Install CLI

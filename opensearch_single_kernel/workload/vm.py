@@ -7,6 +7,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -15,7 +16,9 @@ from charmlibs.pathops import PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_SNAP_REVISION,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -46,6 +49,24 @@ class VMWorkload(BaseWorkload):
             with attempt:
                 cache = snap.SnapCache()
                 self.opensearch_snap = cache["opensearch"]
+
+    @property
+    @override
+    def workload_present(self) -> bool:
+        """Check if the snap is installed."""
+        try:
+            return self.opensearch_snap.present
+        except SnapError:
+            return False
+
+    @property
+    @override
+    def can_connect(self) -> bool:
+        """Check if the snap is installed and we can connect to the snapd API."""
+        try:
+            return bool(self.opensearch_snap.services[self.SERVICE_NAME])
+        except KeyError:
+            return False
 
     @retry(
         stop=stop_after_attempt(3),
@@ -80,10 +101,15 @@ class VMWorkload(BaseWorkload):
         *,
         errors: str | None = None,
         suffix: str | None = None,
-    ):
+    ) -> Generator[PathProtocol, None, None]:
         """Create a temporary file and return the file, clean it once context is closed."""
         f = tempfile.NamedTemporaryFile(
-            mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
+            mode=mode,
+            encoding=encoding,
+            dir=dir.as_posix() if dir else None,
+            delete=False,
+            errors=errors,
+            suffix=suffix,
         )
         if chown is not None:
             command = "sudo chown {} {}".format(chown, f.name)
@@ -116,19 +142,23 @@ class VMWorkload(BaseWorkload):
 
         self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
 
+    @property
     @override
+    def keytool_cmd(self) -> str:
+        """Return VM keytool command via snap wrapper."""
+        return "opensearch.keytool"
+
     def get_host_public_ip(self) -> str | None:
-        """Fetches the Public IP address of the current unit."""
+        """Return unit public address from Juju."""
         cmd = "unit-get public-address"
-        output = self.run_cmd(cmd)
+        try:
+            output = self.run_cmd(cmd)
+        except OpenSearchCmdError:
+            return None
         if output.returncode != 0:
             return None
 
         return output.out.strip()
-
-    def is_started(self) -> bool:
-        """Check if OpenSearch is started."""
-        return self.is_reachable(self.host, self.port)
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -199,32 +229,16 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            logger.info("The opensearch.%s service is already started.", self.SERVICE_NAME)
+            logger.info(f"The opensearch.{self.SERVICE_NAME} service is already started.")
             return
 
+        logger.debug("Starting OpenSearch snap service opensearch.%s", self.SERVICE_NAME)
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
             logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStartError()
 
-    @override
-    def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values.
-
-        According to the kernel source code, the values are always in kB:
-            https://github.com/torvalds/linux/blob/
-                2a130b7e1fcdd83633c4aa70998c314d7c38b476/fs/proc/meminfo.c#L31
-        Returns:
-            meminfo: The memory info values.
-        """
-        with open("/proc/meminfo") as f:
-            meminfo = f.read().split("\n")
-            meminfo = [line.split() for line in meminfo if line.strip()]
-
-        return {line[0][:-1]: float(line[1]) for line in meminfo}
-
-    @override
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
         """Apply a system requirement.
 
@@ -242,16 +256,36 @@ class VMWorkload(BaseWorkload):
             return False
 
     @override
-    def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter.
+    def check_missing_system_requirements(self) -> list[str]:
+        """Checks the system requirements.
 
-        Args:
-            prop (str): Kernel property name.
-
-        Returns:
-            value (int): Kernel property value.
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read
+                or if applying a system requirement fails.
         """
-        return int(self.run_cmd(f"sysctl -n {prop}").out.rstrip())
+        missing_requirements = []
+
+        prop, val = "vm.max_map_count", 262144
+        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at least {val}")
+
+        prop, val = "vm.swappiness", 0
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, 0
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        prop, val = "net.ipv4.tcp_retries2", 5
+        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
+            prop, val
+        ):
+            missing_requirements.append(f"{prop} should be at most {val}")
+
+        if missing_requirements:
+            logger.error("Missing system requirements: %s", missing_requirements)
+        return missing_requirements
 
     @override
     def run_cmd(
@@ -337,3 +371,13 @@ class VMWorkload(BaseWorkload):
     def root(self) -> PathProtocol:
         """Return the root path."""
         return pathops.LocalPath("/")
+
+    @override
+    def chain_path(self) -> str:
+        """Return the local path to chain.pem."""
+        return self.paths.certs_chain.as_posix()
+
+    @override
+    def get_workload_version(self) -> str:
+        """Return the workload version."""
+        return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()

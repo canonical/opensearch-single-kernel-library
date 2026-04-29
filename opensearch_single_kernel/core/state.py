@@ -80,10 +80,12 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage impor
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
+from opensearch_single_kernel.utils.certificates import normalized_tls_subject
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
+    get_k8s_fqdn,
+    get_k8s_seed_host,
     lock_unit_name,
-    normalized_tls_subject,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
 from opensearch_single_kernel.utils.status import format_status
@@ -203,6 +205,11 @@ class OpenSearchServer(RelationState):
     def tls_configured(self, value: bool):
         """Update the value of 'tls_configured'"""
         self.update({"tls_configured": str(value)})
+
+    @tls_configured.deleter
+    def tls_configured(self):
+        """Remove the 'tls_configured' key from unit data bag."""
+        self.update({"tls_configured": ""})
 
     @property
     def update_ts(self) -> str:
@@ -437,14 +444,10 @@ class OpenSearchApplication(RelationState):
         cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}")) or {}
         return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
 
+    @property
     def apps_in_fleet(self) -> list[PeerClusterApp]:
         """Returns list of apps in cluster fleet"""
-        cluster_fleet_apps = self.get_object("cluster_fleet_apps")
-        if not cluster_fleet_apps:
-            cluster_fleet_apps = {}
-        elif not json.loads(cluster_fleet_apps):
-            cluster_fleet_apps = json.loads(cluster_fleet_apps)
-        return [PeerClusterApp.from_dict(app) for app in cluster_fleet_apps.values()]
+        return list(self.cluster_fleet_apps.values())
 
     @property
     def update_ts(self) -> str:
@@ -489,7 +492,7 @@ class OpenSearchApplication(RelationState):
     @property
     def is_data_role_in_cluster_fleet_apps(self) -> bool:
         """Look for data-role through all the roles of all the nodes in all applications"""
-        data_apps_in_fleet = [app for app in self.apps_in_fleet() if "data" in app.roles]
+        data_apps_in_fleet = [app for app in self.apps_in_fleet if "data" in app.roles]
         return bool(data_apps_in_fleet) and any(
             app.planned_units > 0 for app in data_apps_in_fleet
         )
@@ -1017,7 +1020,12 @@ class ClusterState(Object, StatusesStateProtocol):
 
     @property
     def unit_name(self):
-        """Name of the current unit."""
+        """Juju unit identity (such as opensearch-0.2fe, opensearch-1.2fe).
+
+        Use this for relation data, lock documents and OpenSearch node identity. It
+        requires the deployment description to be available so the unit name can be
+        formatted consistently across all units.
+        """
         return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
     @property
@@ -1031,6 +1039,16 @@ class ClusterState(Object, StatusesStateProtocol):
         )
 
     @property
+    def node_host(self) -> str:
+        """Return a connectable host for the current unit.
+
+        On K8s this is the unit DNS name. On VM this is the unit IP address.
+        """
+        if self.substrate == Substrates.K8S:
+            return self.fqdn
+        return self.host_ip
+
+    @property
     def planned_units(self) -> int:
         """Return the planned units for the charm."""
         return self.model.app.planned_units()
@@ -1042,8 +1060,24 @@ class ClusterState(Object, StatusesStateProtocol):
         return str(address)
 
     @property
+    def fqdn(self) -> str:
+        """Return a stable FQDN for the current unit.
+
+        - VM: local host FQDN from the runtime environment.
+        - K8s: canonical endpoint FQDN for this unit service name.
+        """
+        if self.substrate == Substrates.K8S:
+            unit_prefix = str(self.unit_name).split(".", 1)[0]
+            service_name = f"{unit_prefix}.{self.application.name}-endpoints"
+            return get_k8s_fqdn(service_name)
+        return socket.getfqdn()
+
+    @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
+        if self.substrate == Substrates.K8S:
+            # K8s we allow binding on all interfaces
+            return ["0.0.0.0"]
         return [socket.getfqdn(), self.host_ip]
 
     @property
@@ -1145,21 +1179,24 @@ class ClusterState(Object, StatusesStateProtocol):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def units_ips(self) -> dict[str, str]:
-        """Returns the mapping "unit id / ip address" of all units."""
-        unit_ip_map = {}
-        if not self.peer_relation:
-            return unit_ip_map
+    def all_hosts(self) -> set[str]:
+        """Fetch the list of hosts for the current app."""
+        hosts = set()
 
-        for unit in self.peer_relation.units:
-            unit_id = unit.name.split("/")[1]
-            unit_ip_map[unit_id] = self.unit_ip(unit)
+        if not (all_units := self.all_units):
+            return hosts
 
-        # Sometimes the above command doesn't get the current node,
-        # so ensure we get this unit's ip.
-        unit_ip_map[self.model.unit.name.split("/")[1]] = self.host_ip
+        for unit in all_units:
+            if self.substrate == Substrates.K8S:
+                hosts.add(
+                    get_k8s_seed_host(
+                        format_unit_name(unit, app=self.application.deployment_desc.app)
+                    )
+                )
+            else:
+                hosts.add(self.unit_ip(unit))
 
-        return unit_ip_map
+        return hosts
 
     @property
     def all_units(self) -> list[Unit]:
@@ -1216,9 +1253,12 @@ class ClusterState(Object, StatusesStateProtocol):
     # TODO: Once we handle large deployment we will add a separate
     # state object for peer cluster and peer cluster orchestrator
     @property
-    def current_peer_cluster_app(self) -> PeerClusterApp:
+    def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
-        deployment_desc = self.application.deployment_desc
+        # During early lifecycle, the deployment description may not
+        # be computed yet, callers should handle None.
+        if not (deployment_desc := self.application.deployment_desc):
+            return None
         logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,

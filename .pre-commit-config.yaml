@@ -60,21 +60,18 @@ repos:
         - flake8-docstrings
         - pep8-naming
 
-
-
-
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6
     hooks:
-    - id: codespell
-      additional_dependencies: [tomli]
-      args: ["--write-changes"]
-      exclude: ^poetry\.lock$
+      - id: codespell
+        additional_dependencies: [tomli]
+        args: ["--write-changes"]
+        exclude: ^poetry\.lock$
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7
     hooks:
-    - id: actionlint
+      - id: actionlint
 
 exclude: |
   (?x)(

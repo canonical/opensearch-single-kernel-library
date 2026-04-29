@@ -32,7 +32,9 @@ from opensearch_single_kernel.common.constants import (
     USER_ROLESMAPPING_ENDPOINT,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+)
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
@@ -989,7 +991,7 @@ class OpenSearchClient:
 
         return busy_shards
 
-    def reload_tls_certificates(self, cert_files: tuple[str] | None = None) -> None:
+    def reload_tls_certificates(self, cert_files: tuple[str, str] | None = None) -> None:
         """Reload TLS certificates in OpenSearch unit using REST API."""
         url_http = "_plugins/_security/api/ssl/http/reloadcerts"
         url_transport = "_plugins/_security/api/ssl/transport/reloadcerts"
@@ -1009,7 +1011,7 @@ class OpenSearchClient:
                 retries=3,
             )
         except OpenSearchHttpError as e:
-            logger.error("Error reloading TLS certificates via API: %s", str(e))
+            logger.error("Error reloading TLS certificates via API: %s", e)
             raise
 
     def get_allocation_explain(
@@ -1048,7 +1050,8 @@ class OpenSearchClient:
                 retries=3,
                 wait_strategy=wait_exponential(min=2),
             )
-        except OpenSearchHttpError:
+        except OpenSearchHttpError as e:
+            logger.debug("HTTP error when checking cluster health, returning None. Error: %s", e)
             return None
 
     def get_indices(
@@ -1256,11 +1259,11 @@ class OpenSearchClient:
                         s.cert = cert_files
                     else:
                         s.auth = ("admin", self.admin_secret)
-                    # TODO: Handle this when implementing the k8s version of start workflow.
+
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,
-                        "verify": self.workload.paths.certs_chain.as_posix(),
+                        "verify": self.workload.chain_path(),
                         "headers": {
                             "Accept": "application/json",
                             "Content-Type": "application/json",

@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -15,6 +16,7 @@ from datetime import datetime, timedelta
 from hashlib import md5
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
@@ -41,6 +43,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Keep the existing connect/read timeout used by http_request and reuse it
+# for both runner-side and in-unit K8s requests.
+_HTTP_REQUEST_TIMEOUT = (17, 17)
+# Prefix the real response line with a unique marker so we can find it again
+# even if juju ssh prints extra noise before or after the JSON payload.
+_K8S_UNIT_HTTP_RESULT_PREFIX = "__k8s_unit_http_result__="
 EmptyBlockedStatus = StatusObject(
     status="blocked",
     message="",
@@ -62,6 +70,52 @@ def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:
             f"juju status --model {ops_test.model.info.name} {app} --format=json".split()
         )
     )["applications"][app]
+
+
+def _get_unit_address(raw_unit: dict[str, Any]) -> Optional[str]:
+    """Return unit address from raw status; K8s may use 'address' instead of 'public-address'."""
+    return raw_unit.get("public-address") or raw_unit.get("address")
+
+
+async def deploy_opensearch(  # noqa: C901
+    ops_test: OpsTest,
+    charm: str,
+    substrate: str,
+    application_name: str,
+    num_units: int,
+    *,
+    series: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+    constraints: Optional[str] = None,
+    resources: Optional[Dict[str, str]] = None,
+    storage: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Deploy the OpenSearch charm."""
+    deploy_kwargs = {
+        "application_name": application_name,
+        "num_units": num_units,
+    }
+    # Juju does not use `series` for K8s applications.
+    if series and substrate != "k8s":
+        deploy_kwargs["series"] = series
+    if config:
+        deploy_kwargs["config"] = config
+    if constraints:
+        deploy_kwargs["constraints"] = constraints
+    if resources:
+        deploy_kwargs["resources"] = resources
+    if storage:
+        deploy_kwargs["storage"] = storage
+
+    await ops_test.model.deploy(charm, **deploy_kwargs)
+
+
+async def get_cloud_type(ops_test: OpsTest) -> str:
+    """Return current cloud type of the selected controller."""
+    assert ops_test.model, "Model must be present"
+    controller = await ops_test.model.get_controller()
+    cloud = await controller.cloud()
+    return cloud.cloud.type_
 
 
 def now() -> str:
@@ -124,14 +178,24 @@ async def _get_unit(
 
     app_id = f"{ops_test.model.uuid}/{app}"
     app_short_id = md5(app_id.encode()).hexdigest()[:3]
-    machine_id = -1 if subordinate else int(raw_unit["machine"])
+    # K8s units may not have "machine" or use a different structure; use -1 when missing.
+    machine_val = raw_unit.get("machine", -1)
+    machine_id = -1 if subordinate else (int(machine_val) if machine_val != -1 else -1)
+
+    ip = _get_unit_address(raw_unit) or ""
+
+    try:
+        hostname = await get_unit_hostname(ops_test, unit_id, app)
+    except Exception:
+        # On K8s use address as hostname for wait logic.
+        hostname = ip
 
     return Unit(
         id=unit_id,
         short_name=unit_name.replace("/", "-"),
         name=f"{unit_name.replace('/', '-')}.{app_short_id}",
-        ip=raw_unit["public-address"],
-        hostname=await get_unit_hostname(ops_test, unit_id, app),
+        ip=ip,
+        hostname=hostname,
         is_leader=raw_unit.get("leader", False),
         machine_id=machine_id,
         workload_status=Status(
@@ -158,8 +222,8 @@ async def get_application_units(ops_test: OpsTest, app: str) -> List[Unit]:
     # `get_unit_ip` should be replaced with `.public_address`
     raw_app = get_raw_application(ops_test, app)
     units = []
-    for u_name, raw_unit in raw_app["units"].items():
-        if not raw_unit.get("public-address"):
+    for u_name, raw_unit in raw_app.get("units", {}).items():
+        if not _get_unit_address(raw_unit):
             # unit not ready yet...
             continue
         units.append(_get_unit(ops_test, app, raw_app, u_name, raw_unit))
@@ -184,7 +248,7 @@ async def get_application_subordinate_units(
         else:
             raise ValueError(f"Subordinate unit for {app} not found in {principal_app}")
 
-        if not raw_unit.get("public-address"):
+        if not _get_unit_address(raw_unit):
             # unit not ready yet...
             continue
 
@@ -399,7 +463,7 @@ async def get_application_unit_ids_ips(ops_test: OpsTest, app: str = APP_NAME) -
         app: the name of the app
 
     Returns:
-        Dictionary unit_id / unit_ip, of the application
+        Dictionary unit_id / IP, of the application
     """
     result = {}
     for unit in await get_application_units(ops_test, app):
@@ -458,10 +522,180 @@ async def get_leader_unit_id(ops_test: OpsTest, app: str = APP_NAME) -> int:
 
 
 async def get_leader_unit_ip(ops_test: OpsTest, app: str = APP_NAME) -> str:
-    """Helper function that retrieves the leader unit."""
+    """Helper function that retrieves the leader unit IP."""
     for unit in await get_application_units(ops_test, app):
         if unit.is_leader:
             return unit.ip
+
+
+async def _find_k8s_unit_for_endpoint(
+    ops_test: OpsTest, endpoint: str, app: str
+) -> Optional[Unit]:
+    """Return the K8s unit matching the endpoint host, if any."""
+    hostname = urlparse(endpoint).hostname
+    if not hostname:
+        return None
+
+    for unit in await get_application_units(ops_test, app):
+        # On K8s the pod hostname is the Juju short unit name, e.g. `opensearch-0`.
+        # We use that as the signal to run requests from inside the pod so TLS can
+        # use the pod DNS name rather than the external pod IP.
+        if unit.ip == hostname and unit.hostname == unit.short_name:
+            return unit
+
+    return None
+
+
+async def _http_request_from_k8s_unit(
+    ops_test: OpsTest,
+    app: str,
+    unit: Unit,
+    method: str,
+    endpoint: str,
+    admin_secrets: Dict[str, str],
+    payload: Optional[Union[str, Dict[str, any]]] = None,
+    resp_status_code: bool = False,
+    verify: bool = True,
+    user: Optional[str] = "admin",
+    user_password: Optional[str] = None,
+    json_resp: bool = True,
+    extra_headers: Optional[Dict[str, any]] = None,
+):
+    """Run the HTTPS request from inside a K8s unit."""
+    parsed_endpoint = urlparse(endpoint)
+    request_path = parsed_endpoint.path or "/"
+    if parsed_endpoint.query:
+        request_path = f"{request_path}?{parsed_endpoint.query}"
+
+    headers = {}
+    if json_resp:
+        headers.update(
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+        )
+    if extra_headers:
+        headers.update(extra_headers)
+
+    request_body = (
+        payload
+        if isinstance(payload, str)
+        else (json.dumps(payload) if isinstance(payload, dict) else None)
+    )
+    # Only ship the request inputs into the unit. The unit-side script rebuilds
+    # the final URL with the pod FQDN so TLS verification uses the DNS SAN from
+    # the certificate instead of the externally observed pod IP.
+    script_payload = {
+        "scheme": parsed_endpoint.scheme or "https",
+        "headers": headers,
+        "method": method,
+        "port": parsed_endpoint.port
+        or (443 if (parsed_endpoint.scheme or "https") == "https" else 80),
+        "path": request_path,
+        "body": request_body,
+        "timeout": list(_HTTP_REQUEST_TIMEOUT),
+        "verify": verify,
+        "ca_chain": admin_secrets["ca-chain"],
+        "user": user,
+        "password": user_password or admin_secrets["password"],
+    }
+    remote_script = f"""
+import base64
+import json
+import socket
+import ssl
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+payload = json.loads(base64.b64decode(sys.argv[2]).decode())
+# Use the unit FQDN instead of the external pod IP so hostname verification
+# matches the DNS SANs present in the K8s certificate.
+url = (
+    f"{{payload['scheme']}}://{{socket.getfqdn()}}:{{payload['port']}}{{payload['path']}}"
+)
+
+headers = payload["headers"] or {{}}
+if payload["user"] is not None and payload["password"] is not None:
+    basic_auth = base64.b64encode(
+        f"{{payload['user']}}:{{payload['password']}}".encode()
+    ).decode()
+    headers["Authorization"] = f"Basic {{basic_auth}}"
+
+request = urllib.request.Request(
+    url=url,
+    data=payload["body"].encode() if payload["body"] is not None else None,
+    headers=headers,
+    method=payload["method"],
+)
+with tempfile.NamedTemporaryFile(mode="w+") as chain:
+    ssl_context = ssl._create_unverified_context()
+    if payload["verify"]:
+        chain.write(payload["ca_chain"])
+        chain.flush()
+        ssl_context = ssl.create_default_context(cafile=chain.name)
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(payload["timeout"]),
+            context=ssl_context,
+        ) as response:
+            status_code = response.getcode()
+            body = response.read().decode()
+    except urllib.error.HTTPError as error:
+        status_code = error.code
+        body = error.read().decode()
+
+print(
+    "{_K8S_UNIT_HTTP_RESULT_PREFIX}"
+    + json.dumps({{"body": body, "status_code": status_code}})
+)
+"""
+    # Encode both the helper script and its payload so juju ssh sends a single
+    # shell-safe command.
+    remote_command = " ".join(
+        [
+            "python3",
+            "-c",
+            shlex.quote("import base64,sys;exec(base64.b64decode(sys.argv[1]).decode())"),
+            shlex.quote(base64.b64encode(remote_script.encode()).decode()),
+            shlex.quote(base64.b64encode(json.dumps(script_payload).encode()).decode()),
+        ]
+    )
+
+    return_code, stdout, stderr = await ops_test.juju("ssh", f"{app}/{unit.id}", remote_command)
+    response = None
+    # juju ssh can print extra noise before or after the actual payload.
+    # We can use a uniq prefix, so we scan for the one line that
+    # starts with it and only parse the remainder of that line as JSON.
+    for line in reversed(stdout.splitlines()):
+        if not line.startswith(_K8S_UNIT_HTTP_RESULT_PREFIX):
+            continue
+
+        response = json.loads(line.removeprefix(_K8S_UNIT_HTTP_RESULT_PREFIX))
+        break
+
+    if response is None:
+        raise RuntimeError(
+            "Failed to parse K8s unit HTTP response "
+            f"(return_code={return_code}, stdout={stdout}, stderr={stderr})"
+        )
+
+    if resp_status_code:
+        return response["status_code"]
+
+    if json_resp:
+        return json.loads(response["body"])
+
+    logger.info(f"\n{response['body']}")
+    return SimpleNamespace(
+        content=response["body"].encode("utf-8"),
+        status_code=response["status_code"],
+        text=response["body"],
+    )
 
 
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
@@ -483,6 +717,14 @@ async def run_action(
             if unit.workload_status.value != "active":
                 continue
 
+            # K8s units do not expose SSH on port 22, so Juju actions should target
+            # any active unit directly.
+            # libjuju reports machine_id == -1 for CAAS/K8s units, which do not have
+            # a backing Juju machine or SSH on port 22.
+            if unit.machine_id == -1:
+                online_units.append(unit)
+                continue
+
             ping = subprocess.call(
                 f"nc -zv {unit.ip} 22".split(),
                 stdout=subprocess.DEVNULL,
@@ -490,6 +732,11 @@ async def run_action(
             )
             if ping == 0:
                 online_units.append(unit)
+
+        if not online_units:
+            raise RuntimeError(
+                f"No active units available to run action {action_name} on app {app}."
+            )
 
         unit_id = random.choice(online_units).id
 
@@ -549,6 +796,26 @@ async def http_request(
         A json object.
     """
     admin_secrets = await get_secrets(ops_test, app=app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+    if k8s_unit:
+        # K8s requests that start from a pod IP are executed from inside the
+        # unit so they can be retried against the unit FQDN with strict TLS.
+        logger.info(f"Calling from {k8s_unit.name}: {method} - {endpoint}")
+        return await _http_request_from_k8s_unit(
+            ops_test,
+            app,
+            k8s_unit,
+            method,
+            endpoint,
+            admin_secrets,
+            payload=payload,
+            resp_status_code=resp_status_code,
+            verify=verify,
+            user=user,
+            user_password=user_password,
+            json_resp=json_resp,
+            extra_headers=extra_headers,
+        )
 
     # fetch the cluster info from the endpoint of this unit
     with requests.Session() as session, tempfile.NamedTemporaryFile(mode="w+") as chain:
@@ -560,7 +827,7 @@ async def http_request(
         request_kwargs = {
             "method": method,
             "url": endpoint,
-            "timeout": (17, 17),
+            "timeout": _HTTP_REQUEST_TIMEOUT,
         }
         headers = {}
         if json_resp:
@@ -631,10 +898,13 @@ def opensearch_client(
         hosts=[{"host": ip, "port": 9200} for ip in hosts],
         http_auth=(user_name, password),
         http_compress=True,
-        sniff_on_start=True,  # sniff before doing anything
-        sniff_on_connection_fail=True,  # refresh nodes after a node fails to respond
-        sniffer_timeout=60.0,  # and also every 60 seconds
-        # sniff_timeout=5.0,  # and also every 60 seconds
+        # Integration tests already pass the current unit IPs explicitly.
+        # Node sniffing asks OpenSearch for the full node list and
+        # replaces the client's seed hosts with the discovered addresses.
+        # The discovered node endpoints are commonly pod IPs or cluster-local DNS names,
+        # and the runner outside Kubernetes cannot reliably use them.
+        # Disable it here because it is brittle during CA rotation and can fail
+        # before the client ever attempts the provided hosts.
         use_ssl=True,  # turn on ssl
         verify_certs=True,  # make sure we verify SSL certificates
         ssl_assert_hostname=False,
@@ -651,7 +921,7 @@ async def get_application_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> Li
         app: the name of the app
 
     Returns:
-        list of current unit IPs of the application
+        list of current IPs of the application
     """
     return [unit.ip for unit in await get_application_units(ops_test, app)]
 
@@ -735,7 +1005,7 @@ async def get_application_unit_ips_names(ops_test: OpsTest, app: str = APP_NAME)
         app: the name of the app
 
     Returns:
-        Dictionary unit_name / unit_ip, of the application
+        Dictionary unit_name / IP, of the application
     """
     result = {}
     for unit in await get_application_units(ops_test, app):
@@ -892,8 +1162,13 @@ async def app_name(ops_test: OpsTest) -> str | None:
 
     logger.info(f"Apps inside app_name: {apps}")
 
+    # Integration tests can run against both the VM charm (opensearch) and the K8s charm
+    # (opensearch-k8s). Match both.
+    opensearch_charm_names = {"opensearch", "opensearch-k8s"}
     opensearch_apps = {
-        name: desc for name, desc in apps.items() if desc["charm-name"] == "opensearch"
+        name: desc
+        for name, desc in apps.items()
+        if desc.get("charm-name") in opensearch_charm_names
     }
     for name, desc in opensearch_apps.items():
         if name == "opensearch-main":

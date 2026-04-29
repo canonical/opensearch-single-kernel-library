@@ -115,7 +115,13 @@ class InternalUsersManager(BaseManager):
         self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
-        """User creation for specific system users."""
+        """User creation for specific system users.
+
+        Raises:
+            OpenSearchError: If user is not an internal user.
+            OpenSearchFileOperationError: If internal_users.yml cannot be read or written
+              due to any reason
+        """
         if user not in OPENSEARCH_USERS:
             raise OpenSearchError(f"User {user} is not an internal user.")
 

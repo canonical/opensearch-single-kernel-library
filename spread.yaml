@@ -54,8 +54,6 @@ backends:
       systemctl disable --now unattended-upgrades.service
       systemctl mask unattended-upgrades.service
       pipx install charmcraftcache
-      cd "$SPREAD_PATH"
-      bash scripts/build_lib_for_integration.sh
     restore-each: |
       cd "$SPREAD_PATH"
       # Revert python-libjuju version override
@@ -114,18 +112,17 @@ backends:
           username: ubuntu
       - self-hosted-linux-amd64-noble-xlarge:
           username: ubuntu
-
 suites:
   tests/spread/vm/:
     summary: Spread tests for OpenSearch VM
-  #tests/spread/k8s/:
-    #summary: Spread tests for OpenSearch Kubernetes
+  tests/spread/k8s/:
+    summary: Spread tests for OpenSearch Kubernetes
 
 path: /root/spread_project
 
 kill-timeout: 3h
 environment:
-  PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
+  PATH: $PATH:/root/.local/bin:/home/ubuntu/.local/bin
   CONCIERGE_JUJU_CHANNEL: 3.6/stable
   CHARM_UBUNTU_BASE/ubuntu24: 24.04
   CHARM_UBUNTU_BASE/ubuntu22: 22.04
@@ -134,6 +131,14 @@ prepare: |
   chown -R root:root "$SPREAD_PATH"
   cd "$SPREAD_PATH"
   snap install --classic concierge
+  apt-get update
+  apt-get install -y pipx
+  pipx install tox poetry
+  if ! command -v charmcraft >/dev/null 2>&1
+  then
+    snap install charmcraft --classic
+  fi
+  bash scripts/build_lib_for_integration.sh
 
   if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
@@ -183,23 +188,41 @@ prepare: |
     fi
   fi
 
-  # Install charmcraft & pipx (on lxd-vm backend)
-  pipx install tox poetry
 prepare-each: |
   cd "$SPREAD_PATH"
 
-  # `concierge prepare` needs to be run for each spread job in case Juju version changed
-  if [[ $SPREAD_SUITE == *"vm"* ]]
+  # Switch to the backend required by this job (vm -> LXD, k8s -> microk8s)
+  # Keep backend/controller switching centralized.
+  # `juju switch` directly.
+  if [[ "$SPREAD_TASK" == *"/vm/"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml
-  else
-    concierge prepare --trace -c concierge-microk8s.yaml
-  fi
-
-  if [[ $SPREAD_SUITE == *"vm"* ]]
-  then
     juju switch concierge-lxd
   else
+    if [[ -n "$DOCKERHUB_MIRROR" ]]
+    then
+      # Running on IS-hosted runner; configure microk8s to use Docker Hub mirror
+      # Run before concierge prepare because of https://github.com/canonical/concierge/issues/75
+      snap install microk8s --channel "$CONCIERGE_MICROK8S_CHANNEL" --classic
+
+      # Wait for microk8s to populate iptables
+      # https://chat.canonical.com/canonical/pl/jo5cg6wqjjrudqd5ybj6hhttee
+      until [[ -n $(iptables --list | grep -i "microk8s") ]]
+      do
+        echo "MicroK8s has not yet configured iptables."
+        sleep 10
+      done
+
+      tee /var/snap/microk8s/current/args/certs.d/docker.io/hosts.toml << EOF
+      server = "$DOCKERHUB_MIRROR"
+      [host."${DOCKERHUB_MIRROR#'https://'}"]
+      capabilities = ["pull", "resolve"]
+  EOF
+      microk8s stop
+      microk8s start
+    fi
+
+    concierge prepare --trace -c concierge-microk8s.yaml
     juju switch concierge-microk8s
   fi
 

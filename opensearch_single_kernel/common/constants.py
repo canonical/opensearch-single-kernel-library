@@ -107,17 +107,6 @@ class StoreType(BaseStrEnum):
     TRUSTSTORE = "truststore"
 
 
-class TlsFileExt(BaseStrEnum):
-    """Extensions of TLS generated files."""
-
-    CA = ".ca"
-    CERT = ".cert"
-    CHAIN = ".chain"
-    CSR = ".csr"
-    KEY = ".key"
-    KEYPASS = ".key-password"
-
-
 class SmtpTransportSecurity(BaseStrEnum):
     """SMTP transport security protocol.
 
@@ -218,8 +207,9 @@ SYSTEM_INDICES = {
 }
 # TLS
 CA_ALIAS = "ca"
+CA_TRUSTSTORE_P12 = "cacerts.p12"
+JDK_CACERTS_STORE_PASSWORD = "changeit"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
 OLD_CA_PREFIX = "old-"
 CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -241,13 +231,6 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detection-state",
     OPENSEARCH_NODE_LOCK_INDEX,
 ]
-# TLS
-CA_ALIAS = "ca"
-OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
-OLD_CA_PREFIX = "old-"
-CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 
 DEFAULT_EXTRA_USER_ROLE = "default"
 
@@ -332,9 +315,33 @@ CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN = (
 DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
-
-
 # Endpoints
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+
+# OpenSearch container runs as UID 584792 to match rockcraft.yaml
+OPENSEARCH_RUN_AS_USER = 584792
+OPENSEARCH_RUN_AS_GROUP = 584792
+
+# Root group id (gid 0). Used when we want root to have group-level access.
+ROOT_GID = 0
+
+# Container name for K8s deployments
+CONTAINER_NAME = "opensearch"
+
+# Service name for Pebble
+OPENSEARCH_PEBBLE_SERVICE_NAME = "opensearch"
+
+# File permissions as octal
+# standard directory permissions
+DIR_PERMISSIONS_READONLY = 0o750
+# certificates directory permissions
+# minimum permissions: daemon can write, root can list/read.
+DIR_PERMISSIONS_CERTIFICATES = 0o750
+# secure directory permissions
+DIR_PERMISSIONS_SECURE = 0o775
+
+# Pebble service user/group
+PEBBLE_SERVICE_USER = "_daemon_"
+PEBBLE_SERVICE_GROUP = "_daemon_"

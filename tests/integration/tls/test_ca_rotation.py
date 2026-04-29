@@ -18,6 +18,7 @@ from tests.integration.conftest import (
 )
 from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.helpers import (
+    deploy_opensearch,
     get_leader_unit_ip,
     get_secret_by_label,
     wait_until,
@@ -56,15 +57,21 @@ ALL_DEPLOYMENTS = list(ALL_GROUPS.values())
 @pytest.mark.group(id=SMALL_DEPLOYMENT)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy_active(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=len(UNIT_IDS),
+        substrate,
+        APP_NAME,
+        len(UNIT_IDS),
         series=series,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Deploy TLS Certificates operator.
@@ -88,8 +95,11 @@ async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None
 @pytest.mark.group(id=LARGE_DEPLOYMENT)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip()
-async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
+async def test_build_large_deployment(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Setup a large deployments cluster."""
+    os_deploy_kwargs = {"resources": charm_resources} if substrate == "k8s" else {}
     # deploy new cluster
     await asyncio.gather(
         ops_test.model.deploy(
@@ -98,6 +108,7 @@ async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
             num_units=3,
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
+            **os_deploy_kwargs,
         ),
         ops_test.model.deploy(
             charm,
@@ -110,6 +121,7 @@ async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
                 "roles": "cluster_manager,data",
             }
             | CONFIG_OPTS,
+            **os_deploy_kwargs,
         ),
         ops_test.model.deploy(
             charm,
@@ -118,6 +130,7 @@ async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
             series=series,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
+            **os_deploy_kwargs,
         ),
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME,
@@ -146,8 +159,11 @@ async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_rollout_new_ca(ops_test: OpsTest, deploy_type) -> None:
+async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None:
     """Repeat the CA rotation test for the large deployment."""
+    if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
+        pytest.skip("Large deployments are not supported on k8s.")
+
     if deploy_type == SMALL_DEPLOYMENT:
         app = APP_NAME
     else:

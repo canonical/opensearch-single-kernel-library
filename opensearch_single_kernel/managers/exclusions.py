@@ -35,7 +35,13 @@ class NodesExclusionsManager(BaseManager):
         raise_error: bool = False,
     ) -> None:
         """Add voting and alloc exclusions."""
-        node = self.api_or_state_node
+        try:
+            node = self.api_or_state_node
+        except OpenSearchExclusionsException as e:
+            logger.warning("Skipping add exclusions: cannot resolve current node (%s)", e)
+            if raise_error:
+                raise
+            return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._add_voting(scope, node):
                 logger.error("Failed to add voting exclusion: %s.", node.name)
@@ -68,7 +74,13 @@ class NodesExclusionsManager(BaseManager):
         raise_error: bool = False,
     ) -> None:
         """Delete voting and alloc exclusions."""
-        node = self.api_or_state_node
+        try:
+            node = self.api_or_state_node
+        except OpenSearchExclusionsException as e:
+            logger.warning("Skipping delete exclusions: cannot resolve current node (%s)", e)
+            if raise_error:
+                raise
+            return
         if voting and (node.is_cm_eligible() or node.is_voting_only()):
             if not self._delete_voting({node.name}, scope):
                 logger.error("Failed to delete voting exclusion: %s.", node.name)

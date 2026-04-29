@@ -11,7 +11,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from opensearch_single_kernel.common.constants import HealthColors, StartMode
+from opensearch_single_kernel.common.constants import (
+    HealthColors,
+    StartMode,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
@@ -57,7 +60,7 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = self.state.host_ip if use_localhost else None
+        host = self.state.node_host if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)
