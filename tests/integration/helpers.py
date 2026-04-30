@@ -215,12 +215,13 @@ def _check_status(status: Status, check: StatusObject) -> bool:
         )
         + r"(?s:.*?)"
     )
+    status_message = status.message or ""
 
     if (
-        status.message == check.message
-        or status.message.startswith(check.message)
-        or status.message.startswith(f"{check.message:.40}")
-        or re.fullmatch(regex_pattern, status.message or "") is not None
+        status_message == check.message
+        or status_message.startswith(check.message)
+        or status_message.startswith(f"{check.message:.40}")
+        or re.fullmatch(regex_pattern, status_message) is not None
     ):
         return True
     return False
