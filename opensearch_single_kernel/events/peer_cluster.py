@@ -177,8 +177,11 @@ class PeerClusterEventsHandler(Object):
             # TODO migrate to _on_start hook instead
             self.handle_joining_data_node()
 
-        if data.get("is_candidate_failover_orchestrator") != "true":
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+        if data.get("is_candidate_failover_orchestrator", "").lower() != "true":
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id
+            ):
+                event.defer()
             return
 
         # This is run to elect failover
@@ -189,7 +192,10 @@ class PeerClusterEventsHandler(Object):
         target_relation_ids = self.charm.state.peer_clusters_relations_ids(is_provider=True)
         if orchestrators.failover_app and orchestrators.failover_rel_id in target_relation_ids:
             logger.info("A failover cluster orchestrator is already registered.")
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id
+            ):
+                event.defer()
             return
 
         # register the new failover in the current main peer relation data

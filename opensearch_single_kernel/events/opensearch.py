@@ -171,6 +171,7 @@ class OpenSearchEventsHandler(Object):
             # we want to have the most up-to-date info broadcasted to related sub-clusters
 
             if self.charm.state.is_peer_cluster_provider():
+                logger.debug("Refreshing relation data from peer-relation-changed")
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
             # update any orchestrators about planned units
@@ -804,6 +805,9 @@ class OpenSearchEventsHandler(Object):
                     self.charm.state.is_peer_cluster_provider(typ="main")
                     and self.charm.unit.is_leader()
                 ):
+                    logger.debug(
+                        "Refreshing relation data from start opensearch when it already started"
+                    )
                     self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                         event.relation.id if hasattr(event, "relation") else None
                     )
@@ -933,6 +937,8 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
             ):
+
+                logger.debug("Refreshing relation data from start opensearch if we are main")
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 )
@@ -1023,6 +1029,7 @@ class OpenSearchEventsHandler(Object):
         # TODO: Handle event.after_upgrade
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
+            logger.debug("Refreshing relation data after post start init ")
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )
@@ -1171,20 +1178,22 @@ class OpenSearchEventsHandler(Object):
         ):
             return
 
-        logger.debug(f"boutou> We are applying status from deployment desc: {deployment_desc}")
+        logger.debug(f"We are applying status from deployment desc: {deployment_desc}")
 
         if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
             logger.debug(
-                "boutou> No show status directive in deployment description, skipping status application."
+                "No show status directive in deployment description, skipping status application."
             )
             return
 
         # remove show_status directive which is applied below
         if show_status_only_once:
-            logger.debug("boutou> Removing show status directive from cluster manager.")
+            logger.debug("We are removing show status directive from cluster manager.")
             self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
-        logger.debug("boutou> Current status message %s", deployment_desc.state.message)
+        logger.debug(
+            "We are applying status from deployment desc: %s", deployment_desc.state.message
+        )
 
         for status in PeerClusterStatuses:
             if status.value.message != deployment_desc.state.message:
@@ -1195,7 +1204,7 @@ class OpenSearchEventsHandler(Object):
                 )
         if deployment_desc.state.message:
             logger.debug(
-                "boutou> Adding status %s with message: %s",
+                "We are adding status %s with message: %s",
                 GeneralStatuses.BLOCKING_DIRECTIVE.value,
                 deployment_desc.state.message,
             )
@@ -1208,10 +1217,9 @@ class OpenSearchEventsHandler(Object):
                 component=self.charm.cluster_manager.name,
             )
             logger.debug(
-                "boutou> %s",
-                self.charm.state.statuses.get(
-                    "app", self.charm.cluster_manager.name, running_status_only=True
-                ).root,
+                "We are adding status %s with message: %s",
+                GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                deployment_desc.state.message,
             )
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901

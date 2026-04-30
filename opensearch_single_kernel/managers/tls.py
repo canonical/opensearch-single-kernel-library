@@ -636,7 +636,9 @@ class TlsManager(BaseManager):
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list
-
+        # Means the unit is  being terminated
+        if not self.state.peer_relation:
+            return status_list
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)

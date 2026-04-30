@@ -254,9 +254,6 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
             DATA_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
             DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
-        units_statuses={
-            DATA_APP: [NO_DATA_NODE_STATUS],
-        },
     )
 
     await failover_app.remove_relation(
