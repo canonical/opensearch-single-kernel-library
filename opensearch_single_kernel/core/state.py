@@ -321,18 +321,18 @@ class OpenSearchServer(RelationState):
         """Return whether relation broken event should be skipped."""
         return (
             self.relation.data[self.unit]
-            .get(f"{relation.data}_{relation.id}_departing", "")
+            .get(f"{relation.name}_{relation.id}_departing", "")
             .lower()
             == "true"
         )
 
     def set_relation_departing(self, relation: Relation) -> None:
         """Set whether relation broken event should be skipped."""
-        self.update({f"{relation.data}_{relation.id}_departing": "true"})
+        self.update({f"{relation.name}_{relation.id}_departing": "true"})
 
     def remove_relation_departing(self, relation: Relation) -> None:
         """Cleanup mark whether relation broken event should be skipped."""
-        self.update({f"{relation.data}_{relation.id}_departing": ""})
+        self.update({f"{relation.name}_{relation.id}_departing": ""})
 
     @property
     def transport_secrets(self) -> dict[str, str]:
