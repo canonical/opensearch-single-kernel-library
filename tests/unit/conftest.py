@@ -26,6 +26,30 @@ METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.ya
 
 
 @pytest.fixture
+def mock_get_statuses(mocker):
+    """Mock the status setting of the charm."""
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.health.HealthManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.peer_cluster.PeerClusterManager.get_statuses")
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.get_statuses"
+    )
+    mocker.patch("opensearch_single_kernel.managers.lock.LockManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.snapshots.SnapshotsManager.get_statuses")
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.get_statuses"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.get_statuses"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.notification.NotificationsManager.get_statuses"
+    )
+    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.get_statuses")
+
+
+@pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
     if substrate == "vm":
         mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")

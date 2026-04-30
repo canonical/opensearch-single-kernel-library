@@ -662,7 +662,7 @@ class ClusterManager(BaseManager):
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
                 del self.state.application.is_security_index_initialised
-                del self.state.self.application.bootstrapped
+                del self.state.application.bootstrapped
 
     def flush_translog_to_disk(self) -> None:
         """Flush OpenSearch translog to disk."""

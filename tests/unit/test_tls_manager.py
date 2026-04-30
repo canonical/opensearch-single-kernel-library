@@ -441,7 +441,7 @@ def test_truststore_password_secret(harness, mocker, substrate):
     ),
 )
 def test_on_certificate_available_leader_app_cert_full_workflow(
-    deployment_type, harness, mocker, substrate
+    deployment_type, harness, mocker, substrate, mock_get_statuses
 ):
     """New certificate received.
 
@@ -565,7 +565,14 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     ),
 )
 def test_on_certificate_available_any_node_unit_cert_full_workflow(
-    deployment_type, leader, cert_type, harness, mocker, substrate, mock_fs_interactions
+    deployment_type,
+    leader,
+    cert_type,
+    harness,
+    mocker,
+    substrate,
+    mock_fs_interactions,
+    mock_get_statuses,
 ):
     """New *unit* certificate received.
 
@@ -716,7 +723,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
     ],
 )
 def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
-    deployment_type, harness, mocker, mock_fs_interactions, substrate
+    deployment_type, harness, mocker, mock_fs_interactions, substrate, mock_get_statuses
 ):
     """Test CA rotation 1st stage.
 
@@ -1611,7 +1618,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     ),
 )
 def test_on_certificate_available_rotation_ongoing_on_this_unit(
-    deployment_type, leader, harness, substrate, mocker, mock_fs_interactions
+    deployment_type, leader, harness, substrate, mocker, mock_fs_interactions, mock_get_statuses
 ):
     """Additional 'certificate-available' event while processing CA rotation.
 

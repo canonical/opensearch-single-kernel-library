@@ -237,6 +237,7 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
             "main": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
             "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
+        apps_statuses={"main": PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value},
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
@@ -246,6 +247,7 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
+        apps_statuses={"main": PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value},
         units_statuses={
             "main": [
                 ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,

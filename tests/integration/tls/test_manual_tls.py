@@ -8,10 +8,9 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
 from tests.integration.helpers import (
-    EmptyActiveStatus,
-    EmptyMaintenanceStatus,
     wait_until,
 )
 from tests.integration.tls.helpers_manual_tls import (
@@ -79,7 +78,7 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [EmptyActiveStatus, EmptyMaintenanceStatus]},
+        units_statuses={APP_NAME: [TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value]},
         wait_for_exact_units=len(UNIT_IDS) + 1,
     )
 
