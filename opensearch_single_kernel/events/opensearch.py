@@ -195,8 +195,6 @@ class OpenSearchEventsHandler(Object):
             # self.peer_cluster_requirer.apply_orchestrator_status()
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            if self.charm.upgrades_manager.in_progress:
-                return
             if self.charm.config_manager.update_opensearch_config():
                 logger.debug("Restarting opensearch due to reconfiguring node roles")
                 self.charm.restart_opensearch_event.emit()
@@ -358,7 +356,11 @@ class OpenSearchEventsHandler(Object):
             if health == HealthColors.UNKNOWN:
                 return
 
-        if self.charm.unit.is_leader():
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug(
+                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
+            )
+        elif self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
             except OpenSearchHttpError as e:
@@ -367,10 +369,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
-            if (
-                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                and not self.charm.upgrades_manager.in_progress
-            ):
+            if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet

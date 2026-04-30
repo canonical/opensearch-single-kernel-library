@@ -13,6 +13,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from enum import IntEnum
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
@@ -749,3 +750,15 @@ class UnitUpgradesState(BaseStrEnum):
     RESTARTING = "restarting"  # Kubernetes only
     UPGRADING = "upgrading"  # Machines only
     OUTDATED = "outdated"  # Machines only
+
+
+class LifecycleUnitTearingDownAndAppActive(IntEnum):
+    """Unit is tearing down and 1+ other units are NOT tearing down"""
+
+    FALSE = 0
+    TRUE = 1
+    UNKNOWN = 2
+
+    def __bool__(self) -> bool:
+        """Return bool evaluation."""
+        return self is self.TRUE

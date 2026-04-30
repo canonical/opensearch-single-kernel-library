@@ -636,6 +636,10 @@ def test_prereq_when_upgrade_in_progress_then_action_fails(
         "opensearch_single_kernel.managers.upgrades_vm.UpgradesManagerVM.in_progress",
         new_callable=PropertyMock(return_value=True),
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.get_statuses",
+        return_value=[],
+    )
 
     _mock_backup(mocker)
     backend, rels = backend_setup

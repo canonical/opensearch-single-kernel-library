@@ -184,11 +184,6 @@ class UpgradesManagerBase(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
             return [format_status(unit_status, unit_dynamic_params)]
@@ -272,3 +267,22 @@ class UpgradesManagerBase(BaseManager):
 
         logger.warning("Rollback not supported from %s to %s", unit_bag_version, version_on_disk)
         return False
+
+    def update_grafana_dashboards_title(self, charm_revision: str) -> None:
+        """Update the title of the Grafana dashboard file to include the charm revision."""
+        dashboard = json.loads(self.workload.read_text(self.workload.paths.grafana_dashboard))
+
+        old_title = dashboard.get("title", "Charmed OpenSearch")
+        title_prefix = old_title.split(" - Rev")[0]
+        new_title = f"{old_title} - Rev {charm_revision}"
+        dashboard["title"] = f"{title_prefix} - Rev {charm_revision}"
+
+        logger.info(
+            "Changing the title of grafana dashboard from %s to %s",
+            old_title,
+            new_title,
+        )
+
+        self.workload.write_text(
+            json.dumps(dashboard, indent=4), self.workload.paths.grafana_dashboard
+        )

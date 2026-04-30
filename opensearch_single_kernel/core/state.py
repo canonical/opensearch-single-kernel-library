@@ -109,7 +109,7 @@ class OpenSearchServer(RelationState):
         data_interface: DataPeerUnitData,
         component: Unit,
         secrets: OpenSearchSecrets,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self.unit = component
         self.secrets = secrets
@@ -317,23 +317,22 @@ class OpenSearchServer(RelationState):
         """Set or remove OAuth openid_connect_url."""
         self.update({"oauth_openid_connect_url": value or ""})
 
-    @property
-    def oauth_departing(self) -> bool:
-        """Return whether oauth relation broken event should be skipped.
+    def get_relation_departing(self, relation: Relation) -> bool:
+        """Return whether relation broken event should be skipped."""
+        return (
+            self.relation.data[self.unit]
+            .get(f"{relation.data}_{relation.id}_departing", "")
+            .lower()
+            == "true"
+        )
 
-        When current leader is unit oauth relation isn't breaking
-        even if unit receives oauth relation broken event.
-        """
-        return self.relation.data[self.unit].get("oauth_departing", "").lower() == "true"
+    def set_relation_departing(self, relation: Relation) -> None:
+        """Set whether relation broken event should be skipped."""
+        self.update({f"{relation.data}_{relation.id}_departing": "true"})
 
-    @oauth_departing.setter
-    def oauth_departing(self, value: bool):
-        """Set whether oauth relation broken event should be skipped.
-
-        When current leader is unit oauth relation isn't breaking
-        even if unit receives oauth relation broken event.
-        """
-        self.update({"oauth_departing": str(value)})
+    def remove_relation_departing(self, relation: Relation) -> None:
+        """Cleanup mark whether relation broken event should be skipped."""
+        self.update({f"{relation.data}_{relation.id}_departing": ""})
 
     @property
     def transport_secrets(self) -> dict[str, str]:
@@ -370,7 +369,7 @@ class OpenSearchApplication(RelationState):
         component: Application,
         # TODO to be removed when integrating data interfaces v1
         secrets: OpenSearchSecrets,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self.app = component
         self.secrets = secrets
@@ -613,7 +612,7 @@ class ExternalOpenSearchClient(RelationState):
         data_interface: Data,
         component: Application,
         relation_name: str,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self.app = component
         self.relation_name = relation_name
@@ -741,7 +740,7 @@ class LockAppState(RelationState):
         data_interface: Data,
         component: Application,
         unit_name: str,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self._unit_name = unit_name
 
@@ -803,7 +802,7 @@ class LockServerState(RelationState):
         relation: Relation | None,
         data_interface: Data,
         component: Unit,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self.unit = component
 
@@ -841,7 +840,7 @@ class UpgradeAppState(RelationState):
         return UpgradeVersions.from_dict(raw)
 
     @versions.setter
-    def versions(self, value: UpgradeVersions):
+    def versions(self, value: UpgradeVersions) -> None:
         """Set the versions of installed OpenSearch in the relation bag.
 
         Used after next upgrade to check compatibility (i.e. whether that upgrade should be
@@ -878,7 +877,7 @@ class UpgradeServerState(RelationState):
         relation: Relation | None,
         data_interface: Data,
         component: Unit,
-    ):
+    ) -> None:
         super().__init__(relation, data_interface, component)
         self.unit = component
 
@@ -892,7 +891,7 @@ class UpgradeServerState(RelationState):
         )
 
     @unit_state.setter
-    def unit_state(self, value: UnitUpgradesState):
+    def unit_state(self, value: UnitUpgradesState) -> None:
         """Set the unit upgrade state in relation bag."""
         self.relation.data[self.unit].update({"state": value.value})
 
@@ -935,7 +934,7 @@ class ClusterState(Object, StatusesStateProtocol):
         s3_requirer: S3Requirer,
         azure_requires: AzureStorageRequires,
         gcs_requires: GcsStorageRequires,
-    ):
+    ) -> None:
         super().__init__(charm, "cluster_state")
         self.config = charm.config
         self.substrate = substrate

@@ -7,7 +7,7 @@
 
 from typing import Any
 
-from ops import EventBase
+from ops import EventBase, Handle
 
 
 class StartOpenSearch(EventBase):
@@ -18,13 +18,13 @@ class StartOpenSearch(EventBase):
 
     def __init__(
         self,
-        handle,
+        handle: Handle,
         *,
         ignore_lock: bool = False,
         after_upgrade: bool = False,
         is_first_data_node: bool = False,
         override_version: bool = False,
-    ):
+    ) -> None:
         super().__init__(handle)
         self.ignore_lock = ignore_lock
         self.after_upgrade = after_upgrade
@@ -40,7 +40,7 @@ class StartOpenSearch(EventBase):
             "override_version": self.override_version,
         }
 
-    def restore(self, snapshot: dict[str, Any]):
+    def restore(self, snapshot: dict[str, Any]) -> None:
         """Restore data from Dict."""
         self.ignore_lock = snapshot["ignore_lock"]
         self.after_upgrade = snapshot["after_upgrade"]
@@ -62,7 +62,7 @@ class UpgradeOpenSearch(StartOpenSearch):
     `StartOpenSearch` will be emitted.
     """
 
-    def __init__(self, handle, *, ignore_lock=False):
+    def __init__(self, handle: Handle, *, ignore_lock: bool = False) -> None:
         super().__init__(handle, ignore_lock=ignore_lock)
 
 

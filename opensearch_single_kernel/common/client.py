@@ -753,10 +753,6 @@ class OpenSearchClient:
             wait_strategy=wait_exponential(min=2),
         )
 
-    def flush(self, alt_hosts: list[str] | None = None) -> None:
-        """Flush all indices to disk."""
-        self.request("POST", "/_flush", alt_hosts=alt_hosts, retries=3)
-
     def disable_shard_allocation(self, alt_hosts: list[str] | None = None) -> None:
         """Disable shard allocation to primaries only (used before node restart/upgrade)."""
         self.request(

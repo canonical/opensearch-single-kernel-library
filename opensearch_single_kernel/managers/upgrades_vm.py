@@ -71,22 +71,25 @@ class UpgradesManagerVM(UpgradesManagerBase):
 
     def reconcile_partition(self, *, action_event: ops.ActionEvent | None = None) -> None:
         """Handle Juju action to confirm first upgraded unit is healthy and resume upgrade."""
-        if action_event:
-            first_upgrade_unit = self.state.sorted_server_upgrades[0]
-            outdated = first_upgrade_unit.snap_revision != OPENSEARCH_SNAP_REVISION
-            unhealthy = first_upgrade_unit.unit_state is not UnitUpgradesState.HEALTHY
-            if outdated or unhealthy:
-                if outdated:
-                    message = "Highest number unit has not upgraded yet. Upgrade will not resume."
-                else:
-                    message = "Highest number unit is unhealthy. Upgrade will not resume."
-                logger.debug(f"Resume upgrade event failed: {message}")
-                action_event.fail(message)
-                return
-            self.state.application_upgrade.upgrade_resumed = True
-            message = "Upgrade resumed."
-            action_event.set_results({"result": message})
-            logger.debug(f"Resume upgrade event succeeded: {message}")
+        if not action_event:
+            return
+
+        first_upgrade_unit = self.state.sorted_server_upgrades[0]
+        outdated = first_upgrade_unit.snap_revision != OPENSEARCH_SNAP_REVISION
+        unhealthy = first_upgrade_unit.unit_state is not UnitUpgradesState.HEALTHY
+        if outdated or unhealthy:
+            if outdated:
+                message = "Highest number unit has not upgraded yet. Upgrade will not resume."
+            else:
+                message = "Highest number unit is unhealthy. Upgrade will not resume."
+            logger.debug(f"Resume upgrade event failed: {message}")
+            action_event.fail(message)
+            return
+
+        self.state.application_upgrade.upgrade_resumed = True
+        message = "Upgrade resumed."
+        action_event.set_results({"result": message})
+        logger.debug(f"Resume upgrade event succeeded: {message}")
 
     @property
     def authorized(self) -> bool:
