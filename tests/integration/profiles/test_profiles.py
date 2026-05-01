@@ -31,6 +31,10 @@ MISSING_3_DATA_AND_3_CM_STATUS = StatusObject(
     message="Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required.",
     status="blocked",
 )
+MISSING_3_DATA_NODES_STATUS = StatusObject(
+    message="Missing requirements: At least 3 data nodes are required.",
+    status="blocked",
+)
 
 
 async def get_cloud_type(ops_test: OpsTest) -> str:
@@ -259,10 +263,10 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
         apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         units_statuses={
             "main": [
-                MISSING_3_DATA_AND_3_CM_STATUS,
+                MISSING_3_DATA_NODES_STATUS,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
             ],
-            "data": [MISSING_3_DATA_AND_3_CM_STATUS],
+            "data": [MISSING_3_DATA_NODES_STATUS],
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )
