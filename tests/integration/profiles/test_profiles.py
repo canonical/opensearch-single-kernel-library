@@ -240,10 +240,13 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
         ops_test,
         apps=["main", "data"],
         units_statuses={
-            "main": [MISSING_3_DATA_AND_3_CM_STATUS],
+            "main": [
+                MISSING_3_DATA_AND_3_CM_STATUS,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
             "data": [MISSING_3_DATA_AND_3_CM_STATUS],
         },
-        apps_statuses={"main": PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value},
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
@@ -253,7 +256,7 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
-        apps_statuses={"main": PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value},
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         units_statuses={
             "main": [
                 MISSING_3_DATA_AND_3_CM_STATUS,
@@ -265,6 +268,8 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     )
     data_app = ops_test.model.applications["data"]
     await data_app.add_units(count=2)
-    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
+    await wait_until(
+        ops_test, apps=["main", "data"], wait_for_exact_units={"main": 3, "data": 3}, timeout=2000
+    )
 
     await check_heap_size(ops_test, 4, app_name="main")
