@@ -165,7 +165,8 @@ class PeerClusterManager(BaseManager):
         self,
         orchestrators: PeerClusterOrchestrators,
         event_data: MutableMapping[str, Any] | None,
-    ) -> PeerClusterRelErrorData | None:
+        event_rel_id: int,
+    ) -> tuple[PeerClusterRelErrorData | None, int]:
         """Check if the providers are ready and set error if not."""
         orchestrator_rel_ids = [
             rel_id
@@ -174,6 +175,8 @@ class PeerClusterManager(BaseManager):
         ]
 
         error = None
+        # We need to know from where the error comes from to set the correct relation data key
+        rel_error_id = -1
         for rel_id in orchestrator_rel_ids:
             remote_peer_cluster = self.state.peer_cluster_by_relation_id(
                 relation_id=rel_id,
@@ -191,13 +194,18 @@ class PeerClusterManager(BaseManager):
 
             if error_data:
                 error = error_data
+                rel_error_id = rel_id
                 break
 
         # we handle the case where the error came from the provider of a wrong relation
         if not error and "error_data" in (event_data or {}):
             error = json.loads(event_data["error_data"])
+            rel_error_id = event_rel_id
 
-        return PeerClusterRelErrorData.from_dict(error) if error else None
+        if rel_error_id == -1:
+            rel_error_id = event_rel_id
+
+        return (PeerClusterRelErrorData.from_dict(error) if error else None, rel_error_id)
 
     def requirer_errors(  # noqa: C901
         self,

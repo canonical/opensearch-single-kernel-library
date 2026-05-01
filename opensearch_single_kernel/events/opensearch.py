@@ -876,7 +876,8 @@ class OpenSearchEventsHandler(Object):
                 and not self.charm.state.application.is_security_index_initialised
             ):
                 self.charm.state.server.is_cluster_manager_removed = True
-                computed_roles.remove("cluster-manager")
+                if "cluster-manager" in computed_roles:
+                    computed_roles.remove("cluster-manager")
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
             cm_ips = self.charm.cluster_manager.get_cluster_managers_ips(nodes)
             self.charm.cluster_manager.configure_bootstrap_contributors(

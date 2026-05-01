@@ -337,12 +337,12 @@ class PeerClusterEventsHandler(Object):
         reconcile_deployment_desc = False
         try:
             # check if any errors sent by providers
-            errors_data = self.charm.peer_cluster_manager.error_set_from_providers(
-                orchestrators, data
+            errors_data, rel_error_id = self.charm.peer_cluster_manager.error_set_from_providers(
+                orchestrators, data, event_rel_id=event.relation.id
             )
-            logger.debug(f"Errors from providers: {errors_data}")
+            logger.debug(f"Errors from providers: {errors_data}, rel_error_id: {rel_error_id}")
             self.reconcile_peer_cluster_errors(
-                label="error_from_providers-%s" % event.relation.id,
+                label="error_from_providers-%s" % rel_error_id,
                 error=errors_data,
             )
             if errors_data:
