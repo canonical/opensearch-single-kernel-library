@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchLockError,
 )
 from opensearch_single_kernel.common.statuses import LockStatuses
-from opensearch_single_kernel.core.models import DeploymentDescription, PeerClusterApp
+from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -297,8 +297,7 @@ class LockManager(PeerLockManager):
             # handle case of large deployments
             other_apps_units = []
             if all_apps := self.state.application.cluster_fleet_apps:
-                for app in all_apps.values():
-                    p_cluster_app = PeerClusterApp.from_dict(app)
+                for p_cluster_app in all_apps.values():
                     if p_cluster_app.app.id == current_app.id:
                         continue
 

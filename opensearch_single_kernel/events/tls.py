@@ -78,7 +78,9 @@ class TLSEventsHandler(Object):
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
             return
-        # TODO: Check if the charm is in upgrade
+        if self.charm.upgrades_manager.in_progress:
+            event.fail("Setting private key not supported while upgrade in-progress")
+            return
 
         if not self.charm.state.tls_relation:
             event.fail("TLS relation not available.")
@@ -111,7 +113,14 @@ class TLSEventsHandler(Object):
 
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
-        # TODO: Defer when upgrade is in progress
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+            event.defer()
+            return
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
@@ -163,7 +172,12 @@ class TLSEventsHandler(Object):
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
-        # TODO: If upgrade log a warning
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+
         if self.charm.tls_manager.all_tls_resources_stored():
             return
 
@@ -398,10 +412,9 @@ class TLSEventsHandler(Object):
         if not self.charm.unit.is_leader():
             event.fail("The action can only be run on leader unit.")
             return
-        # TODO: block on upgrade
-        # if self.upgrade_in_progress:
-        # event.fail("Setting password not supported while upgrade in-progress")
-        # return
+        if self.charm.upgrades_manager.in_progress:
+            event.fail("Setting password not supported while upgrade in-progress")
+            return
 
         user_name = event.params.get("username")
         if user_name not in OPENSEARCH_USERS:

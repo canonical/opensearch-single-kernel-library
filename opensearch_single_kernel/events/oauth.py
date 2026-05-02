@@ -137,7 +137,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handler for `relation_departed` event."""
         if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
-            self.charm.state.server.oauth_departing = True
+            self.charm.state.server.set_relation_departing(event.relation)
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
@@ -153,7 +153,7 @@ class OAuthEventsHandler(Object):
             return
 
         if (
-            self.charm.state.server.oauth_departing
+            self.charm.state.server.get_relation_departing(event.relation)
             or not self.charm.state.application.is_security_index_initialised
         ):
             return
