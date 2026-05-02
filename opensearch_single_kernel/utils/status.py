@@ -27,4 +27,5 @@ def format_status(status: StatusObject, params: dict[str, Any] | None) -> Status
         status=status.status,
         message=status.message.format_map(SafeDict(params)),
         running=status.running,
+        approved_critical_component=status.approved_critical_component,
     )

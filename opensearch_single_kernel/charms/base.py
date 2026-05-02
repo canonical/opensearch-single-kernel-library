@@ -32,6 +32,7 @@ from opensearch_single_kernel.events.custom_events import (
     ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
+    UpgradeOpenSearch,
     VerifySnapshotsCredentialsEvent,
 )
 from opensearch_single_kernel.events.external_clients import (
@@ -45,6 +46,7 @@ from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandler
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
+from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
     AzureStorageRequires,
 )
@@ -70,6 +72,7 @@ from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
+from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -81,6 +84,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
     # Custom Events
     restart_opensearch_event = EventSource(RestartOpenSearch)
     start_opensearch_event = EventSource(StartOpenSearch)
+    upgrade_opensearch_event = EventSource(UpgradeOpenSearch)
     verify_snapshots_credentials_event = EventSource(VerifySnapshotsCredentialsEvent)
     reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
@@ -115,9 +119,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
         self.snapshots_manager = SnapshotsManager(self.state, self.workload)
+        self.upgrades_manager = UpgradesManagerVM(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
+        self.upgrade_events = UpgradesEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
         self.peer_cluster_events = PeerClusterEventsHandler(self)
         self.external_clients_events = ExternalClientsEventsHandler(self)
@@ -141,6 +147,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.internal_users_manager,
             self.external_clients_manager,
             self.notifications_manager,
+            self.upgrades_manager,
         )
 
     def trigger_peer_rel_changed(

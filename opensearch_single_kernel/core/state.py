@@ -32,6 +32,7 @@ from opensearch_single_kernel.common.constants import (
     SMTP_RELATION,
     STATUS_PEERS_RELATION,
     TLS_RELATION,
+    UPGRADE_RELATION,
     ObjectStorageType,
     Scope,
     StartMode,
@@ -70,6 +71,10 @@ from opensearch_single_kernel.core.relations import (
     PeerClusterOrchestratorData,
 )
 from opensearch_single_kernel.core.secrets import OpenSearchSecrets
+from opensearch_single_kernel.core.upgrade_relation import (
+    UpgradeAppState,
+    UpgradeServerState,
+)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
     AzureStorageRequires,
 )
@@ -110,7 +115,7 @@ class ClusterState(Object):
         s3_requirer: S3Requirer,
         azure_requires: AzureStorageRequires,
         gcs_requires: GcsStorageRequires,
-    ):
+    ) -> None:
         super().__init__(charm, "cluster_state")
         self.config = charm.config
         self.substrate = substrate
@@ -203,10 +208,57 @@ class ClusterState(Object):
         """Check if the relation exists"""
         return bool(self.model.get_relation(relation_name))
 
+    @property
+    def upgrade_relation(self) -> Relation | None:
+        """Get peer upgrade relation."""
+        return self.model.get_relation(UPGRADE_RELATION)
+
     def peer_cluster_orchestrator_relation_exists(self, relation_id: int) -> bool:
         """Check if the relation with id exists"""
         relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
         return bool(relation)
+
+    # --- Upgrade Relation State Properties ---
+
+    @property
+    def server_upgrade(self) -> UpgradeServerState:
+        """Get state of lock relation for current unit."""
+        return UpgradeServerState(
+            relation=self.upgrade_relation,
+            data_interface=DataPeerUnitData(model=self.model, relation_name=UPGRADE_RELATION),
+            component=self.model.unit,
+        )
+
+    @property
+    def application_upgrade(self) -> UpgradeAppState:
+        """Get application state of upgrade relation."""
+        return UpgradeAppState(
+            relation=self.upgrade_relation,
+            data_interface=DataPeerData(model=self.model, relation_name=UPGRADE_RELATION),
+            component=self.model.app,
+        )
+
+    @property
+    def sorted_server_upgrades(self) -> list[UpgradeServerState]:
+        """Get state of upgrade relation for all units in it sorted by highest unit number."""
+        return (
+            [
+                UpgradeServerState(
+                    relation=self.upgrade_relation,
+                    data_interface=DataPeerUnitData(
+                        model=self.model, relation_name=UPGRADE_RELATION
+                    ),
+                    component=unit,
+                )
+                for unit in sorted(
+                    (self.server.unit, *self.upgrade_relation.units),
+                    key=lambda unit: unit.name.split("/")[1],
+                    reverse=True,
+                )
+            ]
+            if self.upgrade_relation
+            else []
+        )
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 

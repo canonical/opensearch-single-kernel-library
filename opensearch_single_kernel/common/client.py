@@ -753,6 +753,34 @@ class OpenSearchClient:
             wait_strategy=wait_exponential(min=2),
         )
 
+    def disable_shard_allocation(self, alt_hosts: list[str] | None = None) -> None:
+        """Disable shard allocation to primaries only (used before node restart/upgrade)."""
+        self.request(
+            "PUT",
+            "/_cluster/settings",
+            payload={
+                "persistent": {
+                    "cluster.routing.allocation.enable": "primaries",
+                    "action.auto_create_index": False,
+                }
+            },
+            alt_hosts=alt_hosts,
+        )
+
+    def enable_shard_allocation(self, alt_hosts: list[str] | None = None) -> None:
+        """Re-enable full shard allocation (used after rollback or node restart)."""
+        self.request(
+            "PUT",
+            "/_cluster/settings",
+            payload={
+                "persistent": {
+                    "cluster.routing.allocation.enable": "all",
+                    "action.auto_create_index": True,
+                }
+            },
+            alt_hosts=alt_hosts,
+        )
+
     def apply_auto_replication_to_index(
         self,
         index: str,

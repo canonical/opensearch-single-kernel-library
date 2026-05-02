@@ -921,14 +921,6 @@ class ClusterManager(BaseManager):
                 self.state.jwt.auth_configuration
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
-        if (
-            (deployment_desc := self.state.application.deployment_desc)
-            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
-            and "data" not in deployment_desc.config.roles
-            and not self.state.application.is_security_index_initialised
-        ):
-            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
         if (
             not self.no_blocking_directives(deployment_desc)
@@ -942,3 +934,12 @@ class ClusterManager(BaseManager):
                     params={"directive": deployment_desc.state.message},
                 )
             )
+
+        if (
+            (deployment_desc := self.state.application.deployment_desc)
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.state.application.is_security_index_initialised
+        ):
+            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)

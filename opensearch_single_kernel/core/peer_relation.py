@@ -315,6 +315,23 @@ class OpenSearchServer(RelationState):
         """Get the keystore-password of HTTP TLS cert from the TLS cert_secret."""
         return self.http_secrets.get("keystore-password")
 
+    def get_relation_departing(self, relation: Relation) -> bool:
+        """Return whether relation broken event should be skipped."""
+        return (
+            self.relation.data[self.unit]
+            .get(f"{relation.name}_{relation.id}_departing", "")
+            .lower()
+            == "true"
+        )
+
+    def set_relation_departing(self, relation: Relation) -> None:
+        """Set whether relation broken event should be skipped."""
+        self.update({f"{relation.name}_{relation.id}_departing": "true"})
+
+    def remove_relation_departing(self, relation: Relation) -> None:
+        """Cleanup mark whether relation broken event should be skipped."""
+        self.update({f"{relation.name}_{relation.id}_departing": ""})
+
 
 class OpenSearchApplication(RelationState):
     """An OpenSearch Application is a charm application with a given role.

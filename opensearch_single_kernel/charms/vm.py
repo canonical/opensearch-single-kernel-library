@@ -19,7 +19,7 @@ class OpenSearchVMCharm(OpenSearchBaseCharm):
     @property
     def workload(self) -> BaseWorkload:
         """Access current workload."""
-        return VMWorkload()
+        return VMWorkload(self.charm_dir)
 
     @property
     def substrate(self) -> Substrates:

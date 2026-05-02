@@ -64,7 +64,13 @@ class ExternalClientsEventsHandler(Object):
             OpenSearchIndexError if the index name is invalid
             OpenSearchHttpError if we can't create the required index
         """
-        # TODO: If upgrade in progress then defer event
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+            event.defer()
+            return
 
         if not self.charm.unit.is_leader():
             return
@@ -186,6 +192,7 @@ class ExternalClientsEventsHandler(Object):
             return
         # remove departing unit from endpoints available to requirer charm.
         if event.departing_unit.app == self.charm.app:
+            self.charm.state.server.set_relation_departing(event.relation)
             departing_unit_ip = self.charm.state.unit_ip(event.departing_unit)
             self.update_external_client_endpoints(
                 external_client, omit_endpoints={departing_unit_ip}
@@ -220,16 +227,17 @@ class ExternalClientsEventsHandler(Object):
         """Handle client relation-broken event."""
         if not self.charm.unit.is_leader():
             return
-        external_client = self.charm.state.external_client_by_relation(event.relation)
-        if not external_client:
+        if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
-        # TODO: Handle upgrades
-        # if self.charm.upgrade_in_progress:
-        #    logger.warning(
-        # "Modifying relations during an upgrade is not supported."
-        # "The charm may be in a broken, unrecoverable state"
-        # )
+        if self.charm.state.server.get_relation_departing(event.relation):
+            self.charm.state.server.remove_relation_departing(event.relation)
+            return
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
             external_client
         )

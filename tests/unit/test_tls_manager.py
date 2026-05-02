@@ -1073,10 +1073,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         app=App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name),
         state=DeploymentState(value=State.ACTIVE),
     )
-    # TODO: Re enable mock over upgrade
-    # upgrade_mock = MagicMock(app_status=ActiveStatus())
-    # upgrade_mock.get_unit_juju_status.return_value = ActiveStatus()
-    # upgrade.return_value = upgrade_mock
 
     mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
     mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)
@@ -1241,10 +1237,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         app=App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name),
         state=DeploymentState(value=State.ACTIVE),
     )
-    # TODO: Re enable mock over upgrade
-    # upgrade_mock = MagicMock(app_status=ActiveStatus())
-    # upgrade_mock.get_unit_juju_status.return_value = ActiveStatus()
-    # upgrade.return_value = upgrade_mock
 
     mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
     mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)

@@ -86,3 +86,21 @@ status-detail:
       type: boolean
       default: false
       description: a boolean indicating whether a unit should recompute all statuses.   - continue upgrade if 1+ upgraded units have non-active status
+
+# TODO to be changed when implementing refresh V3
+force-refresh-start:
+  description: |
+    Potential of data loss and downtime
+
+    Force refresh of first unit
+
+    Must run with at least one of the parameters `=false`
+  params:
+    check-compatibility:
+      type: boolean
+      default: true
+      description: |
+        Potential of data loss and downtime
+
+        If `false`, force refresh if new version of OpenSearch and/or charm is not compatible with previous version
+  additionalProperties: false

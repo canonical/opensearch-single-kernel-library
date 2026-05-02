@@ -63,7 +63,10 @@ from opensearch_single_kernel.common.statuses import (
     ProfileStatuses,
     TlsStatuses,
 )
-from opensearch_single_kernel.core.models import DeploymentDescription
+from opensearch_single_kernel.core.models import (
+    DeploymentDescription,
+    UnitUpgradesState,
+)
 from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
@@ -128,21 +131,19 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
-        # TODO: Handle upgrades
-        # if self.upgrade_in_progress:
-        # logger.warning(
-        #    "Adding units during an upgrade is not supported. The charm may be in a broken,
-        #  unrecoverable state"
-        # )
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Adding units during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
 
     def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Event received by all units when a new node joins the cluster."""
-        # TODO: Handle upgrades
-        # if self.upgrade_in_progress:
-        #    logger.warning(
-        #        "Adding units during an upgrade is not supported. The charm may be in a broken,
-        #  unrecoverable state"
-        #    )
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Adding units during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
@@ -218,12 +219,11 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
-        # TODO: Handle upgrades
-        # if self.upgrade_in_progress:
-        #    logger.warning(
-        #        "Removing units during an upgrade is not supported. The charm may be in a broken,
-        #  unrecoverable state"
-        #    )
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Removing units during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # that happens in the very last stages of the application removal
             return
@@ -266,7 +266,11 @@ class OpenSearchEventsHandler(Object):
         self, event: StorageDetachingEvent
     ) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
-        # TODO: Warning in case of upgrade in progress
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Removing units during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+            )
+
         planned_units = self.charm.app.planned_units()
 
         # acquire lock to ensure only 1 unit removed at a time
@@ -378,7 +382,11 @@ class OpenSearchEventsHandler(Object):
             if health == HealthColors.UNKNOWN:
                 return
 
-        if self.charm.unit.is_leader():
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug(
+                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
+            )
+        elif self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
             except OpenSearchHttpError as e:
@@ -387,11 +395,6 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
-            # TODO: Handle upgrade in progress
-            # if self.upgrade_in_progress:
-            # logger.debug(
-            # "Skipping `remove_lingering_users_and_roles()` because upgrade is in-progress"
-            # )
             if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
@@ -465,7 +468,12 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        # TODO: Handle upgrade in progress
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+            )
+            event.defer()
+            return
 
         try:
             config_profile = self.charm.profiles_manager.config_profile
@@ -940,7 +948,7 @@ class OpenSearchEventsHandler(Object):
                 )
             pass
 
-    def _post_start_init(self, event: StartOpenSearch) -> None:
+    def _post_start_init(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Initialisation post OpenSearch start"""
         # initialize the security index if needed (and certs written on disk etc.)
         # this happens only on the first data node to join the cluster
@@ -991,6 +999,14 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.lock_manager.release()
 
+        if event.after_upgrade:
+            try:
+                self.charm.cluster_manager.opensearch_client.enable_shard_allocation()
+            except OpenSearchHttpError:
+                logger.exception("Failed to re-enable allocation after upgrade")
+                event.defer()
+                return
+
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.started = str(time.time())
         self.charm.state.remove_status_if_present(
@@ -1022,13 +1038,58 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.name,
         )
 
-        # TODO: Handle event.after_upgrade
+        if event.after_upgrade:
+            health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
+
+            # Cluster is considered healthy if green or yellow
+            # TODO future improvement: try to narrow scope to just green or green + yellow in
+            # specific cases
+            # https://github.com/canonical/opensearch-operator/issues/268
+            # See https://chat.canonical.com/canonical/pl/s5j64ekxwi8epq53kzhd8fhrco and
+            # https://chat.canonical.com/canonical/pl/zaizx3bu3j8ftfcw67qozw9dbo
+            # For now, we need to allow yellow because
+            # "During a rolling upgrade, primary shards assigned to a node running the new
+            # version cannot have their replicas assigned to a node with the old version. The new
+            # version might have a different data format that is not understood by the old
+            # version.
+            #
+            # "If it is not possible to assign the replica shards to another node (there is only
+            # one upgraded node in the cluster), the replica shards remain unassigned and status
+            # stays `yellow`.
+            #
+            # "In this case, you can proceed once there are no initializing or relocating shards
+            # (check the `init` and `relo` columns).
+            #
+            # "As soon as another node is upgraded, the replicas can be assigned and the status
+            # will change to `green`."
+            #
+            # from
+            # https://www.elastic.co/guide/en/elastic-stack/8.13/upgrading-elasticsearch.html#upgrading-elasticsearch
+            #
+            # If `health_ == HealthColors.YELLOW`, no shards are initializing or relocating
+            # (otherwise `health_` would be `HealthColors.YELLOW_TEMP`)
+            if health not in (HealthColors.GREEN, HealthColors.YELLOW):
+                logger.error("Cluster is not healthy after upgrade. Manual intervention required.")
+                event.defer()
+                return
+            elif health == HealthColors.YELLOW:
+                # TODO future improvement:
+                # https://github.com/canonical/opensearch-operator/issues/268
+                logger.warning(
+                    "Cluster is yellow. Upgrade may cause data loss if cluster is yellow for reason "
+                    "other than primary shards on upgraded unit & not enough upgraded units available "
+                    "for replica shards"
+                )
+
+        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+        logger.debug("Set upgrade unit state to healthy")
+        self.charm.upgrade_events._reconcile_upgrade()
+
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )
-
         self.post_start_ca_rotation()
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:

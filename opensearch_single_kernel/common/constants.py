@@ -241,12 +241,6 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detection-state",
     OPENSEARCH_NODE_LOCK_INDEX,
 ]
-# TLS
-CA_ALIAS = "ca"
-OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
-OLD_CA_PREFIX = "old-"
-CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 DEFAULT_EXTRA_USER_ROLE = "default"
@@ -275,6 +269,7 @@ JWT_CONFIG_RELATION = "jwt-configuration"
 OAUTH_RELATION = "oauth"
 STATUS_PEERS_RELATION = "status-peers"
 SMTP_RELATION = "smtp"
+UPGRADE_RELATION = "upgrade-version-a"
 
 
 # Paths
@@ -338,3 +333,9 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+
+
+# Upgrades
+UPGRADES_COMPATIBILITY_MATRIX = {
+    "2.19.4": {"2.18.0", "2.19.0", "2.19.1", "2.19.2", "2.19.3"},
+}

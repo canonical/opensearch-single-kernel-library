@@ -13,9 +13,11 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from enum import IntEnum
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
+import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from pydantic import (
     BaseModel,
@@ -43,6 +45,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 logger = logging.getLogger(__name__)
 
@@ -784,11 +787,6 @@ class PeerClusterRelErrorData(Model):
         # We need to find the status based on the blocked_message
         # and the should_wait which means its a waiting status
         for status in PeerClusterErrorDataStatuses:
-            if status.value.status == "blocked" and self.should_wait:
-                continue
-            if status.value.status == "waiting" and not self.should_wait:
-                continue
-
             escaped_message = re.escape(status.value.message)
 
             # Substitute the escaped curly brace blocks with non-greedy wildcard
@@ -892,3 +890,41 @@ class JWTAuthConfiguration(Model):
     required_audience: str | None = None
     required_issuer: str | None = None
     jwt_clock_skew_tolerance_seconds: int | None = None
+
+
+class UpgradeVersions(Model):
+    """Model class for the charm & workload versions used for upgrades."""
+
+    charm: str
+    workload: str
+
+    @property
+    def charm_parsed(self) -> poetry_version.Version:
+        """Parsed charm version with build version omitted."""
+        return poetry_version.Version.parse(self.charm.split("+")[0])
+
+    @property
+    def workload_parsed(self) -> poetry_version.Version:
+        """Parsed workload version."""
+        return poetry_version.Version.parse(self.workload)
+
+
+class UnitUpgradesState(BaseStrEnum):
+    """Unit state of upgrade."""
+
+    HEALTHY = "healthy"
+    RESTARTING = "restarting"  # Kubernetes only
+    UPGRADING = "upgrading"  # Machines only
+    OUTDATED = "outdated"  # Machines only
+
+
+class LifecycleUnitTearingDownAndAppActive(IntEnum):
+    """Unit is tearing down and 1+ other units are NOT tearing down"""
+
+    FALSE = 0
+    TRUE = 1
+    UNKNOWN = 2
+
+    def __bool__(self) -> bool:
+        """Return bool evaluation."""
+        return self is self.TRUE
