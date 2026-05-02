@@ -171,7 +171,6 @@ class OpenSearchEventsHandler(Object):
             # we want to have the most up-to-date info broadcasted to related sub-clusters
 
             if self.charm.state.is_peer_cluster_provider():
-                logger.debug("Refreshing relation data from peer-relation-changed")
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
             # update any orchestrators about planned units
@@ -805,9 +804,6 @@ class OpenSearchEventsHandler(Object):
                     self.charm.state.is_peer_cluster_provider(typ="main")
                     and self.charm.unit.is_leader()
                 ):
-                    logger.debug(
-                        "Refreshing relation data from start opensearch when it already started"
-                    )
                     self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                         event.relation.id if hasattr(event, "relation") else None
                     )
@@ -939,7 +935,6 @@ class OpenSearchEventsHandler(Object):
                 and self.charm.unit.is_leader()
             ):
 
-                logger.debug("Refreshing relation data from start opensearch if we are main")
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 )
@@ -1030,7 +1025,6 @@ class OpenSearchEventsHandler(Object):
         # TODO: Handle event.after_upgrade
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
-            logger.debug("Refreshing relation data after post start init ")
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
             )
