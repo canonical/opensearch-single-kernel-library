@@ -330,7 +330,7 @@ class OpenSearchServer(RelationState):
 
     def remove_relation_departing(self, relation: Relation) -> None:
         """Cleanup mark whether relation broken event should be skipped."""
-        self.update({f"{relation.name}_{relation.id}_departing": ""})
+        self.relation.data[self.unit].pop(f"{relation.name}_{relation.id}_departing", None)
 
 
 class OpenSearchApplication(RelationState):

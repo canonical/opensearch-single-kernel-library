@@ -175,7 +175,7 @@ class PluginManager(BaseManager):
         return [
             relation_name
             for relation_name in plugin_relation_names
-            if self.state.relation_exists(relation_name)
+            if not self.state.relation_exists(relation_name)
         ]
 
     @override

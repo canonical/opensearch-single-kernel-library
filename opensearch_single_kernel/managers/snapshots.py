@@ -566,7 +566,7 @@ class SnapshotsManager(BaseManager):
         return [
             relation_name
             for relation_name in backup_relations
-            if self.state.relation_exists(relation_name)
+            if not self.state.relation_exists(relation_name)
         ]
 
     def update_backup_credentials_from_peer_relation(self, data: PeerClusterRelData) -> None:

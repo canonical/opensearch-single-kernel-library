@@ -909,9 +909,9 @@ class ClusterManager(BaseManager):
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
         """Compute the manager's app statuses and append them to list."""
-        if (
-            deployment_desc := self.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return None
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.state.oauth_relation:
                 status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
             if self.state.jwt_relation:
@@ -924,7 +924,6 @@ class ClusterManager(BaseManager):
 
         if (
             not self.no_blocking_directives(deployment_desc)
-            and deployment_desc
             and deployment_desc.state.value != State.ACTIVE
             and deployment_desc.state.message
         ):
@@ -936,8 +935,7 @@ class ClusterManager(BaseManager):
             )
 
         if (
-            (deployment_desc := self.state.application.deployment_desc)
-            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
             and "data" not in deployment_desc.config.roles
             and not self.state.application.is_security_index_initialised
