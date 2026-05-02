@@ -769,7 +769,7 @@ class ClusterState(Object):
         # who then broadcasts `security_index_initialized` to the peer clusters.
         if (
             self.model.unit.is_leader()
-            and self.is_failover_and_sole_data_app()
+            and self.is_failover_and_sole_data_app
             and not self.application.is_security_index_initialised
         ):
             self.server.is_cluster_manager_removed = True
@@ -780,6 +780,7 @@ class ClusterState(Object):
             computed_roles = []  # to mark a node as dedicated coordinating only, we clear the list
         return computed_roles
 
+    @property
     def is_failover_and_sole_data_app(self) -> bool:
         """Check if the current node is a failover and the only data node in the cluster."""
         deployment_desc = self.application.deployment_desc

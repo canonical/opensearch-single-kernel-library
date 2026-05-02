@@ -876,7 +876,7 @@ class OpenSearchEventsHandler(Object):
             # who then broadcasts `security_index_initialized` to the peer clusters.
             if (
                 self.charm.unit.is_leader()
-                and self.charm.state.is_failover_and_sole_data_app()
+                and self.charm.state.is_failover_and_sole_data_app
                 and not self.charm.state.application.is_security_index_initialised
             ):
                 self.charm.state.server.is_cluster_manager_removed = True
