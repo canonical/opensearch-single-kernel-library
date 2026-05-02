@@ -615,8 +615,8 @@ class TlsManager(BaseManager):
     def cleanup_peer_cluster_error_relation_data(self) -> None:
         """Clean up the error data in relation data when the error is resolved."""
         # copy the keys to avoid "dictionary changed size during iteration" error
-        relation_data = self.state.application.relation_data.copy()
-        for key, _ in relation_data.items():
+        relation_items = list(self.state.application.relation_data.items())
+        for key, _ in relation_items:
             if key.startswith("error_from_tls"):
                 # get the relation id from key
                 rel_id = int(key.split("-")[-1])
