@@ -62,7 +62,7 @@ def _mock_backup(
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
-    mocker, backend_setup, context
+    mocker, harness, backend_setup, context
 ):
     # Given
     create_snapshot = mocker.patch(
@@ -628,18 +628,40 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
     assert "deployment not ready" in err.value.message.lower()
 
 
-# TODO: Re-enable this test when upgrade is implemented
-@pytest.mark.skip(reason="Upgrade not implemented yet")
-def test_prereq_when_upgrade_in_progress_then_action_fails(self, monkeypatch):
-    st = testing.State(leader=True)
-    monkeypatch.setattr(
-        "src.charm.OpenSearchOperatorCharm.upgrade_in_progress",
-        property(lambda _self: True),
+def test_prereq_when_upgrade_in_progress_then_action_fails(
+    context, mocker, harness, backend_setup, monkeypatch
+):
+    # Given
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_vm.UpgradesManagerVM.in_progress",
+        new_callable=PropertyMock(return_value=True),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.get_statuses",
+        return_value=[],
     )
 
-    with pytest.raises(testing.ActionFailed) as err:
-        self.ctx.run(self.ctx.on.action("create-backup"), st)
+    _mock_backup(mocker)
+    backend, rels = backend_setup
+    if backend == "s3":
+        object_storage_type = ObjectStorageType.S3
+    elif backend == "azure":
+        object_storage_type = ObjectStorageType.AZURE
+    else:
+        object_storage_type = ObjectStorageType.GCS
 
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.storage_type",
+        new_callable=PropertyMock,
+        return_value=object_storage_type,
+    )
+
+    st = testing.State(leader=True, relations=rels)
+
+    # When
+    with pytest.raises(testing.ActionFailed) as err:
+        context.run(context.on.action("create-backup"), st)
+    # Assert
     assert "upgrade in-progress" in err.value.message.lower()
 
 

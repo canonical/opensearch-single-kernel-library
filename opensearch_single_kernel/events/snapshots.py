@@ -528,9 +528,9 @@ class SnapshotsEventsHandler(Object):
 
         if not self.charm.state.application.deployment_desc:
             return "Deployment not ready."
-        # TODO: Handle upgrades
-        # if self.charm.upgrade_in_progress:
-        #    return "Backup/Restore operations not supported while upgrade in-progress."
+
+        if self.charm.upgrades_manager.in_progress:
+            return "Backup/Restore operations not supported while upgrade in-progress."
 
         if object_storage_type == ObjectStorageType.CONFLICT:
             return "Conflict: more than one object storage integrators integrated."

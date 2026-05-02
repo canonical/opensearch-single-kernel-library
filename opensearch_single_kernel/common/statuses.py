@@ -241,3 +241,48 @@ class JwtStatuses(Enum):
         status="blocked",
         message="Configuration for JWT authentication is invalid. Check and correct parameters.",
     )
+
+
+class UpgradesStatuses(Enum):
+    """Collection of charm statuses related to upgrades manager."""
+
+    UPGRADES_ACTIVE = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running; Snap rev {snap_revision}; Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
+    UPGRADES_ACTIVE_OUTDATED = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running; Snap rev {snap_revision} (outdated); Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
+    UPGRADES_UPGRADING = StatusObject(
+        status="maintenance",
+        message="Upgrading.",
+        approved_critical_component=True,
+    )
+    UPGRADES_WAITING_FOR_RESUME = StatusObject(
+        status="blocked",
+        message="Upgrading. Verify highest unit is healthy & run `resume upgrade action.",
+        approved_critical_component=True,
+    )
+    UPGRADES_INCOMPATIBLE = StatusObject(
+        status="blocked",
+        message="Upgrade incompatible. Rollback to previous revision with `juju refresh`.",
+        approved_critical_component=True,
+    )
+    UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
+        status="blocked",
+        message="Pre upgrade check failed: please check the logs for more details.",
+        approved_critical_component=True,
+    )
+    UPGRADES_ROLLBACK_UNSUPPORTED = StatusObject(
+        status="blocked",
+        message="Rollback unsupported. Refresh to a newer revision or consult the recovery documentation",
+        approved_critical_component=True,
+    )
+    UPGRADES_ROLLBACK_INCOMPATIBLE = StatusObject(
+        status="blocked",
+        message="Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure",
+        approved_critical_component=True,
+    )
