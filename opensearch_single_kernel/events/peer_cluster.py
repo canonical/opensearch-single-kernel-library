@@ -111,7 +111,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("No units in relation. Skipping refresh relation data")
             return
 
-        if not self.charm.state.peer_cluster_relations:
+        if not self.charm.state.peer_cluster_orchestrator_relations:
             logger.debug("Node not a provider. Skipping refresh relation data")
             return
 
