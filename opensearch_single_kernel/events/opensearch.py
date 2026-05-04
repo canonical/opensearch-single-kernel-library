@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Handler for General OpenSearch charm events."""
@@ -11,7 +11,6 @@ from time import time_ns
 from typing import TYPE_CHECKING
 
 from ops import (
-    BlockedStatus,
     ConfigChangedEvent,
     InstallEvent,
     LeaderElectedEvent,
@@ -28,6 +27,7 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    ADMIN_USER,
     CERTS_EXPIRATION_DATE_FORMAT,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
@@ -48,6 +48,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
     OpenSearchMissingError,
+    OpenSearchNoClusterManagersError,
     OpenSearchNotFullyReadyError,
     OpenSearchStartError,
     OpenSearchStartTimeoutError,
@@ -77,6 +78,7 @@ from opensearch_single_kernel.utils.secrets import (
     password_key,
     user_from_hash_key,
 )
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -150,11 +152,6 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
-        if not self.charm.state.server.started:
-            logger.debug("Deferring peer relation changed because server haven't started yet")
-            event.defer()
-            return
-
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
             and self.charm.apply_health(app=self.charm.unit.is_leader())
@@ -165,39 +162,47 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        # we want to have the most up-to-date info broadcasted to related sub-clusters
-        # if self.opensearch_peer_cm.is_provider():
-        # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
-
-        # update any orchestrators about planned units
-        # if self.opensearch_peer_cm.is_consumer():
-        # self.peer_cluster_requirer.refresh_requirer_relation_data()
-        self.charm.config_manager.update_seeds_config()
+        try:
+            nodes = self.charm.cluster_manager.get_nodes(is_node_up)
+        except OpenSearchHttpError:
+            logger.error("unable to get nodes")
+            nodes = []
 
         if self.charm.unit.is_leader():
-            try:
-                nodes = self.charm.cluster_manager.get_nodes(is_node_up)
-            except OpenSearchHttpError:
-                logger.error("unable to get nodes")
-                nodes = []
+            # we want to have the most up-to-date info broadcasted to related sub-clusters
+
+            if self.charm.state.is_peer_cluster_provider():
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+
+            # update any orchestrators about planned units
+            if self.charm.state.is_peer_cluster_consumer():
+                self.charm.peer_cluster_manager.refresh_requirer_relation_data()
+
             # Update all external clients with new endpoints
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
-            # TODO: Handle once large deployments are implemented
-            # if self.peers_data.get(Scope.APP, "missing_relations"):
-            # for failover promotions: this flag indicates that the user needs
-            # to relate integrators to this new main orchestrator
-            # self.peer_cluster_provider.check_credentials_with_missing_relations()
-            # if self.model.relations[PeerClusterRelationName]:
-            # self.peer_cluster_requirer.apply_orchestrator_status()
+            if self.charm.state.server.started:
+                # make sure that we only restart if the node has already
+                # gone through the start workflow
+                self._reconfigure_and_restart_if_needed()
+            if self.charm.state.application.missing_relations:
+                # for failover promotions: this flag indicates that the user needs
+                # to relate integrators to this new main orchestrator
+                self.charm.peer_cluster_events.check_credentials_with_missing_relations()
+                if self.charm.state.peer_cluster_relations:
+                    self.charm.peer_cluster_events.apply_orchestrator_status()
+
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
-            if self.charm.config_manager.update_opensearch_config():
-                logger.debug("Restarting opensearch due to reconfiguring node roles")
-                self.charm.restart_opensearch_event.emit()
+            if self.charm.state.server.started:
+                # make sure that we only restart if the node has already
+                # gone through the start workflow
+                self._reconfigure_and_restart_if_needed()
+
+        self.charm.config_manager.update_seeds_config(nodes)
 
         self.check_profile_requirements()
 
@@ -257,7 +262,9 @@ class OpenSearchEventsHandler(Object):
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
         )
 
-    def _on_opensearch_data_storage_detaching(self, event: StorageDetachingEvent) -> None:
+    def _on_opensearch_data_storage_detaching(  # noqa: C901
+        self, event: StorageDetachingEvent
+    ) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
@@ -278,10 +285,27 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.reconcile_before_unit_removal(
                 is_last_unit=planned_units == 0
             )
+            if planned_units == 0:
+                if self.charm.state.is_peer_cluster_provider():
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None,
+                    )
+                    logger.debug("demoting main orchestrator")
+                    self.charm.cluster_manager.demote_deployment_type()
+                    del self.charm.state.application.orchestrators
+                    self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
+                elif self.charm.state.is_peer_cluster_consumer():
+                    self.charm.peer_cluster_manager.refresh_requirer_relation_data()
             # No cluster managers left in the cluster fleet
             # raise so we do not lose the cluster state
-            # TODO: Add large deployments support
-
+            if (
+                self.charm.cluster_manager.opensearch_client.is_node_up()
+                and self.charm.cluster_manager.no_cluster_manager_left
+            ):
+                logger.error(
+                    "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
+                )
+                raise OpenSearchNoClusterManagersError()
         # we attempt to flush the translog to disk
         self.charm.cluster_manager.flush_translog_to_disk()
 
@@ -335,14 +359,16 @@ class OpenSearchEventsHandler(Object):
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
+        try:
+            nodes = self.charm.cluster_manager.get_nodes(True)
+        except OpenSearchHttpError:
+            logger.error("unable to get nodes")
+            nodes = []
 
-        # review available CMs
-        # TODO:
-        # self._add_cm_addresses_to_conf()
-
-        # if there are exclusions to be removed
-        # each unit should check its own exclusions' list
-        # self.opensearch_exclusions.cleanup()
+        self.charm.config_manager.update_seeds_config(nodes)
+        self.charm.exclusions_manager.cleanup(
+            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
+        )
         if (
             health := self.charm.apply_health(
                 wait_for_green_first=True, app=self.charm.unit.is_leader()
@@ -376,7 +402,7 @@ class OpenSearchEventsHandler(Object):
         # we need to wait for them all to be ready before deleting the old CA
         if (
             self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
@@ -416,6 +442,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
+        previous_deployment_desc = self.charm.state.application.deployment_desc
         if (
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
@@ -432,10 +459,10 @@ class OpenSearchEventsHandler(Object):
                 # trigger roles change on the leader, other units will have their
                 # peer-rel-changed event triggered
                 self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
-            self.apply_status_from_deployment_desc(self.charm.state.application.deployment_desc)
 
-            # TODO: Handle cluster change to main orchestrator
             # This case is when the user change roles on runtime of init_hold / roles.
+            self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
+
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
@@ -560,9 +587,16 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description not yet computed, deferring event.")
+            event.defer()
+            return
+
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
             return
+
+        is_leader_unit = self.charm.unit.is_leader()
 
         if self.charm.cluster_manager.needs_start_after_host_reboot:
             # This logic will only be triggered if the service has started (i.e. "started")
@@ -593,17 +627,20 @@ class OpenSearchEventsHandler(Object):
                 # This is unlike to happen, unless the snap has been manually removed
                 logger.error("Service previously started but now misses the snap.")
                 return
+
         # apply the directives computed and emitted by the peer cluster manager
-        if not self.charm.cluster_manager.check_if_can_start():
-            logger.debug("cannot start peer cm had a blocking directive")
+        if self.charm.cluster_manager.no_blocking_directives():
+            try:
+                self.charm.cluster_manager.get_nodes(False)
+            except OpenSearchHttpError:
+                logger.warning("No Blocking directives, but unable to get nodes. Deferring event.")
+                event.defer()
+                return
+        else:
+            logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
-
-        if self.charm.unit.is_leader():
-            self.apply_status_from_deployment_desc(
-                self.charm.state.application.deployment_desc,
-                show_status_only_once=False,
-            )
+        self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
@@ -649,7 +686,7 @@ class OpenSearchEventsHandler(Object):
             )
 
         # Configure OpenSearch Users
-        if not self.charm.unit.is_leader():
+        if not is_leader_unit:
             self.charm.internal_users_manager.purge_initial_default_users()
             for user in OPENSEARCH_SYSTEM_USERS:
                 self.charm.internal_users_manager.save_user_locally(user)
@@ -685,25 +722,44 @@ class OpenSearchEventsHandler(Object):
         #   ->(app databag key: first_data_node on data app)
         # main orchestrator will choose which node to start first
         #   ->(app databag key: first_data_node on main orchestrator app)
-
-        # TODO: Add checks on whether we should ignore lock. Since we are not
-        # adding large deployment yet, we always ignore
-        if self.charm.lock_manager.should_ignore_lock(deployment_desc):
+        if self.charm.cluster_manager.should_ignore_lock(deployment_desc):
             logger.debug(
                 f"Requesting start as first data node without lock: {self.charm.state.unit_name}"
             )
-            # TODO:
-            # self.peer_cluster_requirer.set_first_data_node(self.unit_name)
-            # event.defer()
+            self.charm.cluster_manager.set_first_data_node(self.charm.state.unit_name)
+            event.defer()
             return
 
-        logger.info("Emitting the start opensearch event")
+        if (
+            is_leader_unit
+            and self.charm.state.is_peer_cluster_consumer()
+            and (local_first_data_node := self.charm.state.get_local_first_data_node())
+        ):
+            # lock requested
+            if not (
+                peer_cluster_rel_data := self.charm.state.get_rel_data_from_main_orchestrator()
+            ):
+                # main orchestrator has not chosen the first data node yet
+                logger.debug(
+                    f"Local first data node: {local_first_data_node} - cluster first data node: not set"
+                )
+                event.defer()
+                return
+            # main orchestrator has chosen the first data node
+            if peer_cluster_rel_data.first_data_node == local_first_data_node:
+                logger.debug(
+                    f"Local first data node: {local_first_data_node} - cluster first data node: {peer_cluster_rel_data.first_data_node}"
+                )
+                # this unit is the first data node chosen by the main orchestrator
+                self.charm.start_opensearch_event.emit(ignore_lock=True, is_first_data_node=True)
+                self.charm.cluster_manager.set_first_data_node(None)
 
         self.charm.start_opensearch_event.emit()
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
-        # TODO: Update Peer Cluster relation data
+        if self.charm.state.is_peer_cluster_consumer():
+            self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
         if (
             self.charm.cluster_manager.is_opensearch_started
@@ -711,6 +767,12 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
+            except OpenSearchCmdError as e:
+                # This is case when the data node is not able to initialize the security index
+                # Because there is no
+                logger.warning("OpenSearch already started, but post-start command failed: %s", e)
+                event.defer()
+                return
             except (
                 OpenSearchHttpError,
                 OpenSearchNotFullyReadyError,
@@ -720,7 +782,7 @@ class OpenSearchEventsHandler(Object):
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
-                    # and self.opensearch_peer_cm.is_provider(typ="main")
+                    and self.charm.state.is_peer_cluster_provider(typ="main")
                 ):
                     # In large deployments with cluster-manager-only-nodes,
                     # the startup might fail if the cluster was bootstrapped earlier
@@ -745,19 +807,18 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.name,
                 )
                 event.defer()
-            # finally:
-            # if self.opensearch_peer_cm.is_provider(typ="main"):
-            # self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+            finally:
+                if (
+                    self.charm.state.is_peer_cluster_provider(typ="main")
+                    and self.charm.unit.is_leader()
+                ):
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None
+                    )
             return
 
         if self.charm.state.server.started:
             del self.charm.state.server.started
-        self.charm.status_handler.set_running_status(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.cluster_manager.name,
-        )
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -809,6 +870,18 @@ class OpenSearchEventsHandler(Object):
             # Retrieve the nodes of the cluster, needed to configure this node
             nodes = self.charm.cluster_manager.get_nodes(False)
             computed_roles = self.charm.state.computed_roles()
+            # If the failover orchestrator is the only data node in the cluster, remove the
+            # cluster-manager role from it to avoid it bootstrapping the cluster
+            # which is the responsibility of the main orchestrator
+            # who then broadcasts `security_index_initialized` to the peer clusters.
+            if (
+                self.charm.unit.is_leader()
+                and self.charm.state.is_failover_and_sole_data_app
+                and not self.charm.state.application.is_security_index_initialised
+            ):
+                self.charm.state.server.is_cluster_manager_removed = True
+                if "cluster-manager" in computed_roles:
+                    computed_roles.remove("cluster-manager")
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
             cm_ips = self.charm.cluster_manager.get_cluster_managers_ips(nodes)
             self.charm.cluster_manager.configure_bootstrap_contributors(
@@ -821,6 +894,13 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             event.defer()
             return
+
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
+        )
 
         try:
             self.charm.cluster_manager.start(
@@ -841,6 +921,9 @@ class OpenSearchEventsHandler(Object):
             logger.debug("error of type: %s", type(e).__name__)
             self.charm.lock_manager.release()
             logger.warning(e)
+            self.charm.state.remove_status_if_present(
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+            )
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -855,12 +938,17 @@ class OpenSearchEventsHandler(Object):
             # In large deployments with cluster-manager-only-nodes, the startup might fail
             # for the cluster-manager if a joining data node did not yet initialize the
             # security index. We still want to update and broadcast the latest relation data.
-            # TODO:
-            # if self.opensearch_peer_cm.is_provider(typ="main"):
-            #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
+            if (
+                self.charm.state.is_peer_cluster_provider(typ="main")
+                and self.charm.unit.is_leader()
+            ):
+
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
             pass
 
-    def _post_start_init(self, event: StartOpenSearch) -> None:
+    def _post_start_init(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Initialisation post OpenSearch start"""
         # initialize the security index if needed (and certs written on disk etc.)
         # this happens only on the first data node to join the cluster
@@ -874,6 +962,23 @@ class OpenSearchEventsHandler(Object):
                 component_name=self.charm.cluster_manager.name,
             )
             self.charm.cluster_manager.initialise_security_index()
+            if (
+                self.charm.state.application.deployment_desc.typ
+                == DeploymentType.MAIN_ORCHESTRATOR
+            ):
+                if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                ):
+                    event.defer()
+                    return
+            else:
+                # notify the main orchestrator that the security index is initialized
+                self.charm.peer_cluster_manager.set_security_index_initialised()
+            self.charm.state.remove_status_if_present(
+                status=GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
+                scope="app",
+                component=self.charm.cluster_manager.name,
+            )
 
         # Wait for opensearch to be fully ready or throw error
         self.charm.cluster_manager.wait_for_opensearch_up()
@@ -933,7 +1038,6 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.name,
         )
 
-        # TODO: Handle refresh relation data of peer cluster
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
 
@@ -981,6 +1085,11 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Set upgrade unit state to healthy")
         self.charm.upgrade_events._reconcile_upgrade()
 
+        # update the peer cluster rel data with new IP in case of main cluster manager
+        if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
         self.post_start_ca_rotation()
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
@@ -1125,12 +1234,22 @@ class OpenSearchEventsHandler(Object):
         ):
             return
 
+        logger.debug(f"We are applying status from deployment desc: {deployment_desc}")
+
         if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
+            logger.debug(
+                "No show status directive in deployment description, skipping status application."
+            )
             return
 
         # remove show_status directive which is applied below
         if show_status_only_once:
+            logger.debug("We are removing show status directive from cluster manager.")
             self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+
+        logger.debug(
+            "We are applying status from deployment desc: %s", deployment_desc.state.message
+        )
 
         for status in PeerClusterStatuses:
             if status.value.message != deployment_desc.state.message:
@@ -1139,10 +1258,27 @@ class OpenSearchEventsHandler(Object):
                     "app",
                     self.charm.cluster_manager.name,
                 )
+        if deployment_desc.state.message:
+            logger.debug(
+                "We are adding status %s with message: %s",
+                GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                deployment_desc.state.message,
+            )
+            self.charm.state.add_status_if_not_present(
+                status=format_status(
+                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                    params={"directive": deployment_desc.state.message},
+                ),
+                scope="app",
+                component=self.charm.cluster_manager.name,
+            )
+            logger.debug(
+                "We are adding status %s with message: %s",
+                GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                deployment_desc.state.message,
+            )
 
-        self.charm.app.status = BlockedStatus(deployment_desc.state.message)
-
-    def _on_secret_changed(self, event: SecretChangedEvent) -> None:
+    def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
         try:
             event.secret.get_content(refresh=True)
@@ -1200,6 +1336,11 @@ class OpenSearchEventsHandler(Object):
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
                 self.charm.internal_users_manager.put_internal_user(sys_user, password)
+
+        if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
@@ -1271,23 +1412,24 @@ class OpenSearchEventsHandler(Object):
         # if all certs are stored and CA rotation is complete in the cluster
         if (
             self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-            and self.charm.state.ca_and_certs_rotation_complete_in_cluster()
+            and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
 
-        # TODO: Handle case of peer cluster manager
-        # if self.peers_data.get(Scope.UNIT, "cluster_manager_removed", default=False):
-        # restore cluster_manager role and restart the service
-        # logger.debug("Restoring cluster_manager role and restarting the service")
-        # self.peers_data.delete(Scope.UNIT, "cluster_manager_removed")
-        # self._restart_opensearch_event.emit()
+        if self.charm.state.server.is_cluster_manager_removed:
+            # restore cluster_manager role and restart the service
+            logger.debug("Restoring cluster_manager role and restarting the service")
+            del self.charm.state.server.is_cluster_manager_removed
+            self.charm.restart_opensearch_event.emit()
 
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
-        self.charm.state.server.tls_configured = False
-        # TODO: Update peer cluster relation
-        # self.charm.tls.update_tls_flag_to_peer_cluster_relation("tls_configured", "remove")
+        del self.charm.state.server.tls_configured
+        peer_cluster_servers = self.charm.state.all_peer_clusters_servers(remote=False)
+
+        for peer_cluster_server in peer_cluster_servers:
+            del peer_cluster_server.tls_configured
 
         for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
             secret = (
@@ -1366,3 +1508,50 @@ class OpenSearchEventsHandler(Object):
                 self.charm.unit,
             )
         )
+
+    def _handle_change_to_main_orchestrator_if_needed(
+        self, event: ConfigChangedEvent, previous_deployment_desc: DeploymentDescription | None
+    ) -> None:
+        """Handle when the user changes the roles or init_hold config from True to False."""
+        # if the current cluster wasn't already a "main-Orchestrator" and we're now updating
+        # the roles for it to become one. We need to: create the admin user if missing, and
+        # generate the admin certificate if missing and the TLS relation is established.
+        cluster_changed_to_main_cm = (
+            previous_deployment_desc is not None
+            and previous_deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
+            and self.charm.state.application.deployment_desc.typ
+            == DeploymentType.MAIN_ORCHESTRATOR
+        )
+        if not cluster_changed_to_main_cm:
+            return
+        # TODO: Handle upgrades
+        # if self.upgrade_in_progress:
+        # logger.warning(
+        # "Changing config during an upgrade is not supported. The charm may be in a broken,
+        #  unrecoverable state"
+        # )
+        # event.defer()
+        # return
+
+        # we check if we need to create the admin user
+        if not self.charm.state.application.is_admin_user_initialized:
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(ADMIN_USER)
+
+        # we check if we need to generate the admin certificate if missing
+        if not self.charm.tls_manager.all_tls_resources_stored():
+            if not self.charm.state.tls_relation:
+                event.defer()
+                return
+
+            self.request_new_admin_certificate()
+
+    def _reconfigure_and_restart_if_needed(self) -> None:
+        """Reconfigure and restart the unit if needed after a config change."""
+        if self.charm.config_manager.update_opensearch_config():
+            self.charm.state.add_status_if_not_present(
+                GeneralStatuses.WAITING_TO_START.value,
+                "app",
+                self.charm.cluster_manager.name,
+            )
+            logger.debug("Restarting opensearch due to reconfiguring node roles")
+            self.charm.restart_opensearch_event.emit()

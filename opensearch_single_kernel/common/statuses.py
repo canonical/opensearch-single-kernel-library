@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Statuses for the OpenSearch Charm.
@@ -34,6 +34,13 @@ class GeneralStatuses(Enum):
         status="waiting",
         message="The OpenSearch service is stopping.",
         running="blocking",
+    )
+    # Blocking directive should be a running status since it is set based on the presence
+    # of a SHOW_STATUS directive and once the status set we remove the directive
+    BLOCKING_DIRECTIVE = StatusObject(
+        status="blocked",
+        message="{directive}",
+        running="async",
     )
 
 
@@ -178,6 +185,80 @@ class PeerClusterStatuses(Enum):
     DATA_ROLE_REMOVAL_FORBIDDEN = StatusObject(
         status="blocked",
         message="Removal of data role from current deployment not allowed - the data cannot be reallocated.",
+    )
+    PEER_CLUSTER_MISSING_RELATIONS = StatusObject(
+        status="blocked",
+        message="Found credentials with missing relations. Add relation for {relation} and any client applications.",
+    )
+    PEER_CLUSTER_ORCHESTRATORS_REMOVED = StatusObject(
+        status="blocked",
+        message="Main-cluster-orchestrator removed, and no failover cluster related.",
+        running="async",
+    )
+    PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION = StatusObject(
+        status="waiting",
+        message="Main-cluster-orchestrator removed, waiting for failover promotion.",
+        running="async",
+    )
+
+
+class PeerClusterErrorDataStatuses(Enum):
+    """Collection of charm statuses that are propagated from provider."""
+
+    MAIN_OR_FAILOVER_NOT_CONFIGURED = StatusObject(
+        status="waiting", message="'main/failover'-orchestrators not configured yet."
+    )
+    RELATED_TO_NON_MAIN_OR_FAILOVER = StatusObject(
+        status="blocked", message="Related to non 'main/failover'-orchestrator cluster"
+    )
+    WAITING_FOR_PEER_RELATION_CREATED = StatusObject(
+        status="waiting",
+        message="Waiting for peer cluster relation to be created {message_suffix}.",
+    )
+    CANNOT_HAVE_TWO_FAILOVERS = StatusObject(
+        status="blocked",
+        message="Cannot have 2 'failover'-orchestrators. Relate to the existing failover.",
+    )
+    ADMIN_USER_NOT_FULLY_CONFIGURED = StatusObject(
+        status="waiting", message="Admin user not fully configured {message_suffix}."
+    )
+    TLS_NOT_FULLY_CONFIGURED = StatusObject(
+        status="blocked", message="TLS not fully configured {message_suffix}."
+    )
+    SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
+        status="waiting", message="Security index not initialized {message_suffix}."
+    )
+    WAITING_FOR_EVERY_UNIT_TO_START = StatusObject(
+        status="waiting", message="Waiting for every unit {message_suffix} to start."
+    )
+    COS_USER_NOT_CREATED = StatusObject(
+        status="waiting", message="'{COS_USER}' user not created yet."
+    )
+    NO_CLUSTER_MANAGER_ELIGIBLE_NODES = StatusObject(
+        status="waiting", message="No 'cluster_manager' eligible nodes found {message_suffix}"
+    )
+    COULD_NOT_FETCH_NODES = StatusObject(
+        status="waiting", message="Could not fetch nodes {message_suffix}"
+    )
+    COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER = StatusObject(
+        status="waiting",
+        message="Could not fetch nodes in related {deployment_desc.typ} sub-cluster.",
+    )
+    PEER_CLUSTER_MAIN_IS_REQUIRER = StatusObject(
+        status="blocked", message="Main orchestrator cannot be a requirer"
+    )
+    CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER = StatusObject(
+        status="blocked",
+        message="A cluster can only be related to 1 main and 1 failover-clusters at most.",
+    )
+    CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME = StatusObject(
+        status="blocked", message="Cannot relate 2 clusters with different 'cluster_name' values."
+    )
+    CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS = StatusObject(
+        status="blocked", message="CA certificate mismatch between clusters."
+    )
+    CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE = StatusObject(
+        status="blocked", message="CA truststore-password not available."
     )
 
 

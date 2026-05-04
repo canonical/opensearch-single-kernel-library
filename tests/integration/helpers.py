@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -215,8 +215,14 @@ def _check_status(status: Status, check: StatusObject) -> bool:
         )
         + r"(?s:.*?)"
     )
+    status_message = status.message or ""
 
-    return re.fullmatch(regex_pattern, status.message or "") is not None
+    return (
+        status_message == check.message
+        or status_message.startswith(check.message)
+        or status_message.startswith(f"{check.message:.40}")
+        or re.fullmatch(regex_pattern, status_message) is not None
+    )
 
 
 def _is_every_condition_on_app_met(

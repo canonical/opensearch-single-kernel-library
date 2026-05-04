@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Charm-specific exceptions."""
@@ -117,6 +117,18 @@ class OpenSearchRestoreBackupError(OpenSearchError):
     """Exception thrown when restoring a backup fails."""
 
 
+class OpenSearchPeerClusterRelationDataIncompleteError(OpenSearchError):
+    """Exception thrown when the peer cluster relation data is incomplete or invalid."""
+
+
+class OpenSearchSnapshotsPeerClusterDataConflictError(OpenSearchError):
+    """Exception thrown when there is a conflict in the peer cluster relation data of snapshots."""
+
+
+class OpenSearchPeerClusterDidntSaveCredentialsYetError(OpenSearchError):
+    """Exception thrown when a cluster in the peer cluster relation didn't save the credentials."""
+
+
 class OpenSearchInvalidStorageTypeError(OpenSearchError):
     """Exception thrown when an invalid storage type is provided for backup/restore operations."""
 
@@ -129,6 +141,14 @@ class OpenSearchSmtpMissingParametersError(OpenSearchError):
         super().__init__(
             f"Parameters missing from smtp-integrator: {', '.join(missing_parameters)}"
         )
+
+
+class OpenSearchNoClusterManagersError(OpenSearchError):
+    """Exception thrown when there are no cluster managers in the cluster."""
+
+    def __init__(self):
+        message = "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
+        super().__init__(message)
 
 
 class OpenSearchLockError(OpenSearchError):

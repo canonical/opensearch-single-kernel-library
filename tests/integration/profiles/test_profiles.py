@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 from requests import request
 
@@ -25,6 +26,15 @@ from tests.integration.helpers import wait_until
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
+
+MISSING_3_DATA_AND_3_CM_STATUS = StatusObject(
+    message="Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required.",
+    status="blocked",
+)
+MISSING_3_DATA_NODES_STATUS = StatusObject(
+    message="Missing requirements: At least 3 data nodes are required.",
+    status="blocked",
+)
 
 
 async def get_cloud_type(ops_test: OpsTest) -> str:
@@ -194,7 +204,6 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Skipping large deployment")
 async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: str) -> None:
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:
@@ -235,9 +244,13 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
         ops_test,
         apps=["main", "data"],
         units_statuses={
-            "main": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
-            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            "main": [
+                MISSING_3_DATA_AND_3_CM_STATUS,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            "data": [MISSING_3_DATA_AND_3_CM_STATUS],
         },
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
@@ -247,17 +260,20 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         units_statuses={
             "main": [
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                MISSING_3_DATA_NODES_STATUS,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
             ],
-            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            "data": [MISSING_3_DATA_NODES_STATUS],
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )
     data_app = ops_test.model.applications["data"]
     await data_app.add_units(count=2)
-    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
+    await wait_until(
+        ops_test, apps=["main", "data"], wait_for_exact_units={"main": 3, "data": 3}, timeout=2000
+    )
 
     await check_heap_size(ops_test, 4, app_name="main")

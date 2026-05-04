@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Config manager."""
@@ -10,7 +10,7 @@ from typing import Any
 from opensearch_single_kernel.common.constants import (
     CertType,
 )
-from opensearch_single_kernel.core.models import OpenSearchProfile
+from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -474,12 +474,12 @@ class ConfigManager(BaseManager):
             },
         }
 
-    def update_seeds_config(self) -> None:
+    def update_seeds_config(self, nodes: list[Node] | None = None) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using values from nodes_config."""
+        nodes = nodes or []
         if nodes_config := self.state.application.nodes_config:
-            self._update_seeds_file(
-                [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
-            )
+            nodes.extend(list(nodes_config.values()))
+        self._update_seeds_file([node.ip for node in list(nodes) if node.is_cm_eligible()])
 
     def _update_seeds_file(self, cm_ips: list[str] | None) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using provided values."""

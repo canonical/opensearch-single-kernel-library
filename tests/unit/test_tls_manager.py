@@ -1,4 +1,4 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Unit test for opensearch tls manager."""
@@ -441,7 +441,7 @@ def test_truststore_password_secret(harness, mocker, substrate):
     ),
 )
 def test_on_certificate_available_leader_app_cert_full_workflow(
-    deployment_type, harness, mocker, substrate
+    deployment_type, harness, mocker, substrate, mock_get_statuses
 ):
     """New certificate received.
 
@@ -565,7 +565,14 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     ),
 )
 def test_on_certificate_available_any_node_unit_cert_full_workflow(
-    deployment_type, leader, cert_type, harness, mocker, substrate, mock_fs_interactions
+    deployment_type,
+    leader,
+    cert_type,
+    harness,
+    mocker,
+    substrate,
+    mock_fs_interactions,
+    mock_get_statuses,
 ):
     """New *unit* certificate received.
 
@@ -716,7 +723,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
     ],
 )
 def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
-    deployment_type, harness, mocker, mock_fs_interactions, substrate
+    deployment_type, harness, mocker, mock_fs_interactions, substrate, mock_get_statuses
 ):
     """Test CA rotation 1st stage.
 
@@ -1000,13 +1007,13 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
-    )
-    mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.create_cos_user"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.refresh_relation_data"
     )
     mocker.patch("socket.socket.connect")
     add_status = mocker.patch(
@@ -1052,7 +1059,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     # Leader ONLY
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)
-        harness.charm.state.application.security_index_initialised = True
+        harness.charm.state.application.is_security_index_initialised = True
 
         # We passed the 1st stage of the certificate renewalV
         harness.charm.state.server.tls_ca_renewing = True
@@ -1445,6 +1452,17 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     read_stored_ca = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca"
     )
+    reset_ca_rotation_state = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.reset_ca_rotation_state"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ca_and_certs_rotation_complete_in_cluster",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.refresh_relation_data"
+    )
     reload_tls_certificates = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.reload_tls_certificates"
     )
@@ -1531,6 +1549,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         harness.set_leader(leader)
 
         # We passed the 1st stage of the certificate renewalV
+        harness.charm.state.server.tls_configured = True
         harness.charm.state.server.tls_ca_renewing = True
         harness.charm.state.server.tls_ca_renewed = True
 
@@ -1567,8 +1586,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         tempfile.call_args_list[0][1]["dir"]
     )
 
-    assert not harness.charm.state.server.tls_ca_renewing
-    assert not harness.charm.state.server.tls_ca_renewed
+    assert reset_ca_rotation_state.call_count == 1
 
     assert harness.model.unit.status.message == ""
     assert harness.model.unit.status == original_status
@@ -1592,7 +1610,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     ),
 )
 def test_on_certificate_available_rotation_ongoing_on_this_unit(
-    deployment_type, leader, harness, substrate, mocker, mock_fs_interactions
+    deployment_type, leader, harness, substrate, mocker, mock_fs_interactions, mock_get_statuses
 ):
     """Additional 'certificate-available' event while processing CA rotation.
 

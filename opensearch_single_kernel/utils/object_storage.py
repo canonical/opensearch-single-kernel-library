@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Helpers for Cloud storage."""
@@ -16,6 +16,7 @@ from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from google.api_core.exceptions import Conflict, Forbidden, GoogleAPIError, NotFound
 from google.cloud import storage
+from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
     AZURE_REPOSITORY,
@@ -23,7 +24,15 @@ from opensearch_single_kernel.common.constants import (
     S3_REPOSITORY,
     ObjectStorageType,
 )
-from opensearch_single_kernel.core.models import ObjectStorageConfig
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchObjectStorageConfigValidationError,
+)
+from opensearch_single_kernel.core.models import (
+    AzureRelData,
+    GcsRelData,
+    ObjectStorageConfig,
+    S3RelData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -496,3 +505,32 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
     except GoogleAPIError as e:
         logger.error("GCS credential validation failed: %s", e, exc_info=True)
         return False
+
+
+def storage_config_from_connection_info(
+    object_storage_type: ObjectStorageType, connection_info: dict[str, str]
+) -> ObjectStorageConfig | None:
+    """Get the active object storage config from relations/peer-cluster.
+
+    Args:
+        object_storage_type (ObjectStorageType): the type of the object storage
+        to get the config for.
+        connection_info (dict[str, str]): the raw connection info to build the config from.
+
+    Returns:
+        ObjectStorageConfig | None: the active object storage config.
+    """
+    match object_storage_type:
+        case ObjectStorageType.S3:
+            data_model = S3RelData
+        case ObjectStorageType.AZURE:
+            data_model = AzureRelData
+        case ObjectStorageType.GCS:
+            data_model = GcsRelData
+        case _:
+            return
+    try:
+        rel_data = data_model.from_relation(connection_info) if connection_info else None
+    except ValidationError as e:
+        raise OpenSearchObjectStorageConfigValidationError(e) from e
+    return ObjectStorageConfig(**{object_storage_type.value: rel_data}) if rel_data else None

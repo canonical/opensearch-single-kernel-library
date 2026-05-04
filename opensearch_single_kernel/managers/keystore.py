@@ -1,4 +1,4 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Implements the keystore logic.
@@ -14,7 +14,12 @@ from opensearch_single_kernel.common.constants import ObjectStorageType
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
 )
-from opensearch_single_kernel.core.models import ObjectStorageConfig
+from opensearch_single_kernel.core.models import (
+    AzureRelDataCredentials,
+    GcsRelDataCredentials,
+    ObjectStorageCredentials,
+    S3RelDataCredentials,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -41,25 +46,31 @@ class KeystoreManager(BaseManager):
     def put_object_storage_credentials(
         self,
         object_storage_type: ObjectStorageType,
-        object_storage_config: ObjectStorageConfig,
+        object_storage_credentials: ObjectStorageCredentials,
         gcs_file_path: str | None = None,
     ) -> None:
         """Put S3 credentials in the keystore."""
-        if object_storage_type == ObjectStorageType.S3:
+        if object_storage_type == ObjectStorageType.S3 and isinstance(
+            object_storage_credentials, S3RelDataCredentials
+        ):
             self.put_entries(
                 {
-                    "s3.client.default.access_key": object_storage_config.s3.credentials.access_key,
-                    "s3.client.default.secret_key": object_storage_config.s3.credentials.secret_key,
+                    "s3.client.default.access_key": object_storage_credentials.access_key,
+                    "s3.client.default.secret_key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.AZURE:
+        elif object_storage_type == ObjectStorageType.AZURE and isinstance(
+            object_storage_credentials, AzureRelDataCredentials
+        ):
             self.put_entries(
                 {
-                    "azure.client.default.account": object_storage_config.azure.credentials.storage_account,
-                    "azure.client.default.key": object_storage_config.azure.credentials.secret_key,
+                    "azure.client.default.account": object_storage_credentials.storage_account,
+                    "azure.client.default.key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.GCS:
+        elif object_storage_type == ObjectStorageType.GCS and isinstance(
+            object_storage_credentials, GcsRelDataCredentials
+        ):
             if gcs_file_path is None:
                 raise ValueError(
                     "GCS credentials file path must be provided for GCS object storage."

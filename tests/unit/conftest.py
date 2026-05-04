@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 from pathlib import Path
@@ -26,6 +26,30 @@ from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S
 CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
 ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
 METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
+
+
+@pytest.fixture
+def mock_get_statuses(mocker):
+    """Mock the status setting of the charm."""
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.health.HealthManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.peer_cluster.PeerClusterManager.get_statuses")
+    mocker.patch(
+        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.get_statuses"
+    )
+    mocker.patch("opensearch_single_kernel.managers.lock.LockManager.get_statuses")
+    mocker.patch("opensearch_single_kernel.managers.snapshots.SnapshotsManager.get_statuses")
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.get_statuses"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.get_statuses"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.notification.NotificationsManager.get_statuses"
+    )
+    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.get_statuses")
 
 
 @pytest.fixture

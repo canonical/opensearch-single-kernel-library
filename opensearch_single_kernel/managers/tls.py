@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch TLS manager."""
@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.constants import (
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
+    DeploymentType,
     Scope,
     StoreType,
 )
@@ -26,7 +27,15 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterErrorDataStatuses,
+    TlsStatuses,
+)
+from opensearch_single_kernel.core.models import (
+    PeerClusterRelData,
+    PeerClusterRelErrorData,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -140,12 +149,9 @@ class TlsManager(BaseManager):
         if secrets:
             store_pwd = secrets.get(f"{store_type.val}-password")
 
-        if not store_pwd:
-            # and not (
-            # TODO: handle this once large deployment is implemented
-            # self.charm.opensearch_peer_cm.is_consumer(of="main")
-            # and cert_type == CertType.APP_ADMIN
-            # ):
+        if not store_pwd and not (
+            self.state.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
+        ):
 
             self.state.secrets.put_object(
                 scope,
@@ -421,8 +427,9 @@ class TlsManager(BaseManager):
         # Mark this unit as tls configured
         if self.is_fully_configured():
             self.state.server.tls_configured = True
-            # TODO: Update peer cluster relation
-            # self.update_tls_flag_to_peer_cluster_relation("tls_configured", "add")
+            peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
+            for peer_cluster_server in peer_cluster_servers:
+                peer_cluster_server.tls_configured = True
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
@@ -558,6 +565,43 @@ class TlsManager(BaseManager):
 
         return True
 
+    def peer_cluster_error_from_tls(
+        self, peer_cluster_rel_data: PeerClusterRelData
+    ) -> PeerClusterRelErrorData | None:
+        """Compute TLS related errors."""
+        blocked_msg, should_sever_relation = None, False
+
+        if self.all_tls_resources_stored():  # compare CAs
+            unit_transport_ca_cert = self.state.secrets.get_object(
+                Scope.UNIT, CertType.UNIT_TRANSPORT.val
+            )["ca-cert"]
+            if unit_transport_ca_cert != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]:
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
+                )
+                should_sever_relation = True
+
+        if (
+            peer_cluster_rel_data.credentials.admin_tls
+            and not peer_cluster_rel_data.credentials.admin_tls.get("truststore-password")
+        ):
+            logger.info("Relation data for TLS is missing.")
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE.value.message
+            )
+            should_sever_relation = True
+
+        if not blocked_msg:
+            return None
+
+        return PeerClusterRelErrorData(
+            cluster_name=peer_cluster_rel_data.cluster_name,
+            should_sever_relation=should_sever_relation,
+            should_wait=not should_sever_relation,
+            blocked_message=blocked_msg,
+            deployment_desc=self.state.application.deployment_desc,
+        )
+
     def get_secrets_for_cert_type(self, cert_type: CertType) -> dict[str, str]:
         """Get secrets for a given certificate type."""
         match cert_type:
@@ -568,27 +612,60 @@ class TlsManager(BaseManager):
             case CertType.UNIT_HTTP:
                 return self.state.server.http_secrets
 
+    def cleanup_peer_cluster_error_relation_data(self) -> None:
+        """Clean up the error data in relation data when the error is resolved."""
+        # copy the keys to avoid "dictionary changed size during iteration" error
+        relation_items = list(self.state.application.relation_data.items())
+        for key, _ in relation_items:
+            if key.startswith("error_from_tls"):
+                # get the relation id from key
+                rel_id = int(key.split("-")[-1])
+                relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
+                if rel_id not in relation_ids:
+                    self.state.application.relation_data.pop(key)
+
     @override
-    def get_statuses(
+    def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
         status_list: list[StatusObject] = []
-
+        if not self.state.tls_relation:
+            # Unit will fail if we combine the two iF
+            if (
+                self.state.application.deployment_desc
+                and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            ):
+                status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
+            return status_list
+        # Means the unit is  being terminated
+        if not self.state.peer_relation:
+            return status_list
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
-            if not self.all_tls_resources_stored():
-                status_list.append(
-                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                    if self.state.tls_relation
-                    else TlsStatuses.TLS_RELATION_MISSING.value
+            # If it is the main orchestrator then it will create all resources
+            # Other types will wait for the Peer cluster Main, we also need to check
+            # That the orchestrators field has been populated, otherwise it might
+            # be a relation that is prohibited
+            # Even the failover
+            if (
+                (
+                    (deployment_desc := self.state.application.deployment_desc)
+                    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 )
+                or (
+                    self.state.application.orchestrators_dict
+                    and self.state.peer_clusters(remote=True, is_provider=False)
+                )
+                or self.state.peer_clusters(remote=True, is_provider=True)
+            ):
+                if not self.all_tls_resources_stored():
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
             if not self.state.tls_relation and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
@@ -597,5 +674,29 @@ class TlsManager(BaseManager):
                         {"certificates": ", ".join(missing)},
                     )
                 )
+        if scope == "app":
+            if (
+                deployment_desc := self.state.application.deployment_desc
+            ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+                if not self.all_tls_resources_stored():
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
+
+            # Clean up any lingering errors
+            self.cleanup_peer_cluster_error_relation_data()
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                if self.state.application.relation_data.get(
+                    f"error_from_tls-{peer_cluster.relation.id}"
+                ):
+                    status = PeerClusterRelErrorData.get_status_from_message(
+                        self.state.application.relation_data[
+                            f"error_from_tls-{peer_cluster.relation.id}"
+                        ]
+                    )
+                    if status:
+                        status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

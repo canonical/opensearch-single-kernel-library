@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Secrets management, TODO: This needs to be refactored.
@@ -9,14 +9,14 @@ to an event handler.
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import Relation, Secret, SecretNotFoundError
+from ops import ModelError, Relation, Secret, SecretNotFoundError
 from ops.framework import Object
 from overrides import override
 
 from opensearch_single_kernel.common.constants import SECRETS_LABEL_SEPARATOR, Scope
 from opensearch_single_kernel.common.exceptions import OpenSearchSecretInsertionError
 from opensearch_single_kernel.core.relations import RelationDataStore
-from opensearch_single_kernel.utils.secrets import safe_obj_data
+from opensearch_single_kernel.utils import secrets as secrets_utils
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -35,6 +35,32 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
         self.cached_secrets = SecretCache()
         self.charm = charm
+
+    def resolve_credential(
+        self,
+        credential: str,
+        *,
+        content_key: str | None = None,
+        password_key: str | None = None,
+        hash_key: str | None = None,
+        peek_secrets: bool = False,
+    ) -> str | dict[str, str] | None:
+        """Resolves credential to its secret value if it's a secret"""
+        if not credential.startswith("secret://"):
+            return credential
+
+        if not content_key:
+            if password_key:
+                content_key = secrets_utils.password_key(password_key)
+            elif hash_key:
+                content_key = secrets_utils.hash_key(hash_key)
+            elif peek_secrets:
+                return self.charm.model.get_secret(id=credential).peek_content()
+            else:
+                return self.charm.model.get_secret(id=credential).get_content()
+        if peek_secrets:
+            return self.charm.model.get_secret(id=credential).peek_content().get(content_key)
+        return self.charm.model.get_secret(id=credential).get_content().get(content_key)
 
     def label(self, scope: Scope, key: str) -> str:
         """Generated keys to be used within relation data to refer to secret IDs."""
@@ -78,7 +104,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         return content
 
     def _add_juju_secret(self, scope: Scope, key: str, value: dict[str, str]) -> Secret | None:
-        safe_value = safe_obj_data(value)
+        safe_value = secrets_utils.safe_obj_data(value)
 
         if not safe_value:
             return None
@@ -116,7 +142,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             content = self._get_juju_secret_content(scope, key)
 
         content.update(value)
-        safe_content = safe_obj_data(content)
+        safe_content = secrets_utils.safe_obj_data(content)
 
         if not safe_content:
             return self._remove_juju_secret(scope, key)
@@ -221,7 +247,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             return super().put_object(scope, key, value, merge)
 
         # todo: remove when secret-changed not triggered for same content update
-        if self.get_object(scope, key) == safe_obj_data(value):
+        if self.get_object(scope, key) == secrets_utils.safe_obj_data(value):
             return
 
         self._add_or_update_juju_secret(scope, key, value, merge)
@@ -265,8 +291,64 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
     def grant_secret_to_relation(self, secret_id: str, relation: Relation):
         """Grant a secret to a relation."""
-        secret = self.charm.model.get_secret(id=secret_id)
-        secret.grant(relation)
+        try:
+            secret = self._charm.model.get_secret(id=secret_id)
+            secret.grant(relation)
+        except SecretNotFoundError:
+            logger.error("Could not find secret: %s", secret_id)
+            return False
+        except ModelError:
+            logger.error("Not owner of secret: %s. Cannot grant to relation", secret_id)
+            return False
+        return True
+
+    def grant_secret_to_subclusters(self, secret_id: str, is_provider: bool) -> bool:
+        """Returns True if secret is successfully granted to all subclusters"""
+        for local_peer_cluster in self.charm.state.peer_clusters(
+            is_provider=is_provider, remote=False
+        ):
+            if not self.grant_secret_to_relation(secret_id, local_peer_cluster.relation):
+                return False
+        return True
+
+    def grant_secrets_to_peer_clusters(  # noqa: C901
+        self,
+        rel_data_secret_content: dict[str, Any] | None,
+        is_provider: bool,
+    ) -> None:
+        """Grant the secrets to all the related apps."""
+        # return if rel_data_secret_content was not successfully created
+        if not rel_data_secret_content:
+            return
+
+        credentials = rel_data_secret_content["credentials"]
+        for key, secret_id in credentials.items():
+            # admin-username is not secrets
+            if key == "admin_username":
+                continue
+
+            for local_peer_cluster in self.charm.state.peer_clusters(
+                is_provider=is_provider, remote=False
+            ):
+                if relation := local_peer_cluster.relation:
+                    if key == "s3":
+                        if secret_id["access-key"]:
+                            self.grant_secret_to_relation(secret_id["access-key"], relation)
+                        if secret_id["secret-key"]:
+                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+                        if secret_id.get("s3-tls-ca-chain"):
+                            self.grant_secret_to_relation(secret_id["s3-tls-ca-chain"], relation)
+                    elif key == "azure":
+                        if secret_id["storage-account"]:
+                            self.grant_secret_to_relation(secret_id["storage-account"], relation)
+                        if secret_id["secret-key"]:
+                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+
+                    elif key == "gcs":
+                        if secret_id["secret-key"]:
+                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+                    else:
+                        self.grant_secret_to_relation(secret_id, relation)
 
 
 class SecretCache:

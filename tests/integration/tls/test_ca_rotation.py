@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -87,7 +87,6 @@ async def test_build_and_deploy_active(ops_test: OpsTest, charm, series) -> None
 
 @pytest.mark.group(id=LARGE_DEPLOYMENT)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip()
 async def test_build_large_deployment(ops_test: OpsTest, charm, series) -> None:
     """Setup a large deployments cluster."""
     # deploy new cluster
@@ -175,7 +174,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type) -> None:
                 ops_test,
                 apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
                 wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
-                timeout=2400,
+                timeout=3600,
                 idle_period=IDLE_PERIOD,
             )
 

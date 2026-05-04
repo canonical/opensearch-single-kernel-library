@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Nodes Exclusions manager."""
@@ -90,7 +90,7 @@ class NodesExclusionsManager(BaseManager):
     def cleanup(self, scope: Scope) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
-        units_to_cleanup = self._units_to_cleanup(list(state.delete_voting_exclusions))
+        units_to_cleanup = self._units_to_cleanup(list(state.voting_exclusions_to_delete))
         self._delete_voting(units_to_cleanup, scope)
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(
@@ -109,7 +109,7 @@ class NodesExclusionsManager(BaseManager):
         state.allocation_exclusions_to_delete = state.allocation_exclusions_to_delete.union(
             {unit_name}
         )
-        state.delete_voting_exclusions = state.delete_voting_exclusions.union({unit_name})
+        state.voting_exclusions_to_delete = state.voting_exclusions_to_delete.union({unit_name})
 
     def _units_to_cleanup(self, removable: list[str]) -> set[str] | None:
         """Deletes all units that have left the cluster via Juju.
@@ -167,12 +167,12 @@ class NodesExclusionsManager(BaseManager):
                 alt_hosts=self.alt_hosts,
             )
             if scope == Scope.APP:
-                self.state.application.delete_voting_exclusions = to_add.union(
-                    self.state.application.delete_voting_exclusions
+                self.state.application.voting_exclusions_to_delete = to_add.union(
+                    self.state.application.voting_exclusions_to_delete
                 )
             else:
-                self.state.server.delete_voting_exclusions = to_add.union(
-                    self.state.server.delete_voting_exclusions
+                self.state.server.voting_exclusions_to_delete = to_add.union(
+                    self.state.server.voting_exclusions_to_delete
                 )
 
             # The voting excl. API returns a status only
@@ -234,12 +234,12 @@ class NodesExclusionsManager(BaseManager):
 
             # Finally, we clean up the VOTING_TO_DELETE
             if scope == Scope.APP:
-                self.state.application.delete_voting_exclusions = (
-                    self.state.application.delete_voting_exclusions - exclusions
+                self.state.application.voting_exclusions_to_delete = (
+                    self.state.application.voting_exclusions_to_delete - exclusions
                 )
             else:
-                self.state.server.delete_voting_exclusions = (
-                    self.state.server.delete_voting_exclusions - exclusions
+                self.state.server.voting_exclusions_to_delete = (
+                    self.state.server.voting_exclusions_to_delete - exclusions
                 )
 
             return True

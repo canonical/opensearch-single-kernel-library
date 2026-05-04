@@ -1,4 +1,4 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Implements the plugin manager class.
@@ -13,12 +13,21 @@ config-changed, upgrade, s3-credentials-changed, etc.
 import json
 import logging
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ModelError, SecretNotFoundError
+from overrides import override
 
 from opensearch_single_kernel.common.constants import Scope
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterStatuses,
+)
 from opensearch_single_kernel.core.models import PluginConfigInfo, SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.helpers import diff
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -30,6 +39,36 @@ class PluginManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the plugin manager class."""
         super().__init__(state, workload, "plugin_manager")
+
+    def update_plugin_configs(self, configs_from_relation) -> None:
+        """Add or Remove plugin config information transferred from main orchestrator"""
+        current_app_plugin_info = self.state.application.plugin_config_info
+        add, remove = diff(configs_from_relation.keys(), current_app_plugin_info.keys())
+
+        for label in remove:
+            self.remove_plugin_secret(label)
+
+        for label in add:
+            plugin = configs_from_relation[label]
+            if plugin.secret_id:
+                self.state.secrets.get_tracked_secret(plugin.secret_id, Scope.APP, label)
+                self.put_plugin_config(
+                    scope=Scope.APP,
+                    label=label,
+                    secret_id=plugin.secret_id,
+                    relation_name=plugin.relation_name,
+                )
+
+    def remove_plugin_secret_ids(self):
+        """Removes secret IDs from the stored plugin confis"""
+        plugins = self.state.application.plugin_config_info
+        for label, plugin in plugins.items():
+            self.put_plugin_config(
+                scope=Scope.APP,
+                label=label,
+                secret_id=None,
+                relation_name=plugin.relation_name,
+            )
 
     def put_plugin_config(
         self,
@@ -83,6 +122,12 @@ class PluginManager(BaseManager):
             del plugins[label]
         state.plugin_config_info = plugins
 
+    def remove_plugin_secrets(self) -> None:
+        """Removes all plugin secrets and their corresponding config info."""
+        for label, plugin_config in self.state.application.plugin_config_info.items():
+            if plugin_config.secret_id:
+                self.remove_plugin_secret(label)
+
     def store_plugin_secret(
         self,
         *,
@@ -118,3 +163,42 @@ class PluginManager(BaseManager):
         except ModelError as e:
             logger.error("Cannot delete secret %s: %s", label, e)
         self.remove_plugin_config(Scope.APP, label)
+
+    def missing_plugins_relations(self) -> list[str]:
+        """Get the cureent missing plugins relations."""
+        # Check the plugin_config_info to get configured relations
+        plugin_relation_names = [
+            s.relation_name
+            for s in self.state.application.plugin_config_info.values()
+            if s.relation_name
+        ]
+        return [
+            relation_name
+            for relation_name in plugin_relation_names
+            if not self.state.relation_exists(relation_name)
+        ]
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        status_list: list[StatusObject] = []
+
+        if scope == "app":
+            if self.state.application.missing_relations and (
+                missing_relations := self.missing_plugins_relations()
+            ):
+                status_list.append(
+                    format_status(
+                        PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                        {"relation": missing_relations[0]},
+                    )
+                )
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

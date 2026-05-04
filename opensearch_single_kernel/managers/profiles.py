@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch profiles."""
@@ -19,6 +19,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ class ProfilesManager(BaseManager):
         current_app = self.state.current_peer_cluster_app
         # backwards compatibility for revisions that do not set generated roles
         # in cluster_fleet_apps
-        if not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps:
+        if current_app and (not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps):
             cluster_fleet_apps[current_app.app.id] = current_app
 
         logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)
@@ -131,11 +132,19 @@ class ProfilesManager(BaseManager):
             ]
 
         status_list: list[StatusObject] = []
-
+        missing_requirements = self.get_missing_requirements()
         if scope == "unit":
             try:
                 self.config_profile
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+
+            if missing_requirements:
+                status_list.append(
+                    format_status(
+                        ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                        {"requirements": " - ".join(missing_requirements)},
+                    )
+                )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

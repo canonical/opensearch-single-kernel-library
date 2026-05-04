@@ -264,8 +264,9 @@ class NotificationsEvents(Object):
             )
 
         # propagate to subclusters if this is the main provider
-        # if self.charm.opensearch_peer_cm.is_provider(typ="main"):
-        #     self.charm.peer_cluster_provider.refresh_relation_data(event)
+        if self.charm.state.is_peer_cluster_provider():
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                event.defer()
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
         """Cleanup for a broken smtp relation (relation-scoped).
@@ -307,8 +308,9 @@ class NotificationsEvents(Object):
             self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
-                # if self.charm.opensearch_peer_cm.is_provider(typ="main"):
-                #     self.charm.peer_cluster_provider.refresh_relation_data(event)
+                if self.charm.state.is_peer_cluster_provider():
+                    if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                        event.defer()
             return
 
         # Delete notification configs first so we never have configs that reference
@@ -336,8 +338,9 @@ class NotificationsEvents(Object):
 
         self.charm.plugin_manager.remove_plugin_secret(label)
 
-        # if self.charm.opensearch_peer_cm.is_provider(typ="main"):
-        #     self.charm.peer_cluster_provider.refresh_relation_data(event)
+        if self.charm.state.is_peer_cluster_provider():
+            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                event.defer()
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Handles smtp secrets changes (support multiple smtp relations).

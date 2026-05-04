@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Base Charm."""
@@ -43,6 +43,7 @@ from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
 from opensearch_single_kernel.events.notifications import NotificationsEvents
 from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
+from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandler
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
@@ -63,6 +64,10 @@ from opensearch_single_kernel.managers.internal_users import InternalUsersManage
 from opensearch_single_kernel.managers.keystore import KeystoreManager
 from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
+from opensearch_single_kernel.managers.peer_cluster import PeerClusterManager
+from opensearch_single_kernel.managers.peer_cluster_orchestrator import (
+    PeerClusterOrchestratorManager,
+)
 from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.snapshots import SnapshotsManager
@@ -106,6 +111,10 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
         self.config_manager = ConfigManager(self.state, self.workload)
+        self.peer_cluster_orchestrator_manager = PeerClusterOrchestratorManager(
+            self.state, self.workload
+        )
+        self.peer_cluster_manager = PeerClusterManager(self.state, self.workload)
         self.keystore_manager = KeystoreManager(self.state, self.workload)
         self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
@@ -116,6 +125,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.upgrade_events = UpgradesEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
+        self.peer_cluster_events = PeerClusterEventsHandler(self)
         self.external_clients_events = ExternalClientsEventsHandler(self)
         self.keystore_events = KeystoreEventsHandler(self)
         self.snapshots_events = SnapshotsEventsHandler(self)
@@ -129,6 +139,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.profiles_manager,
             self.tls_manager,
             self.health_manager,
+            self.peer_cluster_manager,
+            self.peer_cluster_orchestrator_manager,
             self.cluster_manager,
             self.lock_manager,
             self.snapshots_manager,

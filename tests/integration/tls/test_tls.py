@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import logging
@@ -9,6 +9,7 @@ import time
 import pytest
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -16,7 +17,6 @@ from tests.integration.conftest import (
     UNIT_IDS,
 )
 from tests.integration.helpers import (
-    EmptyBlockedStatus,
     check_cluster_formation_successful,
     cluster_health,
     get_application_unit_ids,
@@ -187,7 +187,8 @@ async def test_tls_expiration(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [EmptyBlockedStatus]},
+        units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
+        apps_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
         wait_for_exact_units=1,
     )
 
