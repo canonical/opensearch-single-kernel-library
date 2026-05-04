@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
@@ -25,7 +25,10 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import App, PeerClusterConfig
+from opensearch_single_kernel.core.models import (
+    App,
+    PeerClusterConfig,
+)
 
 logger = logging.getLogger(__name__)
 

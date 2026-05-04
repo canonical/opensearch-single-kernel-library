@@ -148,7 +148,6 @@ async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsTest) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")
@@ -195,6 +194,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        timeout=3600,
     )
 
     logger.info(f"Integrating {DATA_APP} with {JWT_APP_NAME} - this will result in blocked status")

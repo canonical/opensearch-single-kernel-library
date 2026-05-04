@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Base OpenSearch manager."""
@@ -11,7 +11,9 @@ from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, Statu
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+)
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
@@ -50,9 +52,8 @@ class BaseManager(ManagerStatusProtocol):
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.extend([node.ip for node in nodes_conf.values()])
 
-        # TODO: Add getting relation data form state
-        # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
-        #    all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
+        if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
+            all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
 
         random.shuffle(all_hosts)
 

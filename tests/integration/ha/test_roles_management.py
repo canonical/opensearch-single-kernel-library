@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
@@ -63,7 +62,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_set_roles_manually(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
 ) -> None:
@@ -110,7 +108,6 @@ async def test_set_roles_manually(
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_switch_back_to_auto_generated_roles(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
 ) -> None:

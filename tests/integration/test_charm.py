@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -96,6 +96,8 @@ async def test_build_and_deploy(charm, series, ops_test: OpsTest) -> None:
         ops_test,
         apps=[APP_NAME],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
+        # Added this since we should wait for both statuses
+        apps_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
         units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
     )
     assert len(ops_test.model.applications[APP_NAME].units) == DEFAULT_NUM_UNITS
@@ -142,7 +144,6 @@ async def test_actions_get_admin_password(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip
 async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
     """Test the rotation and change of admin password."""
     leader_ip = await get_leader_unit_ip(ops_test)
