@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - 2/edge
-      - feature/single-kernel
 
 concurrency:
   # Prevent race conditions (if multiple commits have been pushed since the last release)
@@ -33,8 +32,7 @@ jobs:
       - release-part1
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Change environment name if we are on test feature
-    environment: ${{ github.ref_name == 'feature/single-kernel' && 'testpypi' || 'production' }}
+    environment: production
     steps:
       - name: Download all the dists
         uses: actions/download-artifact@v4
