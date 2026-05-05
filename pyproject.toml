@@ -93,7 +93,7 @@ shellcheck-py = "^0.10.0.1"
 [tool.poetry.group.unit.dependencies]
 ops = { version = "^3.3.0", extras = ["testing"] }
 ops-scenario = "^8.5.2"
-pytest = "^8.4.0"
+pytest = "^9.0.3"
 pytest-asyncio = "^0.21.2"
 coverage = { extras = ["toml"], version = "^7.9.1" }
 parameterized = "^0.9.0"
@@ -102,7 +102,7 @@ pytest-mock = "*"
 
 [tool.poetry.group.integration.dependencies]
 boto3 = "^1.38.36"
-pytest = "^8.4.0"
+pytest = "^9.0.3"
 pytest-asyncio = "^0.21.2"
 pytest-operator = "^0.42.0"
 pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
