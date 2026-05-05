@@ -1,19 +1,18 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 [project]
-name = "opensearch-single-kernel-library"
+name = "opensearch-charms-single-kernel"
 dynamic = ["version"]
 description = "Shared and reusable code for OpenSearch charms"
 readme = "README.md"
 license = "Apache-2.0"
-authors = [
-]
+authors = []
 classifiers = [
- "Development Status :: 3 - Alpha",
- "Intended Audience :: Developers",
- "Intended Audience :: System Administrators",
- "Operating System :: POSIX :: Linux",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.10,<4.0"
 
@@ -23,21 +22,19 @@ homepage = "https://github.com/canonical/opensearch-single-kernel-library"
 repository = "https://github.com/canonical/opensearch-single-kernel-library"
 "Bug Tracker" = "https://github.com/canonical/opensearch-single-kernel-library/issues"
 "Matrix" = "https://matrix.to/#/#charmhub-data-platform:ubuntu.com"
-"Contribute" = "https://github.com/canonical/mongo-single-kernel-library/blob/main/CONTRIBUTING.md"
+"Contribute" = "https://github.com/canonical/opensearch-single-kernel-library/blob/main/CONTRIBUTING.md"
 
 [tool.poetry]
 requires-poetry = ">=2.0.0"
 package-mode = true
-packages = [
-    {include = "opensearch_single_kernel"},
-]
+packages = [{ include = "opensearch_single_kernel" }]
 include = ["opensearch_single_kernel/templates/"]
 exclude = ["opensearch_single_kernel/charmcraft.yaml"]
 version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-ops = "^2.22.0"
+ops = "^3.3.0"
 tenacity = "^9.1.2"
 boto3 = "^1.38.36"
 overrides = "^7.7.0"
@@ -45,27 +42,30 @@ requests = "2.32.4"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-jproperties = "2.1.2"
-pydantic = "^1.10.17, <2"
+pydantic = ">= 1.0"
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
-data-platform-helpers = "^0.1.4"
+data-platform-helpers = "^0.1.7"
 poetry-core = "<2.0.0"
 pre-commit = "^4.4.0"
+charmlibs-pathops = "^1.0.1"
+azure-storage-blob = "^12.25.0"
+google-cloud-storage = "^2.16.0"
+google-api-core = "^2.17.0"
 
 
 [tool.poetry.group.charm-libs.dependencies]
 # data_platform_libs/v0/data_interfaces.py
-ops = "^2.22.0"
+ops = "^3.3.0"
 # data_platform_libs/v0/upgrade.py
-# grafana_agent/v0/cos_agent.py requires pydantic <2
-pydantic = "^1.10.17, <2"
+pydantic = ">= 1.0"
 # tls_certificates_interface/v3/tls_certificates.py
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
 cosl = "^1.0.0"
 bcrypt = "^4.3.0"
+email-validator = ">=2"
 
 
 [tool.poetry.group.format]
@@ -91,13 +91,14 @@ codespell = "^2.4.1"
 shellcheck-py = "^0.10.0.1"
 
 [tool.poetry.group.unit.dependencies]
-ops = { version = "^2.22.0", extras = ["testing"] }
-ops-scenario = "^7.22.0"
+ops = { version = "^3.3.0", extras = ["testing"] }
+ops-scenario = "^8.5.2"
 pytest = "^8.4.0"
 pytest-asyncio = "^0.21.2"
 coverage = { extras = ["toml"], version = "^7.9.1" }
 parameterized = "^0.9.0"
 responses = "^0.25.7"
+pytest-mock = "*"
 
 [tool.poetry.group.integration.dependencies]
 boto3 = "^1.38.36"
@@ -105,8 +106,10 @@ pytest = "^8.4.0"
 pytest-asyncio = "^0.21.2"
 pytest-operator = "^0.42.0"
 pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
+pytest-mock = "*"
 juju = "^3.6.1.2"
-ops = "^2.22.0"
+jsonschema = "^4.24.0"
+ops = "^3.3.0"
 tenacity = "^9.1.2"
 pyyaml = "^6.0.2"
 pyjwt = "^2.10.1"
@@ -118,6 +121,23 @@ allure-pytest-default-results = "^0.1.3"
 # Azure integration tests
 azure-identity = "^1.23.0"
 azure-storage-blob = "^12.25.1"
+oauth_tools = { git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0" }
+
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.8"
+poetry-dynamic-versioning = { version = ">=1.0.0,<2.0.0", extras = ["plugin"] }
+
+[tool.poetry-dynamic-versioning]
+enable = true
+vcs = "git"
+dirty = true
+strict = true
+fix-shallow-repository = true
+
+
+[build-system]
+requires = ["poetry-core>=2.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.coverage.run]
 branch = true
@@ -128,7 +148,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
-markers = ["unstable"]
+markers = ["unstable", "real_fs"]
 asyncio_mode = "auto"
 
 # Formatting tools configuration
@@ -144,7 +164,17 @@ profile = "black"
 max-line-length = 99
 max-doc-length = 99
 max-complexity = 10
-exclude = [".git", "__pycache__", ".tox", "build", "dist", "*.egg_info", "venv"]
+exclude = [
+  ".git",
+  "__pycache__",
+  ".tox",
+  "build",
+  "dist",
+  "*.egg_info",
+  "venv",
+  ".coverage",
+  ".poetry",
+]
 select = ["E", "W", "F", "C", "N", "R", "D", "H"]
 # Ignore W503, E501 because using black creates errors with this
 # Ignore D107 Missing docstring in __init__

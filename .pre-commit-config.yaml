@@ -29,11 +29,10 @@ repos:
       - id: debug-statements
       - id: check-toml
       - id: detect-private-key
-        exclude: |
-          (?x)^(
-           )$
+        exclude: ^tests/
       - id: check-merge-conflict
       - id: end-of-file-fixer
+        exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
         exclude_types:
           - svg
       - id: mixed-line-ending
@@ -42,16 +41,27 @@ repos:
     rev: 25.1.0
     hooks:
     - id: black
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
 
   - repo: https://github.com/pycqa/isort
     rev: 6.0.1
     hooks:
     - id: isort
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
 
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0
     hooks:
     - id: flake8
+      exclude: ^(opensearch_single_kernel/lib/|tests/integration/relations/opensearch_provider/application-charm/lib/)
+      additional_dependencies:
+        - Flake8-pyproject
+        - flake8-copyright
+        - flake8-docstrings
+        - pep8-naming
+
+
+
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6
@@ -59,6 +69,7 @@ repos:
     - id: codespell
       additional_dependencies: [tomli]
       args: ["--write-changes"]
+      exclude: ^poetry\.lock$
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7

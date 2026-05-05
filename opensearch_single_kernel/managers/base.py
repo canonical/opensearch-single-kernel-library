@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Base OpenSearch manager."""
+
+import logging
+import random
+
+from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+
+from opensearch_single_kernel.common.client import OpenSearchClient
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+)
+from opensearch_single_kernel.common.statuses import GeneralStatuses
+from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
+
+
+class BaseManager(ManagerStatusProtocol):
+    """Base OpenSearch Manager.
+
+    Include a set of functions and properties useful to other managers.
+    """
+
+    def __init__(self, state: ClusterState, workload: BaseWorkload, name: str):
+        self.state: ClusterState = state  # type: ignore[override]
+        self.workload = workload
+        self.name = name
+
+    @property
+    def opensearch_client(self) -> OpenSearchClient:
+        """Initialize an opensearch client"""
+        return OpenSearchClient(
+            self.workload,
+            self.state.host_ip,
+            OPENSEARCH_HTTP_PORT,
+            self.state.application.admin_password,
+        )
+
+    @property
+    def alt_hosts(self) -> list[str] | None:
+        """Return an alternative host (of another node)in case the current is offline."""
+        all_units_ips = self.state.units_ips
+        all_hosts = list(all_units_ips.values())
+
+        if nodes_conf := self.state.application.nodes_config:
+            all_hosts.extend([node.ip for node in nodes_conf.values()])
+
+        if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
+            all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
+
+        random.shuffle(all_hosts)
+
+        if not all_hosts:
+            return None
+
+        client = self.opensearch_client
+
+        return [
+            host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
+        ]
+
+    def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
+        """Get the nodes of cluster manager eligible nodes."""
+        result = []
+        for node in nodes:
+            if node.is_cm_eligible():
+                result.append(node.ip)
+
+        return result
+
+    def get_cluster_managers_names(self, nodes: list[Node]) -> list[str]:
+        """Get the nodes of cluster manager eligible nodes."""
+        result = []
+        for node in nodes:
+            if node.is_cm_eligible():
+                result.append(node.name)
+
+        return result
+
+    def _nodes(
+        self,
+        use_localhost: bool,
+        hosts: list[str] | None = None,
+    ) -> list[Node]:
+        """Get the list of nodes in a cluster."""
+        host: str | None = None  # defaults to current unit ip
+        alt_hosts: list[str] | None = hosts
+        if not use_localhost and hosts:
+            host = hosts[0]
+            if len(hosts) >= 2:
+                alt_hosts = hosts[1:]
+
+        nodes: list[Node] = []
+        if use_localhost or host:
+            response = self.opensearch_client.get_nodes(host, alt_hosts)
+            if "nodes" in response:
+                for obj in response["nodes"].values():
+                    node = Node(
+                        name=obj["name"],
+                        roles=obj["roles"],
+                        ip=obj["ip"],
+                        app=App(id=obj["attributes"]["app_id"]),
+                        unit_number=int(obj["name"].split(".")[0].split("-")[-1]),
+                        temperature=obj.get("attributes", {}).get("temp"),
+                    )
+                    nodes.append(node)
+        return nodes
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        return [GeneralStatuses.ACTIVE_IDLE.value]
