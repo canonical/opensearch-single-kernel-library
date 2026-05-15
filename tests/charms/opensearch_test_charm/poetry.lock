@@ -903,36 +903,34 @@ files = [
 
 [[package]]
 name = "opensearch-charms-single-kernel"
-version = "0.0.0"
+version = "0.0.5"
 description = "Shared and reusable code for OpenSearch charms"
 optional = false
-python-versions = "^3.10"
+python-versions = "<4.0,>=3.10"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "opensearch_charms_single_kernel-0.0.5-py3-none-any.whl", hash = "sha256:5fb122a679227d7d389134129dfbad6dd49831dee3f61f23ae3b978a43722e40"},
+    {file = "opensearch_charms_single_kernel-0.0.5.tar.gz", hash = "sha256:531c2fbd338aebcb9d2bdb5d58a23ed8a4eea6c6790ef1cfe18598f96ec700ad"},
+]
 
 [package.dependencies]
-azure-storage-blob = "^12.25.0"
-boto3 = "^1.38.36"
-charmlibs-pathops = "^1.0.1"
-cryptography = "^45.0.4"
-data-platform-helpers = "^0.1.7"
-google-api-core = "^2.17.0"
-google-cloud-storage = "^2.16.0"
-jsonschema = "^4.24.0"
-ops = "^3.3.0"
-overrides = "^7.7.0"
+azure-storage-blob = ">=12.25.0,<13.0.0"
+boto3 = ">=1.38.36,<2.0.0"
+charmlibs-pathops = ">=1.0.1,<2.0.0"
+cryptography = ">=45.0.4,<46.0.0"
+data-platform-helpers = ">=0.1.7,<0.2.0"
+google-api-core = ">=2.17.0,<3.0.0"
+google-cloud-storage = ">=2.16.0,<3.0.0"
+jsonschema = ">=4.24.0,<5.0.0"
+ops = ">=3.3.0,<4.0.0"
+overrides = ">=7.7.0,<8.0.0"
 poetry-core = "<2.0.0"
-pre-commit = "^4.4.0"
-pydantic = ">= 1.0"
+pre-commit = ">=4.4.0,<5.0.0"
+pydantic = ">=1.0"
 requests = "2.32.4"
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-tenacity = "^9.1.2"
-
-[package.source]
-type = "directory"
-url = "opensearch_single_kernel"
+tenacity = ">=9.1.2,<10.0.0"
 
 [[package]]
 name = "opentelemetry-api"
@@ -1757,4 +1755,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "53084642ec0c43825e5b772dd6978a1b25111aa72508dbdd6c465173a4269383"
+content-hash = "b78fe7e42a6eae6962ccdf84c4d3f4bb67837e9b24ff9b56b03458c013a1e98e"
