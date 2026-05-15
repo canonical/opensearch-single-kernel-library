@@ -902,8 +902,8 @@ files = [
 ]
 
 [[package]]
-name = "opensearch-single-kernel-library"
-version = "0.0.1.post6.dev0+744f8cb.dirty"
+name = "opensearch-charms-single-kernel"
+version = "0.0.0"
 description = "Shared and reusable code for OpenSearch charms"
 optional = false
 python-versions = "^3.10"
@@ -1757,4 +1757,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "f1ffae6fbced7404fa5d7ca564e44d6f376441eb77a1c485df14488d259ba4a0"
+content-hash = "53084642ec0c43825e5b772dd6978a1b25111aa72508dbdd6c465173a4269383"
