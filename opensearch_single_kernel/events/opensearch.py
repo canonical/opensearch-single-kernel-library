@@ -674,7 +674,6 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
-        self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
@@ -979,7 +978,7 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.application.deployment_desc.typ
                 == DeploymentType.MAIN_ORCHESTRATOR
             ):
-                if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 ):
                     event.defer()

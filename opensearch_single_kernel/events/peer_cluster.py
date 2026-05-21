@@ -11,6 +11,7 @@ from ops import (
     Object,
     Relation,
     RelationChangedEvent,
+    RelationDataContent,
     RelationDepartedEvent,
     RelationJoinedEvent,
 )
@@ -32,6 +33,7 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.models import (
+    DeploymentDescription,
     PeerClusterApp,
     PeerClusterRelData,
     PeerClusterRelErrorData,
@@ -128,7 +130,7 @@ class PeerClusterEventsHandler(Object):
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
             # check if any credentials exist without relations
             self.check_credentials_with_missing_relations()
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
@@ -140,7 +142,9 @@ class PeerClusterEventsHandler(Object):
         # Do not defer the event if we are waiting for a peer cluster relation
         # Once the relation is established and the cluster starts we will re-process the event
         if (
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+            not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id
+            )
             and not is_waiting_for_peer_relation
         ):
             event.defer()
@@ -180,7 +184,7 @@ class PeerClusterEventsHandler(Object):
             self.handle_joining_data_node()
 
         if data.get("is_candidate_failover_orchestrator", "").lower() != "true":
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
@@ -194,7 +198,7 @@ class PeerClusterEventsHandler(Object):
         target_relation_ids = self.charm.state.peer_clusters_relations_ids(is_provider=True)
         if orchestrators.failover_app and orchestrators.failover_rel_id in target_relation_ids:
             logger.info("A failover cluster orchestrator is already registered.")
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
@@ -678,4 +682,27 @@ class PeerClusterEventsHandler(Object):
         self.charm.config_manager.update_seeds_config(data.cm_nodes)
         self.charm.opensearch_events.apply_status_from_deployment_desc(
             self.charm.state.application.deployment_desc
+        )
+
+    def _put_relation_conflict_error(
+        self,
+        relation_data: RelationDataContent,
+        relation_id: int,
+        deployment_desc: DeploymentDescription,
+    ) -> None:
+        """Add orchestrator relation conflict error into cluster peer data and show the status."""
+        if not relation_data.get("data"):
+            return
+        data = PeerClusterRelData.peer_cluster_rel_data_from_str(
+            self.charm.state.secrets, relation_data["data"]
+        )
+        self.reconcile_peer_cluster_errors(
+            label="error_from_providers-%s" % relation_id,
+            error=PeerClusterRelErrorData(
+                cluster_name=data.cluster_name,
+                should_sever_relation=True,
+                should_wait=False,
+                blocked_message=PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message,
+                deployment_desc=deployment_desc,
+            ),
         )

@@ -241,16 +241,6 @@ class PeerClusterManager(BaseManager):
                 blocked_msg = (
                     PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
                 )
-        elif event_rel_id and (
-            event_rel_id
-            not in [
-                orchestrators.main_rel_id,
-                orchestrators.failover_rel_id,
-            ]
-        ):
-            blocked_msg = (
-                PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message
-            )
         elif peer_cluster_rel_data.cluster_name != deployment_desc.config.cluster_name:
             contains_inherit_directive = (
                 Directive.INHERIT_CLUSTER_NAME in deployment_desc.pending_directives

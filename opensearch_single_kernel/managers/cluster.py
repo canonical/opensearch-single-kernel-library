@@ -259,6 +259,7 @@ class ClusterManager(BaseManager):
         # avoid mutating the previous deployment description in state
         directives = list(prev_deployment_desc.pending_directives)
         deployment_state = prev_deployment_desc.state
+        roles = config.roles
         try:
             self._pre_validate_roles_change(
                 new_roles=config.roles, prev_roles=prev_deployment_desc.config.roles
@@ -273,6 +274,7 @@ class ClusterManager(BaseManager):
             deployment_state = DeploymentState(
                 value=State.BLOCKED_CANNOT_APPLY_NEW_ROLES, message=str(e)
             )
+            roles = prev_deployment_desc.config.roles
 
         start_mode = (
             StartMode.WITH_PROVIDED_ROLES if config.roles else StartMode.WITH_GENERATED_ROLES
@@ -292,7 +294,7 @@ class ClusterManager(BaseManager):
             config=PeerClusterConfig(
                 cluster_name=prev_deployment_desc.config.cluster_name,
                 init_hold=prev_deployment_desc.config.init_hold,
-                roles=config.roles,
+                roles=roles,
                 data_temperature=config.data_temperature,
             ),
             start=start_mode,
@@ -321,23 +323,23 @@ class ClusterManager(BaseManager):
 
     def _pre_validate_roles_change(self, new_roles: list[str], prev_roles: list[str]) -> None:
         """Validate that the config changes of roles are allowed to happen."""
-        if sorted(prev_roles) == sorted(new_roles):
-            # nothing changed, leave
-            return
-
         if not new_roles:
             # user requests the auto-generation logic of roles, this will have the
             # cluster_manager role generated, so nothing to validate
+            return
+
+        if "cluster_manager" in new_roles and "voting_only" in new_roles:
+            # Invalid combination of roles - we cannot have both roles set to a node
+            raise OpenSearchProvidedRolesException(CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID)
+
+        if sorted(prev_roles) == sorted(new_roles):
+            # nothing changed, leave
             return
 
         # if prev_roles None, means auto-generated roles, and will therefore include the cm role
         # for all the units up to the latest if even number of units, which will be voting_only
         prev_roles = set(prev_roles or GENERATED_ROLES)
         new_roles = set(new_roles)
-
-        if "cluster_manager" in new_roles and "voting_only" in new_roles:
-            # Invalid combination of roles - we cannot have both roles set to a node
-            raise OpenSearchProvidedRolesException(CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID)
 
         if "cluster_manager" in prev_roles and "cluster_manager" not in new_roles:
             # user requests a forbidden removal of "cluster_manager" role from node
@@ -945,8 +947,7 @@ class ClusterManager(BaseManager):
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
         if (
-            not self.no_blocking_directives(deployment_desc)
-            and deployment_desc.state.value != State.ACTIVE
+            Directive.SHOW_STATUS in deployment_desc.pending_directives
             and deployment_desc.state.message
         ):
             status_list.append(
