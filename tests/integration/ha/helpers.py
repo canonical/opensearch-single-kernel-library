@@ -56,20 +56,21 @@ def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:
     wait=wait_fixed(wait=15) + wait_random(0, 5),
     stop=stop_after_attempt(25),
 )
-async def get_elected_cm_unit_id(ops_test: OpsTest, unit_ip: str) -> int:
+async def get_elected_cm_unit_id(ops_test: OpsTest, unit_ip: str, app: str = APP_NAME) -> int:
     """Returns the unit id of the current elected cm node."""
     # get current elected cm node
     resp = await http_request(
         ops_test,
         "GET",
         f"https://{unit_ip}:9200/_cluster/state/cluster_manager_node",
+        app=app,
     )
     cm_node_id = resp.get("cluster_manager_node")
     if not cm_node_id:
         return -1
 
     # get all nodes
-    resp = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes")
+    resp = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
     node_name = resp["nodes"][cm_node_id]["name"]
 
     return int(node_name.split(".")[0].split("-")[-1])
@@ -79,18 +80,23 @@ async def get_elected_cm_unit_id(ops_test: OpsTest, unit_ip: str) -> int:
     wait=wait_fixed(wait=15) + wait_random(0, 5),
     stop=stop_after_attempt(25),
 )
-async def cluster_allocation(ops_test: OpsTest, unit_ip: str) -> list[dict[str, str]]:
+async def cluster_allocation(
+    ops_test: OpsTest, unit_ip: str, app: str = APP_NAME
+) -> list[dict[str, str]]:
     """Fetch the cluster allocation of shards."""
     return await http_request(
         ops_test,
         "GET",
         f"https://{unit_ip}:9200/_cat/allocation",
+        app=app,
     )
 
 
-async def get_number_of_shards_by_node(ops_test: OpsTest, unit_ip: str) -> dict[int, int]:
+async def get_number_of_shards_by_node(
+    ops_test: OpsTest, unit_ip: str, app: str = APP_NAME
+) -> dict[int, int]:
     """Get the number of shards allocated per node."""
-    init_cluster_alloc = await cluster_allocation(ops_test, unit_ip)
+    init_cluster_alloc = await cluster_allocation(ops_test, unit_ip, app=app)
 
     result = {}
     for alloc in init_cluster_alloc:
@@ -166,21 +172,22 @@ async def get_shards_by_state(ops_test: OpsTest, unit_ip: str) -> dict[str, list
     wait=wait_fixed(wait=15) + wait_random(0, 5),
     stop=stop_after_attempt(25),
 )
-async def get_shards_by_index(ops_test: OpsTest, unit_ip: str, index_name: str) -> list[Shard]:
+async def get_shards_by_index(
+    ops_test: OpsTest, unit_ip: str, index_name: str, app: str = APP_NAME
+) -> list[Shard]:
     """Returns the list of shards and their location in cluster for an index.
 
     Args:
         ops_test: The ops test framework instance.
         unit_ip: The ip of the OpenSearch unit.
         index_name: the name of the index.
+        app: The name of the application.
 
     Returns:
         List of shards.
     """
     response = await http_request(
-        ops_test,
-        "GET",
-        f"https://{unit_ip}:9200/{index_name}/_search_shards",
+        ops_test, "GET", f"https://{unit_ip}:9200/{index_name}/_search_shards", app=app
     )
 
     nodes = response["nodes"]

@@ -116,9 +116,11 @@ class PeerCluster(RelationState):
         """Delete the 'error_data' field to notify related clusters."""
         self.relation.data[self.app].pop("error_data", None)
 
-    def data(self, peek_secrets: bool = False) -> PeerClusterRelData:
+    def data(self, peek_secrets: bool = False) -> PeerClusterRelData | None:
         """Get the relation data as a PeerClusterRelData object."""
-        content = self.relation.data[self.app].get("data", "{}")
+        content = self.relation.data[self.app].get("data", None)
+        if not content:
+            return None
         return PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.secrets, content, peek_secrets=peek_secrets
         )

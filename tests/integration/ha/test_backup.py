@@ -206,7 +206,9 @@ def remove_backups(  # noqa C901
                 aws_secret_access_key=cloud_credentials[cloud_name]["secret-key"],
                 region_name=config["region"],
             )
-            s3 = session.resource("s3", endpoint_url=config["endpoint"])
+            s3 = session.resource(
+                "s3", endpoint_url=config["endpoint"], verify=config.get("tls-ca-chain")
+            )
             bucket = s3.Bucket(config["bucket"])
 
             # Some of our runs target only a single cloud, therefore, they will
@@ -366,7 +368,7 @@ def _is_related_with(ops_test: OpsTest, app_name: str, target_app_name: str) -> 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_small_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, cloud_name: str, deploy_type: str
+    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
 ) -> None:
     """Build and deploy an HA cluster of OpenSearch and corresponding S3/Azure integration."""
     if await app_name(ops_test):
@@ -391,7 +393,14 @@ async def test_small_deployment_build_and_deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
         ops_test.model.deploy(backup_integrator, channel=backup_integrator_channel),
-        ops_test.model.deploy(charm, num_units=3, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(
+            charm,
+            application_name=APP_NAME,
+            num_units=3,
+            series=series,
+            config=CONFIG_OPTS,
+            resources=charm_resources,
+        ),
     )
 
     # Relate it to OpenSearch to set up TLS.
@@ -411,7 +420,7 @@ async def test_small_deployment_build_and_deploy(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, cloud_name: str, deploy_type: str
+    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
 ) -> None:
     """Build and deploy a large cluster (main/failover orchestrators + data.hot node).
 
@@ -467,6 +476,7 @@ async def test_large_deployment_build_and_deploy(
             num_units=1,
             series=series,
             config=main_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -474,6 +484,7 @@ async def test_large_deployment_build_and_deploy(
             num_units=2,
             series=series,
             config=failover_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -481,6 +492,7 @@ async def test_large_deployment_build_and_deploy(
             num_units=1,
             series=series,
             config=data_hot_conf | CONFIG_OPTS,
+            resources=charm_resources,
         ),
     )
 
@@ -819,6 +831,7 @@ async def test_restore_to_new_cluster(
     series,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
+    charm_resources,
     cloud_name: str,
     deploy_type: str,
     force_clear_cwrites_index,
@@ -858,7 +871,14 @@ async def test_restore_to_new_cluster(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
         ops_test.model.deploy(backup_integrator, channel=backup_integrator_channel),
-        ops_test.model.deploy(charm, num_units=3, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(
+            charm,
+            num_units=3,
+            series=series,
+            config=CONFIG_OPTS,
+            application_name=app,
+            resources=charm_resources,
+        ),
     )
 
     # Relate it to OpenSearch to set up TLS.
@@ -1114,7 +1134,9 @@ async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> No
 @pytest.mark.group(id=ALL_GCS_GROUP)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_deploy_and_test_status(ops_test: OpsTest, charm, series) -> None:
+async def test_build_deploy_and_test_status(
+    ops_test: OpsTest, charm, series, charm_resources
+) -> None:
     """Deploy HA cluster + s3-integrator (credentials set per scenario later)."""
     if await app_name(ops_test):
         return
@@ -1126,7 +1148,14 @@ async def test_build_deploy_and_test_status(ops_test: OpsTest, charm, series) ->
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(charm, num_units=3, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(
+            charm,
+            num_units=3,
+            series=series,
+            config=CONFIG_OPTS,
+            application_name=APP_NAME,
+            resources=charm_resources,
+        ),
     )
 
     # Relate it to OpenSearch to set up TLS.

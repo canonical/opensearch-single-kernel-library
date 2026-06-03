@@ -90,6 +90,8 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requi
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
+    get_k8s_fqdn,
+    get_k8s_seed_host,
     lock_unit_name,
 )
 from opensearch_single_kernel.utils.object_storage import (
@@ -549,6 +551,16 @@ class ClusterState(Object):
         )
 
     @property
+    def node_host(self) -> str:
+        """Return a connectable host for the current unit.
+
+        On K8s this is the unit DNS name. On VM this is the unit IP address.
+        """
+        if self.substrate == Substrates.K8S:
+            return self.fqdn
+        return self.host_ip
+
+    @property
     def planned_units(self) -> int:
         """Return the planned units for the charm."""
         return self.model.app.planned_units()
@@ -560,8 +572,24 @@ class ClusterState(Object):
         return str(address)
 
     @property
+    def fqdn(self) -> str:
+        """Return a stable FQDN for the current unit.
+
+        - VM: local host FQDN from the runtime environment.
+        - K8s: canonical endpoint FQDN for this unit service name.
+        """
+        if self.substrate == Substrates.K8S:
+            unit_prefix = str(self.unit_name).split(".", 1)[0]
+            service_name = f"{unit_prefix}.{self.application.name}-endpoints"
+            return get_k8s_fqdn(service_name)
+        return socket.getfqdn()
+
+    @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
+        if self.substrate == Substrates.K8S:
+            # K8s we allow binding on all interfaces
+            return ["0.0.0.0"]
         return [socket.getfqdn(), self.host_ip]
 
     @property
@@ -675,21 +703,24 @@ class ClusterState(Object):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def units_ips(self) -> dict[str, str]:
-        """Returns the mapping "unit id / ip address" of all units."""
-        unit_ip_map = {}
-        if not self.peer_relation:
-            return unit_ip_map
+    def all_hosts(self) -> set[str]:
+        """Fetch the list of hosts for the current app."""
+        hosts = set()
 
-        for unit in self.peer_relation.units:
-            unit_id = unit.name.split("/")[1]
-            unit_ip_map[unit_id] = self.unit_ip(unit)
+        if not (all_units := self.all_units):
+            return hosts
 
-        # Sometimes the above command doesn't get the current node,
-        # so ensure we get this unit's ip.
-        unit_ip_map[self.model.unit.name.split("/")[1]] = self.host_ip
+        for unit in all_units:
+            if self.substrate == Substrates.K8S:
+                hosts.add(
+                    get_k8s_seed_host(
+                        format_unit_name(unit, app=self.application.deployment_desc.app)
+                    )
+                )
+            else:
+                hosts.add(self.unit_ip(unit))
 
-        return unit_ip_map
+        return hosts
 
     @property
     def all_units(self) -> list[Unit]:

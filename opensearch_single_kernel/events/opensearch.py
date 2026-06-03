@@ -25,10 +25,12 @@ from ops import (
     StorageDetachingEvent,
     UpdateStatusEvent,
 )
+from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     CERTS_EXPIRATION_DATE_FORMAT,
+    CONTAINER_NAME,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
@@ -41,12 +43,15 @@ from opensearch_single_kernel.common.constants import (
     HealthColors,
     Scope,
     StartMode,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchError,
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchLockError,
     OpenSearchMissingError,
     OpenSearchNoClusterManagersError,
     OpenSearchNotFullyReadyError,
@@ -60,7 +65,6 @@ from opensearch_single_kernel.common.statuses import (
     InternalUsersStatuses,
     LockStatuses,
     PeerClusterStatuses,
-    ProfileStatuses,
     TlsStatuses,
 )
 from opensearch_single_kernel.core.models import (
@@ -68,6 +72,7 @@ from opensearch_single_kernel.core.models import (
     UnitUpgradesState,
 )
 from opensearch_single_kernel.events.custom_events import (
+    PebbleCanConnectEvent,
     RestartOpenSearch,
     StartOpenSearch,
 )
@@ -128,6 +133,7 @@ class OpenSearchEventsHandler(Object):
         # --- OpenSearch Custom events ---
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
+        self.framework.observe(self.charm.on.pebble_can_connect, self._on_pebble_can_connect)
 
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
@@ -187,7 +193,12 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
-                self._reconfigure_and_restart_if_needed()
+                try:
+                    self._reconfigure_and_restart_if_needed()
+                except OpenSearchFileOperationError as e:
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                    event.defer()
+                    return
             if self.charm.state.application.missing_relations:
                 # for failover promotions: this flag indicates that the user needs
                 # to relate integrators to this new main orchestrator
@@ -200,11 +211,26 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
-                self._reconfigure_and_restart_if_needed()
+                try:
+                    self._reconfigure_and_restart_if_needed()
+                except OpenSearchFileOperationError as e:
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                    event.defer()
+                    return
 
-        self.charm.config_manager.update_seeds_config(nodes)
+        try:
+            self.charm.config_manager.update_seeds_config()
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while updating seeds config: %s", str(e))
+            event.defer()
+            return
 
-        self.check_profile_requirements()
+        try:
+            self.check_profile_requirements()
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            event.defer()
+            return
 
         if not (unit_data := event.relation.data.get(event.unit)):
             return
@@ -275,10 +301,21 @@ class OpenSearchEventsHandler(Object):
 
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
-        if planned_units > 1 and not self.charm.lock_manager.acquire():
-            # Raise uncaught exception to prevent Juju from removing unit
-            raise Exception("Unable to acquire lock: Another unit is starting or stopping.")
+        if planned_units > 0:
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+                with attempt:
+                    if not self.charm.lock_manager.acquire():
+                        logger.debug(
+                            "Unable to acquire lock: Another unit is starting or stopping."
+                        )
+                        # Raise uncaught exception to prevent Juju from removing unit
+                        raise OpenSearchLockError(
+                            "Unable to acquire lock: Another unit is starting or stopping."
+                        )
 
+        logger.info(
+            "Unit %s is being removed. Starting pre-removal process.", self.charm.unit.name
+        )
         # if the leader is departing, and this hook fails "leader elected" won't trigger,
         # so we want to re-balance the node roles from here
         if self.charm.unit.is_leader():
@@ -331,7 +368,7 @@ class OpenSearchEventsHandler(Object):
                         "1 or more 'primary' shards are not assigned, please scale your application up."
                     )
         finally:
-            if planned_units > 1 and (
+            if planned_units > 0 and (
                 self.charm.cluster_manager.opensearch_client.is_node_up()
                 or self.charm.cluster_manager.alt_hosts
             ):
@@ -352,9 +389,12 @@ class OpenSearchEventsHandler(Object):
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
-
-        if not self.check_profile_requirements():
-            return
+        try:
+            if not self.check_profile_requirements():
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            event.defer()
 
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -405,7 +445,10 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            try:
+                self.charm.tls_manager.finalize_ca_certs_rotation()
+            except OpenSearchFileOperationError as e:
+                logger.error("Error finalizing CA rotation: %s", e)
         # If relation not broken - leave
         if self.charm.state.tls_relation:
             return
@@ -433,6 +476,10 @@ class OpenSearchEventsHandler(Object):
 
     def _on_install(self, event: InstallEvent) -> None:
         """Event handler for install event."""
+        # For VM: install snap package
+        if self.charm.state.substrate == Substrates.K8S:
+            return
+
         self.charm.status_handler.set_running_status(
             GeneralStatuses.INSTALL_IN_PROGRESS.value,
             "unit",
@@ -443,22 +490,33 @@ class OpenSearchEventsHandler(Object):
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
         previous_deployment_desc = self.charm.state.application.deployment_desc
-        if (
+        if self.charm.substrate == Substrates.VM and (
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
         ):
-            self.charm.config_manager.update_opensearch_config()
+            try:
+                self.charm.config_manager.update_opensearch_config()
+            except OpenSearchFileOperationError as e:
+                logger.error("An error occurred while updating opensearch config: %s", str(e))
+                event.defer()
+                return
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
 
-        if self.charm.unit.is_leader() and self.charm.cluster_manager.reconcile_cluster_config():
-            if (
-                self.charm.state.application.deployment_desc.start
-                == StartMode.WITH_GENERATED_ROLES
-            ):
-                # trigger roles change on the leader, other units will have their
-                # peer-rel-changed event triggered
-                self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
+        config_restart_needed = False
+        if self.charm.unit.is_leader():
+            deployment_changed, roles_changed = (
+                self.charm.cluster_manager.reconcile_cluster_config()
+            )
+            if deployment_changed:
+                if roles_changed:
+                    # trigger roles change on the leader, other units will have their
+                    # peer-rel-changed event triggered
+                    self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
+                    config_restart_needed = True
+                self.apply_status_from_deployment_desc(
+                    self.charm.state.application.deployment_desc
+                )
 
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
@@ -477,30 +535,19 @@ class OpenSearchEventsHandler(Object):
 
         try:
             config_profile = self.charm.profiles_manager.config_profile
-            self.charm.state.remove_status_if_present(
-                ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
                 self.charm.state.config.get("profile"),
             )
-            self.charm.state.add_status_if_not_present(
-                ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
-            # Avoid two blocked statuses overlapping.
-            self.charm.state.remove_status_if_present(
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
             return
 
-        if not self.check_profile_requirements():
+        try:
+            if not self.check_profile_requirements():
+                event.defer()
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
             event.defer()
             return
 
@@ -511,14 +558,17 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.external_clients_manager.update_relations_roles_mapping()
             except OpenSearchUserMgmtError as e:
-                logger.error("Failed to update relations roles mapping: %s", e)
+                logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()
                 return
 
-        if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
+        if self.charm.cluster_manager.workload.is_service_started() and (
+            profile_restart_needed or config_restart_needed
+        ):
             logger.debug(
-                "Restarting opensearch due to config change: profile_restart_needed=%s",
+                "Restarting opensearch due to config change: profile_restart_needed=%s, config_restart_needed=%s",
                 profile_restart_needed,
+                config_restart_needed,
             )
             self.charm.restart_opensearch_event.emit()
 
@@ -549,18 +599,25 @@ class OpenSearchEventsHandler(Object):
             nodes = self.charm.cluster_manager.get_nodes(True)
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
                 # Nodes Config updated, we would need to reconfigure and restart
-                if self.charm.config_manager.update_opensearch_config():
-                    # Restart needed
-                    logger.debug("Restarting opensearch due to reconfiguring node roles")
+                try:
+                    self.charm.config_manager.update_opensearch_config()
+                    logger.debug("Leader election reconfigured node roles; emitting restart.")
                     self.charm.restart_opensearch_event.emit()
-
+                except OpenSearchFileOperationError as e:
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                    event.defer()
             return
 
         # TODO: check if cluster can start independently
 
         # User config is currently in a default state, which contains multiple insecure default
         # users. Purge the user list before initialising the users the charm requires.
-        self.charm.internal_users_manager.purge_initial_default_users()
+        try:
+            self.charm.internal_users_manager.purge_initial_default_users()
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while purging initial default users: %s", str(e))
+            event.defer()
+            return
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
@@ -572,23 +629,28 @@ class OpenSearchEventsHandler(Object):
                 component_name=self.charm.internal_users_manager.name,
             )
 
-        try:
-            # Restore purged system users in local `internal_users.yml`
-            # with corresponding credentials
-            if self.charm.unit.is_leader():
-                for user in OPENSEARCH_SYSTEM_USERS:
+        # Restore purged system users in local `internal_users.yml` with corresponding credentials
+        if self.charm.unit.is_leader():
+            for user in OPENSEARCH_SYSTEM_USERS:
+                try:
                     self.charm.internal_users_manager.put_or_update_internal_user_leader(
                         user, update=False
                     )
-        except OpenSearchUserMgmtError as e:
-            logger.error("An error occurred while updating internal user %s", str(e))
-            event.defer()
-            return
+                except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                    logger.error("An error occurred while updating internal user %s", str(e))
+                    event.defer()
+                    return
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
+        if (
+            self.charm.state.substrate == Substrates.K8S
+            and not self.charm.unit.get_container(CONTAINER_NAME).can_connect()
+        ):
+            self.charm.pebble_observer.start()
+
         if not self.charm.state.application.deployment_desc:
-            logger.debug("Deployment description not yet computed, deferring event.")
+            logger.debug("Deployment description not yet computed.")
             event.defer()
             return
 
@@ -596,9 +658,12 @@ class OpenSearchEventsHandler(Object):
             self.cleanup_start_state()
             return
 
-        is_leader_unit = self.charm.unit.is_leader()
-
-        if self.charm.cluster_manager.needs_start_after_host_reboot:
+        # VM-specific: Handle host reboot scenario where service should be up but isn't
+        # This doesn't apply to K8s as pods are ephemeral and don't have host reboots
+        if (
+            self.charm.state.substrate == Substrates.VM
+            and self.charm.cluster_manager.needs_start_after_host_reboot
+        ):
             # This logic will only be triggered if the service has started (i.e. "started")
             # if we had a "start" hook (i.e. the actual machine has rebooted)
             # and we are a cluster_manager with the service down
@@ -613,7 +678,8 @@ class OpenSearchEventsHandler(Object):
 
             # Now, reissue a restart: we should not have stopped in the first place
             # as "started" flag is still set to True.
-            # We do not wait for the 200 return, as maybe more than one unit is coming back
+            # We do not wait for the 200 return, as maybe more than one unit is coming back.
+            # start_service_only() is polymorphic but here we call it only for VMs.
             try:
                 self.charm.workload.start_service_only()
                 # We're done here, we can return
@@ -652,15 +718,6 @@ class OpenSearchEventsHandler(Object):
             return
 
         if not self.charm.tls_manager.all_tls_resources_stored():
-            self.charm.state.add_status_if_not_present(
-                (
-                    TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                    if self.charm.state.tls_relation
-                    else TlsStatuses.TLS_RELATION_MISSING.value
-                ),
-                "unit",
-                self.charm.tls_manager.name,
-            )
             event.defer()
             return
 
@@ -668,14 +725,6 @@ class OpenSearchEventsHandler(Object):
             InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
             "unit",
             self.charm.internal_users_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
-            "unit",
-            self.charm.internal_users_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            TlsStatuses.TLS_RELATION_MISSING.value, "unit", self.charm.internal_users_manager.name
         )
 
         if self.charm.unit.is_leader():
@@ -686,10 +735,15 @@ class OpenSearchEventsHandler(Object):
             )
 
         # Configure OpenSearch Users
-        if not is_leader_unit:
-            self.charm.internal_users_manager.purge_initial_default_users()
-            for user in OPENSEARCH_SYSTEM_USERS:
-                self.charm.internal_users_manager.save_user_locally(user)
+        if not self.charm.unit.is_leader():
+            try:
+                self.charm.internal_users_manager.purge_initial_default_users()
+                for user in OPENSEARCH_SYSTEM_USERS:
+                    self.charm.internal_users_manager.save_user_locally(user)
+            except OpenSearchFileOperationError as e:
+                logger.error("An error occurred while saving internal users: %s", str(e))
+                event.defer()
+                return
 
         deployment_desc = self.charm.state.application.deployment_desc
         # only start the main orchestrator if a data node is available
@@ -731,7 +785,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         if (
-            is_leader_unit
+            self.charm.unit.is_leader()
             and self.charm.state.is_peer_cluster_consumer()
             and (local_first_data_node := self.charm.state.get_local_first_data_node())
         ):
@@ -767,18 +821,14 @@ class OpenSearchEventsHandler(Object):
         ):
             try:
                 self._post_start_init(event)
-            except OpenSearchCmdError as e:
-                # This is case when the data node is not able to initialize the security index
-                # Because there is no
-                logger.warning("OpenSearch already started, but post-start command failed: %s", e)
-                event.defer()
-                return
             except (
                 OpenSearchHttpError,
                 OpenSearchNotFullyReadyError,
-            ):
+                OpenSearchCmdError,
+                OpenSearchFileOperationError,
+            ) as e:
                 # check if cluster should have started but is blocked
-                logger.debug("OpenSearch already started, but post-start init failed.")
+                logger.debug("OpenSearch already started, but post-start init failed: %s", e)
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
@@ -798,7 +848,8 @@ class OpenSearchEventsHandler(Object):
                     )
                 event.defer()
             except OpenSearchUserMgmtError as e:
-                # Either generic start failure or cluster is not read to create the internal users
+                # Either generic start failure or cluster is not read
+                # to create the internal users
                 logger.warning(e)
                 self.charm.lock_manager.release()
                 self.charm.state.add_status_if_not_present(
@@ -825,13 +876,16 @@ class OpenSearchEventsHandler(Object):
         # - blocking directives
         # - admin user and security index configured/initialised
         # - cluster health
-        if not all(
-            [
-                self.check_profile_requirements(),
-                self.charm.cluster_manager.can_service_start(),
-            ]
-        ):
-            logger.info("Conditions not met to start opensearch. Will retry next event.")
+        try:
+            if (
+                not self.check_profile_requirements()
+                or not self.charm.cluster_manager.check_if_can_start()
+            ):
+                logger.info("Conditions not met to start opensearch. Will retry next event.")
+                event.defer()
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
             event.defer()
             return
 
@@ -1081,9 +1135,10 @@ class OpenSearchEventsHandler(Object):
                     "for replica shards"
                 )
 
-        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
-        logger.debug("Set upgrade unit state to healthy")
-        self.charm.upgrade_events._reconcile_upgrade()
+        if self.charm.state.upgrade_relation:
+            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+            logger.debug("Set upgrade unit state to healthy")
+            self.charm.upgrade_events._reconcile_upgrade()
 
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
@@ -1133,6 +1188,10 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Restarting OpenSearch with ignore_lock=%s", ignore_lock)
         self.charm.start_opensearch_event.emit(ignore_lock=ignore_lock)
 
+    def _on_pebble_can_connect(self, event: PebbleCanConnectEvent) -> None:
+        """Periodic pebble-can-connect trigger fired independently of update-status."""
+        logger.info("_on_pebble_can_connect triggered")
+
     def _on_node_lock_relation_changed(self, _=None) -> None:
         """Event handler for when the node-lock relation changed"""
         self.charm.lock_manager.refresh_lock()
@@ -1159,56 +1218,18 @@ class OpenSearchEventsHandler(Object):
         """Check all requirements of profile.
 
         Returns:
-            whether the profile passed validation and all requirements.
+            True if the profile passed validation and all requirements.
         """
         try:
             self.charm.profiles_manager.config_profile
-            self.charm.state.remove_status_if_present(
-                ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
                 self.charm.state.config.get("profile"),
             )
-            self.charm.state.add_status_if_not_present(
-                ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
-            # Avoid two blocked statuses overlapping.
-            self.charm.state.remove_status_if_present(
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                "unit",
-                self.charm.profiles_manager.name,
-            )
             return False
 
-        missing_requirements = self.charm.profiles_manager.get_missing_requirements()
-
-        self.set_profile_status(missing_requirements)
-
-        return not missing_requirements
-
-    def set_profile_status(self, missing_requirements: list[str]) -> None:
-        """Set the charm status based on the missing requirements"""
-        if missing_requirements:
-            logger.error("Missing profile requirements: %s", missing_requirements)
-            self.charm.state.add_status_if_not_present(
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                "unit",
-                self.charm.profiles_manager.name,
-                {"requirements": " - ".join(missing_requirements)},
-            )
-        else:
-            self.charm.state.remove_status_if_present(
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                "unit",
-                self.charm.profiles_manager.name,
-                interpolated=True,
-            )
+        return not self.charm.profiles_manager.get_missing_requirements()
 
     def cleanup_start_state(self) -> None:
         """Clean Up Start statuses and state."""
@@ -1335,7 +1356,12 @@ class OpenSearchEventsHandler(Object):
         elif not is_leader and label_key in system_user_hash_keys:
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
-                self.charm.internal_users_manager.put_internal_user(sys_user, password)
+                try:
+                    self.charm.internal_users_manager.put_internal_user(sys_user, password)
+                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                    logger.error("An error occurred while updating internal user: %s", str(e))
+                    event.defer()
+                    return
 
         if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
@@ -1366,8 +1392,7 @@ class OpenSearchEventsHandler(Object):
                     and event.is_first_data_node
                 )
             )
-        else:
-            return self.is_cluster_healthy_to_start()
+        return self.is_cluster_healthy_to_start()
 
     def trigger_peer_rel_changed(
         self,
@@ -1392,12 +1417,6 @@ class OpenSearchEventsHandler(Object):
         """Configure TLS CA rotation after OpenSearch is started."""
         # update the peer relation data for TLS CA rotation routine
         self.charm.state.reset_ca_rotation_state()
-        self.charm.state.remove_status_if_present(
-            TlsStatuses.TLS_CA_ROTATION.value, "unit", self.charm.tls_manager.name
-        )
-        self.charm.state.remove_status_if_present(
-            TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value, "unit", self.charm.tls_manager.name
-        )
 
         # request new certificates after rotating the CA
         if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
@@ -1415,7 +1434,10 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
-            self.charm.tls_manager.finalize_ca_certs_rotation()
+            try:
+                self.charm.tls_manager.finalize_ca_certs_rotation()
+            except OpenSearchFileOperationError as e:
+                logger.error("Error finalizing CA rotation: %s", e)
 
         if self.charm.state.server.is_cluster_manager_removed:
             # restore cluster_manager role and restart the service

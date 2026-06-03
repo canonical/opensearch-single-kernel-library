@@ -59,7 +59,9 @@ PROTECTED_INDICES = [
 
 
 @pytest.mark.abort_on_fail
-async def test_create_relation(ops_test: OpsTest, application_charm, charm, series):
+async def test_create_relation(
+    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate
+):
     """Test basic functionality of relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
     # set data in the relation application databag using only the leader unit).
@@ -78,19 +80,21 @@ async def test_create_relation(ops_test: OpsTest, application_charm, charm, seri
             application_name=CLIENT_APP_NAME,
         ),
         ops_test.model.deploy(
-            DASHBOARDS_APP_NAME,
-            application_name=DASHBOARDS_APP_NAME,
-            channel="2/edge",
-            series=SERIES,
-        ),
-        ops_test.model.deploy(
             charm,
             application_name=OPENSEARCH_APP_NAME,
             num_units=NUM_UNITS,
             series=series,
             config=CONFIG_OPTS,
+            resources=charm_resources,
         ),
     )
+    if substrate == "vm":
+        await ops_test.model.deploy(
+            DASHBOARDS_APP_NAME,
+            application_name=DASHBOARDS_APP_NAME,
+            channel="2/edge",
+            series=SERIES,
+        )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME], status="active", timeout=1600
@@ -107,10 +111,21 @@ async def test_create_relation(ops_test: OpsTest, application_charm, charm, seri
         timeout=1600,
         status="active",
     )
-    await ops_test.model.wait_for_idle(
-        apps=[DASHBOARDS_APP_NAME],
-        timeout=1600,
-    )
+    if substrate == "vm":
+        await ops_test.model.wait_for_idle(
+            apps=[DASHBOARDS_APP_NAME],
+            timeout=1600,
+        )
+
+
+def _get_client_relation(ops_test, endpoint_name: str = FIRST_RELATION_NAME):
+    """Helper function to retrieve the client relation from the model."""
+    for relation in ops_test.model.relations:
+        if {CLIENT_APP_NAME, OPENSEARCH_APP_NAME} == {
+            app.name for app in relation.applications
+        } and endpoint_name in {end.name for end in relation.endpoints}:
+            return relation
+    raise Exception("Couldn't find client relation")
 
 
 @pytest.mark.abort_on_fail
@@ -120,6 +135,7 @@ async def test_index_usage(ops_test: OpsTest):
     The client application authenticates using the cert provided in the index; if this is
     invalid for any reason, the test will fail, so this test implicitly verifies that TLS works.
     """
+    client_relation = _get_client_relation(ops_test)
     await run_request(
         ops_test,
         unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
@@ -153,6 +169,8 @@ async def test_index_usage(ops_test: OpsTest):
 @pytest.mark.abort_on_fail
 async def test_bulk_index_usage(ops_test: OpsTest):
     """Check we can update and delete things using bulk api."""
+    client_relation = _get_client_relation(ops_test)
+
     bulk_payload = """{ "index" : { "_index": "albums", "_id" : "2" } }
 {"artist": "Herbie Hancock", "genre": ["Jazz"],  "title": "Head Hunters"}
 { "index" : { "_index": "albums", "_id" : "3" } }
@@ -193,6 +211,7 @@ async def test_bulk_index_usage(ops_test: OpsTest):
 @pytest.mark.abort_on_fail
 async def test_version(ops_test: OpsTest):
     """Check version reported in the databag is consistent with the version on the charm."""
+    client_relation = _get_client_relation(ops_test)
     run_version_request = await run_request(
         ops_test,
         unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
@@ -217,7 +236,9 @@ async def get_secret_data(ops_test, secret_uri):
     return json.loads(stdout)[secret_unique_id]["content"]["Data"]
 
 
+# TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Add a dashboard relation and wait for them to exchange data
@@ -246,7 +267,9 @@ async def test_dashboard_relation(ops_test: OpsTest):
     assert relation_user_pwd == result.response.get("password")
 
 
+# TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation_password_change(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Changing Opensearch kibanaserver password
@@ -275,7 +298,7 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_scaling(ops_test: OpsTest):
+async def test_scaling(ops_test: OpsTest, substrate):
     """Test that scaling correctly updates endpoints in databag.
 
     scale_application also contains a wait_for_idle check, including checking for active status.
@@ -298,18 +321,21 @@ async def test_scaling(ops_test: OpsTest):
     ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
     await wait_until(
         ops_test,
-        apps=ALL_APPS,
+        apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
     # Test scale down
     opensearch_unit_ids = get_application_unit_ids(ops_test, OPENSEARCH_APP_NAME)
-    await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
-        f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
-    )
+    if substrate == "k8s":
+        await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=-1)
+    else:
+        await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
+            f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
+        )
     await wait_until(
         ops_test,
-        apps=ALL_APPS,
+        apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1},
         idle_period=70,
     )
@@ -321,7 +347,7 @@ async def test_scaling(ops_test: OpsTest):
     await ops_test.model.applications[OPENSEARCH_APP_NAME].add_unit(count=1)
     await wait_until(
         ops_test,
-        apps=ALL_APPS,
+        apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids)},
         idle_period=50,  # slightly less than update-status-interval period
     )
@@ -333,14 +359,17 @@ async def test_scaling(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_multiple_relations(ops_test: OpsTest, application_charm):
+async def test_multiple_relations(ops_test: OpsTest, application_charm, substrate):
     """Test that two different applications can connect to the database."""
     # scale-down for CI
     logger.info("Removing 1 unit for CI and sleep a minute..")
     opensearch_unit_ids = get_application_unit_ids(ops_test, app=OPENSEARCH_APP_NAME)
-    await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
-        f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
-    )
+    if substrate == "k8s":
+        await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=-1)
+    else:
+        await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
+            f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
+        )
 
     # sleep a minute to ease the load on machine
     time.sleep(60)
@@ -364,7 +393,12 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm):
 
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
+        apps=[
+            OPENSEARCH_APP_NAME,
+            CLIENT_APP_NAME,
+            SECONDARY_CLIENT_APP_NAME,
+            TLS_CERTIFICATES_APP_NAME,
+        ],
         wait_for_exact_units={
             OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1,
             CLIENT_APP_NAME: 1,
@@ -403,7 +437,7 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
     )
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
+        apps=[OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME],
         idle_period=70,
     )
 
@@ -439,7 +473,7 @@ async def test_admin_relation(ops_test: OpsTest):
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
+        apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
@@ -602,7 +636,7 @@ async def test_relation_broken(ops_test: OpsTest):
 
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
+        apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
@@ -657,9 +691,14 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
 
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [SECONDARY_CLIENT_APP_NAME],
+        apps=[
+            OPENSEARCH_APP_NAME,
+            TLS_CERTIFICATES_APP_NAME,
+            SECONDARY_CLIENT_APP_NAME,
+            CLIENT_APP_NAME,
+        ],
         idle_period=70,
-    ),
+    )
 
     read_index_endpoint = "/albums/_search?q=Jazz"
     run_bulk_read_index = await run_request(

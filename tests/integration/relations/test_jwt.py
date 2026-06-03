@@ -46,15 +46,17 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 3}
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_small_cluster(charm, series, ops_test: OpsTest) -> None:
+async def test_deploy_small_cluster(charm, series, ops_test: OpsTest, charm_resources) -> None:
     """Deploy OpenSearch and JWT integrator, configure and integrate them."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await ops_test.model.deploy(
         charm,
+        application_name=APP_NAME,
         num_units=DEFAULT_NUM_UNITS,
         series=series,
         config=CONFIG_OPTS,
+        resources=charm_resources,
     )
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
@@ -76,10 +78,12 @@ async def test_deploy_small_cluster(charm, series, ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
+async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
     """Configure JWT authentication and access the cluster with the token."""
     global generated_jwt
     generated_jwt = generate_json_web_token()
+
+    logger.info("Generated JWT for testing\n%s", generated_jwt)
 
     logger.info("Creating signing-key secret")
     secret_name = "jwt-signing-key"
@@ -148,6 +152,8 @@ async def test_configure_and_use_jwt(charm, series, ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+# TODO Add when Large deployments is implemented
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsTest) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")
@@ -194,7 +200,6 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
-        timeout=3600,
     )
 
     logger.info(f"Integrating {DATA_APP} with {JWT_APP_NAME} - this will result in blocked status")

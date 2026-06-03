@@ -10,7 +10,7 @@ declare -a TEST_CHARMS=()
 
 LIB_PATH="./opensearch_single_kernel"
 CHARMS_PATH="./tests/charms"
-THIRD_PARTY_CHARMS=("./tests/integration/relations/opensearch_provider/application-charm")
+THIRD_PARTY_CHARMS=("./tests/integration/relations/opensearch_provider/application-charm" "./tests/charms/dummy-client-charm")
 
 # --- Argument Parsing ---
 while [[ "$#" -gt 0 ]]; do

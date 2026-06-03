@@ -22,6 +22,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     OpenSearchProvides,
 )
 from opensearch_single_kernel.utils.helpers import validate_index_name
+from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -99,7 +100,13 @@ class ExternalClientsEventsHandler(Object):
         )
 
         self.charm.status_handler.set_running_status(
-            ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+            format_status(
+                ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+                {
+                    "index": event.index,
+                    "id": event.relation.id,
+                },
+            ),
             "unit",
             component_name=self.charm.external_clients_manager.name,
         )

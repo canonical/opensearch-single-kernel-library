@@ -9,12 +9,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.helpers_data import (
     bulk_insert,
+    bulk_insert_generated,
     create_index,
     delete_index,
     index_doc,
@@ -22,6 +22,7 @@ from tests.integration.ha.helpers_data import (
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
+    EmptyBlockedStatus,
     app_name,
     get_application_unit_ids_ips,
     get_leader_unit_id,
@@ -42,7 +43,6 @@ from ..plugins.helpers import (
     poll_until,
     run_knn_training,
 )
-from ..profiles.test_profiles import get_constraints
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
@@ -86,11 +86,6 @@ TEXT_EMBEDDING_MODEL = {
     "model_format": "TORCH_SCRIPT",
 }
 
-CosBlockedStatus = StatusObject(
-    status="blocked",
-    message="",
-)
-
 
 async def _wait_for_units(
     ops_test: OpsTest,
@@ -113,8 +108,7 @@ async def _wait_for_units(
             await wait_until(
                 ops_test,
                 apps=[COS_APP_NAME],
-                units_statuses={COS_APP_NAME: [CosBlockedStatus]},
-                apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
+                units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
                 timeout=1800,
                 idle_period=IDLE_PERIOD,
             )
@@ -140,8 +134,7 @@ async def _wait_for_units(
         await wait_until(
             ops_test,
             apps=[COS_APP_NAME],
-            units_statuses={COS_APP_NAME: [CosBlockedStatus]},
-            apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
+            units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
             timeout=1800,
             idle_period=IDLE_PERIOD,
         )
@@ -278,7 +271,7 @@ async def _wait_until_config_absent(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy_small_deployment(
-    ops_test: OpsTest, charm, series, deploy_type: str
+    ops_test: OpsTest, charm, series, deploy_type: str, substrate, charm_resources
 ) -> None:
     """Build and deploy an OpenSearch cluster."""
     if await app_name(ops_test):
@@ -291,17 +284,18 @@ async def test_build_and_deploy_small_deployment(
     #  test_prometheus_exporter_disabled_by_cos_relation_gone
     model_conf["update-status-hook-interval"] = "1m"
     await ops_test.model.set_config(model_conf)
-    constraints = await get_constraints(ops_test)
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     await asyncio.gather(
         ops_test.model.deploy(
             charm,
+            application_name=APP_NAME,
             num_units=3,
             series=series,
-            constraints=constraints,
+            constraints="mem=8G",
             config={"profile": "production"},
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
@@ -331,8 +325,10 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
     assert len(response_str.split("\n")) > 500
 
 
+# TODO enable for k8s when cos is merged
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
@@ -361,9 +357,11 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
     assert relation_data["scheme"] == "https"
 
 
+# TODO add when LD is on k8s
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
+@pytest.mark.skip_if_substrate("k8s")
 async def test_large_deployment_build_and_deploy(
     ops_test: OpsTest, charm, series, deploy_type: str
 ) -> None:
@@ -433,6 +431,7 @@ async def test_large_deployment_build_and_deploy(
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_large_deployment_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
@@ -470,7 +469,9 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str):
+async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy_type: str):
+    if substrate == "k8s" and deploy_type == "large_deployment":
+        pytest.skip("Large deployment is not yet supported on k8s substrate.")
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
@@ -492,6 +493,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str)
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
@@ -630,7 +632,7 @@ async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrate) -> None:
     """Tests the entire cycle of KNN plugin.
 
     1) Enters data and trains a model in "test_end_to_end_with_ivf_faiss_training"
@@ -649,9 +651,11 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
     index_name = "test_end_to_end_with_ivf_faiss_training"
     vector_name = "test_end_to_end_with_ivf_faiss_vector"
     model_name = "test_end_to_end_with_ivf_faiss_model"
+    logger.info("Creating index and bulk inserting data for KNN training...")
     await create_index_and_bulk_insert(
-        ops_test, app, leader_unit_ip, index_name, len(units) - 1, vector_name
+        ops_test, app, leader_unit_ip, index_name, len(units) - 1, vector_name, substrate=substrate
     )
+    logger.info("Starting KNN training...")
     await run_knn_training(
         ops_test,
         app,
@@ -669,11 +673,13 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
             },
         },
     )
+    logger.info("KNN training started.")
     # wait for training to finish -> fails with an exception otherwise
     assert await is_knn_training_complete(
         ops_test, app, leader_unit_ip, model_name
     ), "KNN training did not complete."
 
+    logger.info("Creating target index and bulk inserting data for KNN search...")
     # Creates the target index, to use the model
     payload_list = await create_index_and_bulk_insert(
         ops_test,
@@ -683,13 +689,14 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
         len(units) - 1,
         vector_name="target-field",
         model_name=model_name,
+        substrate=substrate,
     )
 
     query = {
         "size": 2,
-        "query": {"knn": {"target-field": {"vector": payload_list[0], "k": 2}}},
+        "query": {"knn": {"target-field": {"vector": payload_list, "k": 2}}},
     }
-
+    logger.info("Running KNN search with trained model...")
     docs = await search(
         ops_test,
         app,
@@ -703,6 +710,7 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards
@@ -852,6 +860,20 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
     """Test that the ISM and job scheduler plugins are enabled and functional."""
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     base_url = f"https://{leader_unit_ip}:9200"
+
+    # ISM jobs run every 5m by default with jitter, so make this test's
+    # scheduler timing explicit before waiting for the rollover.
+    await http_request(
+        ops_test,
+        "PUT",
+        f"{base_url}/_cluster/settings",
+        {
+            "persistent": {
+                "plugins.index_state_management.job_interval": 1,
+                "plugins.index_state_management.jitter": 0,
+            }
+        },
+    )
 
     # create index with alias
     index_alias = "ism-test"
@@ -1325,6 +1347,7 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
         ops_test,
         f"{base_url}/_plugins/_ml/tasks/{task_id}",
         lambda status: status.get("state") == "COMPLETED",
+        timeout=300,  # 5m
     )
 
     # insert docs
@@ -1508,9 +1531,14 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     await create_index(ops_test, APP_NAME, leader_unit_ip, default)
 
     # insert same docs to indices with different codecs
-    docs = [{"x": i, "blob": "A" * 100} for i in range(5000)]
-    body = bulk_encode(docs, zstd) + "\n" + bulk_encode(docs, default)
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, body)
+    await bulk_insert_generated(
+        ops_test,
+        APP_NAME,
+        leader_unit_ip,
+        [zstd, default],
+        docs_count=5000,
+        blob_size=100,
+    )
 
     # refresh so store size reflects indexed data
     await http_request(ops_test, "POST", f"{base_url}/{zstd},{default}/_refresh")

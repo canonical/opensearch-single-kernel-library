@@ -9,6 +9,7 @@ import socket
 from datetime import datetime
 from typing import Any
 
+from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -16,12 +17,14 @@ from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
+    CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
     DeploymentType,
     Scope,
     StoreType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
@@ -43,14 +46,15 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 )
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
+    cert_expiration_remaining_hours,
+    parse_tls_file,
     read_ca,
     remove_ca,
+    split_ca_chain,
     store_ca_chain,
 )
 from opensearch_single_kernel.utils.helpers import (
-    cert_expiration_remaining_hours,
     generate_password,
-    parse_tls_file,
 )
 from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -69,8 +73,32 @@ class TlsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "tls_manager")
 
-    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:
-        """Check if all TLS resources are stored on disk."""
+    def all_tls_resources_stored(  # noqa: C901
+        self, only_unit_resources: bool = False, reconcile: bool = True
+    ) -> bool:  # noqa: C901
+        """Check if all TLS resources are stored and ready to use.
+
+        For K8s, we need first to save TLS resources from secrets.
+
+        Args:
+            only_unit_resources (bool):
+                If True, only check for unit TLS resources (transport and HTTP certs).
+                If False, also check for app-level admin TLS resources.
+            reconcile (bool):
+                If True, perform reconciliation of K8s runtime TLS resources before checking.
+
+        Returns:
+            bool: True if all required TLS resources are stored and valid, False otherwise.
+        """
+        if self.state.substrate == Substrates.K8S and reconcile:
+            try:
+                self.reconcile_k8s_runtime_resources()
+            except OpenSearchFileOperationError as e:
+                logger.warning(f"Error during TLS runtime resources reconciliation: {e}")
+                # If we cannot access the filesystem to check TLS resources
+                # we assume they are not ready.
+                return False
+
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
         if not only_unit_resources:
             cert_types.append(CertType.APP_ADMIN)
@@ -83,15 +111,19 @@ class TlsManager(BaseManager):
         ca_issuer = self.get_cert_issuer(cert=current_ca)
 
         for cert_type in cert_types:
-            cert_type_path = self.workload.paths.certs / f"{cert_type}.p12"
-            if not cert_type_path.exists():
+            cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
+            try:
+                if not self.workload.exists(cert_type_path):
+                    return False
+            except OpenSearchFileOperationError as e:
+                logger.warning(f"Error checking existence of TLS resource {cert_type_path}: {e}")
                 return False
 
             secret = self.get_secrets_for_cert_type(cert_type)
 
             cert_issuer = self.get_cert_issuer_from_path(
                 store_pwd=secret.get("keystore-password"),
-                store_path=self.workload.paths.certs / f"{cert_type}.p12",
+                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
             )
             if not cert_issuer:
                 return False
@@ -106,9 +138,6 @@ class TlsManager(BaseManager):
         admin_secrets = self.state.application.admin_secrets
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug("Reading stored ca from %s", ca_trust_store)
-        if not (ca_trust_store.exists() and admin_secrets):
-            return None
-
         return read_ca(
             workload=self.workload,
             alias=alias,
@@ -161,13 +190,20 @@ class TlsManager(BaseManager):
             )
 
     def _get_certificate_subject(self, cert_type: CertType) -> str:
-        """Get subject of the certificate."""
-        if cert_type == CertType.APP_ADMIN:
-            cn = "admin"
-        else:
-            cn = self.state.host_ip
+        """Get subject of the certificate.
 
-        return cn
+        For K8s, prefer canonical service DNS over pod IP to keep CN stable.
+        """
+        if cert_type == CertType.APP_ADMIN:
+            return "admin"
+
+        if self.state.substrate == Substrates.K8S:
+            # X.509 common names are limited to 64 characters. Use the unit_name
+            # as CN and keep the full service FQDN in SANs for TLS hostname checks.
+            return self.state.unit_name
+
+        # VM: use unit IP from peer binding.
+        return str(self.state.host_ip)
 
     def _get_sans(self, cert_type: CertType) -> dict[str, list[str]]:
         """Create a list of OID/IP/DNS names for an OpenSearch unit.
@@ -180,14 +216,30 @@ class TlsManager(BaseManager):
         if cert_type == CertType.APP_ADMIN:
             return sans
 
-        dns = {self.state.unit_name, socket.gethostname(), socket.getfqdn()}
+        # Base DNS names: how this unit can be addressed by clients and other nodes.
+        # unit_name is the Juju unit, gethostname/getfqdn cover short and fully-qualified
+        # hostnames used in configs or DNS.
+        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn, "localhost"}
         logger.info(f"This is the current DNS {dns}")
-        ips = {self.state.host_ip}
+        # VM certificates must be reachable by the unit IP. On K8s, pod IPs are ephemeral
+        # across pod recreation, so only stable DNS names should be included.
+        ips = (
+            {self.state.host_ip}
+            if self.state.substrate == Substrates.VM and self.state.host_ip
+            else set()
+        )
 
-        host_public_ip = self.workload.get_host_public_ip()
-        if cert_type == CertType.UNIT_HTTP and host_public_ip:
-            ips.add(host_public_ip)
+        if cert_type == CertType.UNIT_HTTP:
+            # HTTP cert must also be valid for the address clients use to reach this
+            # unit (load balancer, ingress, or public IP).
+            # we always add the fqdn as SAN even for VM
+            dns.add(self.state.fqdn)
 
+            if self.state.substrate == Substrates.VM:
+                ips.add(self.state.node_host)
+
+        # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
+        # so the certificate is accepted when clients connect by those names.
         for ip in ips.copy():
             try:
                 name, aliases, addresses = socket.gethostbyaddr(ip)
@@ -201,7 +253,11 @@ class TlsManager(BaseManager):
             except (socket.herror, socket.gaierror):
                 continue
 
-        sans["sans_ip"] = [ip for ip in ips if ip.strip()]
+        # empty strings would be invalid in SANs.
+        # Do not return IPs in SANs for K8s
+        sans["sans_ip"] = (
+            [ip for ip in ips if ip.strip()] if self.state.substrate == Substrates.VM else []
+        )
         sans["sans_dns"] = [entry for entry in dns if entry.strip()]
 
         return sans
@@ -331,14 +387,16 @@ class TlsManager(BaseManager):
             self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
         # if the chain.pem already contains the current CA chain, we can skip rewriting it
-        bundle_content = self.workload.read_text(chain_path) if chain_path.exists() else ""
+        bundle_content = (
+            self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
+        )
         if ca_chain not in bundle_content:
             self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
         bundle_path = self.workload.paths.certs_chain
-        if not bundle_path.exists():
+        if not self.workload.exists(bundle_path):
             return
 
         bundle_content = self.workload.read_text(bundle_path)
@@ -362,7 +420,7 @@ class TlsManager(BaseManager):
         self.store_key_pair(
             name=cert_type.val,
             store_pwd=secrets.get("keystore-password"),
-            store_path=self.workload.paths.certs / f"{cert_type}.p12",
+            store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
             cert=secrets.get("cert"),
             key=secrets.get("key"),
             key_pwd=secrets.get("key-password"),
@@ -384,15 +442,20 @@ class TlsManager(BaseManager):
         key_pwd: str | None,
     ) -> None:
         """Store cert in keystore."""
-        store_path.unlink(missing_ok=True)
+        logger.debug("Storing TLS key pair for %s at %s", name, store_path)
+        certs_dir_path = self.workload.paths.certs
+        self.workload.unlink(store_path, missing_ok=True)
+
+        if self.state.substrate == Substrates.K8S and not store_path.as_posix().startswith("/"):
+            store_path = self.workload.paths.certs / store_path.as_posix().lstrip("/")
 
         try:
             with (
                 self.workload.temp_file(
-                    mode="w+t", suffix=".pem", data=key, dir=store_path.parent
+                    mode="w+t", suffix=".pem", data=key, dir=certs_dir_path
                 ) as tmp_key,
                 self.workload.temp_file(
-                    mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
+                    mode="w+t", suffix=".cert", data=cert, dir=certs_dir_path
                 ) as tmp_cert,
             ):
                 cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
@@ -401,11 +464,13 @@ class TlsManager(BaseManager):
                     args = f"{args} -passin pass:{key_pwd}"
 
                 self.workload.run_cmd(cmd, args)
-                self.workload.run_cmd(f"sudo chmod +r {store_path}")
+                self.workload.run_cmd(f"chmod +r {store_path}")
         except OpenSearchFileOperationError as e:
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
+            raise
         except OpenSearchCmdError as e:
             logger.error("Error storing the TLS certificates for %s: %s", name, e)
+            raise
 
         logger.info("TLS certificate for %s stored.", name)
 
@@ -430,6 +495,100 @@ class TlsManager(BaseManager):
             peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
                 peer_cluster_server.tls_configured = True
+
+    def reconcile_k8s_runtime_resources(self) -> None:
+        """Prepare the K8s runtime and restore TLS artifacts from secrets.
+
+        On K8s, TLS material can be present in Juju secrets while the workload container
+        filesystem is empty after pod restart or not yet prepared during early hook ordering.
+        This reconciliation prepares the container runtime and then restores TLS files onto the
+        workload filesystem.
+
+        On VM, this is a no-op.
+        """
+        if self.state.substrate != Substrates.K8S:
+            return
+
+        # Fast path: if required TLS runtime artifacts already exist, skip heavy reconciliation.
+        if self._k8s_runtime_tls_artifacts_ready():
+            return
+
+        # TODO: Address scenario of CA rotation
+        self.restore_tls_files_from_secrets()
+
+    def _k8s_runtime_tls_artifacts_ready(self) -> bool:
+        """Return whether K8s TLS runtime files required by current secrets already exist."""
+        certs_dir = self.workload.paths.certs
+        if not self.workload.exists(certs_dir):
+            return False
+
+        admin_secrets = (
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
+        if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
+            if not self.workload.exists(certs_dir / CA_TRUSTSTORE_P12):
+                return False
+            if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
+                return False
+            if not self.workload.exists(certs_dir / "chain.pem"):
+                return False
+
+        for scope, cert_type in [
+            (Scope.APP, CertType.APP_ADMIN),
+            (Scope.UNIT, CertType.UNIT_TRANSPORT),
+            (Scope.UNIT, CertType.UNIT_HTTP),
+        ]:
+            secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            if not (
+                secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
+            ):
+                continue
+            if not self.workload.exists(certs_dir / f"{cert_type.val}.p12"):
+                return False
+
+        return True
+
+    def restore_tls_files_from_secrets(self) -> None:
+        """Recreate TLS artifacts on disk from Juju secrets (K8s only).
+
+        This is intended for pod restarts when the container filesystem is ephemeral and we do
+        not want to depend on a persistent volume for /etc/opensearch/certificates.
+
+        if secrets are not present yet, it does nothing.
+        If Pebble/container isn't ready, it raises PebbleConnectionError so callers can defer.
+        """
+        if self.state.substrate != Substrates.K8S:
+            return
+
+        # ensure CA truststore + chain.pem (if secrets available).
+        admin_secrets = (
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
+        if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
+            # create_store_pwd=False, passwords should already be in secrets
+            # don't mutate secrets here
+            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False)
+
+        # recreate PKCS12 stores for all cert types we might need on startup.
+        for scope, cert_type in [
+            (Scope.APP, CertType.APP_ADMIN),
+            (Scope.UNIT, CertType.UNIT_TRANSPORT),
+            (Scope.UNIT, CertType.UNIT_HTTP),
+        ]:
+            secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            if not (
+                secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
+            ):
+                continue
+
+            self.store_key_pair(
+                name=cert_type.val,
+                store_pwd=secrets.get("keystore-password"),
+                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+                cert=secrets.get("cert"),
+                key=secrets.get("key"),
+                key_pwd=secrets.get("key-password"),
+            )
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
@@ -462,16 +621,24 @@ class TlsManager(BaseManager):
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.application.admin_secrets
+        # the certs need to be created on the charm container filesystem
+        # because the OpenSearch client library expects file paths for the cert and key
+        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
         with (
             self.workload.temp_file(
-                mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
+                mode="w+t",
+                data=admin_secret["cert"],
+                dir=charm_container_tmp_dir,
             ) as tmp_cert,
             self.workload.temp_file(
-                mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
+                mode="w+t",
+                data=admin_secret["key"],
+                dir=charm_container_tmp_dir,
             ) as tmp_key,
         ):
             self.opensearch_client.reload_tls_certificates(
-                cert_files=(str(tmp_cert), str(tmp_key))
+                cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
             )
 
     def finalize_ca_certs_rotation(self) -> None:
@@ -529,12 +696,22 @@ class TlsManager(BaseManager):
         trust_store_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
 
         old_ca = self.read_stored_ca(alias=OLD_CA_ALIAS)
-        remove_ca(
-            workload=self.workload,
-            alias=OLD_CA_ALIAS,
-            store_pwd=trust_store_pwd,
-            store_path=trust_store_path,
+        # store_ca() persists each certificate in a chain under indexed aliases
+        # like old-ca-0, old-ca-1 rather than a single old-ca entry, so
+        # CA rotation cleanup must remove the same indexed aliases one by one.
+        old_ca_aliases = (
+            [f"{OLD_CA_ALIAS}-{i}" for i, _ in enumerate(split_ca_chain(old_ca))]
+            if old_ca
+            else [OLD_CA_ALIAS]
         )
+        for alias in old_ca_aliases:
+            remove_ca(
+                workload=self.workload,
+                alias=alias,
+                store_pwd=trust_store_pwd,
+                store_path=trust_store_path,
+                use_sudo=self.state.substrate == Substrates.VM,
+            )
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
@@ -557,7 +734,7 @@ class TlsManager(BaseManager):
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
             ca=cert_secrets.get("ca-cert"),
             keep_previous=True,
-            add_read_perm=True,
+            use_sudo=self.state.substrate == Substrates.VM,
         ):
             return False
 
@@ -630,6 +807,7 @@ class TlsManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
+
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
             if (
@@ -638,12 +816,15 @@ class TlsManager(BaseManager):
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list
+
         # Means the unit is  being terminated
         if not self.state.peer_relation:
             return status_list
+
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
+
             # If it is the main orchestrator then it will create all resources
             # Other types will wait for the Peer cluster Main, we also need to check
             # That the orchestrators field has been populated, otherwise it might
@@ -660,12 +841,9 @@ class TlsManager(BaseManager):
                 )
                 or self.state.peer_clusters(remote=True, is_provider=True)
             ):
-                if not self.all_tls_resources_stored():
-                    status_list.append(
-                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                        if self.state.tls_relation
-                        else TlsStatuses.TLS_RELATION_MISSING.value
-                    )
+                if not self.all_tls_resources_stored(reconcile=False):
+                    status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
+
             if not self.state.tls_relation and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
@@ -674,16 +852,13 @@ class TlsManager(BaseManager):
                         {"certificates": ", ".join(missing)},
                     )
                 )
+
         if scope == "app":
             if (
                 deployment_desc := self.state.application.deployment_desc
             ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 if not self.all_tls_resources_stored():
-                    status_list.append(
-                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
-                        if self.state.tls_relation
-                        else TlsStatuses.TLS_RELATION_MISSING.value
-                    )
+                    status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
             # Clean up any lingering errors
             self.cleanup_peer_cluster_error_relation_data()

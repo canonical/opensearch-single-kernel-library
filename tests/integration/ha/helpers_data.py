@@ -3,6 +3,8 @@
 # See LICENSE file for licensing details.
 
 """Helper functions for data related tests, such as indexing, searching etc.."""
+import base64
+import json
 import logging
 from random import randint
 from typing import Any, Dict, List, Optional
@@ -10,7 +12,15 @@ from typing import Any, Dict, List, Optional
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, retry, stop_after_attempt, wait_fixed, wait_random
 
-from tests.integration.helpers import http_request
+from tests.helpers import Substrate
+from tests.integration.conftest import CLIENT_CHARM
+from tests.integration.helpers import (
+    _find_k8s_unit_for_endpoint,
+    _k8s_unit_fqdn,
+    get_secrets,
+    http_request,
+    run_action,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +95,37 @@ async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count:
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def create_dummy_docs(ops_test: OpsTest, app: str, unit_ip: str, count: int = 5) -> None:
+async def create_dummy_docs(
+    ops_test: OpsTest, app: str, unit_ip: str, count: int = 5, substrate: Substrate = "vm"
+) -> None:
     """Store documents in the dummy indexes."""
+    if substrate == "k8s":
+        admin_secrets = await get_secrets(ops_test, app=app)
+        k8s_unit = await _find_k8s_unit_for_endpoint(
+            ops_test, f"https://{unit_ip}:9200/_bulk", app
+        )
+        if not k8s_unit:
+            raise RuntimeError(
+                f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
+            )
+        logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
+        action = await run_action(
+            ops_test,
+            app=CLIENT_CHARM,
+            action_name="create-dummy-docs",
+            params={
+                "count": count,
+                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "username": "admin",
+                "password": admin_secrets["password"],
+                "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
+            },
+            unit_id=None,
+        )
+        if action.status != "completed":
+            raise RuntimeError(f"Failed to create dummy docs through {CLIENT_CHARM} action")
+        return
+
     all_docs = ""
     for index_id in range(count):
         for doc_id in range(count * 1000):
@@ -96,7 +135,7 @@ async def create_dummy_docs(ops_test: OpsTest, app: str, unit_ip: str, count: in
                 f'{{"ProductId": "{1000 + doc_id}", '
                 f'"Amount": "{randint(10, 1000)}", '
                 f'"Quantity": "{randint(0, 50)}", '
-                f'Store_Id": "{randint(1, 250)}"}}\n'
+                f'"Store_Id": "{randint(1, 250)}"}}\n'
             )
 
     await http_request(ops_test, "PUT", f"https://{unit_ip}:9200/_bulk", payload=all_docs, app=app)
@@ -155,13 +194,81 @@ async def bulk_insert(ops_test: OpsTest, app: str, unit_ip: str, payload: str) -
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
+async def bulk_insert_generated(
+    ops_test: OpsTest,
+    app: str,
+    unit_ip: str,
+    index_names: list[str],
+    docs_count: int,
+    blob_size: int = 100,
+) -> None:
+    """Generate docs near OpenSearch and insert them through the bulk endpoint."""
+    endpoint = f"https://{unit_ip}:9200/_bulk"
+    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+    if k8s_unit:
+        admin_secrets = await get_secrets(ops_test, app=app)
+        logger.info(
+            f"Creating generated bulk docs through {CLIENT_CHARM} action on unit {k8s_unit.name}"
+        )
+        action = await run_action(
+            ops_test,
+            app=CLIENT_CHARM,
+            action_name="bulk-insert",
+            params={
+                "index-names": json.dumps(index_names),
+                "docs-count": docs_count,
+                "blob-size": blob_size,
+                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "username": "admin",
+                "password": admin_secrets["password"],
+                "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
+            },
+            unit_id=None,
+        )
+        logger.debug(action)
+        if action.status != "completed":
+            raise RuntimeError(
+                f"Failed to create generated bulk docs through {CLIENT_CHARM} action: "
+                f"{action.response}"
+            )
+
+        status_code = int(action.response["status-code"])
+        result = action.response.get("result", {})
+        if status_code >= 300 or result.get("errors", "False") != "False":
+            raise RuntimeError(f"Generated bulk insert failed with status {status_code}: {result}")
+        return
+
+    await http_request(
+        ops_test,
+        "PUT",
+        endpoint,
+        payload=_generated_bulk_body(index_names, docs_count, blob_size),
+        app=app,
+    )
+
+
+def _generated_bulk_body(index_names: list[str], docs_count: int, blob_size: int) -> str:
+    """Generate deterministic NDJSON for local bulk insertion."""
+    blob = "A" * blob_size
+    lines = []
+    for index_name in index_names:
+        for doc_id in range(docs_count):
+            lines.append(json.dumps({"index": {"_index": index_name}}))
+            lines.append(json.dumps({"x": doc_id, "blob": blob}))
+    return "\n".join(lines) + "\n"
+
+
+@retry(
+    wait=wait_fixed(wait=5) + wait_random(0, 5),
+    stop=stop_after_attempt(15),
+)
 async def index_doc(
     ops_test: OpsTest,
     app: str,
     unit_ip: str,
     index_name: str,
     doc_id: int,
-    doc: Optional[Dict[str, any]] = None,
+    doc: Optional[Dict[str, Any]] = None,
     refresh: bool = True,
 ) -> None:
     """Index a simple document."""

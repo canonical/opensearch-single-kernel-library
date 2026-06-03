@@ -15,6 +15,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.10,<4.0"
+version = "0.0.1.post6.dev0+744f8cb.dirty"
 
 
 [project.urls]
@@ -30,7 +31,6 @@ package-mode = true
 packages = [{ include = "opensearch_single_kernel" }]
 include = ["opensearch_single_kernel/templates/"]
 exclude = ["opensearch_single_kernel/charmcraft.yaml"]
-version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -42,28 +42,31 @@ requests = "2.32.4"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-pydantic = ">= 1.0"
+pydantic = ">= 2.0"
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.7"
 poetry-core = "<2.0.0"
 pre-commit = "^4.4.0"
 charmlibs-pathops = "^1.0.1"
+lightkube = "^0.17.0"
 azure-storage-blob = "^12.25.0"
 google-cloud-storage = "^2.16.0"
 google-api-core = "^2.17.0"
+# grafana_agent/v0/cos_agent.py
+cosl = "^1.9.1"
 
 
 [tool.poetry.group.charm-libs.dependencies]
 # data_platform_libs/v0/data_interfaces.py
 ops = "^3.3.0"
 # data_platform_libs/v0/upgrade.py
-pydantic = ">= 1.0"
+pydantic = ">= 2.0"
 # tls_certificates_interface/v3/tls_certificates.py
 cryptography = "^45.0.4"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
-cosl = "^1.0.0"
+cosl = "^1.9.1"
 bcrypt = "^4.3.0"
 email-validator = ">=2"
 
@@ -93,6 +96,7 @@ shellcheck-py = "^0.10.0.1"
 [tool.poetry.group.unit.dependencies]
 ops = { version = "^3.3.0", extras = ["testing"] }
 ops-scenario = "^8.5.2"
+pytest-operator = "^0.42.0"
 pytest = "^8.4.0"
 pytest-asyncio = "^0.21.2"
 coverage = { extras = ["toml"], version = "^7.9.1" }
@@ -122,6 +126,7 @@ allure-pytest-default-results = "^0.1.3"
 azure-identity = "^1.23.0"
 azure-storage-blob = "^12.25.1"
 oauth_tools = { git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0" }
+kubernetes = "^30.0.0"
 
 [tool.poetry.requires-plugins]
 poetry-plugin-export = ">=1.8"
@@ -148,7 +153,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
-markers = ["unstable", "real_fs"]
+markers = ["unstable", "real_fs", "group"]
 asyncio_mode = "auto"
 
 # Formatting tools configuration

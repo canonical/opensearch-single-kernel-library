@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from enum import Enum
 from io import StringIO
-from typing import Any, Dict, List
+from typing import Any
 
 from charmlibs.pathops import PathProtocol
 from overrides import override
@@ -22,6 +22,45 @@ from ruamel.yaml.comments import CommentedSet
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def get_nested_value(config: dict, key_path: str) -> Any | None:
+    """Get a nested value from config dict using dotted key path.
+
+    Handles both flat dicts (with dotted keys) and nested dicts.
+
+    Args:
+        config: Dictionary to search in.
+        key_path: Dotted key path such as "plugins.security.ssl.transport.keystore_filepath".
+
+    Returns:
+        The value at the nested path, or None if not found.
+    """
+    if not isinstance(config, dict):
+        return None
+
+    # Fast-path for flat YAMLs where the full dotted key exists as-is.
+    if key_path in config:
+        return config.get(key_path)
+
+    keys = key_path.split(".")
+    value: Any = config
+
+    for idx, key in enumerate(keys):
+        if not isinstance(value, dict):
+            return None
+
+        # Support mixed representations where a prefix is flattened:
+        # such as {"plugins.security.disabled": false}
+        remaining = ".".join(keys[idx:])
+        if remaining in value:
+            return value.get(remaining)
+
+        value = value.get(key)
+        if value is None:
+            return None
+
+    return value
 
 
 class OutputType(Enum):
@@ -56,7 +95,7 @@ class ConfigSetter(ABC):
         self.base_path = self.__clean_base_path(base_path)
 
     @abstractmethod
-    def load(self, config_file: str) -> Dict[str, Any]:
+    def load(self, config_file: str) -> dict[str, Any]:
         """Load the content of a YAML file."""
         pass
 
@@ -69,8 +108,8 @@ class ConfigSetter(ABC):
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
-        output_file: str = None,
-    ) -> Dict[str, Any]:
+        output_file: str | None = None,
+    ) -> dict[str, Any]:
         """Add or update the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -86,7 +125,7 @@ class ConfigSetter(ABC):
             output_file: Target file for the result config, by default same as config_file
 
         Returns:
-            Dict[str, any]: The final version of the YAML config.
+            dict[str, Any]: The final version of the YAML config.
         """
         pass
 
@@ -110,8 +149,8 @@ class ConfigSetter(ABC):
         key_path: str,
         sep="/",
         output_type: OutputType = OutputType.file,
-        output_file: str = None,
-    ) -> Dict[str, Any]:
+        output_file: str | None = None,
+    ) -> dict[str, Any]:
         """Delete the value of a key (or content of array at index / key) if it exists.
 
         Args:
@@ -123,7 +162,7 @@ class ConfigSetter(ABC):
             output_file: Target file for the result config, by default same as config_file
 
         Returns:
-            Dict[str, any]: The final version of the YAML config.
+            dict[str, Any]: The final version of the YAML config.
         """
         pass
 
@@ -136,7 +175,7 @@ class ConfigSetter(ABC):
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
-        output_file: str = None,
+        output_file: str | None = None,
     ) -> None:
         """Replace any substring in a text file.
 
@@ -185,13 +224,20 @@ class YamlConfigSetter(ConfigSetter):
         self.yaml = YAML()
 
     @override
-    def load(self, config_file: str) -> Dict[str, Any]:
-        """Load the content of a YAML file."""
+    def load(self, config_file: str) -> dict[str, Any]:
+        """Load the content of a YAML file.
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read due to other reasons
+        """
         path = self.base_path / config_file
 
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
-        lines = self.workload.read_text(path).strip().split("\n")
+        contents = self.workload.read_text(path)
+
+        lines = contents.split("\n")
 
         # We are adding a random key:value to the end of the yaml
         # To make sure that the yaml reader will be able to read the file
@@ -200,9 +246,11 @@ class YamlConfigSetter(ConfigSetter):
         random_id = uuid.uuid4().hex
         lines.append(f"{random_id}: {random_id}")
 
-        data = self.yaml.load(StringIO("\n".join(lines)))
-        del data[random_id]
+        data: dict | None = self.yaml.load(StringIO("\n".join(lines)))
+        if data is None:
+            return {}
 
+        data.pop(random_id, None)
         return data
 
     @override
@@ -214,9 +262,24 @@ class YamlConfigSetter(ConfigSetter):
         sep="/",
         output_type: OutputType = OutputType.file,
         inline_array: bool = False,
-        output_file: str = None,
-    ) -> Dict[str, Any]:
-        """Add or update the value of a key (or content of array at index / key) if it exists."""
+        output_file: str | None = None,
+    ) -> dict[str, Any]:
+        """Add or update the value of a key (or content of array at index / key) if it exists.
+
+        Args:
+            config_file (str): Path to the source config file
+            key_path (str): The path of the YAML key to target
+            val (any): The value to store for the passed key
+            sep (str): The separator / delimiter character to use in the key_path
+            output_type (OutputType): The type of output we're expecting from this operation
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
+        Returns:
+            dict[str, Any]: The final version of the YAML config.
+        """
         data = self.load(config_file)
 
         self.__deep_update(data, key_path.split(sep), val)
@@ -240,17 +303,19 @@ class YamlConfigSetter(ConfigSetter):
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
 
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
         Returns:
             whether config file was changed.
         """
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
-        old_content = path.read_text().strip()
-        logger.debug("Rewriting config file ")
+        old_content = self.workload.read_text(path)
         self.__dump(target, OutputType.file, config_file)
-        new_content = path.read_text().strip()
-        return old_content != new_content
+        return old_content.strip() != path.read_text().strip()
 
     @override
     def delete(
@@ -259,9 +324,24 @@ class YamlConfigSetter(ConfigSetter):
         key_path: str,
         sep="/",
         output_type: OutputType = OutputType.file,
-        output_file: str = None,
-    ) -> Dict[str, any]:
-        """Delete the value of a key (or content of array at index / key) if it exists."""
+        output_file: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete the value of a key (or content of array at index / key) if it exists.
+
+        Args:
+            config_file (str): Path to the source config file
+            key_path (str): The path of the YAML key to target
+            sep (str): The separator / delimiter character to use in the key_path
+            output_type (OutputType): The type of output we're expecting from this operation
+            output_file: Target file for the result config, by default same as config_file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
+        Returns:
+            dict[str, Any]: The final version of the YAML config.
+        """
         data = self.load(config_file)
 
         self.__deep_delete(data, key_path.split(sep))
@@ -283,22 +363,27 @@ class YamlConfigSetter(ConfigSetter):
         regex: bool = False,
         add_line_if_missing: bool = False,
         output_type: OutputType = OutputType.file,
-        output_file: PathProtocol = None,
+        output_file: PathProtocol | None = None,
     ) -> None:
         """Replace any substring in a text file.
 
         Args:
             config_file (str): Path to the source config file
             old_val (str): The value we wish to replace
-            new_val (any): The new value to replace old_val
+            new_val (Any): The new value to replace old_val
             regex (bool): Whether to treat old_val as a regex.
             add_line_if_missing (bool): whether to append the new_val if old_val is not found.
             output_type (OutputType): The type of output we're expecting from this operation,
                 i.e, set OutputType.all to have the output on both the console and target file
             output_file: Target file for the result config, by default same as config_file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
+
         """
         path = self.base_path / config_file
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
 
         data = self.workload.read_text(path)
@@ -329,10 +414,14 @@ class YamlConfigSetter(ConfigSetter):
         Args:
             config_file (str): Path to the source config file
             text_to_append (str): The str to append to the config file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            OpenSearchFileOperationError: If file cannot be read or written due to other reasons
         """
         path = self.base_path / config_file
 
-        if not path.exists():
+        if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
 
         data = self.workload.read_text(path)
@@ -340,8 +429,20 @@ class YamlConfigSetter(ConfigSetter):
             data = data + "\n" + text_to_append
             self.workload.write_text(data, path)
 
-    def __dump(self, data: Dict[str, Any], output_type: OutputType, target_file: str):
-        """Write the YAML data on the corresponding "output_type" stream."""
+    def __dump(self, data: dict[str, Any], output_type: OutputType, target_file: str):
+        """Write the YAML data on the corresponding "output_type" stream.
+
+        Always writes YAML even if data is empty ({}), to ensure file exists
+        and prevent file does not exist yet.
+
+        Args:
+            data: the YAML data to write
+            output_type: the type of output we're expecting from this operation, i.e, set Output
+            .all to have the output on both the console and target file
+
+        Raises:
+            OpenSearchFileOperationError: If file cannot be written due to any reason
+        """
         if not data:
             return
 
@@ -350,9 +451,19 @@ class YamlConfigSetter(ConfigSetter):
 
         if output_type in [OutputType.file, OutputType.all]:
             target_path = self.base_path / target_file
-            self.yaml.dump(data, target_path)
 
-    def __deep_update(self, source, node_keys: List[str], val: Any):
+            # ensure parent directory exists before writing
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Necessary for K8s: ruamel.yaml.dump() requires a stream with write(), and the
+            # path is inside the container so the charm cannot open() it. Dump to a buffer
+            # in the charm, then write the content via the workload/path API.
+            buffer = StringIO()
+            self.yaml.dump(data, buffer)
+            yaml_content = buffer.getvalue()
+            self.workload.write_text(yaml_content, target_path)
+
+    def __deep_update(self, source, node_keys: list[str], val: Any):
         """Recursively traverses the tree of nodes, and writes the value accordingly.
 
         Arg:
@@ -415,7 +526,7 @@ class YamlConfigSetter(ConfigSetter):
 
         return source
 
-    def __deep_delete(self, source, node_keys: List[str]):
+    def __deep_delete(self, source, node_keys: list[str]):
         if not node_keys:
             return
 
@@ -444,7 +555,7 @@ class YamlConfigSetter(ConfigSetter):
             logger.debug("Target element not found.")
             pass
 
-    def __leaf_container(self, current, node_names: List[str]):
+    def __leaf_container(self, current, node_names: list[str]):
         if len(node_names) == 1:
             return current
 
@@ -482,7 +593,7 @@ class YamlConfigSetter(ConfigSetter):
 
         return int(str_index) if index is None else index
 
-    def __inline_array_format(self, data, node_keys: List[str], val: List[Any]) -> Dict[str, Any]:
+    def __inline_array_format(self, data, node_keys: list[str], val: list[Any]) -> dict[str, Any]:
         """Reformat a multiline YAML array into one with square braces."""
         leaf_k = node_keys[-1]
 

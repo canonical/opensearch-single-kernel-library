@@ -249,10 +249,14 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
         apps_statuses={
-            MAIN_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
+            MAIN_APP: [PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value],
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
-            DATA_APP: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
-            DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
+            DATA_APP: [
+                PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value
+            ],
+            DATA_APP_TWO: [
+                PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value
+            ],
         },
     )
 

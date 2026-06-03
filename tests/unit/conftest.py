@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from pathlib import Path
-from unittest.mock import PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -17,39 +17,10 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     S3_RELATION,
     TLS_RELATION,
-    UPGRADE_RELATION,
 )
-from opensearch_single_kernel.core.models import UpgradeVersions
 from tests.helpers import Substrate
+from tests.integration.conftest import ACTIONS, CONFIG, METADATA
 from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S3_INFO
-
-CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
-ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
-METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
-
-
-@pytest.fixture
-def mock_get_statuses(mocker):
-    """Mock the status setting of the charm."""
-    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_statuses")
-    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.get_statuses")
-    mocker.patch("opensearch_single_kernel.managers.health.HealthManager.get_statuses")
-    mocker.patch("opensearch_single_kernel.managers.peer_cluster.PeerClusterManager.get_statuses")
-    mocker.patch(
-        "opensearch_single_kernel.managers.peer_cluster_orchestrator.PeerClusterOrchestratorManager.get_statuses"
-    )
-    mocker.patch("opensearch_single_kernel.managers.lock.LockManager.get_statuses")
-    mocker.patch("opensearch_single_kernel.managers.snapshots.SnapshotsManager.get_statuses")
-    mocker.patch(
-        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.get_statuses"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.get_statuses"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.notification.NotificationsManager.get_statuses"
-    )
-    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.get_statuses")
 
 
 @pytest.fixture
@@ -59,35 +30,52 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
+
+        # unit tests should not depend on a running snapd daemon.
+        fake_snap = MagicMock()
+        fake_snap.present = True
+        fake_snap.held = True
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.snap.SnapCache",
+            return_value={"opensearch": fake_snap},
+        )
+        # Unit tests should not run Juju CLI (such as unit-get public-address).
+        # VM workload callers can fall back to state.host_ip populated by harness.add_network.
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.get_host_public_ip",
+            return_value=None,
+        )
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.check_missing_system_requirements",
+            return_value=[],
+        )
     else:
         from tests.charms.opensearch_k8s_test_charm.src.charm import (
             OpenSearchK8sCharm as TestCharm,
         )
 
+    # In K8s, the container hostname is the Pod name ("opensearch-0").
+    # When running unit tests on a local machine, socket.gethostname() would
+    # return the host machine name which breaks node.name-dependent logic.
+    if substrate != "vm":
+        mocker.patch("socket.gethostname", return_value="opensearch-0")
+        mocker.patch("socket.getfqdn", return_value="opensearch-0")
+
     config = str(yaml.safe_load((opensearch_base_path / "config.yaml").read_text()))
     actions = str(yaml.safe_load((opensearch_base_path / "actions.yaml").read_text()))
     metadata = str(yaml.safe_load((opensearch_base_path / "metadata.yaml").read_text()))
-
-    # _current_versions is a @property that reads version files via read_text(), which is mocked to
-    # return MagicMock by mock_fs_interactions. Patch it as a PropertyMock before begin() so all
-    # events (including upgrade relation_created) see valid version strings.
-    mocker.patch(
-        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.current_versions",
-        new_callable=PropertyMock,
-        return_value=UpgradeVersions(charm="1.0.0", workload="2.19.4"),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.reconcile_compatibility_matrix",
-    )
 
     harness = Harness(TestCharm, meta=metadata, actions=actions, config=config)
     harness.add_network("1.1.1.1")
     harness.add_network("1.1.1.1", endpoint=TLS_RELATION)
     harness.begin()
+    # Most unit tests assume the workload container is connectable so charm logic can
+    # proceed past "container not ready" gating (pebble/files/exec operations are mocked).
+    if substrate != "vm":
+        harness.set_can_connect("opensearch", True)
     rel_id = harness.add_relation(PEER_RELATION, harness.charm.app.name)
     harness.add_relation_unit(rel_id, f"{harness.charm.app.name}/0")
-    harness.add_relation(UPGRADE_RELATION, harness.charm.app.name)
-    harness.add_relation(TLS_RELATION, harness.charm.app.name),
+    harness.add_relation(TLS_RELATION, harness.charm.app.name)
 
     return harness
 
@@ -107,9 +95,25 @@ def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
     mocker.patch("charmlibs.pathops.PathProtocol.write_text")
     mocker.patch("charmlibs.pathops.PathProtocol.mkdir")
     mocker.patch("charmlibs.pathops.PathProtocol.unlink")
+    mocker.patch("charmlibs.pathops.PathProtocol.exists", return_value=True)
+    # VM workload paths are LocalPath,
+    # patch those too to avoid touching `/var/snap/...` on dev machines.
+    mocker.patch("charmlibs.pathops.LocalPath.exists", return_value=True)
+    mocker.patch("charmlibs.pathops.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops.LocalPath.unlink")
+    # Some code paths instantiate LocalPath from the implementation module directly.
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.exists", return_value=True)
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops._local_path.LocalPath.unlink")
 
-    if substrate == "vm":
-        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
+    mocker.patch("charmlibs.pathops.LocalPath.read_text")
+    mocker.patch("charmlibs.pathops.LocalPath.write_text")
+    mocker.patch("charmlibs.pathops.LocalPath.mkdir")
+    mocker.patch("charmlibs.pathops.LocalPath.unlink")
 
 
 # ---- Backup and Restore related fixtures ---- #

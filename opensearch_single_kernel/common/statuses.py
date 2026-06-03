@@ -35,6 +35,11 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
+    WORKLOAD_FILESYSTEM_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="Waiting for the OpenSearch workload filesystem to become available.",
+    )
+
     # Blocking directive should be a running status since it is set based on the presence
     # of a SHOW_STATUS directive and once the status set we remove the directive
     BLOCKING_DIRECTIVE = StatusObject(
@@ -180,7 +185,7 @@ class PeerClusterStatuses(Enum):
     )
     CM_VO_PROVIDED_INVALID = StatusObject(
         status="blocked",
-        message="cluster_manager and voting_only roles cannot be both set on the same nodes.",
+        message="The cluster_manager and voting_only roles cannot be both set on the same nodes.",
     )
     DATA_ROLE_REMOVAL_FORBIDDEN = StatusObject(
         status="blocked",
@@ -279,7 +284,7 @@ class SnapshotsStatuses(Enum):
     )
     BACKUP_REPOSITORY_MISCONFIGURED = StatusObject(
         status="blocked",
-        message="opensearch {storage_type} repository setup failed. Check the {integrator} config.",
+        message="OpenSearch {storage_type} repository setup failed. Check the {integrator} config.",
     )
     # TODO: large deployments.
     BACKUP_RELATION_SHOULD_NOT_EXIST = StatusObject(
@@ -297,7 +302,7 @@ class SnapshotsStatuses(Enum):
     )
     RESTORE_IN_PROGRESS = StatusObject(
         status="maintenance",
-        message="restore in progress...",
+        message="Restore in progress...",
         running="blocking",
     )
 

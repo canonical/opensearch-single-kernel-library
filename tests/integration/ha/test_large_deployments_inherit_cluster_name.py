@@ -13,6 +13,7 @@ from pytest_operator.plugin import OpsTest
 from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
+    TlsStatuses,
 )
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.continuous_writes import ContinuousWrites
@@ -210,7 +211,8 @@ async def test_build_and_deploy_autogen(ops_test: OpsTest, charm, series) -> Non
 async def test_invalid_inherit_cluster_name_integration(ops_test: OpsTest) -> None:
     """If the cluster name wasn't auto generated, cluster name should not be inherited"""
     await ops_test.model.integrate(
-        f"{INVALID_FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP_NOT_AUTOGEN}:{REL_ORCHESTRATOR}"
+        f"{INVALID_FAILOVER_APP}:{REL_PEER}",
+        f"{MAIN_APP_NOT_AUTOGEN}:{REL_ORCHESTRATOR}",
     )
 
     await wait_until(
@@ -219,9 +221,11 @@ async def test_invalid_inherit_cluster_name_integration(ops_test: OpsTest) -> No
         apps_statuses={
             INVALID_FAILOVER_APP: [
                 PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value,
-                # I added this since it is a valid status that should be waited for
-                # Before advanced status the status were overriding each other
-                PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value,
+            ],
+        },
+        units_statuses={
+            INVALID_FAILOVER_APP: [
+                TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
             ],
         },
         wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},

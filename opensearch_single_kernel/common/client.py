@@ -1076,7 +1076,8 @@ class OpenSearchClient:
                 retries=3,
                 wait_strategy=wait_exponential(min=2),
             )
-        except OpenSearchHttpError:
+        except OpenSearchHttpError as e:
+            logger.debug("HTTP error when checking cluster health, returning None. Error: %s", e)
             return None
 
     def get_indices(
@@ -1284,11 +1285,11 @@ class OpenSearchClient:
                         s.cert = cert_files
                     else:
                         s.auth = ("admin", self.admin_secret)
-                    # TODO: Handle this when implementing the k8s version of start workflow.
+
                     request_kwargs = {
                         "method": method.upper(),
                         "url": url,
-                        "verify": self.workload.paths.certs_chain.as_posix(),
+                        "verify": self.workload.chain_path(),
                         "headers": {
                             "Accept": "application/json",
                             "Content-Type": "application/json",

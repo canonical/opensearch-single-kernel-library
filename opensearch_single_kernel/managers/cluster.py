@@ -21,6 +21,7 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
     CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN,
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
     DATA_ROLE_REMOVAL_FORBIDDEN,
@@ -57,7 +58,11 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type
+from opensearch_single_kernel.utils.helpers import (
+    deployment_type,
+    format_unit_name,
+    mask_sensitive_information,
+)
 from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -100,10 +105,13 @@ class ClusterManager(BaseManager):
             logger.debug("Waited %s but OpenSearch did not start", datetime.now() - start)
             raise OpenSearchStartTimeoutError()
 
-    def reconcile_cluster_config(self) -> bool:
+    def reconcile_cluster_config(self) -> tuple[bool, bool]:
         """Init, or updates / recomputes current peer cluster related config if applies.
 
-        Returns whether the deployment description has changed (Not the first time setup).
+        Returns:
+            - whether the cluster deployment description was updated and needs to be
+              re-broadcasted.
+            - whether the roles have changed and we need to re-apply the config with new roles.
         """
         logger.debug("Running peer cluster manager reconcile function")
         user_config = self._user_config()
@@ -112,19 +120,27 @@ class ClusterManager(BaseManager):
             deployment_desc = self._new_cluster_setup(user_config)
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
             self.state.application.deployment_desc = deployment_desc
-            return False
-
+            return False, False
         # update cluster deployment desc
         logger.debug("Existing deployment_desc before cluster setup: %s", current_deployment_desc)
+        old_roles = current_deployment_desc.config.roles.copy()
         deployment_desc = self._existing_cluster_setup(user_config, current_deployment_desc)
         logger.debug("Existing deployment_desc after cluster setup: %s", deployment_desc)
         if current_deployment_desc == deployment_desc:
-            return False
+            return False, False
 
         # TODO: Should we add an entry on DeploymentDesc "errors" to reflect on status?
         self.state.application.deployment_desc = deployment_desc
 
-        return True
+        # TODO: once peer clusters relation implemented, we should apply all directives
+        #  + removing them from queue. We currently only apply the status.
+        logger.debug(
+            "roles changed: %s, old roles: %s, new roles: %s",
+            deployment_desc.config.roles != old_roles,
+            old_roles,
+            deployment_desc.config.roles,
+        )
+        return True, old_roles != deployment_desc.config.roles
 
     def reconcile_cluster_config_with_relation_data(
         self, data: PeerClusterRelData
@@ -389,11 +405,17 @@ class ClusterManager(BaseManager):
             logger.info("Failed to get online nodes")
             raise e
 
+        if not (expected_name := self.state.unit_name):
+            raise OpenSearchNotFullyReadyError(
+                "Node online but cannot determine expected node.name yet (deployment_desc not ready)."
+            )
         for node in nodes:
-            if node.name == self.state.unit_name:
+            if node.name == expected_name:
                 break
         else:
-            raise OpenSearchNotFullyReadyError("Node online but not in cluster.")
+            raise OpenSearchNotFullyReadyError(
+                "Node online but not in cluster (expected node.name=%s)." % expected_name
+            )
 
     def initialise_security_index(self) -> None:
         """Initialise security Index.
@@ -404,18 +426,20 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
+        # Use a connectable host for the securityadmin CLI.
+        securityadmin_host = self.state.node_host
         admin_secrets = self.state.application.admin_secrets
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-            f"-h {self.state.host_ip}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-h {securityadmin_host}",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tsalias ca",
             "-tst PKCS12",
-            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-ks {(self.workload.paths.certs / f'{CertType.APP_ADMIN.val}.p12')}",
             f"-kspass {admin_secrets['keystore-password']}",
-            f"-ksalias {CertType.APP_ADMIN}",
+            f"-ksalias {CertType.APP_ADMIN.val}",
             "-kst PKCS12",
         ]
 
@@ -423,10 +447,15 @@ class ClusterManager(BaseManager):
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
+        logger.info(
+            "Executing securityadmin.sh with args: %s",
+            mask_sensitive_information(" ".join(args)),
+        )
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
-        self.state.application.is_security_index_initialised = True
+        logger.info("securityadmin.sh execution completed successfully")
+        self._put_security_index_initialised()
 
     def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
         """Run the security_admin script for specified config file, avoiding changes to others."""
@@ -436,8 +465,8 @@ class ClusterManager(BaseManager):
         args = [
             f"-f {self.workload.paths.conf}/{file}",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-            f"-h {self.state.host_ip}",
-            f"-ts {self.workload.paths.certs}/ca.p12",
+            f"-h {self.state.node_host}",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
             f"-tspass {admin_secrets['truststore-password']}",
             "-tst PKCS12",
             f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
@@ -452,6 +481,27 @@ class ClusterManager(BaseManager):
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
+
+    def check_if_can_start(self) -> bool:
+        """Apply the directives computed by the opensearch peer cluster manager."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            # the deployment description hasn't finished being computed by the leader
+            return False
+
+        # check possibility to start
+        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
+        if self.no_blocking_directives(deployment_desc):
+            try:
+                self.get_nodes(False)
+            except OpenSearchHttpError:
+                return False
+            return True
+        return False
+
+    def _put_security_index_initialised(self) -> None:
+        """Set the security index initialized flag."""
+        # TODO: Add peer cluster updates here we need to update relations
+        self.state.application.is_security_index_initialised = True
 
     def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
@@ -551,7 +601,6 @@ class ClusterManager(BaseManager):
                     unit_number=node.unit_number,
                     temperature=temperature,
                 )
-
         if self.state.application.nodes_config == updated_nodes:
             return False
 
@@ -593,7 +642,7 @@ class ClusterManager(BaseManager):
     @property
     def is_opensearch_started(self) -> bool:
         """Returns whether OpenSearch has started."""
-        reachable = self.workload.is_reachable(self.state.host_ip, OPENSEARCH_HTTP_PORT)
+        reachable = self.workload.is_reachable(self.state.node_host, OPENSEARCH_HTTP_PORT)
         if not reachable:
             logger.debug("Cannot connect to the OpenSearch server...")
 
@@ -630,6 +679,7 @@ class ClusterManager(BaseManager):
                 ip=node.ip,
                 app=node.app,
                 unit_number=node.unit_number,
+                # clean temp on auto generated roles
                 temperature=None,
             )
         logger.debug(
@@ -647,7 +697,10 @@ class ClusterManager(BaseManager):
             remaining_nodes = [
                 node
                 for node in self.get_nodes(self.opensearch_client.is_node_up())
-                if node.name != self.state.unit_name
+                if node.name
+                != format_unit_name(
+                    self.state.unit_name, app=self.state.application.deployment_desc.app
+                )
             ]
             self.compute_and_broadcast_updated_topology(remaining_nodes)
         elif is_last_unit:
@@ -681,7 +734,7 @@ class ClusterManager(BaseManager):
         the unit is marked as started but service couldn't start
         """
         return (
-            self.state.server.started
+            bool(self.state.server.started)
             and "cluster_manager" in self.roles
             and not self.workload.is_service_started()
         )

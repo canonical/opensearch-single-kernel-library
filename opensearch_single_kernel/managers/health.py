@@ -11,7 +11,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from opensearch_single_kernel.common.constants import HealthColors, StartMode
+from opensearch_single_kernel.common.constants import (
+    HealthColors,
+    StartMode,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
@@ -41,7 +44,10 @@ class HealthManager(BaseManager):
         local_app_only: bool = True,
     ) -> str:
         """Fetch the current cluster status."""
-        if not (deployment_desc := self.state.application.deployment_desc):
+        if (
+            not (deployment_desc := self.state.application.deployment_desc)
+            or not self.state.server.started
+        ):
             return HealthColors.UNKNOWN
 
         # the health depends on data nodes, for large deployments: an ML cluster
@@ -57,7 +63,7 @@ class HealthManager(BaseManager):
         if not compute_health:
             return HealthColors.IGNORE
 
-        host = self.state.host_ip if use_localhost else None
+        host = self.state.node_host if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)
@@ -107,87 +113,14 @@ class HealthManager(BaseManager):
             # is being relocated. Examples are: simple stop, unit removal, upgrade
             raise OpenSearchHAError("Shards haven't completed relocating.")
 
-    def apply_health(
-        self,
-        wait_for_green_first: bool = False,
-        use_localhost: bool = True,
-        app: bool = True,
-        unit: bool = True,
-    ) -> str:
-        """Fetch cluster health and set it on the app status."""
-        status = self.get(wait_for_green_first=wait_for_green_first, use_localhost=use_localhost)
-        logger.info("Current health of cluster: %s", status)
-
-        if app:
-            match status:
-                case HealthColors.GREEN:
-                    # health green: cluster healthy
-                    self.state.remove_status_if_present(
-                        HealthStatuses.CLUSTER_HEALTH_RED.value, "app", self.name
-                    )
-                    self.state.remove_status_if_present(
-                        HealthStatuses.CLUSTER_HEALTH_YELLOW.value, "app", self.name
-                    )
-                    self.state.remove_status_if_present(
-                        HealthStatuses.WAITING_FOR_BUSY_SHARDS.value, "app", self.name
-                    )
-                case HealthColors.RED:
-                    # health RED: some primary shards are unassigned
-                    self.state.add_status_if_not_present(
-                        HealthStatuses.CLUSTER_HEALTH_RED.value, "app", self.name
-                    )
-                case HealthColors.YELLOW_TEMP:
-                    # health is yellow but temporarily (shards are relocating or initializing)
-                    self.state.add_status_if_not_present(
-                        HealthStatuses.WAITING_FOR_BUSY_SHARDS.value, "app", self.name
-                    )
-                case HealthColors.YELLOW:
-                    # health is yellow permanently (some replica shards are unassigned)
-                    self.state.add_status_if_not_present(
-                        HealthStatuses.CLUSTER_HEALTH_YELLOW.value, "app", self.name
-                    )
-
-        if unit:
-            if status != HealthColors.YELLOW_TEMP:
-                self.state.remove_status_if_present(
-                    HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value, "unit", self.name
-                )
-            else:
-                busy_shards = self.opensearch_client.get_busy_shards_by_unit(
-                    alt_hosts=self.alt_hosts
-                )
-                if not busy_shards:
-                    self.state.remove_status_if_present(
-                        HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value, "unit", self.name
-                    )
-                else:
-                    message = sorted(
-                        [f"{key}/{','.join(val)}" for key, val in busy_shards.items()]
-                    )
-                    self.state.add_status_if_not_present(
-                        format_status(
-                            HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value,
-                            {"shards": " - ".join(message)},
-                        ),
-                        "unit",
-                        self.name,
-                    )
-
-        return status
-
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
         status_list: list[StatusObject] = []
 
-        status = self.get()
+        status = self.get(wait_for_green_first=recompute)
 
         if scope == "app":
             match status:

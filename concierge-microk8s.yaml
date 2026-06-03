@@ -6,6 +6,7 @@
 # provision charm development and testing machines.
 # This file is used automatically by spread.
 juju:
+  agent-version: "3.6.21"
   model-defaults:
     logging-config: <root>=INFO; unit=DEBUG
 providers:

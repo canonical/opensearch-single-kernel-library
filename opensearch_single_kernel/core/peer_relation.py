@@ -194,6 +194,24 @@ class OpenSearchServer(RelationState):
         self.update({"certs_exp_checked_at": value})
 
     @property
+    def pebble_observer_pid(self) -> int | None:
+        """PID of the running pebble observer subprocess, or None."""
+        if not self.relation:
+            return None
+        val = self.relation.data[self.unit].get("pebble-observer-pid")
+        return int(val) if val else None
+
+    @pebble_observer_pid.setter
+    def pebble_observer_pid(self, value: str) -> None:
+        """Store the pebble observer PID."""
+        self.update({"pebble-observer-pid": value})
+
+    @pebble_observer_pid.deleter
+    def pebble_observer_pid(self) -> None:
+        """Clear the stored pebble observer PID."""
+        self.update({"pebble-observer-pid": ""})
+
+    @property
     def allocation_exclusions_to_delete(self) -> set[str]:
         """Return the value of 'allocation_exclusion_to_delete' from application databag."""
         return set(

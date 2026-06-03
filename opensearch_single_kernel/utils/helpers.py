@@ -4,6 +4,7 @@
 
 """A set of helpers functions."""
 
+
 import base64
 import hashlib
 import json
@@ -11,9 +12,11 @@ import logging
 import math
 import re
 import secrets
+import socket
 import string
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable
+from typing import Any
 
 import bcrypt
 from cryptography import x509
@@ -25,10 +28,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import (
-    App,
-    PeerClusterConfig,
-)
+from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,44 @@ def deployment_type(
         if not config.init_hold
         else DeploymentType.FAILOVER_ORCHESTRATOR
     )
+
+
+def get_k8s_fqdn(name: str) -> str:
+    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+    try:
+        info = socket.getaddrinfo(
+            name,
+            None,
+            family=socket.AF_UNSPEC,
+            flags=socket.AI_CANONNAME,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as e:
+        logger.warning(
+            "Failed to resolve canonical name for %s: %s. \nFalling back on default fqdn.",
+            name,
+            e,
+        )
+        return socket.getfqdn(name)
+
+    for entry in info:
+        if canonname := entry[3]:
+            return canonname
+
+    logger.warning(
+        "Failed to resolve canonical name for %s. \nFalling back on default fqdn.", name
+    )
+    return socket.getfqdn(name)
+
+
+def get_k8s_seed_host(unit_name: str) -> str:
+    """Return the canonical K8s seed host for a unit."""
+    # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
+    pod_prefix = (unit_name or "").split(".", 1)[0]
+    # remove the last -digit to get the app name: "app-0" -> "app"
+    app_name = "-".join(pod_prefix.split("-")[:-1])
+    service_name = f"{pod_prefix}.{app_name}-endpoints"
+    return get_k8s_fqdn(service_name)
 
 
 def normalized_tls_subject(subject: str) -> str:
@@ -190,6 +228,62 @@ def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | 
     except json.JSONDecodeError as e:
         logger.error("Malformed JSON in secret %s: %s", label, e)
         return None
+
+
+def build_command_list(command_with_args: str) -> list[str]:
+    """Build command list for container.exec().
+
+    Detects shell metacharacters and wraps command in shell if needed.
+    Otherwise splits command into list of arguments.
+
+    Args:
+        command_with_args: Full command string with arguments.
+
+    Returns:
+        list[str]: Command list suitable for container.exec().
+    """
+    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
+    if any(char in command_with_args for char in shell_metachars):
+        return ["sh", "-c", command_with_args]
+    if " " in command_with_args:
+        return command_with_args.split()
+    return [command_with_args]
+
+
+def wait_for_process_output(
+    process: Any, masked_command: str, original_command: str
+) -> tuple[str, str]:
+    """Wait for process to complete and return output.
+
+    Args:
+        process: Process object from container.exec() (has wait_output()).
+        masked_command: Command string with sensitive info masked for logging.
+        original_command: Original command string for error messages.
+
+    Returns:
+        tuple[str, str]: (stdout, stderr). stderr is typically empty when
+        combine_stderr=True was used for exec().
+
+    Raises:
+        OpenSearchCmdError: If process fails or returns non-zero exit code.
+    """
+    try:
+        stdout, stderr = process.wait_output()
+        return stdout, stderr
+    except Exception as e:
+        error_string = str(e).lower()
+        missing_keystore = (
+            "opensearch.keystore" in error_string and "does not exist" in error_string
+        ) or "keystore file does not exist" in error_string
+        if missing_keystore:
+            logger.debug(
+                "wait_output() failed for %s (expected missing opensearch.keystore): %s",
+                masked_command,
+                e,
+            )
+        else:
+            logger.warning("wait_output() failed for %s: %s", masked_command, e)
+        raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
 
 
 def lock_unit_name(full_unit_id: str) -> str:

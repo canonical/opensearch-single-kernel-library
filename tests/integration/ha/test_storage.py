@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(ops_test: OpsTest, charm, series, substrate) -> None:
     """Build and deploy one unit of OpenSearch."""
+    if substrate == "k8s":
+        pytest.skip("Storage pool test is VM/LXD-specific and does not apply to K8s substrate.")
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
     if await app_name(ops_test):
@@ -53,7 +55,12 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
         ops_test.model.deploy(
-            charm, num_units=1, series=series, storage=storage, config=CONFIG_OPTS
+            charm,
+            application_name=APP_NAME,
+            num_units=1,
+            series=series,
+            storage=storage,
+            config=CONFIG_OPTS,
         ),
     )
 

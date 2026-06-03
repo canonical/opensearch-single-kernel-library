@@ -8,15 +8,23 @@ import json
 import logging
 import subprocess
 import time
+from collections.abc import Generator
+from typing import Any
 
 import boto3
 import botocore
 import pytest
 from pytest_operator.plugin import OpsTest
 
+from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.continuous_writes import ContinuousWrites, ReplicationMode
 from tests.integration.ha.helpers import update_restart_delay
+from tests.integration.ha.k8s_helpers.helpers import (
+    deploy_chaos_mesh,
+    destroy_chaos_mesh,
+    pebble_patch_restart_delay,
+)
 from tests.integration.helpers import (
     app_name,
     get_application_unit_ids,
@@ -38,12 +46,20 @@ RESTART_DELAY = 360
 
 
 @pytest.fixture(scope="function")
-async def reset_restart_delay(ops_test: OpsTest):
+async def reset_restart_delay(ops_test: OpsTest, substrate: Substrate):
     """Resets service file delay on all units."""
     yield
     app = (await app_name(ops_test)) or APP_NAME
     for unit_id in get_application_unit_ids(ops_test, app):
-        await update_restart_delay(ops_test, app, unit_id, ORIGINAL_RESTART_DELAY)
+        if substrate == "k8s":
+            pebble_patch_restart_delay(
+                ops_test.model_name,
+                f"{app}/{unit_id}",
+                None,
+                ensure_replan=True,
+            )
+        else:
+            await update_restart_delay(ops_test, app, unit_id, ORIGINAL_RESTART_DELAY)
 
 
 @pytest.fixture(scope="function")
@@ -247,3 +263,16 @@ def s3_bucket(microceph_credentials, microceph_config) -> None:
     )
     bucket = s3.Bucket(microceph_config["bucket"])
     return bucket
+
+
+@pytest.fixture(scope="module")
+def chaos_mesh(ops_test, substrate: Substrate) -> Generator[None, Any, Any]:
+    assert (
+        ops_test.model
+    ), "Juju model is not set. Ensure that the test is running with a Juju model."
+    if substrate == "k8s":
+        deploy_chaos_mesh(ops_test.model_name)
+        yield
+        destroy_chaos_mesh(ops_test.model_name)
+    else:
+        yield
