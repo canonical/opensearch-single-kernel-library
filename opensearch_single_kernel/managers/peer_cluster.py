@@ -450,7 +450,7 @@ class PeerClusterManager(BaseManager):
                     status_list.append(status)
 
                 # requirer errors
-                if data := peer_cluster.data():
+                if self.state.application.deployment_desc and (data := peer_cluster.data()):
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
                         deployment_desc=self.state.application.deployment_desc,
