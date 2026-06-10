@@ -628,10 +628,7 @@ class K8sWorkload(BaseWorkload):
             logger.debug("Executing command list: %s", cmd_list)
 
             process = self.container.exec(
-                cmd_list,
-                stdin=stdin,
-                encoding="utf-8",
-                combine_stderr=True,
+                cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
             )
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
