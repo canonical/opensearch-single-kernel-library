@@ -235,7 +235,7 @@ async def assert_continuous_writes_consistency(
     apps_units_ips = {app: await get_application_unit_ids_ips(ops_test, app) for app in apps}
 
     # investigate the data in each shard, primaries and their respective replicas
-    shards = await get_shards_by_index(ops_test, unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(ops_test, unit_ip, ContinuousWrites.INDEX_NAME, app=apps[0])
     shards_by_id = {}
     for shard in shards:
         shards_by_id.setdefault(shard.num, []).append(shard)
@@ -496,6 +496,7 @@ async def wait_for_backup_system_to_settle(
                 ops_test,
                 "GET",
                 f"https://{unit_ip}:9200/_recovery?human",
+                app=app,
             )
             for info in indices_status.values():
                 # Now, check the status of each shard
