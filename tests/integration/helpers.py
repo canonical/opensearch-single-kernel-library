@@ -51,6 +51,10 @@ EmptyBlockedStatus = StatusObject(
     status="blocked",
     message="",
 )
+CosBlockedStatus = StatusObject(
+    status="blocked",
+    message="Missing ['grafana-cloud-config']|['grafana-dashboards-provider']|['logging-consumer']|['send-remote-write'] for cos-agent",
+)
 EmptyActiveStatus = StatusObject(
     status="active",
     message="",
