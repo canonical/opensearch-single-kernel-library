@@ -186,16 +186,32 @@ def store_ca_chain(  # noqa: C901
 
         # rename existing alias to old-<alias>-<i> if requested
         if keep_previous:
+            changealias_cmd = (
+                f"{workload.keytool_cmd} -changealias "
+                f"-alias {internal_alias} -destalias {old_internal_alias} "
+                f"-keystore {store_path} -storetype PKCS12"
+            )
+            store_args = f"-storepass {store_pwd}"
             try:
-                workload.run_cmd(
-                    f"{workload.keytool_cmd} -changealias "
-                    f"-alias {internal_alias} -destalias {old_internal_alias} "
-                    f"-keystore {store_path} -storetype PKCS12",
-                    f"-storepass {store_pwd}",
-                )
+                workload.run_cmd(changealias_cmd, store_args)
             except OpenSearchCmdError as e:
                 msg = (e.out or "") + (e.err or "")
-                if ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
+                if "already exists" in msg:
+                    # A previous rotation left a stale old-<alias>-<i> behind (it never
+                    # finalized). Drop it and retry, otherwise every future rotation is
+                    # permanently blocked on this keystore.
+                    try:
+                        workload.run_cmd(
+                            f"{workload.keytool_cmd} -delete -alias {old_internal_alias} "
+                            f"-keystore {store_path} -storetype PKCS12",
+                            store_args,
+                        )
+                        workload.run_cmd(changealias_cmd, store_args)
+                    except OpenSearchCmdError:
+                        return False
+                elif (
+                    "does not exist" not in msg
+                ) and ("Keystore file does not exist" not in msg):
                     return False
 
         # import the cert
