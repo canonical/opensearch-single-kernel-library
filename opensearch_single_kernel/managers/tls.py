@@ -17,7 +17,6 @@ from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
-    CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
@@ -544,8 +543,9 @@ class TlsManager(BaseManager):
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            if not self.workload.exists(certs_dir / CA_TRUSTSTORE_P12):
-                return False
+            # Note: cacerts.p12 is intentionally NOT checked here. It is the snapshot-gateway
+            # truststore (S3/GCS/Azure CA), managed by the snapshots manager and absent unless a
+            # backup backend with a custom CA is related. OpenSearch's own truststore is ca.p12.
             if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
                 return False
             if not self.workload.exists(certs_dir / "chain.pem"):

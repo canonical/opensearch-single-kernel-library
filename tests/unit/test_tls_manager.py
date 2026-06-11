@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import TlsStatuses
 from opensearch_single_kernel.core.models import (
     App,
@@ -26,7 +27,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentState,
     PeerClusterConfig,
 )
-from opensearch_single_kernel.utils.certificates import remove_ca
+from opensearch_single_kernel.utils.certificates import remove_ca, store_ca_chain
 from tests.unit.helpers import (
     create_utf8_encoded_private_key,
     deployment_descriptions,
@@ -111,6 +112,133 @@ def test_remove_ca_deletes_exact_alias(mocker):
         "-delete" in call.args[0] and "-alias old-ca-0" in call.args[0]
         for call in workload.run_cmd.call_args_list
     )
+
+
+def test_store_ca_chain_recovers_from_stale_old_alias(mocker):
+    """A new CA can be stored even if a stale old-<alias>-i is left from a prior rotation.
+
+    Reproduces the CA-rotation deadlock: keytool refuses to rename ca-0 -> old-ca-0 with
+    "Destination alias <old-ca-0> already exists" when an earlier rotation never finalized.
+    The store must drop the stale old alias and retry the rename instead of giving up.
+    """
+    workload = MagicMock()
+    workload.keytool_cmd = "keytool"
+    store_path = MagicMock()
+    store_path.__str__.return_value = "/certs/ca.p12"
+    store_path.exists.return_value = True
+
+    # temp_file is a context manager yielding the path used in the import command
+    tmp_ctx = MagicMock()
+    tmp_ctx.__enter__.return_value = "/certs/tmp.pem"
+    workload.temp_file.return_value = tmp_ctx
+
+    changealias_calls = []
+
+    def run_cmd(cmd, *args, **kwargs):
+        if "-changealias" in cmd:
+            changealias_calls.append(cmd)
+            # First rename attempt fails: destination alias already exists
+            if len(changealias_calls) == 1:
+                raise OpenSearchCmdError(
+                    cmd,
+                    out="keytool error: java.lang.Exception: "
+                    "Destination alias <old-ca-0> already exists\n",
+                )
+        return mocker.Mock(out="")
+
+    workload.run_cmd.side_effect = run_cmd
+
+    result = store_ca_chain(
+        workload=workload,
+        alias="ca",
+        store_pwd="truststore-password",
+        store_path=store_path,
+        ca="-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----",
+        keep_previous=True,
+        use_sudo=False,
+    )
+
+    assert result is True
+    issued = [call.args[0] for call in workload.run_cmd.call_args_list]
+    # the stale old alias was deleted...
+    assert any("-delete" in cmd and "-alias old-ca-0" in cmd for cmd in issued), issued
+    # ...and the rename was retried
+    assert len(changealias_calls) == 2, issued
+    # ...and the new cert was imported under ca-0
+    assert any("-importcert" in cmd and "-alias ca-0" in cmd for cmd in issued), issued
+
+
+def test_store_ca_chain_overwrites_existing_alias_on_import(mocker):
+    """store_ca_chain(keep_previous=False) must overwrite an already-present alias.
+
+    Recovery from secrets uses keep_previous=False (no rename), so when the keystore already
+    holds ca-0, keytool -importcert fails "alias <ca-0> already exists". The store must drop the
+    existing alias and re-import instead of giving up, otherwise the K8s restore path deadlocks.
+    """
+    workload = MagicMock()
+    workload.keytool_cmd = "keytool"
+    store_path = MagicMock()
+    store_path.__str__.return_value = "/certs/ca.p12"
+    store_path.exists.return_value = True
+
+    tmp_ctx = MagicMock()
+    tmp_ctx.__enter__.return_value = "/certs/tmp.pem"
+    workload.temp_file.return_value = tmp_ctx
+
+    import_calls = []
+
+    def run_cmd(cmd, *args, **kwargs):
+        if "-importcert" in cmd:
+            import_calls.append(cmd)
+            # First import fails: alias already exists
+            if len(import_calls) == 1:
+                raise OpenSearchCmdError(
+                    cmd,
+                    out="keytool error: java.lang.Exception: "
+                    "Certificate not imported, alias <ca-0> already exists\n",
+                )
+        return mocker.Mock(out="")
+
+    workload.run_cmd.side_effect = run_cmd
+
+    result = store_ca_chain(
+        workload=workload,
+        alias="ca",
+        store_pwd="truststore-password",
+        store_path=store_path,
+        ca="-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----",
+        keep_previous=False,
+        use_sudo=False,
+    )
+
+    assert result is True
+    issued = [call.args[0] for call in workload.run_cmd.call_args_list]
+    # the conflicting alias was deleted...
+    assert any("-delete" in cmd and "-alias ca-0" in cmd for cmd in issued), issued
+    # ...and the import was retried
+    assert len(import_calls) == 2, issued
+
+
+def test_k8s_runtime_tls_ready_does_not_require_cacerts_p12(harness, mocker):
+    """Readiness must not require cacerts.p12 (the snapshot-gateway truststore).
+
+    Regression: requiring cacerts.p12 (which only exists when an S3/GCS/Azure backend CA is
+    related) made the K8s readiness fast-path always False, so restore_tls_files_from_secrets ran
+    on every hook. OpenSearch's own truststore is ca.p12, not cacerts.p12.
+    """
+    harness.charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"ca-cert": "ca", "truststore-password": "tspwd"},
+    )
+
+    # Everything OpenSearch actually needs exists; only cacerts.p12 is absent.
+    def exists(path):
+        return "cacerts.p12" not in str(path)
+
+    mocker.patch.object(harness.charm.tls_manager.workload, "exists", side_effect=exists)
+
+    assert harness.charm.tls_manager._k8s_runtime_tls_artifacts_ready() is True
 
 
 def test_get_sans(harness, mocker, substrate):
@@ -570,6 +698,56 @@ def test_truststore_password_secret(harness, mocker, substrate):
     harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, True)
 
     create_store_pwd_if_not_exists.assert_called_once()
+
+
+def test_store_new_ca_threads_keep_previous(harness, mocker):
+    """store_new_ca must forward keep_previous to store_ca_chain.
+
+    The K8s restore-from-secrets path relies on keep_previous=False so that rebuilding the
+    keystore does not masquerade as a CA rotation (which would create a spurious old-ca-0).
+    """
+    store_ca_chain = mocker.patch(
+        "opensearch_single_kernel.managers.tls.store_ca_chain", return_value=True
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
+    harness.charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"ca-cert": "ca", "truststore-password": "tspwd", "chain": "ca"},
+    )
+
+    harness.charm.tls_manager.store_new_ca(
+        CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False
+    )
+    assert store_ca_chain.call_args.kwargs["keep_previous"] is False
+
+    harness.charm.tls_manager.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False)
+    assert store_ca_chain.call_args.kwargs["keep_previous"] is True
+
+
+@pytest.mark.skip_if_substrate("vm")
+def test_restore_tls_files_from_secrets_does_not_rotate_ca(harness, mocker):
+    """Restoring the keystore from secrets on K8s must not trigger CA-rotation semantics.
+
+    Regression: restore_tls_files_from_secrets used keep_previous=True, which renamed the
+    current ca-0 to old-ca-0 on every reconcile, spuriously driving the rotation state
+    machine into a restart/renew loop.
+    """
+    store_ca_chain = mocker.patch(
+        "opensearch_single_kernel.managers.tls.store_ca_chain", return_value=True
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.store_key_pair")
+    harness.charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"ca-cert": "ca", "truststore-password": "tspwd", "chain": "ca"},
+    )
+
+    harness.charm.tls_manager.restore_tls_files_from_secrets()
+
+    store_ca_chain.assert_called_once()
+    assert store_ca_chain.call_args.kwargs["keep_previous"] is False
 
 
 @pytest.mark.parametrize(
