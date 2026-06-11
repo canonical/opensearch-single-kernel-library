@@ -747,7 +747,6 @@ class OpenSearchEventsHandler(Object):
                 "unit",
                 self.charm.cluster_manager.name,
             )
-            event.defer()
             return
         # We are requesting start of openSearch
 

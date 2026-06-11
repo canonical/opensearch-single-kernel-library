@@ -42,11 +42,16 @@ TIMEOUT = 45 * 60
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy(
-    ops_test: OpsTest, charm, series, failover_model: Model, data_model: Model
+    ops_test: OpsTest,
+    charm,
+    series,
+    failover_model: Model,
+    data_model: Model,
+    charm_resources,
+    substrate,
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
-
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     await asyncio.gather(
@@ -58,6 +63,7 @@ async def test_build_and_deploy(
             application_name=MAIN_APP,
             num_units=APP_UNITS[MAIN_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME} | CONFIG_OPTS,
         ),
     )
@@ -81,6 +87,7 @@ async def test_build_and_deploy(
             application_name=FAILOVER_APP,
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True} | CONFIG_OPTS,
         )
 
@@ -94,7 +101,12 @@ async def test_build_and_deploy(
         )
         logger.info("Integrating certs with failover...\n")
         await failover_model.integrate(f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}")
-        await failover_model.wait_for_idle(apps=[FAILOVER_APP], timeout=TIMEOUT)
+        await failover_model.wait_for_idle(
+            apps=[FAILOVER_APP],
+            timeout=TIMEOUT,
+            idle_period=90,
+            wait_for_active=True,
+        )
 
         failover_peer_cluster_orchestrator_offer = f"offer {failover_model.info.name}.{FAILOVER_APP}:{PEER_CLUSTER_ORCHESTRATOR_RELATION} {FAILOVER_ORCHESTRATOR_OFFER}"
         logger.info("Offering relations from failover model...")
@@ -106,6 +118,7 @@ async def test_build_and_deploy(
             application_name=DATA_APP,
             num_units=APP_UNITS[DATA_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
             | CONFIG_OPTS,
         )
@@ -128,13 +141,16 @@ async def test_build_and_deploy(
             f"{DATA_APP}",
             f"{FAILOVER_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
         )
-        await data_model.wait_for_idle(apps=[DATA_APP], timeout=TIMEOUT)
+        await data_model.wait_for_idle(
+            apps=[DATA_APP],
+            timeout=TIMEOUT,
+            idle_period=90,
+            wait_for_active=True,
+        )
 
 
 @pytest.mark.abort_on_fail
-async def test_failover_promotion(
-    ops_test: OpsTest, failover_model: Model, data_model: Model
-) -> None:
+async def test_promotion(ops_test: OpsTest, failover_model: Model, data_model: Model) -> None:
     """Test that the failover orchestrator promotes itself
 
     when the majority of relations with main are severed
@@ -145,7 +161,10 @@ async def test_failover_promotion(
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
     )
     await failover_model.wait_for_idle(
-        apps=[FAILOVER_APP], raise_on_blocked=False, timeout=TIMEOUT
+        apps=[FAILOVER_APP],
+        raise_on_blocked=False,
+        idle_period=90,
+        timeout=TIMEOUT,
     )
     await failover_model.remove_saas(MAIN_ORCHESTRATOR_OFFER)
 
@@ -166,7 +185,12 @@ async def test_failover_promotion(
         f"{DATA_APP}:{PEER_CLUSTER_RELATION}",
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
     )
-    await data_model.wait_for_idle(apps=[DATA_APP], raise_on_blocked=False, timeout=TIMEOUT)
+    await data_model.wait_for_idle(
+        apps=[DATA_APP],
+        raise_on_blocked=False,
+        idle_period=90,
+        timeout=TIMEOUT,
+    )
     await data_model.remove_saas(MAIN_ORCHESTRATOR_OFFER)
     with ops_test.model_context("data"):
         logger.info("Ensuring failover was promoted to main...")

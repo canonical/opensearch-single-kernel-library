@@ -117,7 +117,7 @@ async def all_nodes(ops_test: OpsTest, unit_ip: str, app: str = APP_NAME) -> lis
     response = await http_request(
         ops_test,
         "GET",
-        f"https://{unit_ip}:9200/_nodes",
+        f"https://{unit_ip}:9200/_nodes?filter_path=nodes.*.name,nodes.*.roles,nodes.*.ip,nodes.*.attributes.app_id,nodes.*.attributes.temp",
         app=app,
     )
     nodes = response.get("nodes", {})

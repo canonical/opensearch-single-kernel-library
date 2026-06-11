@@ -11,6 +11,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
+from opensearch_single_kernel.common.statuses import PeerClusterStatuses
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     PeerClusterOrchestrators,
@@ -48,7 +49,7 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resources) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
@@ -63,6 +64,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=MAIN_APP,
             num_units=APP_UNITS[MAIN_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
         ),
         ops_test.model.deploy(
@@ -70,6 +72,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=FAILOVER_APP,
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
             | CONFIG_OPTS,
         ),
@@ -78,6 +81,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=DATA_APP,
             num_units=APP_UNITS[DATA_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
             | CONFIG_OPTS,
         ),
@@ -181,8 +185,7 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        # TODO: Investigate why the running status is removed even if it is set to blocked
-        # apps_statuses={DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]},
+        apps_statuses={DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]},
         units_statuses={DATA_APP: [NO_CM_STATUS]},
         wait_for_exact_units={
             DATA_APP: APP_UNITS[DATA_APP],
