@@ -22,6 +22,7 @@ from tests.integration.ha.helpers_data import (
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
+    CosBlockedStatus,
     EmptyBlockedStatus,
     app_name,
     get_application_unit_ids_ips,
@@ -108,7 +109,8 @@ async def _wait_for_units(
             await wait_until(
                 ops_test,
                 apps=[COS_APP_NAME],
-                units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
+                apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
+                units_statuses={COS_APP_NAME: [EmptyBlockedStatus, CosBlockedStatus]},
                 timeout=1800,
                 idle_period=IDLE_PERIOD,
             )
@@ -134,7 +136,8 @@ async def _wait_for_units(
         await wait_until(
             ops_test,
             apps=[COS_APP_NAME],
-            units_statuses={COS_APP_NAME: [EmptyBlockedStatus]},
+            apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
+            units_statuses={COS_APP_NAME: [EmptyBlockedStatus, CosBlockedStatus]},
             timeout=1800,
             idle_period=IDLE_PERIOD,
         )
