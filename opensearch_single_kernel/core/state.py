@@ -91,7 +91,7 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequ
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
     get_k8s_fqdn,
-    get_k8s_seed_host,
+    k8s_fqdn,
     lock_unit_name,
 )
 from opensearch_single_kernel.utils.object_storage import (
@@ -579,7 +579,7 @@ class ClusterState(Object):
         - K8s: canonical endpoint FQDN for this unit service name.
         """
         if self.substrate == Substrates.K8S:
-            unit_prefix = str(self.unit_name).split(".", 1)[0]
+            unit_prefix = self.unit_name.split(".")[0]
             service_name = f"{unit_prefix}.{self.application.name}-endpoints"
             return get_k8s_fqdn(service_name)
         return socket.getfqdn()
@@ -713,7 +713,7 @@ class ClusterState(Object):
         for unit in all_units:
             if self.substrate == Substrates.K8S:
                 hosts.add(
-                    get_k8s_seed_host(
+                    k8s_fqdn(
                         format_unit_name(unit, app=self.application.deployment_desc.app)
                     )
                 )

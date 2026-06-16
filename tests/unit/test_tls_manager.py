@@ -1081,7 +1081,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.wait_opensearch_part_of_cluster"
+        "opensearch_single_kernel.managers.cluster.ClusterManager.assert_current_node_joined_cluster"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
     mocker.patch(
@@ -1259,7 +1259,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.wait_opensearch_part_of_cluster"
+        "opensearch_single_kernel.managers.cluster.ClusterManager.assert_current_node_joined_cluster"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"

@@ -15,7 +15,7 @@ from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Subs
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.helpers import get_k8s_seed_host
+from opensearch_single_kernel.utils.helpers import k8s_fqdn
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -75,18 +75,6 @@ class BaseManager(ManagerStatusProtocol):
 
         return result
 
-    def get_cluster_managers_seed_hosts(self, nodes: list[Node]) -> list[str]:
-        """Get the seed hosts of cluster manager eligible nodes."""
-        result = []
-        for node in nodes:
-            if not node.is_cm_eligible():
-                continue
-            if self.state.substrate == Substrates.K8S:
-                result.append(get_k8s_seed_host(node.name))
-            else:
-                result.append(node.ip)
-
-        return result
 
     def get_cluster_managers_names(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""

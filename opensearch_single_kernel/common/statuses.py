@@ -35,10 +35,6 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
-    WORKLOAD_FILESYSTEM_UNAVAILABLE = StatusObject(
-        status="waiting",
-        message="Waiting for the OpenSearch workload filesystem to become available.",
-    )
 
     # Blocking directive should be a running status since it is set based on the presence
     # of a SHOW_STATUS directive and once the status set we remove the directive
@@ -183,13 +179,9 @@ class PeerClusterStatuses(Enum):
         status="blocked",
         message="Removal of cluster_manager role from deployment not allowed.",
     )
-    CM_VO_PROVIDED_INVALID = StatusObject(
-        status="blocked",
-        message="The cluster_manager and voting_only roles cannot be both set on the same nodes.",
-    )
     DATA_ROLE_REMOVAL_FORBIDDEN = StatusObject(
         status="blocked",
-        message="Removal of data role from current deployment not allowed - the data cannot be reallocated.",
+        message="The 'cluster_manager' and 'voting_only' roles cannot be both set on the same nodes.",
     )
     PEER_CLUSTER_MISSING_RELATIONS = StatusObject(
         status="blocked",

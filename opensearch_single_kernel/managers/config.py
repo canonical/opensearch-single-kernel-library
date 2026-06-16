@@ -18,7 +18,7 @@ from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
 from opensearch_single_kernel.utils.helpers import (
-    get_k8s_seed_host,
+    k8s_fqdn,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -492,7 +492,7 @@ class ConfigManager(BaseManager):
             nodes.extend(list(nodes_config.values()))
         if self.state.substrate == Substrates.K8S:
             self._update_seeds_file(
-                [get_k8s_seed_host(node.name) for node in nodes if node.is_cm_eligible()]
+                [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
             )
         else:
             self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])

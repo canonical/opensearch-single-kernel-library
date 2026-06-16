@@ -1077,7 +1077,7 @@ class OpenSearchClient:
                 wait_strategy=wait_exponential(min=2),
             )
         except OpenSearchHttpError as e:
-            logger.debug("HTTP error when checking cluster health, returning None. Error: %s", e)
+            logger.error("HTTP error when checking cluster health: %s", e)
             return None
 
     def get_indices(

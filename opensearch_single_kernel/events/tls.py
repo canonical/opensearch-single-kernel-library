@@ -110,6 +110,8 @@ class TLSEventsHandler(Object):
         """Request certificate when TLS relation created."""
         if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
             logger.warning("Workload not ready for TLS relation created, deferring.")
+            event.defer()
+            return
 
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
@@ -163,13 +165,13 @@ class TLSEventsHandler(Object):
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.
         """
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
-            logger.warning("Workload not ready for certificate available, deferring.")
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
             return
 
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
-            logger.debug("Deployment description not yet computed, deferring event.")
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+            logger.warning("Workload not ready for certificate available, deferring.")
             event.defer()
             return
 
@@ -377,29 +379,29 @@ class TLSEventsHandler(Object):
 
         # In case of renewal of the unit transport layer cert - restart opensearch
         if renewal and self.charm.state.application.is_admin_user_initialized:
-            if self.charm.tls_manager.is_fully_configured():
-                if self.charm.state.server.started:
-                    try:
-                        self.charm.tls_manager.reload_tls_certificates()
-                    except OpenSearchHttpError:
-                        logger.error("Could not reload TLS certificates via API, will restart.")
-                        self.charm.restart_opensearch_event.emit()
-                        return
-
-                self.charm.state.reset_ca_rotation_state()
-                # if all certs are stored and CA rotation is complete in the cluster
-                # we delete the old ca and update the chain to only include the new one
-                if (
-                    self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
-                    and self.charm.state.ca_and_certs_rotation_complete_in_cluster
-                ):
-                    logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
-                    self.charm.tls_manager.finalize_ca_certs_rotation()
-
-            else:
+            if not self.charm.tls_manager.is_fully_configured():
                 logger.debug("TLS not fully configured yet, deferring event.")
                 event.defer()
                 return
+
+            if self.charm.state.server.started:
+                try:
+                    self.charm.tls_manager.reload_tls_certificates()
+                except OpenSearchHttpError:
+                    logger.error("Could not reload TLS certificates via API, will restart.")
+                    self.charm.restart_opensearch_event.emit()
+                    return
+
+            self.charm.state.reset_ca_rotation_state()
+            # if all certs are stored and CA rotation is complete in the cluster
+            # we delete the old ca and update the chain to only include the new one
+            if (
+                self.charm.tls_manager.read_stored_ca(OLD_CA_ALIAS)
+                and self.charm.state.ca_and_certs_rotation_complete_in_cluster
+            ):
+                logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
+                self.charm.tls_manager.finalize_ca_certs_rotation()
+
 
     def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""

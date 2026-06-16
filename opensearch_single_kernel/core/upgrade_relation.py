@@ -85,8 +85,6 @@ class UpgradeServerState(RelationState):
     @unit_state.setter
     def unit_state(self, value: UnitUpgradesState) -> None:
         """Set the unit upgrade state in relation bag."""
-        if self.relation is None:
-            return
         self.relation.data[self.unit].update({"state": value.value})
 
     @property

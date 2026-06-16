@@ -94,6 +94,7 @@ class NotificationsEvents(Object):
         try:
             config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
         except OpenSearchSmtpMissingParametersError:
+            logger.error("SMTP parameters missing. Cannot create notification configs without them.")
             return
 
         # create/update SMTP sender config (config_id is relation-based)
@@ -215,9 +216,9 @@ class NotificationsEvents(Object):
         if keys:
             try:
                 self.charm.keystore_manager.remove_entries(keys)
+                self.charm.reload_keystore_event.emit()
             except OpenSearchCmdError as e:
                 logger.error("Failed to remove SMTP credentials from keystore: %s", e)
-            self.charm.reload_keystore_event.emit()
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
 

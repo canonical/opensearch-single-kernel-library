@@ -394,7 +394,7 @@ class OpenSearchEventsHandler(Object):
                 return
         except OpenSearchCmdError as e:
             logger.error("An error occurred while checking profile requirements: %s", str(e))
-            event.defer()
+            return
 
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -489,39 +489,7 @@ class OpenSearchEventsHandler(Object):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        previous_deployment_desc = self.charm.state.application.deployment_desc
-        if self.charm.substrate == Substrates.VM and (
-            self.charm.state.server.last_host_ip
-            and self.charm.state.host_ip != self.charm.state.server.last_host_ip
-        ):
-            try:
-                self.charm.config_manager.update_opensearch_config()
-            except OpenSearchFileOperationError as e:
-                logger.error("An error occurred while updating opensearch config: %s", str(e))
-                event.defer()
-                return
-            # This happens when the unit IP has changed
-            self.on_unit_ip_changed(event)
-
-        config_restart_needed = False
-        if self.charm.unit.is_leader():
-            deployment_changed, roles_changed = (
-                self.charm.cluster_manager.reconcile_cluster_config()
-            )
-            if deployment_changed:
-                if roles_changed:
-                    # trigger roles change on the leader, other units will have their
-                    # peer-rel-changed event triggered
-                    self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
-                    config_restart_needed = True
-                self.apply_status_from_deployment_desc(
-                    self.charm.state.application.deployment_desc
-                )
-
-            # This case is when the user change roles on runtime of init_hold / roles.
-            self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
-
-        if not self.charm.state.application.deployment_desc:
+        if not (previous_deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
             return
@@ -550,6 +518,33 @@ class OpenSearchEventsHandler(Object):
             logger.error("An error occurred while checking profile requirements: %s", str(e))
             event.defer()
             return
+
+        if self.charm.substrate == Substrates.VM and (
+            self.charm.state.server.last_host_ip
+            and self.charm.state.host_ip != self.charm.state.server.last_host_ip
+        ):
+            try:
+                self.charm.config_manager.update_opensearch_config()
+            except OpenSearchFileOperationError as e:
+                logger.error("An error occurred while updating opensearch config: %s", str(e))
+                event.defer()
+                return
+            # This happens when the unit IP has changed
+            self.on_unit_ip_changed(event)
+
+        config_restart_needed = False
+        if self.charm.unit.is_leader():
+            if self.charm.cluster_manager.reconcile_cluster_config():
+                new_deployment_desc = self.charm.state.application.deployment_desc
+                if previous_deployment_desc.config.roles != new_deployment_desc.config.roles:
+                    # trigger roles change on the leader, other units will have their
+                    # peer-rel-changed event triggered
+                    self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
+                    config_restart_needed = True
+                self.apply_status_from_deployment_desc(new_deployment_desc)
+
+            # This case is when the user change roles on runtime of init_hold / roles.
+            self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
         profile_restart_needed = self.charm.config_manager.update_profile_configuration(
             config_profile
@@ -630,16 +625,18 @@ class OpenSearchEventsHandler(Object):
             )
 
         # Restore purged system users in local `internal_users.yml` with corresponding credentials
-        if self.charm.unit.is_leader():
-            for user in OPENSEARCH_SYSTEM_USERS:
-                try:
-                    self.charm.internal_users_manager.put_or_update_internal_user_leader(
-                        user, update=False
-                    )
-                except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
-                    logger.error("An error occurred while updating internal user %s", str(e))
-                    event.defer()
-                    return
+        if not self.charm.unit.is_leader():
+            return
+
+        for user in OPENSEARCH_SYSTEM_USERS:
+            try:
+                self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                    user, update=False
+                )
+            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                logger.error("An error occurred while updating internal user %s", str(e))
+                event.defer()
+                return
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
@@ -679,7 +676,6 @@ class OpenSearchEventsHandler(Object):
             # Now, reissue a restart: we should not have stopped in the first place
             # as "started" flag is still set to True.
             # We do not wait for the 200 return, as maybe more than one unit is coming back.
-            # start_service_only() is polymorphic but here we call it only for VMs.
             try:
                 self.charm.workload.start_service_only()
                 # We're done here, we can return
@@ -1038,7 +1034,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.cluster_manager.wait_for_opensearch_up()
 
         # Wait for opensearch to be online and part of the cluster
-        self.charm.cluster_manager.wait_opensearch_part_of_cluster()
+        self.charm.cluster_manager.assert_current_node_joined_cluster()
 
         if self.charm.state.server.is_bootstrap_contributor:
             # If the unit is leader we cleanup the application conf as well
@@ -1135,10 +1131,9 @@ class OpenSearchEventsHandler(Object):
                     "for replica shards"
                 )
 
-        if self.charm.state.upgrade_relation:
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
-            logger.debug("Set upgrade unit state to healthy")
-            self.charm.upgrade_events._reconcile_upgrade()
+        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+        logger.debug("Set upgrade unit state to healthy")
+        self.charm.upgrade_events._reconcile_upgrade()
 
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
