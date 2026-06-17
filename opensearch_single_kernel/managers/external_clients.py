@@ -5,7 +5,6 @@
 """OpenSearch External Clients manager."""
 
 import logging
-from functools import cached_property
 from typing import Any
 
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -28,7 +27,9 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
-from opensearch_single_kernel.core.external_clients_relation import ExternalOpenSearchClient
+from opensearch_single_kernel.core.external_clients_relation import (
+    ExternalOpenSearchClient,
+)
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager

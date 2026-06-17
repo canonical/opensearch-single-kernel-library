@@ -15,7 +15,6 @@ from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Subs
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.helpers import k8s_fqdn
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)

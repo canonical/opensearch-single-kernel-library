@@ -60,8 +60,6 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     deployment_type,
-    format_unit_name,
-    mask_sensitive_information,
 )
 from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload

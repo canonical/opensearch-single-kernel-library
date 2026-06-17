@@ -9,14 +9,13 @@ from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
-    CA_TRUSTSTORE_P12,
     CertType,
     Substrates,
 )
 from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
+from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     k8s_fqdn,
 )

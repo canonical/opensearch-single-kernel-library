@@ -16,7 +16,6 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
