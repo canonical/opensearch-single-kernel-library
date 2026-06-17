@@ -76,6 +76,8 @@ class UpgradeServerState(RelationState):
     @property
     def unit_state(self) -> UnitUpgradesState | None:
         """Get the unit upgrade state from relation bag."""
+        if not self.relation:
+            return None
         return (
             UnitUpgradesState(state)
             if (state := self.relation.data[self.unit].get("state"))
@@ -85,6 +87,8 @@ class UpgradeServerState(RelationState):
     @unit_state.setter
     def unit_state(self, value: UnitUpgradesState) -> None:
         """Set the unit upgrade state in relation bag."""
+        if not self.relation:
+            return
         self.relation.data[self.unit].update({"state": value.value})
 
     @property

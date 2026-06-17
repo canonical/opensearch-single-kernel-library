@@ -148,12 +148,12 @@ class ConfigManager(BaseManager):
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""
         return {
-            "cluster.name": deployment_desc.config.cluster_name,
+            "cluster.name": self.state.application.deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
             "http.publish_host": self.state.node_host,
             "node.roles": sorted(roles),
-            "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
+            "node.attr.app_id": self.state.application.deployment_desc.app.id,
             "path.data": self.workload.paths.data.as_posix(),
             "path.logs": self.workload.paths.logs.as_posix(),
             "path.home": self.workload.paths.home.as_posix(),

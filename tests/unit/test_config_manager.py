@@ -86,6 +86,19 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
         return_value="20.20.20.20",
         new_callable=PropertyMock,
     )
+    deployment_desc_mock = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    app = App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name)
+    deployment_desc_mock.return_value = DeploymentDescription(
+        config=PeerClusterConfig(cluster_name="opensearch-dev", init_hold=False, roles=[]),
+        start=StartMode.WITH_GENERATED_ROLES,
+        pending_directives=[],
+        app=app,
+        typ=DeploymentType.MAIN_ORCHESTRATOR,
+        state=DeploymentState(value=State.ACTIVE),
+    )
     # call method
     harness.charm.config_manager.update_opensearch_config()
 
@@ -186,9 +199,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
         if substrate == "vm"
         else "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"
     )
-    expected_network_host = (
-        ["_site_", "_local_", "10.10.10.10"] if substrate == "vm" else ["0.0.0.0"]
-    )
+    expected_network_host = ["10.10.10.10"]
     assert opensearch_conf["network.host"] == expected_network_host
     assert opensearch_conf["network.publish_host"] == expected_publish_host
     assert opensearch_conf["http.publish_host"] == expected_publish_host
