@@ -94,7 +94,9 @@ class NotificationsEvents(Object):
         try:
             config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
         except OpenSearchSmtpMissingParametersError:
-            logger.error("SMTP parameters missing. Cannot create notification configs without them.")
+            logger.error(
+                "SMTP parameters missing. Cannot create notification configs without them."
+            )
             return
 
         # create/update SMTP sender config (config_id is relation-based)

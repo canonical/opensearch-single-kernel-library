@@ -713,9 +713,7 @@ class ClusterState(Object):
         for unit in all_units:
             if self.substrate == Substrates.K8S:
                 hosts.add(
-                    k8s_fqdn(
-                        format_unit_name(unit, app=self.application.deployment_desc.app)
-                    )
+                    k8s_fqdn(format_unit_name(unit, app=self.application.deployment_desc.app))
                 )
             else:
                 hosts.add(self.unit_ip(unit))

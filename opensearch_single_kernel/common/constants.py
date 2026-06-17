@@ -332,9 +332,6 @@ USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
-# OpenSearch container runs as UID 584792 to match rockcraft.yaml
-OPENSEARCH_RUN_AS_USER = 584792
-OPENSEARCH_RUN_AS_GROUP = 584792
 
 # Root group id (gid 0). Used when we want root to have group-level access.
 ROOT_GID = 0

@@ -118,7 +118,7 @@ class PeerCluster(RelationState):
 
     def data(self, peek_secrets: bool = False) -> PeerClusterRelData | None:
         """Get the relation data as a PeerClusterRelData object."""
-        if not (content:= self.relation.data[self.app].get("data", None)):
+        if not (content := self.relation.data[self.app].get("data", None)):
             return None
         return PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.secrets, content, peek_secrets=peek_secrets

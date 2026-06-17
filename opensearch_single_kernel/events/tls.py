@@ -402,7 +402,6 @@ class TLSEventsHandler(Object):
                 logger.info("on_tls_conf_set: Detected CA rotation complete in cluster")
                 self.charm.tls_manager.finalize_ca_certs_rotation()
 
-
     def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""
         if not self.charm.state.application.deployment_desc:
