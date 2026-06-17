@@ -587,10 +587,11 @@ class ClusterState(Object):
     @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
+        hosts = ["_site_", "_local_"]
         if self.substrate == Substrates.K8S:
             # K8s we allow binding on all interfaces
-            return [self.fqdn]  # only the DNS name that's in the cert SANs
-        return [socket.getfqdn(), self.host_ip]
+            return hosts + [self.fqdn]  # only the DNS name that's in the cert SANs
+        return hosts + [socket.getfqdn(), self.host_ip]
 
     @property
     def port(self) -> int:
@@ -704,7 +705,7 @@ class ClusterState(Object):
 
     @property
     def all_hosts(self) -> set[str]:
-        """Fetch the list of hosts for the current app."""
+        """Fetch the list of hosts for the current juju app."""
         hosts = set()
 
         if not (all_units := self.all_units):

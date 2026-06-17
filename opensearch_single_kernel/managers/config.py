@@ -44,7 +44,6 @@ class ConfigManager(BaseManager):
         self,
         roles: list[str] | None = None,
         cm_names: list[str] | None = None,
-        seed_hosts: list[str] | None = None,
         cm_ips: list[str] | None = None,
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
@@ -55,8 +54,6 @@ class ConfigManager(BaseManager):
         Args:
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
-            seed_hosts: override seed hosts got from nodes_config.
-                        (Cluster Manager hosts to be written to unicast_hosts.txt)
             cm_ips: override seed hosts got from nodes_config with IPs of CMs only.
 
         Raises:
@@ -71,20 +68,18 @@ class ConfigManager(BaseManager):
         config = (
             self._opensearch_static_config()
             | self._opensearch_general_config(roles)
-            | self._opensearch_host_config()
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
             | self._opensearch_tls_config(CertType.UNIT_HTTP)
             | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
+            | {"network.publish_host": self.state.node_host}
         )
 
         self._update_static_jvm_options()
 
         self.update_security_config()
 
-        if seed_hosts:
-            self._update_seeds_file(seed_hosts)
         if cm_ips:
             self._update_seeds_file(cm_ips)
         else:
@@ -150,20 +145,12 @@ class ConfigManager(BaseManager):
             "prometheus.nodes.filter": "_local",
         }
 
-    def _network_hosts(self) -> list[str]:
-        """Compute network.host entries for opensearch.yml."""
-        # Include _local_ (localhost) so localhost checks can succeed (readiness, internal checks).
-        return ["_site_", "_local_", *sorted(self.state.network_hosts)]
-
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""
-        if not (deployment_desc := self.state.application.deployment_desc):
-            return {}
-
         return {
             "cluster.name": deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
-            "network.host": self._network_hosts(),
+            "network.host": self.state.network_hosts,
             "http.publish_host": self.state.node_host,
             "node.roles": sorted(roles),
             "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
@@ -171,10 +158,6 @@ class ConfigManager(BaseManager):
             "path.logs": self.workload.paths.logs.as_posix(),
             "path.home": self.workload.paths.home.as_posix(),
         }
-
-    def _opensearch_host_config(self) -> dict[str, Any]:
-        """Network publish host settings written to opensearch.yml."""
-        return {"network.publish_host": self.state.node_host}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
         """Optional data temperature settings written to opensearch.yml."""
@@ -497,11 +480,11 @@ class ConfigManager(BaseManager):
         else:
             self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
 
-    def _update_seeds_file(self, seed_hosts: list[str] | None) -> None:
+    def _update_seeds_file(self, cm_hosts: list[str] | None) -> None:
         """Reconcile OpenSearch unicast_hosts.txt using provided values.
 
         Args:
-            seed_hosts: list of host IPs or DNS names to be written to unicast_hosts
+            cm_hosts: list of host IPs or DNS names to be written to unicast_hosts
 
         Returns:
             None
@@ -509,13 +492,13 @@ class ConfigManager(BaseManager):
         Raises:
             OpenSearchFileOperationError: if there is an error writing to the seeds file.
         """
-        if not seed_hosts:
+        if not cm_hosts:
             return
-        lines = "\n".join(sorted(set(seed_hosts)))
+        lines = "\n".join(sorted(set(cm_hosts)))
         self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
 
     def update_profile_configuration(self, profile: OpenSearchProfile) -> bool:
-        """Update JVM heap based on the performance profile.
+        """Update JVM heap in jvm.options based on the performance profile.
 
         Returns:
             whether the configuration changed and restart required.
@@ -546,25 +529,3 @@ class ConfigManager(BaseManager):
             f"-Xmx{heap_size_in_kb}k",
             regex=True,
         )
-
-    def _is_tls_layer_configured(self, layer: str, keystore_filename: str) -> bool:
-        """Check if TLS config for a layer is present and files exist."""
-        try:
-            config = self.yaml_setter.load(self.CONFIG_YML)
-            required_keys = [
-                f"plugins.security.ssl.{layer}.keystore_filepath",
-                f"plugins.security.ssl.{layer}.truststore_filepath",
-                f"plugins.security.ssl.{layer}.keystore_password",
-                f"plugins.security.ssl.{layer}.truststore_password",
-            ]
-            for key_path in required_keys:
-                value = get_nested_value(config, key_path)
-                if not (isinstance(value, str) and value.strip()):
-                    return False
-
-            keystore_path = self.workload.paths.certs / keystore_filename
-            truststore_path = self.workload.paths.certs / f"{CA_ALIAS}.p12"
-            cacert_path = self.workload.paths.certs / CA_TRUSTSTORE_P12
-            return keystore_path.exists() and truststore_path.exists() and cacert_path.exists()
-        except Exception:
-            return False

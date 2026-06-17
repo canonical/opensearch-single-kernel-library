@@ -49,7 +49,7 @@ class CosEventsHandler(Object):
             self.cos_integration = COSAgentProvider(
                 self.charm,
                 relation_name=COS_RELATION,
-                scrape_configs=self.scrape_vm_config,
+                scrape_configs=self.scrape_vm_config(),
                 refresh_events=[
                     self.charm.on.config_changed,
                     self.charm.on.set_password_action,

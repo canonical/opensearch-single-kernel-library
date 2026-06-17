@@ -435,7 +435,7 @@ class ClusterManager(BaseManager):
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
         logger.info("securityadmin.sh execution completed successfully")
-        self._put_security_index_initialised()
+        self.state.application.is_security_index_initialised = True
 
     def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
         """Run the security_admin script for specified config file, avoiding changes to others."""
@@ -461,27 +461,6 @@ class ClusterManager(BaseManager):
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
-
-    def check_if_can_start(self) -> bool:
-        """Apply the directives computed by the opensearch peer cluster manager."""
-        if not (deployment_desc := self.state.application.deployment_desc):
-            # the deployment description hasn't finished being computed by the leader
-            return False
-
-        # check possibility to start
-        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
-        if self.no_blocking_directives(deployment_desc):
-            try:
-                self.get_nodes(False)
-            except OpenSearchHttpError:
-                return False
-            return True
-        return False
-
-    def _put_security_index_initialised(self) -> None:
-        """Set the security index initialized flag."""
-        # TODO: Add peer cluster updates here we need to update relations
-        self.state.application.is_security_index_initialised = True
 
     def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
@@ -581,6 +560,7 @@ class ClusterManager(BaseManager):
                     unit_number=node.unit_number,
                     temperature=temperature,
                 )
+
         if self.state.application.nodes_config == updated_nodes:
             return False
 
@@ -659,7 +639,7 @@ class ClusterManager(BaseManager):
                 ip=node.ip,
                 app=node.app,
                 unit_number=node.unit_number,
-                # clean temp on auto generated roles
+                # clean previously set temperature when switching to auto generated roles
                 temperature=None,
             )
         logger.debug(
@@ -677,10 +657,7 @@ class ClusterManager(BaseManager):
             remaining_nodes = [
                 node
                 for node in self.get_nodes(self.opensearch_client.is_node_up())
-                if node.name
-                != format_unit_name(
-                    self.state.unit_name, app=self.state.application.deployment_desc.app
-                )
+                if node.name != self.state.unit_name
             ]
             self.compute_and_broadcast_updated_topology(remaining_nodes)
         elif is_last_unit:

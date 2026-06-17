@@ -172,7 +172,6 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
     harness.charm.config_manager.update_opensearch_config(
         roles=["cluster_manager", "data"],
         cm_names=["cm1"],
-        seed_hosts=["20.20.20.20"],
     )
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     assert opensearch_conf["cluster.name"] == "opensearch-dev"

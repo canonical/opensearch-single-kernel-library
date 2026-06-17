@@ -209,7 +209,7 @@ class OpenSearchServer(RelationState):
     @pebble_observer_pid.deleter
     def pebble_observer_pid(self) -> None:
         """Clear the stored pebble observer PID."""
-        self.update({"pebble-observer-pid": ""})
+        self.relation.data[self.unit].pop("pebble-observer-pid", None)
 
     @property
     def allocation_exclusions_to_delete(self) -> set[str]:

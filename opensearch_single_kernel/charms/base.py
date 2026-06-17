@@ -145,6 +145,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.jwt_events = JWTEventsHandler(self)
         self.oauth_events = OAuthEventsHandler(self)
 
+        # Re-dispatch deferred events once pebble is ready; without this, a slow pebble startup
+        # leaves the charm stuck with all events deferred and no trigger to replay them.
         self.pebble_observer = PebbleObserver(self)
 
         self.status_handler = StatusHandler(
@@ -224,11 +226,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.trigger_peer_rel_changed(on_other_units=True)
             return
 
-        status = self.health_manager.get(
+        return self.health_manager.get(
             wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
         )
-        logger.info("Current health of cluster: %s", status)
-        return status
 
     @property
     @abstractmethod

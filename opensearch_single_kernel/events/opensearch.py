@@ -873,10 +873,7 @@ class OpenSearchEventsHandler(Object):
         # - admin user and security index configured/initialised
         # - cluster health
         try:
-            if (
-                not self.check_profile_requirements()
-                or not self.charm.cluster_manager.check_if_can_start()
-            ):
+            if not self.check_profile_requirements():
                 logger.info("Conditions not met to start opensearch. Will retry next event.")
                 event.defer()
                 return
@@ -1371,7 +1368,19 @@ class OpenSearchEventsHandler(Object):
         we check cluster health and start.
         """
         # Case of the first "main" cluster to get started.
-        deployment_desc = self.charm.state.application.deployment_desc
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            # the deployment description hasn't finished being computed by the leader
+            return False
+
+        # check possibility to start
+        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
+        if not self.charm.cluster_manager.no_blocking_directives(deployment_desc):
+            return False
+        try:
+            self.charm.cluster_manager.get_nodes(False)
+        except OpenSearchHttpError:
+            return False
+
         if (
             not self.charm.state.application.is_security_index_initialised
             or not self.charm.cluster_manager.alt_hosts
