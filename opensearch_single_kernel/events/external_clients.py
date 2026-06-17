@@ -155,7 +155,7 @@ class ExternalClientsEventsHandler(Object):
             search_parameters={"id": event.relation.id},
         )
         try:
-            external_client.version = self.charm.external_clients_manager.version
+            external_client.version = self.charm.workload.version
         except OpenSearchCmdError as e:
             logger.error("Failed to update relation version info: %s", str(e))
             event.defer()

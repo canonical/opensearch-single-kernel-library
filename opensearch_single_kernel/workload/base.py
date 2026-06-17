@@ -432,3 +432,12 @@ class BaseWorkload(ABC):
     def opensearch_keystore_binary(self) -> str:
         """Return the path to the opensearch-keystore binary."""
         raise NotImplementedError
+
+    @property
+    def version(self) -> str:
+        """Returns the version number of this opensearch instance."""
+        # Will have a format similar to:
+        # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
+        result = self.get_workload_version()
+        logger.debug("version call output: %s", result)
+        return result.split(", ")[0].split(": ")[1]

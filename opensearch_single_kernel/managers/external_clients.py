@@ -28,8 +28,9 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
+from opensearch_single_kernel.core.external_clients_relation import ExternalOpenSearchClient
 from opensearch_single_kernel.core.models import Node
-from opensearch_single_kernel.core.state import ClusterState, ExternalOpenSearchClient
+from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     generate_hashed_password,
@@ -275,15 +276,6 @@ class ExternalClientsManager(BaseManager):
         for dashboards_client in self.state.dashboards_clients:
             dashboards_client.username = KIBANA_SERVER_USER
             dashboards_client.password = pwd
-
-    @cached_property
-    def version(self) -> str:
-        """Returns the version number of this opensearch instance."""
-        # Will have a format similar to:
-        # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
-        result = self.workload.get_workload_version()
-        logger.debug("version call output: %s", result)
-        return result.split(", ")[0].split(": ")[1]
 
     @override
     def get_statuses(

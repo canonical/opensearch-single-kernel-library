@@ -118,12 +118,12 @@ class InternalUsersManager(BaseManager):
         """User creation for specific system users.
 
         Raises:
-            OpenSearchError: If user is not an internal user.
+            OpenSearchUserMgmtError: If user is not an internal user.
             OpenSearchFileOperationError: If internal_users.yml cannot be read or written
               due to any reason
         """
         if user not in OPENSEARCH_USERS:
-            raise OpenSearchError(f"User {user} is not an internal user.")
+            raise OpenSearchUserMgmtError(f"User {user} is not an internal user.")
 
         logger.debug("Creating internal user %s, with %s", user, hashed_pwd)
 

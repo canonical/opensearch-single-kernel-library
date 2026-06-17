@@ -1350,7 +1350,7 @@ class OpenSearchEventsHandler(Object):
             if sys_user := user_from_hash_key(label_key):
                 try:
                     self.charm.internal_users_manager.put_internal_user(sys_user, password)
-                except (OpenSearchFileOperationError, OpenSearchError) as e:
+                except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
                     logger.error("An error occurred while updating internal user: %s", str(e))
                     event.defer()
                     return
