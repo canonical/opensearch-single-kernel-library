@@ -495,24 +495,6 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            config_profile = self.charm.profiles_manager.config_profile
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.charm.state.config.get("profile"),
-            )
-            return
-
-        try:
-            if not self.check_profile_requirements():
-                event.defer()
-                return
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
-            event.defer()
-            return
-
         if self.charm.substrate == Substrates.VM and (
             self.charm.state.server.last_host_ip
             and self.charm.state.host_ip != self.charm.state.server.last_host_ip
@@ -544,6 +526,24 @@ class OpenSearchEventsHandler(Object):
 
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
+
+        try:
+            config_profile = self.charm.profiles_manager.config_profile
+        except ValueError:
+            logger.error(
+                "Invalid profile configuration. Value: %s",
+                self.charm.state.config.get("profile"),
+            )
+            return
+
+        try:
+            if not self.check_profile_requirements():
+                event.defer()
+                return
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            event.defer()
+            return
 
         profile_restart_needed = self.charm.config_manager.update_profile_configuration(
             config_profile
