@@ -26,6 +26,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
+from opensearch_single_kernel.common.pebble_observer import PebbleObserver
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.cos import CosEventsHandler
@@ -66,7 +67,6 @@ from opensearch_single_kernel.managers.internal_users import InternalUsersManage
 from opensearch_single_kernel.managers.keystore import KeystoreManager
 from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
-from opensearch_single_kernel.managers.pebble_observer import PebbleObserver
 from opensearch_single_kernel.managers.peer_cluster import PeerClusterManager
 from opensearch_single_kernel.managers.peer_cluster_orchestrator import (
     PeerClusterOrchestratorManager,
