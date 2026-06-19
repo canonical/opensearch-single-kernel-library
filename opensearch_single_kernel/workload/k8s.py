@@ -455,8 +455,6 @@ class K8sWorkload(BaseWorkload):
 
         # Currently, soft requirement (warn-only): tcp_retries2 should be
         # lowered for better stability. Do not block charm execution if this is not set.
-        # TODO: deploy the K8s admission webhook mutator to the K8s environment
-        #  and put the charm to blocked when tcp_retries2 values is not lowered
         tcp_retries2_config_method = (
             "recommended net.ipv4.tcp_retries2=5 (configure at kubelet/node level as appropriate)"
         )

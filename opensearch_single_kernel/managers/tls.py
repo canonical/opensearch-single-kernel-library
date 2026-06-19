@@ -448,11 +448,6 @@ class TlsManager(BaseManager):
         certs_dir_path = self.workload.paths.certs
         self.workload.unlink(store_path, missing_ok=True)
 
-        if self.state.substrate == Substrates.K8S and not store_path.as_posix().startswith("/"):
-            # anchor the store_path to the workload certs dir for K8s
-            # pebble has its own root-relative filesystem
-            store_path = self.workload.paths.certs / store_path.as_posix().lstrip("/")
-
         try:
             with (
                 self.workload.temp_file(

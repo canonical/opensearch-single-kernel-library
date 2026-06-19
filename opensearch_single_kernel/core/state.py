@@ -704,7 +704,7 @@ class ClusterState(Object):
         return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
-    def all_hosts(self) -> set[str]:
+    def peer_unit_hosts(self) -> set[str]:
         """Fetch the list of hosts for the current juju app."""
         hosts = set()
 

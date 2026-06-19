@@ -278,10 +278,7 @@ async def test_safe_scale_down_remove_leaders(
     if init_units_count < 5:
         # scale up by 5 - init units
         added_units = 5 - init_units_count
-        if substrate == "k8s":
-            await ops_test.model.applications[app].scale(scale_change=added_units)
-        else:
-            await ops_test.model.applications[app].add_unit(count=added_units)
+        await ops_test.model.applications[app].add_unit(count=added_units)
 
         await wait_until(
             ops_test,

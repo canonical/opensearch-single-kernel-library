@@ -44,7 +44,7 @@ class BaseManager(ManagerStatusProtocol):
     @property
     def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
-        all_hosts = self.state.all_hosts
+        all_hosts = self.state.peer_unit_hosts
 
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.update([node.ip for node in nodes_conf.values()])
