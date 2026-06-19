@@ -148,6 +148,7 @@ class VMWorkload(BaseWorkload):
         """Return VM keytool command via snap wrapper."""
         return "opensearch.keytool"
 
+    @override
     def get_host_public_ip(self) -> str | None:
         """Return unit public address from Juju."""
         cmd = "unit-get public-address"
@@ -380,11 +381,6 @@ class VMWorkload(BaseWorkload):
     def get_workload_version(self) -> str:
         """Return the workload version."""
         return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()
-
-    @property
-    def opensearch_keystore_binary(self) -> str:
-        """Return the path to the opensearch-keystore binary."""
-        return "opensearch.keystore"
 
     @override
     def memtotal(self) -> float:

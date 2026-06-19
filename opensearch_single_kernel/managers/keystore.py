@@ -8,7 +8,7 @@ This module manages OpenSearch keystore access and lifecycle.
 
 import logging
 
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_result, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import ObjectStorageType
 from opensearch_single_kernel.common.exceptions import (
@@ -37,7 +37,7 @@ class KeystoreManager(BaseManager):
     @property
     def keystore(self) -> str:
         """Return the path to the keystore."""
-        return self.workload.opensearch_keystore_binary
+        return self.workload.paths.opensearch_keystore_binary
 
     def _create_if_needed(self) -> None:
         """Creates the keystore if not already present."""
@@ -174,6 +174,12 @@ class KeystoreManager(BaseManager):
                     continue
                 raise
 
+    @retry(
+        retry=retry_if_result(lambda x: not x),
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(2),
+        retry_error_callback=lambda _: False,
+    )
     def reload(self) -> bool:
         """Reload the keystore.
 

@@ -207,12 +207,12 @@ class LockManager(PeerLockManager):
             except OpenSearchHttpError:
                 logger.exception("Error getting OpenSearch nodes")
                 return False
+
             logger.debug("[Node lock] Opensearch %s", online_nodes)
             if not online_nodes:
                 raise OpenSearchLockError("Failed to acquire lock due to absence of online nodes")
             try:
                 unit_with_lock = self.opensearch_client.get_unit_with_lock(host, self.alt_hosts)
-                logger.debug("[Node lock] Unit with opensearch lock: %s", unit_with_lock)
             except OpenSearchHttpError:
                 logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock
@@ -286,7 +286,7 @@ class LockManager(PeerLockManager):
         # - OR, unit is leader & lock granted in this Juju event
         return super().acquire()
 
-    def release(self) -> None:  # noqa C901
+    def release(self) -> None:
         """Release lock.
 
         Limitation: if lock acquired via OpenSearch document and all units offline, OpenSearch

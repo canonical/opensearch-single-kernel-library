@@ -92,6 +92,11 @@ class Paths:
         return self.conf / "opensearch.keystore"
 
     @property
+    def opensearch_keystore_binary(self) -> str:
+        """Name of the opensearch-keystore binary."""
+        return "opensearch.keystore"
+
+    @property
     def data(self) -> PathProtocol:
         """Get path to the data snap directory."""
         return self.snap_common / OpenSearchPaths.DATA.val
@@ -441,3 +446,8 @@ class BaseWorkload(ABC):
         result = self.get_workload_version()
         logger.debug("version call output: %s", result)
         return result.split(", ")[0].split(": ")[1]
+
+    @abstractmethod
+    def get_host_public_ip(self) -> str | None:
+        """Get the public IP address of the host."""
+        return None

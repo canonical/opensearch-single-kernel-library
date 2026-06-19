@@ -129,6 +129,9 @@ class ProfilesManager(BaseManager):
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
 
+        if not self.state.current_peer_cluster_app:
+            return [GeneralStatuses.ACTIVE_IDLE.value]
+
         if scope == "unit":
             try:
                 _ = self.config_profile
@@ -136,9 +139,7 @@ class ProfilesManager(BaseManager):
                 return [ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value]
 
             try:
-                if self.state.current_peer_cluster_app and (
-                    missing_requirements := self.get_missing_requirements()
-                ):
+                if missing_requirements := self.get_missing_requirements():
                     status_list.append(
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,

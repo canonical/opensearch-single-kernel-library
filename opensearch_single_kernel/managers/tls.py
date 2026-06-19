@@ -237,6 +237,8 @@ class TlsManager(BaseManager):
 
             if self.state.substrate == Substrates.VM:
                 ips.add(self.state.node_host)
+                if (public_ip := self.workload.get_host_public_ip()) is not None:
+                    ips.add(public_ip)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
         # so the certificate is accepted when clients connect by those names.
@@ -447,6 +449,8 @@ class TlsManager(BaseManager):
         self.workload.unlink(store_path, missing_ok=True)
 
         if self.state.substrate == Substrates.K8S and not store_path.as_posix().startswith("/"):
+            # anchor the store_path to the workload certs dir for K8s
+            # pebble has its own root-relative filesystem
             store_path = self.workload.paths.certs / store_path.as_posix().lstrip("/")
 
         try:

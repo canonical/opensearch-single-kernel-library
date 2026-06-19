@@ -138,11 +138,14 @@ class K8sPaths(BasePaths):
         """
         return self.root / OpenSearchPaths.BIN.val
 
+    @property
+    def opensearch_key_store_binary(self) -> str:
+        """Name of the opensearch-keystore binary."""
+        return (self.bin / "opensearch-keystore").as_posix()
+
 
 class K8sWorkload(BaseWorkload):
     """Kubernetes OpenSearch Workload."""
-
-    SERVICE_NAME = OPENSEARCH_PEBBLE_SERVICE_NAME
 
     def __init__(self, charm_root: Path, container: Container | None = None):
         """Initialize K8s workload.
@@ -153,7 +156,7 @@ class K8sWorkload(BaseWorkload):
         """
         super().__init__()
         if not container:
-            raise AttributeError("Container is required.")
+            raise ValueError("Container is required.")
         self.charm_root = LocalPath(charm_root)
         self.container = container
         self._paths: BasePaths | None = None
@@ -186,7 +189,7 @@ class K8sWorkload(BaseWorkload):
 
     @property
     @override
-    def can_connect(self):
+    def can_connect(self) -> bool:
         """Check if the workload container is connectable."""
         return self.container.can_connect()
 
@@ -205,7 +208,7 @@ class K8sWorkload(BaseWorkload):
             layer = self._build_pebble_layer()
             self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
 
-            logger.info("Configured pebble plan for %s service", self.SERVICE_NAME)
+            logger.info("Configured pebble plan for %s service", OPENSEARCH_PEBBLE_SERVICE_NAME)
 
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.warning("Failed to configure pebble plan: %s", e)
@@ -301,15 +304,16 @@ class K8sWorkload(BaseWorkload):
                 file_path.write_text(data)
             yield file_path
         finally:
-            if delete:
-                try:
-                    file_path.unlink()
-                except FileNotFoundError:
-                    pass
-                except PebbleConnectionError as e:
-                    logger.warning("Failed to delete temp file %s: %s", file_path, e)
-                except (PebbleError, ModelError, OSError, ValueError) as e:
-                    logger.warning("Failed to delete temp file %s: %s", file_path, e)
+            if not delete:
+                return
+            try:
+                file_path.unlink()
+            except FileNotFoundError:
+                pass
+            except PebbleConnectionError as e:
+                logger.warning("Failed to delete temp file %s: %s", file_path, e)
+            except (PebbleError, ModelError, OSError, ValueError) as e:
+                logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
     def run_script(self, script_name: str, args: str | None = None):
@@ -325,12 +329,11 @@ class K8sWorkload(BaseWorkload):
         Raises:
             OpenSearchCmdError: if container is not connected or script execution fails.
         """
-        script_path = "%s/%s" % (self.paths.home, script_name)
-        bash_cmd = "bash %s" % script_path
-        full_command = "%s %s" % (bash_cmd, args) if args is not None else bash_cmd
+        script_path = f"{self.paths.home}/{script_name}"
+        bash_cmd = f"bash {script_path}"
+        full_command = f"{bash_cmd} {args}" if args is not None else bash_cmd
         env_setup = self._build_script_environment(full_command)
-        quoted = shlex.quote(env_setup)
-        result = self.run_cmd(f"bash -c {quoted}")
+        result = self.run_cmd("bash -c", shlex.quote(env_setup))
         return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)
 
     def _build_script_environment(self, command: str) -> str:
@@ -455,7 +458,7 @@ class K8sWorkload(BaseWorkload):
             self._configure_pebble_plan(enable_checks=True)
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
+            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
             raise OpenSearchStartError() from e
 
     @override
@@ -497,12 +500,12 @@ class K8sWorkload(BaseWorkload):
 
             service = self._get_service()
             if service is not None and service.current == ServiceStatus.ACTIVE:
-                logger.info("The %s service is already started.", self.SERVICE_NAME)
+                logger.info("The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME)
                 return
 
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
-            logger.error("Failed to start the %s service: %s", self.SERVICE_NAME, e)
+            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
             raise OpenSearchStartError() from e
 
     @override
@@ -658,7 +661,7 @@ class K8sWorkload(BaseWorkload):
 
             self.container.stop(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to stop the %s service: %s", self.SERVICE_NAME, e)
+            logger.error("Failed to stop the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
             raise OpenSearchStopError() from e
 
     @property

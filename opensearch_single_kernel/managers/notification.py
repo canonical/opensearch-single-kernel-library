@@ -250,13 +250,14 @@ class NotificationsManager(BaseManager):
         """Compute the manager's statuses."""
         status_list: list[StatusObject] = []
 
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return []
+
         if not self.state.smtp_relations:
             return [GeneralStatuses.ACTIVE_IDLE.value]
 
         if scope == "app":
-            if (
-                deployment_desc := self.state.application.deployment_desc
-            ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+            if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 for relation in self.state.smtp_relations:
                     self._add_relation_statuses(status_list, relation)
             else:

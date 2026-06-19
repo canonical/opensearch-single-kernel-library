@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -32,8 +31,7 @@ class PebbleObserver(Object):
 
     def start(self) -> None:
         """Start observer if not running; restart if previous process is dead."""
-        existing_pid = self._charm.state.server.pebble_observer_pid
-        if existing_pid is not None:
+        if (existing_pid := self._charm.state.server.pebble_observer_pid) is not None:
             try:
                 os.kill(existing_pid, 0)
                 return  # process is alive
@@ -76,8 +74,7 @@ class PebbleObserver(Object):
 
     def stop(self) -> None:
         """SIGTERM the observer subprocess and clear stored PID."""
-        pid = self._charm.state.server.pebble_observer_pid
-        if pid is None:
+        if (pid := self._charm.state.server.pebble_observer_pid) is None:
             return
 
         try:

@@ -24,45 +24,6 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 logger = logging.getLogger(__name__)
 
 
-def get_nested_value(config: dict, key_path: str) -> Any | None:
-    """Get a nested value from config dict using dotted key path.
-
-    Handles both flat dicts (with dotted keys) and nested dicts.
-
-    Args:
-        config: Dictionary to search in.
-        key_path: Dotted key path such as "plugins.security.ssl.transport.keystore_filepath".
-
-    Returns:
-        The value at the nested path, or None if not found.
-    """
-    if not isinstance(config, dict):
-        return None
-
-    # Fast-path for flat YAMLs where the full dotted key exists as-is.
-    if key_path in config:
-        return config.get(key_path)
-
-    keys = key_path.split(".")
-    value: Any = config
-
-    for idx, key in enumerate(keys):
-        if not isinstance(value, dict):
-            return None
-
-        # Support mixed representations where a prefix is flattened:
-        # such as {"plugins.security.disabled": false}
-        remaining = ".".join(keys[idx:])
-        if remaining in value:
-            return value.get(remaining)
-
-        value = value.get(key)
-        if value is None:
-            return None
-
-    return value
-
-
 class OutputType(Enum):
     """Enum representing the output type of a write operation."""
 
@@ -235,9 +196,8 @@ class YamlConfigSetter(ConfigSetter):
 
         if not self.workload.exists(path):
             raise FileNotFoundError(f"{path} not found.")
-        contents = self.workload.read_text(path)
 
-        lines = contents.split("\n")
+        lines = self.workload.read_text(path).strip().split("\n")
 
         # We are adding a random key:value to the end of the yaml
         # To make sure that the yaml reader will be able to read the file
@@ -246,11 +206,9 @@ class YamlConfigSetter(ConfigSetter):
         random_id = uuid.uuid4().hex
         lines.append(f"{random_id}: {random_id}")
 
-        data: dict | None = self.yaml.load(StringIO("\n".join(lines)))
-        if data is None:
-            return {}
+        data = self.yaml.load(StringIO("\n".join(lines)))
 
-        data.pop(random_id, None)
+        del data[random_id]
         return data
 
     @override
@@ -313,9 +271,11 @@ class YamlConfigSetter(ConfigSetter):
         target = self.load(config_file)
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
-        old_content = self.workload.read_text(path)
+        old_content = self.workload.read_text(path).strip()
         self.__dump(target, OutputType.file, config_file)
-        return old_content.strip() != path.read_text().strip()
+
+        new_content = path.read_text().strip()
+        return old_content != new_content
 
     @override
     def delete(
