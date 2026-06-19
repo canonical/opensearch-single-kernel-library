@@ -41,17 +41,17 @@ class DummyClientCharmCharm(ops.CharmBase):
         )
         framework.observe(self.on.request_action, self._on_request_action)
 
-    def _on_start(self, _: ops.StartEvent):
+    def _on_start(self, _: ops.StartEvent) -> None:
         """Handle start event."""
         self.unit.status = ops.ActiveStatus()
 
-    def _on_config_changed(self, event: ops.ConfigChangedEvent):
+    def _on_config_changed(self, event: ops.ConfigChangedEvent) -> None:
         """Handle config changed event."""
         config = self._charm_config()
         if config.ca_cert:
             self._write_ca_cert(config.ca_cert)
 
-    def _on_create_dummy_docs_action(self, event: ops.ActionEvent):
+    def _on_create_dummy_docs_action(self, event: ops.ActionEvent) -> None:
         """Handle create-dummy-docs action."""
         params = CreateDummyDocsActionParams.model_validate(event.params)
         client = self._opensearch_client(params.client_options(), params.ca_cert)
@@ -76,7 +76,7 @@ class DummyClientCharmCharm(ops.CharmBase):
             }
         )
 
-    def _on_generate_bulk_training_data_action(self, event: ops.ActionEvent):
+    def _on_generate_bulk_training_data_action(self, event: ops.ActionEvent) -> None:
         """Handle generate-bulk-training-data action."""
         params = GenerateBulkTrainingDataActionParams.model_validate(event.params)
         client = self._opensearch_client(params.client_options(), params.ca_cert)
@@ -106,7 +106,7 @@ class DummyClientCharmCharm(ops.CharmBase):
             }
         )
 
-    def _on_request_action(self, event: ops.ActionEvent):
+    def _on_request_action(self, event: ops.ActionEvent) -> None:
         """Handle generic OpenSearch request action."""
         params = RequestActionParams.model_validate(event.params)
         client = self._opensearch_client(params.client_options(), params.ca_cert)
@@ -123,7 +123,7 @@ class DummyClientCharmCharm(ops.CharmBase):
         )
         event.set_results({"status-code": response.status_code, "body": response.text})
 
-    def _on_bulk_insert_action(self, event: ops.ActionEvent):
+    def _on_bulk_insert_action(self, event: ops.ActionEvent) -> None:
         """Handle generated bulk insert action."""
         params = BulkInsertActionParams.model_validate(event.params)
         client = self._opensearch_client(params.client_options(), params.ca_cert)
@@ -176,7 +176,7 @@ class DummyClientCharmCharm(ops.CharmBase):
         return opensearch_client.OpenSearchClient(**options)
 
     @staticmethod
-    def _write_ca_cert(ca_cert_b64: str):
+    def _write_ca_cert(ca_cert_b64: str) -> None:
         """Write a base64-encoded CA certificate to disk."""
         try:
             ca_cert = base64.b64decode(ca_cert_b64, validate=True).decode()

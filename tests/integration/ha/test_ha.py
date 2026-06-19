@@ -281,11 +281,6 @@ async def test_kill_db_process_node_with_elected_cm(
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
 
 
-async def test_whatever(ops_test, c_writes):
-    await c_writes.clear()
-    logger.info("\n\n\n\nThe writes have been cleared.\n\n\n\n")
-
-
 @pytest.mark.abort_on_fail
 async def test_freeze_db_process_node_with_primary_shard(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner, substrate
@@ -332,9 +327,6 @@ async def test_freeze_db_process_node_with_primary_shard(
     time.sleep(10)
 
     # verify the unit is not reachable
-    logger.info(
-        f"Verifying that the unit {first_unit_with_primary_shard} is not reachable after SIGSTOP."
-    )
     is_node_up = await is_up(
         ops_test, units_ips[first_unit_with_primary_shard], retries=3, app=app, timeout=30
     )
@@ -683,10 +675,7 @@ async def test_full_cluster_crash(
     # sleep for restart delay + 45 secs max for the election time + node start + cluster formation
     # around 10 sec enough in a good machine - 45 secs for CI
     logger.info("Sleeping for restart delay + 45 seconds to allow cluster to restart and form.")
-    if substrate == "k8s":
-        time.sleep(45)
-    else:
-        time.sleep(ORIGINAL_RESTART_DELAY + 45)
+    time.sleep(ORIGINAL_RESTART_DELAY + 45)
 
     # verify all units are up and running
     for unit_id, unit_ip in (await get_application_unit_ids_ips(ops_test, app)).items():
@@ -770,7 +759,7 @@ async def test_full_cluster_restart(
 
     # sleep for restart delay + 45 secs max for the election time + node start + cluster formation
     # around 10 sec enough in a good machine - 45 secs for CI
-    time.sleep((ORIGINAL_RESTART_DELAY if substrate != "k8s" else 0) + 45)
+    time.sleep(ORIGINAL_RESTART_DELAY + 45)
 
     # verify all units are up and running
     for unit_id, unit_ip in (await get_application_unit_ids_ips(ops_test, app)).items():

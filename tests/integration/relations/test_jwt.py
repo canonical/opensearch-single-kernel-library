@@ -83,8 +83,6 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
     global generated_jwt
     generated_jwt = generate_json_web_token()
 
-    logger.info("Generated JWT for testing\n%s", generated_jwt)
-
     logger.info("Creating signing-key secret")
     secret_name = "jwt-signing-key"
     secret_id = (

@@ -82,13 +82,14 @@ async def test_build_and_deploy_with_manual_tls(
     )
     assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
 
+    logger.info("Scaling up the application by adding a new unit")
+
     if substrate == "k8s":
         # K8s integration currently supports only a single OpenSearch unit.
-        return
-
-    # Scale up the application by adding a new unit
-    logger.info("Scaling up the application by adding a new unit")
-    await os_app.add_unit(1)
+        await os_app.scale(scale_change=1)
+    else:
+        # Scale up the application by adding a new unit
+        await os_app.add_unit(1)
 
     # Wait for the new unit to be in maintenance
     logger.info("Waiting for the new unit to be in maintenance waiting for certificates")

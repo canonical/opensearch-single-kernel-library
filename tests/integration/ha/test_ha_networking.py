@@ -110,10 +110,7 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
         old_units_count = len(ops_test.model.applications[app].units)
-        if substrate == "k8s":
-            await ops_test.model.applications[app].scale(scale_change=1)
-        else:
-            await ops_test.model.applications[app].add_unit(count=1)
+        await ops_test.model.applications[app].add_unit(count=1)
         await wait_until(
             ops_test,
             apps=[app],
@@ -213,10 +210,7 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
         old_units_count = len(ops_test.model.applications[app].units)
-        if substrate == "k8s":
-            await ops_test.model.applications[app].scale(scale_change=1)
-        else:
-            await ops_test.model.applications[app].add_unit(count=1)
+        await ops_test.model.applications[app].add_unit(count=1)
         await wait_until(
             ops_test,
             apps=[app],
