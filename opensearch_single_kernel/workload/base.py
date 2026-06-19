@@ -441,7 +441,6 @@ class BaseWorkload(ABC):
         logger.debug("version call output: %s", result)
         return result.split(", ")[0].split(": ")[1]
 
-    @abstractmethod
     def get_host_public_ip(self) -> str | None:
         """Get the public IP address of the host."""
         return None
