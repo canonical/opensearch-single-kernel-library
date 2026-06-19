@@ -488,11 +488,6 @@ class OpenSearchEventsHandler(Object):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        if not (previous_deployment_desc := self.charm.state.application.deployment_desc):
-            logger.debug("Deployment description not yet computed, deferring event.")
-            event.defer()
-            return
-
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
                 "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
@@ -533,9 +528,14 @@ class OpenSearchEventsHandler(Object):
 
         config_restart_needed = False
         if self.charm.unit.is_leader():
+            previous_deployment_desc = self.charm.state.application.deployment_desc
+
             if self.charm.cluster_manager.reconcile_cluster_config():
                 new_deployment_desc = self.charm.state.application.deployment_desc
-                if previous_deployment_desc.config.roles != new_deployment_desc.config.roles:
+                if (
+                    previous_deployment_desc
+                    and previous_deployment_desc.config.roles != new_deployment_desc.config.roles
+                ):
                     # trigger roles change on the leader, other units will have their
                     # peer-rel-changed event triggered
                     self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
