@@ -17,7 +17,7 @@ from opensearch_single_kernel.core.models import (
     DeploymentState,
     PeerClusterConfig,
 )
-from opensearch_single_kernel.utils.config import YamlConfigSetter, get_nested_value
+from opensearch_single_kernel.utils.config import YamlConfigSetter
 from tests.unit.helpers import (
     config_path,
     jvm_options,
@@ -25,6 +25,26 @@ from tests.unit.helpers import (
     sec_conf_yml,
     seed_unicast_hosts,
 )
+
+
+def get_nested_value(config: dict, key_path: str) -> Any | None:
+    """Get a nested value from config dict using dotted key path."""
+    if not isinstance(config, dict):
+        return None
+    if key_path in config:
+        return config.get(key_path)
+    keys = key_path.split(".")
+    value: Any = config
+    for idx, key in enumerate(keys):
+        if not isinstance(value, dict):
+            return None
+        remaining = ".".join(keys[idx:])
+        if remaining in value:
+            return value.get(remaining)
+        value = value.get(key)
+        if value is None:
+            return None
+    return value
 
 
 @pytest.fixture
@@ -202,7 +222,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
     expected_network_host = ["10.10.10.10"]
     assert opensearch_conf["network.host"] == expected_network_host
     assert opensearch_conf["network.publish_host"] == expected_publish_host
-    assert opensearch_conf["http.publish_host"] == expected_publish_host
+    assert opensearch_conf["http.publish_host"] == [expected_publish_host]
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
 

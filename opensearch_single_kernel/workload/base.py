@@ -433,12 +433,6 @@ class BaseWorkload(ABC):
         raise NotImplementedError
 
     @property
-    @abstractmethod
-    def opensearch_keystore_binary(self) -> str:
-        """Return the path to the opensearch-keystore binary."""
-        raise NotImplementedError
-
-    @property
     def version(self) -> str:
         """Returns the version number of this opensearch instance."""
         # Will have a format similar to:

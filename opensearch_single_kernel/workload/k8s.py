@@ -138,7 +138,7 @@ class K8sPaths(BasePaths):
         return self.root / OpenSearchPaths.BIN.val
 
     @property
-    def opensearch_key_store_binary(self) -> str:
+    def opensearch_keystore_binary(self) -> str:
         """Name of the opensearch-keystore binary."""
         return (self.bin / "opensearch-keystore").as_posix()
 
@@ -644,11 +644,6 @@ class K8sWorkload(BaseWorkload):
         return self.run_cmd(
             f"{self.paths.bin}/opensearch", args="--version 2>/dev/null"
         ).out.strip()
-
-    @property
-    def opensearch_keystore_binary(self) -> str:
-        """Return the path to the opensearch-keystore binary."""
-        return (self.paths.bin / "opensearch-keystore").as_posix()
 
     @override
     def memtotal(self) -> float:

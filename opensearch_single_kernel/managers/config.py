@@ -148,7 +148,8 @@ class ConfigManager(BaseManager):
         """General OpenSearch settings written to opensearch.yml."""
         publish_hosts = [self.state.node_host]
         if self.state.substrate == Substrates.VM:
-            publish_hosts.append(self.workload.get_host_public_ip())
+            if public_ip := self.workload.get_host_public_ip():
+                publish_hosts.append(public_ip)
         return {
             "cluster.name": self.state.application.deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,

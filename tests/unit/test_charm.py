@@ -179,6 +179,9 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
+    )
 
     # test when setup complete
     should_ignore_lock.return_value = False
