@@ -5,7 +5,6 @@
 """Kubernetes Workload."""
 
 import logging
-import shlex
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -331,89 +330,14 @@ class K8sWorkload(BaseWorkload):
         """
         script_path = f"{self.paths.home}/{script_name}"
         bash_cmd = f"bash {script_path}"
-        full_command = f"{bash_cmd} {args}" if args is not None else bash_cmd
-        env_setup = self._build_script_environment(full_command)
-        result = self.run_cmd("bash -c", shlex.quote(env_setup))
-        return SimpleNamespace(cmd=env_setup, out=result.out, err=result.err, returncode=0)
-
-    def _build_script_environment(self, command: str) -> str:
-        """Build environment setup string for script execution.
-
-        Sets up environment variables needed by OpenSearch scripts:
-        - OPENSEARCH_HOME: OpenSearch installation directory
-        - OPENSEARCH_PATH_CONF: Configuration directory
-        - JAVA_HOME: Java installation directory
-        - PATH: Includes Java bin and OpenSearch bin directories
-
-        Args:
-            command: script command to execute after environment setup.
-
-        Returns:
-            str: environment setup string with exports and command.
-        """
-        java_home = self.paths.jdk
-        opensearch_home = self.paths.home
-        opensearch_bin = self.paths.bin
-        opensearch_conf = self.paths.conf
-
-        # build PATH with Java bin, OpenSearch bin, and system paths
-        path_value = "%s/bin:%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" % (
-            java_home,
-            opensearch_bin,
-        )
-
-        # use export to make variables available to the script
-        # bash -c expects a single string argument, and the shell will handle
-        # argument parsing correctly.
-        return (
-            'export OPENSEARCH_HOME="%s" && '
-            'export OPENSEARCH_PATH_CONF="%s" && '
-            'export JAVA_HOME="%s" && '
-            'export PATH="%s" && '
-            "%s"
-        ) % (opensearch_home, opensearch_conf, java_home, path_value, command)
+        result = self.run_cmd(bash_cmd, args)
+        return SimpleNamespace(cmd=bash_cmd, out=result.out, err=result.err, returncode=0)
 
     @property
     @override
     def keytool_cmd(self) -> str:
         """Return keytool command path from the workload JDK."""
         return (self.paths.jdk / "bin" / "keytool").as_posix()
-
-    def _get_pod_fqdn(self) -> str | None:
-        """Get pod FQDN using hostname -f command.
-
-        In K8s, hostname -f returns the pods FQDN that resolves via DNS.
-
-        Returns:
-            str or None: FQDN if successful, None otherwise.
-        """
-        try:
-            if (
-                (result := self.run_cmd("hostname", args="-f"))
-                and result.returncode == 0
-                and isinstance(result.out, str)
-                and result.out.strip()
-            ):
-                return result.out.strip()
-        except OpenSearchCmdError as e:
-            logger.debug("Failed to get FQDN via 'hostname -f', will try fallback. Error: %s", e)
-        return None
-
-    def _verify_hostname_resolves(self, hostname: str) -> bool:
-        """Verify that hostname resolves via DNS using getent.
-
-        Args:
-            hostname: hostname to verify.
-
-        Returns:
-            bool: True if hostname resolves, False otherwise.
-        """
-        try:
-            fqdn_result = self.run_cmd("getent", args="hosts %s" % hostname)
-            return fqdn_result.returncode == 0
-        except OpenSearchCmdError as e:
-            logger.debug("Failed to get FQDN via 'getent hosts', using hostname. Error: %s", e)
-            return False
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -429,8 +353,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            service = self._get_service()
-            if service is None:
+            if (service := self._get_service()) is None:
                 return False
 
             if service.current == ServiceStatus.ACTIVE:
@@ -472,8 +395,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            service = self._get_service()
-            if service is None:
+            if (service := self._get_service()) is None:
                 return False
 
             return service.current == ServiceStatus.ERROR
@@ -498,8 +420,9 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            service = self._get_service()
-            if service is not None and service.current == ServiceStatus.ACTIVE:
+            if (
+                service := self._get_service()
+            ) is not None and service.current == ServiceStatus.ACTIVE:
                 logger.info("The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME)
                 return
 
@@ -628,7 +551,6 @@ class K8sWorkload(BaseWorkload):
                 raise OpenSearchCmdError(cmd=command, out="", err="Container not connected")
 
             cmd_list = build_command_list(command_with_args)
-            logger.debug("Executing command list: %s", cmd_list)
 
             process = self.container.exec(
                 cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
@@ -673,9 +595,6 @@ class K8sWorkload(BaseWorkload):
         is a ContainerPath bound to self.container.
         """
         if self._paths is None:
-            # access self.root which depends on self.container
-            # this may raise RuntimeError if container isn't set, which is expected
-            # during initialization before container is available
             root_path = self.root
             self._paths = K8sPaths(root_path, self.charm_root)
         return self._paths
