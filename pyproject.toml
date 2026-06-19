@@ -43,7 +43,7 @@ requests = "2.32.4"
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
 pydantic = ">= 1.0"
-cryptography = "^45.0.4"
+cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.7"
 poetry-core = "<2.0.0"
@@ -60,7 +60,7 @@ ops = "^3.3.0"
 # data_platform_libs/v0/upgrade.py
 pydantic = ">= 1.0"
 # tls_certificates_interface/v3/tls_certificates.py
-cryptography = "^45.0.4"
+cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
 cosl = "^1.0.0"
