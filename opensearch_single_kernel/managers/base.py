@@ -57,13 +57,13 @@ class BaseManager(ManagerStatusProtocol):
 
         client = self.opensearch_client
 
-        return random.shuffle(
-            [
-                host
-                for host in all_hosts
-                if host != self.state.node_host and client.is_node_up(host)
-            ]
-        )
+        active_hosts = [
+            host for host in all_hosts if host != self.state.node_host and client.is_node_up(host)
+        ]
+
+        random.shuffle(active_hosts)
+
+        return active_hosts
 
     def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
