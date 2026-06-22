@@ -92,7 +92,9 @@ class CosEventsHandler(Object):
     def scrape_vm_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config for VM platform."""
         if (
-            not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
+            # deployment_desc is used to get unit name which is needed for prometheus labels
+            not self.charm.state.application.deployment_desc
+            or not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
             or not (pwd := self.charm.state.application.cos_password)
             or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
         ):
@@ -119,6 +121,7 @@ class CosEventsHandler(Object):
         """Generate the scrape config for K8s platform."""
         try:
             if (
+                # deployment_desc is used to get unit name which is needed for prometheus labels
                 not self.charm.state.application.deployment_desc
                 or not (pwd := self.charm.state.application.cos_password)
                 or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
