@@ -17,7 +17,6 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     Substrates,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 from opensearch_single_kernel.lib.charms.grafana_agent.v0.cos_agent import (
     COSAgentProvider,
 )
@@ -119,17 +118,13 @@ class CosEventsHandler(Object):
 
     def scrape_k8s_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config for K8s platform."""
-        try:
-            if (
-                # deployment_desc is used to get unit name which is needed for prometheus labels
-                not self.charm.state.application.deployment_desc
-                or not (pwd := self.charm.state.application.cos_password)
-                or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
-            ):
-                # Not yet ready, waiting for certain values to be set
-                return []
-        except OpenSearchFileOperationError as e:
-            logger.warning(f"Error reading prometheus labels: {e}")
+        if (
+            # deployment_desc is used to get unit name which is needed for prometheus labels
+            not self.charm.state.application.deployment_desc
+            or not (pwd := self.charm.state.application.cos_password)
+            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
+        ):
+            # Not yet ready, waiting for certain values to be set
             return []
 
         tls_enabled = self.charm.tls_manager.all_tls_resources_stored()

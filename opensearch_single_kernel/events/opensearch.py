@@ -192,10 +192,7 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
-                try:
-                    self._reconfigure_and_restart_if_needed()
-                except OpenSearchFileOperationError as e:
-                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                if not self._reconfigure_and_restart_if_needed():
                     event.defer()
                     return
             if self.charm.state.application.missing_relations:
@@ -210,17 +207,11 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
-                try:
-                    self._reconfigure_and_restart_if_needed()
-                except OpenSearchFileOperationError as e:
-                    logger.error("An error occurred while updating opensearch config: %s", str(e))
+                if not self._reconfigure_and_restart_if_needed():
                     event.defer()
                     return
 
-        try:
-            self.charm.config_manager.update_seeds_config()
-        except OpenSearchFileOperationError as e:
-            logger.error("An error occurred while updating seeds config: %s", str(e))
+        if not self.charm.config_manager.update_seeds_config():
             event.defer()
             return
 
@@ -444,10 +435,7 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.debug("update_status: Detected CA rotation complete in cluster")
-            try:
-                self.charm.tls_manager.finalize_ca_certs_rotation()
-            except OpenSearchFileOperationError as e:
-                logger.error("Error finalizing CA rotation: %s", e)
+            self.charm.tls_manager.finalize_ca_certs_rotation()
         # If relation not broken - leave
         if self.charm.state.tls_relation:
             return
@@ -1437,10 +1425,7 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.ca_and_certs_rotation_complete_in_cluster
         ):
             logger.info("post_start_init: Detected CA rotation complete in cluster")
-            try:
-                self.charm.tls_manager.finalize_ca_certs_rotation()
-            except OpenSearchFileOperationError as e:
-                logger.error("Error finalizing CA rotation: %s", e)
+            self.charm.tls_manager.finalize_ca_certs_rotation()
 
         if self.charm.state.server.is_cluster_manager_removed:
             # restore cluster_manager role and restart the service
@@ -1570,9 +1555,18 @@ class OpenSearchEventsHandler(Object):
 
             self.request_new_admin_certificate()
 
-    def _reconfigure_and_restart_if_needed(self) -> None:
-        """Reconfigure and restart the unit if needed after a config change."""
-        if self.charm.config_manager.update_opensearch_config():
+    def _reconfigure_and_restart_if_needed(self) -> bool:
+        """Reconfigure and restart the unit if needed after a config change.
+
+        Returns:
+            True on success, False if a filesystem error prevented reconfiguration.
+        """
+        try:
+            changed = self.charm.config_manager.update_opensearch_config()
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while updating opensearch config: %s", e)
+            return False
+        if changed:
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.WAITING_TO_START.value,
                 "app",
@@ -1580,3 +1574,4 @@ class OpenSearchEventsHandler(Object):
             )
             logger.debug("Restarting opensearch due to reconfiguring node roles")
             self.charm.restart_opensearch_event.emit()
+        return True

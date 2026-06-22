@@ -36,6 +36,8 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
     OpenSearchProvidedRolesException,
@@ -435,8 +437,12 @@ class ClusterManager(BaseManager):
         logger.info("securityadmin.sh execution completed successfully")
         self.state.application.is_security_index_initialised = True
 
-    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
-        """Run the security_admin script for specified config file, avoiding changes to others."""
+    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> bool:
+        """Run the security_admin script for specified config file, avoiding changes to others.
+
+        Returns:
+            True on success, False if the script failed.
+        """
         if not file.startswith("opensearch-security"):
             raise ValueError("security config is expected")
 
@@ -456,9 +462,14 @@ class ClusterManager(BaseManager):
         if admin_key_pwd is not None:
             args.append(f"-keypass {admin_key_pwd}")
 
-        self.workload.run_script(
-            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
-        )
+        try:
+            self.workload.run_script(
+                "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+            )
+        except OpenSearchCmdError as e:
+            logger.debug("Error when updating the security index: %s", e.out)
+            return False
+        return True
 
     def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
@@ -790,6 +801,9 @@ class ClusterManager(BaseManager):
             # At very early stages of the deployment, "node.roles" may not be yet present
             # in the opensearch.yml, nor APIs is responding. Therefore, we need to catch
             # the KeyError here and report the appropriate response.
+            return None
+        except OpenSearchFileOperationError as e:
+            logger.warning("Error reading prometheus labels: %s", e)
             return None
 
     @property

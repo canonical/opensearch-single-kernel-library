@@ -12,6 +12,7 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     Substrates,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -467,21 +468,26 @@ class ConfigManager(BaseManager):
             },
         }
 
-    def update_seeds_config(self, nodes: list[Node] | None = None) -> None:
+    def update_seeds_config(self, nodes: list[Node] | None = None) -> bool:
         """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config.
 
-        Raises:
-            OpenSearchFileOperationError: if there is an error writing to the seeds file.
+        Returns:
+            True on success, False if a filesystem error occurred.
         """
         nodes = nodes or []
         if nodes_config := self.state.application.nodes_config:
             nodes.extend(list(nodes_config.values()))
-        if self.state.substrate == Substrates.K8S:
-            self._update_seeds_file(
-                [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
-            )
-        else:
-            self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
+        try:
+            if self.state.substrate == Substrates.K8S:
+                self._update_seeds_file(
+                    [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
+                )
+            else:
+                self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while updating seeds config: %s", e)
+            return False
+        return True
 
     def _update_seeds_file(self, cm_hosts: list[str] | None) -> None:
         """Reconcile OpenSearch unicast_hosts.txt using provided values.

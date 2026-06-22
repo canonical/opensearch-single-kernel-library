@@ -21,7 +21,6 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import (
     OAuthStatuses,
 )
@@ -125,12 +124,9 @@ class OAuthEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.charm.cluster_manager.apply_security_config(
-                admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
-            )
-        except OpenSearchCmdError as e:
-            logger.debug(f"Error when updating the security index: {e.out}")
+        if not self.charm.cluster_manager.apply_security_config(
+            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+        ):
             event.defer()
             return
 
@@ -167,11 +163,8 @@ class OAuthEventsHandler(Object):
         if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
-        try:
-            self.charm.cluster_manager.apply_security_config(
-                admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
-            )
-        except OpenSearchCmdError as e:
-            logger.debug(f"Error when updating the security index: {e.out}")
+        if not self.charm.cluster_manager.apply_security_config(
+            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+        ):
             event.defer()
             return

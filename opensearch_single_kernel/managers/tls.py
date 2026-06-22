@@ -29,6 +29,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
+    OpenSearchHttpError,
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
@@ -376,8 +377,12 @@ class TlsManager(BaseManager):
 
         return None
 
-    def update_request_ca_bundle(self, ca_chain: str | None = None) -> None:
-        """Create a new chain.pem file for requests module"""
+    def update_request_ca_bundle(self, ca_chain: str | None = None) -> bool:
+        """Create a new chain.pem file for requests module.
+
+        Returns:
+            True on success, False if a filesystem error occurred.
+        """
         logger.debug("Updating requests TLS CA bundle")
         if ca_chain is None:
             admin_secret = self.state.application.admin_secrets
@@ -385,15 +390,20 @@ class TlsManager(BaseManager):
 
         # we store the pem format to make it easier for the python requests lib
         chain_path = self.workload.paths.certs_chain
-        if parent_dir_path := chain_path.parent:
-            self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
+        try:
+            if parent_dir_path := chain_path.parent:
+                self.workload.mkdir(parent_dir_path, parents=True, exist_ok=True)
 
-        # if the chain.pem already contains the current CA chain, we can skip rewriting it
-        bundle_content = (
-            self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
-        )
-        if ca_chain not in bundle_content:
-            self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
+            # if the chain.pem already contains the current CA chain, we can skip rewriting it
+            bundle_content = (
+                self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
+            )
+            if ca_chain not in bundle_content:
+                self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
+        except OpenSearchFileOperationError as e:
+            logger.error("Error updating request CA bundle: %s", e)
+            return False
+        return True
 
     def _remove_ca_from_request_bundle(self, ca_cert: str) -> None:
         """Remove the CA cert from the request bundle for the requests module."""
@@ -404,10 +414,14 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(bundle_path)
         self.workload.write_text(bundle_content.replace(ca_cert, ""), bundle_path)
 
-    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]) -> None:
-        """Add key and cert to keystore."""
+    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]) -> bool:
+        """Add key and cert to keystore.
+
+        Returns:
+            True on success, False if a filesystem or command error occurred.
+        """
         if not self.state.ca_rotation_complete_in_cluster:
-            return
+            return True
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         if cert_type == CertType.APP_ADMIN:
@@ -417,16 +431,21 @@ class TlsManager(BaseManager):
 
         if not secrets.get("key"):
             logger.error("TLS key not found, quitting.")
-            return
+            return True
         logger.debug("Storing %s TLS resources on disk.", cert_type.val)
-        self.store_key_pair(
-            name=cert_type.val,
-            store_pwd=secrets.get("keystore-password"),
-            store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
-            cert=secrets.get("cert"),
-            key=secrets.get("key"),
-            key_pwd=secrets.get("key-password"),
-        )
+        try:
+            self.store_key_pair(
+                name=cert_type.val,
+                store_pwd=secrets.get("keystore-password"),
+                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+                cert=secrets.get("cert"),
+                key=secrets.get("key"),
+                key_pwd=secrets.get("key-password"),
+            )
+        except (OpenSearchFileOperationError, OpenSearchCmdError) as e:
+            logger.error("Unable to store TLS resources for %s: %s", cert_type.val, e)
+            return False
+        return True
 
     def delete_stored_tls_resources(self) -> None:
         """Delete the TLS resources of the unit that are stored on disk."""
@@ -616,35 +635,52 @@ class TlsManager(BaseManager):
             logger.error("Error reading the current certificate: %s", e)
             return None
 
-    def reload_tls_certificates(self) -> None:
-        """Reload transport and HTTP layer communication certificates via REST APIs."""
+    def reload_tls_certificates(self) -> bool:
+        """Reload transport and HTTP layer communication certificates via REST APIs.
+
+        Returns:
+            True on success, False if the API call failed.
+        """
         # using the SSL API requires authentication with app-admin cert and key
         admin_secret = self.state.application.admin_secrets
         # the certs need to be created on the charm container filesystem
         # because the OpenSearch client library expects file paths for the cert and key
         charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
         self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
-        with (
-            self.workload.temp_file(
-                mode="w+t",
-                data=admin_secret["cert"],
-                dir=charm_container_tmp_dir,
-            ) as tmp_cert,
-            self.workload.temp_file(
-                mode="w+t",
-                data=admin_secret["key"],
-                dir=charm_container_tmp_dir,
-            ) as tmp_key,
-        ):
-            self.opensearch_client.reload_tls_certificates(
-                cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
-            )
+        try:
+            with (
+                self.workload.temp_file(
+                    mode="w+t",
+                    data=admin_secret["cert"],
+                    dir=charm_container_tmp_dir,
+                ) as tmp_cert,
+                self.workload.temp_file(
+                    mode="w+t",
+                    data=admin_secret["key"],
+                    dir=charm_container_tmp_dir,
+                ) as tmp_key,
+            ):
+                self.opensearch_client.reload_tls_certificates(
+                    cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
+                )
+        except OpenSearchHttpError as e:
+            logger.error("Could not reload TLS certificates via API: %s", e)
+            return False
+        return True
 
-    def finalize_ca_certs_rotation(self) -> None:
-        """Handle the completion of CA rotation."""
+    def finalize_ca_certs_rotation(self) -> bool:
+        """Handle the completion of CA rotation.
+
+        Returns:
+            True on success, False if a filesystem error occurred.
+        """
         logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
-        self.remove_old_ca()
-        self.update_request_ca_bundle()
+        try:
+            self.remove_old_ca()
+        except OpenSearchFileOperationError as e:
+            logger.error("Error removing old CA during rotation finalization: %s", e)
+            return False
+        return self.update_request_ca_bundle()
 
     def get_unit_certificates(self) -> dict[CertType, str]:
         """Retrieve the list of certificates for this unit."""
@@ -715,7 +751,11 @@ class TlsManager(BaseManager):
         self._remove_ca_from_request_bundle(old_ca)
 
     def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
-        """Add new CA cert to trust store."""
+        """Add new CA cert to trust store.
+
+        Returns:
+            True on success, False if data is missing or a filesystem error occurred.
+        """
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
 
@@ -723,23 +763,25 @@ class TlsManager(BaseManager):
         cert_secrets = self.get_secrets_for_cert_type(cert_type)
 
         if not (cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")):
-            logger.error("CA cert  or truststore-password not found, quitting.")
+            logger.error("CA cert or truststore-password not found, quitting.")
             return False
 
-        if not store_ca_chain(
-            workload=self.workload,
-            alias=CA_ALIAS,
-            store_pwd=admin_secrets.get("truststore-password"),
-            store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
-            ca=cert_secrets.get("ca-cert"),
-            keep_previous=True,
-            use_sudo=self.state.substrate == Substrates.VM,
-        ):
+        try:
+            if not store_ca_chain(
+                workload=self.workload,
+                alias=CA_ALIAS,
+                store_pwd=admin_secrets.get("truststore-password"),
+                store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
+                ca=cert_secrets.get("ca-cert"),
+                keep_previous=True,
+                use_sudo=self.state.substrate == Substrates.VM,
+            ):
+                return False
+        except OpenSearchFileOperationError as e:
+            logger.error("Error storing new CA certificate: %s", e)
             return False
 
-        self.update_request_ca_bundle(cert_secrets.get("chain"))
-
-        return True
+        return self.update_request_ca_bundle(cert_secrets.get("chain"))
 
     def peer_cluster_error_from_tls(
         self, peer_cluster_rel_data: PeerClusterRelData
