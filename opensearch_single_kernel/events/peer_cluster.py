@@ -114,7 +114,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Node not a provider. Skipping refresh relation data")
             return
 
-        if not deployment_desc:
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
