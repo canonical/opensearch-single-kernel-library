@@ -104,6 +104,7 @@ backends:
       GCP_SERVICE_ACCOUNT: "$(HOST: echo $GCP_SERVICE_ACCOUNT)"
       AZURE_STORAGE_ACCOUNT: "$(HOST: echo $AZURE_STORAGE_ACCOUNT)"
       AZURE_SECRET_KEY: "$(HOST: echo $AZURE_SECRET_KEY)"
+      DOCKERHUB_MIRROR: "$(HOST: echo $DOCKERHUB_MIRROR)"
       CONCIERGE_EXTRA_DEBS: pipx
     systems:
       - self-hosted-linux-amd64-noble-medium:
@@ -132,6 +133,15 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
+  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
+  then
+    mkdir -p /var/snap/k8s/common/etc/containerd/certs.d/docker.io
+    tee /var/snap/k8s/common/etc/containerd/certs.d/docker.io/hosts.toml << EOF
+    server = "$DOCKERHUB_MIRROR"
+    [host."${DOCKERHUB_MIRROR#'https://'}"]
+    capabilities = ["pull", "resolve"]
+  EOF
+  fi
 
   if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
