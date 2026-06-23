@@ -133,16 +133,6 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ -n "$DOCKERHUB_MIRROR" ]] && [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
-  then
-    mkdir -p /var/snap/k8s/common/etc/containerd/certs.d/docker.io
-    tee /var/snap/k8s/common/etc/containerd/certs.d/docker.io/hosts.toml << EOF
-    server = "$DOCKERHUB_MIRROR"
-    [host."${DOCKERHUB_MIRROR#'https://'}"]
-    capabilities = ["pull", "resolve"]
-  EOF
-  fi
-
   if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
     concierge prepare --trace -c concierge-k8s.yaml
