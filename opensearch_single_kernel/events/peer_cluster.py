@@ -97,8 +97,6 @@ class PeerClusterEventsHandler(Object):
     ):
         """Handle peer cluster orchestrator relation changed event."""
         logger.debug("Peer cluster orchestrator relation changed: %s", event)
-        if deployment_desc := self.charm.state.application.deployment_desc:
-            self.charm.opensearch_events.check_profile_requirements()
 
         if not self.charm.unit.is_leader():
             logger.debug("Node not a leader. Skipping refresh relation data")
@@ -266,7 +264,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         try:
-            self.charm.opensearch_events.check_profile_requirements()
+            self.charm.profiles_manager.check_profile_requirements()
         except OpenSearchCmdError as e:
             logger.warning(f"Error checking profile requirements: {e}. Deferring event.")
             event.defer()
@@ -545,7 +543,7 @@ class PeerClusterEventsHandler(Object):
         except ValueError:
             return
 
-        if not self.charm.opensearch_events.check_profile_requirements():
+        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         self.charm.config_manager._update_jvm_heap_size(
