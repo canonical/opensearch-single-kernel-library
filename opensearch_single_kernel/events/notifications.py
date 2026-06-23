@@ -216,11 +216,10 @@ class NotificationsEvents(Object):
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:
-            try:
-                self.charm.keystore_manager.remove_entries(keys)
+            if self.charm.keystore_manager.remove_entries(keys):
                 self.charm.reload_keystore_event.emit()
-            except OpenSearchCmdError as e:
-                logger.error("Failed to remove SMTP credentials from keystore: %s", e)
+            else:
+                logger.error("Failed to remove SMTP credentials from keystore.")
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
 

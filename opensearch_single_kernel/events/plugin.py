@@ -71,7 +71,8 @@ class PluginEventsHandler(Object):
             cleanup = unit_plugins[label].cleanup
             for key, items in cleanup.items():
                 if key == "keys":
-                    self.charm.keystore_manager.remove_entries(items)
+                    if not self.charm.keystore_manager.remove_entries(items):
+                        logger.error("Failed to remove plugin keystore entries.")
 
         # reload keystore
         self.charm.reload_keystore_event.emit()
