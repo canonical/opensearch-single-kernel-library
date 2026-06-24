@@ -52,4 +52,4 @@ def opensearch_base_path(substrate) -> Path:
 @pytest.fixture
 def opensearch_minus_1_base_path() -> Path:
     """The base path for the files of the n-1 opensearch charm."""
-    return _TESTS_DIR / "charms/opensearch_k8s_2.18_test_charm"
+    return _TESTS_DIR / "charms/opensearch_k8s_2.19.4_test_charm"
