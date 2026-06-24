@@ -127,7 +127,7 @@ jobs:
         path:
           - tests/charms/opensearch_test_charm
           - tests/charms/opensearch_k8s_test_charm
-          - tests/charms/opensearch_k8s_2.18_test_charm
+          - tests/charms/opensearch_k8s_2.19.4_test_charm
           - tests/charms/dummy-client-charm
           - tests/integration/relations/opensearch_provider/application-charm
     steps:
