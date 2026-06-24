@@ -135,6 +135,18 @@ prepare: |
 
   if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
   then
+  # Remove docker and fix iptable forwarding rules to avoid conflicts with k8s and cilium
+    sudo apt-get purge -y docker.io containerd 2>/dev/null || true
+    sudo apt-get autoremove -y 2>/dev/null || true
+    for chain in DOCKER DOCKER-ISOLATION-STAGE-1 DOCKER-ISOLATION-STAGE-2 DOCKER-USER DOCKER-FORWARD; do
+      sudo iptables -D FORWARD -j $chain 2>/dev/null || true
+      sudo iptables -F $chain 2>/dev/null || true
+      sudo iptables -X $chain 2>/dev/null || true
+      sudo iptables -t nat -F $chain 2>/dev/null || true
+      sudo iptables -t nat -X $chain 2>/dev/null || true
+    done
+    sudo iptables -P FORWARD ACCEPT
+
     concierge prepare --trace -c concierge-k8s.yaml
     # k8s status --wait-ready returns as soon as 1 node is ready
     # (see https://github.com/canonical/k8s-snap/issues/1789)
