@@ -49,9 +49,20 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             "opensearch_single_kernel.workload.vm.VMWorkload.check_missing_system_requirements",
             return_value=[],
         )
+
+        # Mock compatibility matrix reading
+        mocker.patch(
+            "opensearch_single_kernel.managers.upgrades_vm.UpgradesManagerVM.reconcile_compatibility_matrix",
+        )
+
     else:
         from tests.charms.opensearch_k8s_test_charm.src.charm import (
             OpenSearchK8sCharm as TestCharm,
+        )
+
+        # Mock compatibility matrix reading
+        mocker.patch(
+            "opensearch_single_kernel.managers.upgrades_k8s.UpgradesManagerK8s.reconcile_compatibility_matrix",
         )
 
     # In K8s, the container hostname is the Pod name ("opensearch-0").

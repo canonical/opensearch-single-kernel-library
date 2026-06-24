@@ -241,7 +241,7 @@ class ClusterState(Object):
         )
 
     @property
-    def sorted_server_upgrades(self) -> list[UpgradeServerState]:
+    def sorted_upgrades_units(self) -> list[UpgradeServerState]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
@@ -254,13 +254,23 @@ class ClusterState(Object):
                 )
                 for unit in sorted(
                     (self.server.unit, *self.upgrade_relation.units),
-                    key=lambda unit: unit.name.split("/")[1],
+                    key=lambda unit: int(unit.name.split("/")[1]),
                     reverse=True,
                 )
             ]
             if self.upgrade_relation
             else []
         )
+
+    @property
+    def pod_name(self) -> str:
+        """K8S only: The pod name."""
+        return self.model.unit.name.replace("/", "-")
+
+    @property
+    def namespace(self) -> str:
+        """K8S only: The namespace."""
+        return self.model.unit._backend.model_name
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 
@@ -587,10 +597,10 @@ class ClusterState(Object):
     @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
-        hosts = ["_site_", "_local_"]
+        hosts = ["_site_"]
         if self.substrate == Substrates.K8S:
             # K8s we allow binding on all interfaces
-            return hosts + [self.fqdn]  # only the DNS name that's in the cert SANs
+            return hosts + [self.fqdn] + ["_local_"]  # only the DNS name that's in the cert SANs
         return hosts + [socket.getfqdn(), self.host_ip]
 
     @property

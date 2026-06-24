@@ -315,7 +315,9 @@ class K8sWorkload(BaseWorkload):
                 logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
-    def run_script(self, script_name: str, args: str | None = None):
+    def run_script(
+        self, script_name: str, args: str | None = None, stdin: str | None = None
+    ) -> SimpleNamespace:
         """Run script provided by OpenSearch in the container.
 
         Args:
@@ -330,7 +332,7 @@ class K8sWorkload(BaseWorkload):
         """
         script_path = f"{self.paths.home}/{script_name}"
         bash_cmd = f"bash {script_path}"
-        result = self.run_cmd(bash_cmd, args)
+        result = self.run_cmd(bash_cmd, args, stdin=stdin)
         return SimpleNamespace(cmd=bash_cmd, out=result.out, err=result.err, returncode=0)
 
     @property

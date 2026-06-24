@@ -14,7 +14,7 @@ from ..ha.helpers import (
     assert_continuous_writes_consistency,
     assert_continuous_writes_increasing,
 )
-from ..helpers import APP_NAME, app_name, set_watermark, wait_until
+from ..helpers import APP_NAME, app_name, deploy_opensearch, set_watermark, wait_until
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     PROFILES_REVISION,
@@ -22,7 +22,7 @@ from .helpers import (
     VERSION_N,
     VERSION_N_MINUS_1,
     VERSION_N_MINUS_2,
-    VERSION_TO_REVISION,
+    VM_VERSION_TO_REVISION,
     assert_rollback_to_revision,
     assert_upgrade_to_local,
     assert_upgrade_to_revision,
@@ -49,7 +49,7 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
     """Deploy OpenSearch cluster from a given revision."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    revision = VERSION_TO_REVISION[version][series]
+    revision = VM_VERSION_TO_REVISION[version][series]
     await ops_test.model.deploy(
         OPENSEARCH_ORIGINAL_CHARM_NAME,
         application_name=APP_NAME,
@@ -91,9 +91,47 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_latest_from_channel(ops_test: OpsTest, series) -> None:
+async def test_deploy_latest_from_channel(
+    ops_test: OpsTest, charm_version_minus_1, series, substrate
+) -> None:
     """Deploy OpenSearch."""
-    await _build_env(ops_test, VERSION_N_MINUS_2, series)
+    if substrate == "k8s":
+        # Deploy from the local 2.18 charm to have n-1 version available
+        # TODO: Once revision released deploy from channel and remove local charm
+        await ops_test.model.set_config(MODEL_CONFIG)
+        charm_resources = {
+            "opensearch-image": "ghcr.io/canonical/charmed-opensearch:2.18.0-24.04_edge"
+        }
+        await deploy_opensearch(
+            ops_test,
+            charm_version_minus_1,
+            substrate,
+            APP_NAME,
+            3,
+            series=series,
+            config=CONFIG_OPTS,
+            resources=charm_resources,
+        )
+        # Deploy TLS Certificates operator.
+        config = {"ca-common-name": "CN_CA"}
+        await ops_test.model.deploy(
+            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
+        )
+        # Relate it to OpenSearch to set up TLS.
+        await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+        await wait_until(
+            ops_test,
+            apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
+            timeout=1400,
+            wait_for_exact_units={
+                APP_NAME: 3,
+            },
+            idle_period=60,
+        )
+
+        await set_watermark(ops_test, APP_NAME)
+    else:
+        await _build_env(ops_test, VERSION_N_MINUS_2, series)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
@@ -101,14 +139,14 @@ async def test_deploy_latest_from_channel(ops_test: OpsTest, series) -> None:
 @pytest.mark.skip("Can't upgrade between earlier versions")
 # TODO: re-enable after two versions available
 async def test_upgrade_to_n_minus_1(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, series
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, series, substrate
 ) -> None:
     """Test upgrade from upstream (n-2) to currently n-1 built version."""
     app = (await app_name(ops_test)) or APP_NAME
-    revision = VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_2)
+    revision = VM_VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
+    await assert_version_units(ops_test, app, VERSION_N_MINUS_2, substrate)
     await assert_upgrade_to_revision(ops_test, app=app, revision=revision)
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_1)
+    await assert_version_units(ops_test, app, VERSION_N_MINUS_1, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -118,12 +156,22 @@ async def test_upgrade_to_n_minus_1(
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 async def test_upgrade_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, charm
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    charm,
+    substrate,
+    charm_resources,
 ) -> None:
     """Test upgrade from n-1 to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME
-    await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-    await assert_version_units(ops_test, app, VERSION_N)
+    await assert_upgrade_to_local(
+        ops_test, app=app, charm=charm, substrate=substrate, charm_resources=charm_resources
+    )
+    await assert_version_units(ops_test, app, VERSION_N, substrate)
+    if substrate == "k8s":
+        # Update since the ips have changed after upgrade
+        await c_writes.update()
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -152,24 +200,26 @@ async def test_deploy_from_version(ops_test: OpsTest, version, series) -> None:
 @pytest.mark.abort_on_fail
 @pytest.mark.skip("Rollbacks not supported")
 # TODO re-enable after rollbacks best effort support is added
-async def test_upgrade_rollback_from_local(ops_test: OpsTest, version, charm, series) -> None:
+async def test_upgrade_rollback_from_local(
+    ops_test: OpsTest, version, charm, series, substrate
+) -> None:
     """Test upgrade and rollback to each version available."""
     app = (await app_name(ops_test)) or APP_NAME
-    revision = VERSION_TO_REVISION[version][series]
-    await assert_version_units(ops_test, app, version)
+    revision = VM_VERSION_TO_REVISION[version][series]
+    await assert_version_units(ops_test, app, version, substrate)
     await assert_rollback_to_revision(ops_test, app=app, charm=charm, revision=revision)
-    await assert_version_units(ops_test, app, version)
+    await assert_version_units(ops_test, app, version, substrate)
 
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 async def test_upgrade_from_version_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm, substrate
 ) -> None:
     """Test upgrade from usptream to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME
-    await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-    await assert_version_units(ops_test, app, VERSION_N)
+    await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
+    await assert_version_units(ops_test, app, VERSION_N, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)

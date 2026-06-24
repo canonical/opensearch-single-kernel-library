@@ -26,7 +26,7 @@ from .helpers import (
     VERSION_N,
     VERSION_N_MINUS_1,
     VERSION_N_MINUS_2,
-    VERSION_TO_REVISION,
+    VM_VERSION_TO_REVISION,
     assert_rollback_to_revision,
     assert_upgrade_to_local,
     assert_upgrade_to_revision,
@@ -59,7 +59,7 @@ async def _build_env(ops_test: OpsTest, version: str, series: str) -> None:
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
 
-    revision = VERSION_TO_REVISION[version][series]
+    revision = VM_VERSION_TO_REVISION[version][series]
     config = testing_config_if_supported(revision)
     await asyncio.gather(
         ops_test.model.deploy(
@@ -141,15 +141,15 @@ async def test_deploy_starting_version(ops_test: OpsTest, series) -> None:
 @pytest.mark.skip("Can't upgrade between earlier versions")
 # TODO: re-enable after two versions available
 async def test_upgrade_to_n_minus_1(
-    ops_test: OpsTest, series: str, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest, series: str, c_writes: ContinuousWrites, c_writes_runner, substrate
 ) -> None:
     """Test minor version upgrade from n-2 to n-1."""
     # upgrade to version n-1 revision for current series
-    revision = VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
+    revision = VM_VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
     for app in list(APPS.keys()):
-        await assert_version_units(ops_test, app, VERSION_N_MINUS_2)
+        await assert_version_units(ops_test, app, VERSION_N_MINUS_2, substrate)
         await assert_upgrade_to_revision(ops_test, app, revision)
-        await assert_version_units(ops_test, app, VERSION_N_MINUS_1)
+        await assert_version_units(ops_test, app, VERSION_N_MINUS_1, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -159,12 +159,12 @@ async def test_upgrade_to_n_minus_1(
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 async def test_upgrade_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, charm
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, charm, substrate
 ) -> None:
     """Test upgrade to local charm from n-1."""
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
-        await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-        await assert_version_units(ops_test, app, VERSION_N)
+        await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
+        await assert_version_units(ops_test, app, VERSION_N, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -190,13 +190,14 @@ async def test_upgrade_rollback_from_local(
     series: str,
     c_writes: ContinuousWrites,
     c_writes_runner,
+    substrate,
 ) -> None:
     """Test upgrade to local and rollback to given version."""
-    revision = VERSION_TO_REVISION[version][series]
+    revision = VM_VERSION_TO_REVISION[version][series]
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
-        await assert_version_units(ops_test, app, version)
+        await assert_version_units(ops_test, app, version, substrate)
         await assert_rollback_to_revision(ops_test, app, charm, revision)
-        await assert_version_units(ops_test, app, version)
+        await assert_version_units(ops_test, app, version, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -206,12 +207,12 @@ async def test_upgrade_rollback_from_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 async def test_upgrade_from_version_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm, substrate
 ) -> None:
     """Test upgrade from usptream to local charm."""
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
-        await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-        await assert_version_units(ops_test, app, VERSION_N)
+        await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
+        await assert_version_units(ops_test, app, VERSION_N, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)

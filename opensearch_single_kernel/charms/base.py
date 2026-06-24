@@ -75,6 +75,7 @@ from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
 from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
+from opensearch_single_kernel.managers.upgrades_k8s import UpgradesManagerK8s
 from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -130,9 +131,12 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
         self.snapshots_manager = SnapshotsManager(self.state, self.workload)
-        self.upgrades_manager = UpgradesManagerVM(self.state, self.workload)
+        if self.substrate == Substrates.K8S:
+            self.upgrades_manager = UpgradesManagerK8s(self.state, self.workload)
+        else:
+            self.upgrades_manager = UpgradesManagerVM(self.state, self.workload)
 
-        # Event Handlers
+        # Events
         self.opensearch_events = OpenSearchEventsHandler(self)
         self.upgrade_events = UpgradesEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
@@ -151,6 +155,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         self.status_handler = StatusHandler(
             self,
+            self.upgrades_manager,
             self.profiles_manager,
             self.tls_manager,
             self.health_manager,
@@ -162,7 +167,6 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.internal_users_manager,
             self.external_clients_manager,
             self.notifications_manager,
-            self.upgrades_manager,
         )
 
     def trigger_peer_rel_changed(

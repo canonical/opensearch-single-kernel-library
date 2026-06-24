@@ -108,6 +108,9 @@ async def deploy_opensearch(  # noqa: C901
         deploy_kwargs["resources"] = resources
     if storage:
         deploy_kwargs["storage"] = storage
+    if substrate == "k8s":
+        # This is needed for upgrades
+        deploy_kwargs["trust"] = True
 
     await ops_test.model.deploy(charm, **deploy_kwargs)
 

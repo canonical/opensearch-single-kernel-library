@@ -37,7 +37,7 @@ VERSION_N = "2.19.4"
 VERSION_N_MINUS_1 = "2.18.0"
 VERSION_N_MINUS_2 = "2.17.0"
 
-VERSION_TO_REVISION = {
+VM_VERSION_TO_REVISION = {
     VERSION_N_MINUS_2: {"jammy": 168, "noble": 206},
     VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
 }
@@ -52,7 +52,7 @@ UPGRADE_PARAMS = [
             id="two_version_upgrade" if version == VERSION_N_MINUS_2 else "one_version_upgrade"
         ),
     )
-    for version in VERSION_TO_REVISION.keys()
+    for version in VM_VERSION_TO_REVISION.keys()
 ]
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ def refresh(
     channel: Optional[str] = None,
     path: Optional[str] = None,
     config: Optional[dict[str, str]] = None,
+    resources: Optional[dict[str, str]] = None,
 ) -> None:
     # due to: https://github.com/juju/python-libjuju/issues/1057
     # the following call does not work:
@@ -90,6 +91,9 @@ def refresh(
         args.append(f"--channel={channel}")
     if path:
         args.append(f"--path={path}")
+    if resources:
+        for resource_name, resource_path in resources.items():
+            args.extend(["--resource", f"{resource_name}={resource_path}"])
     if config:
         for key, val in config.items():
             args.extend(["--config", f"{key}={val}"])
@@ -102,36 +106,40 @@ def refresh(
             subprocess.check_output(cmd)
 
 
-def get_version_on_unit(unit: str, model: str):
+def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
-    # opensearch.opensearch-bin not exposed in older snap revisions
-    cmd = [
-        "juju",
-        "exec",
-        "--model",
-        model,
-        "--unit",
-        unit,
-        "--",
-        "sudo",
-        "snap",
-        "run",
-        "--shell",
-        "opensearch.daemon",
-        "-c",
-        "$OPENSEARCH_BIN/opensearch --version",
-    ]
-    output = subprocess.check_output(cmd, text=True)
+    if substrate == "k8s":
+        cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+    else:
+        # opensearch.opensearch-bin not exposed in older snap revisions
+        cmd = [
+            "juju",
+            "exec",
+            "--model",
+            model,
+            "--unit",
+            unit,
+            "--",
+            "sudo",
+            "snap",
+            "run",
+            "--shell",
+            "opensearch.daemon",
+            "-c",
+            "$OPENSEARCH_BIN/opensearch --version",
+        ]
+        output = subprocess.check_output(cmd, text=True)
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 
 
-async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str):
+async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str, substrate):
     """Ensures all units in given app are running expected OpenSearch version"""
     logger.info("Ensuring units in '%s' running version %s", app, expected_version)
 
     units = [f"{app}/{unit.id}" for unit in await get_application_units(ops_test, app)]
-    versions = [get_version_on_unit(unit, ops_test.model.info.name) for unit in units]
+    versions = [get_version_on_unit(unit, ops_test.model.info.name, substrate) for unit in units]
     assert all(
         version == expected_version for version in versions
     ), f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
@@ -188,7 +196,12 @@ async def assert_upgrade_to_revision(
 
 
 async def assert_upgrade_to_local(
-    ops_test: OpsTest, app: str, charm: str, config: dict[str, str] = {}
+    ops_test: OpsTest,
+    app: str,
+    charm: str,
+    substrate: str,
+    charm_resources: dict[str, str] | None = None,
+    config: dict[str, str] = {},
 ):
     """Upgrades to local charm"""
     units = await get_application_units(ops_test, app)
@@ -201,7 +214,12 @@ async def assert_upgrade_to_local(
 
     async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
         logger.info("Refreshing '%s' local charm", app)
-        refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
+        if substrate == "k8s":
+            refresh(
+                ops_test, app, path=charm, config=CONFIG_OPTS | config, resources=charm_resources
+            )
+        else:
+            refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
 
         await wait_until(
             ops_test,

@@ -49,7 +49,9 @@ class UpgradesManagerVM(UpgradesManagerBase):
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             if self.state.server_upgrade.unit_state is UnitUpgradesState.OUTDATED:
-                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
+                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, {
+                    "param": "check-compatibility"
+                }
 
         if self.state.server_upgrade.snap_revision == OPENSEARCH_SNAP_REVISION:
             return (
@@ -69,12 +71,14 @@ class UpgradesManagerVM(UpgradesManagerBase):
             },
         )
 
-    def reconcile_partition(self, *, action_event: ops.ActionEvent | None = None) -> None:
+    def reconcile_partition(
+        self, *, action_event: ops.ActionEvent | None = None, force=False
+    ) -> None:
         """Handle Juju action to confirm first upgraded unit is healthy and resume upgrade."""
         if not action_event:
             return
 
-        first_upgrade_unit = self.state.sorted_server_upgrades[0]
+        first_upgrade_unit = self.state.sorted_upgrades_units[0]
         outdated = first_upgrade_unit.snap_revision != OPENSEARCH_SNAP_REVISION
         unhealthy = first_upgrade_unit.unit_state is not UnitUpgradesState.HEALTHY
         if outdated or unhealthy:
@@ -102,7 +106,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         """
         assert self.state.server_upgrade.snap_revision != OPENSEARCH_SNAP_REVISION
         assert self.state.application_upgrade.versions
-        for index, unit in enumerate(self.state.sorted_server_upgrades):
+        for index, unit in enumerate(self.state.sorted_upgrades_units):
             if unit.unit == self.state.server.unit:
                 # Higher number units have already upgraded
                 if index == 0:
@@ -153,8 +157,8 @@ class UpgradesManagerVM(UpgradesManagerBase):
             f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.current_versions.workload=} in unit databag after upgrade"
         )
 
-    def save_snap_revision_after_first_install(self):
-        """Set snap revision on first install"""
+    def save_revision_after_first_install(self) -> None:
+        """Save revision on first install"""
         self.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
         self.state.server_upgrade.workload_version = self.current_versions.workload
         logger.debug(
@@ -170,7 +174,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         the cluster is expected to be yellow during a rolling upgrade.
         """
         assert self.state.application_upgrade.versions
-        for index, server in enumerate(self.state.sorted_server_upgrades):
+        for index, server in enumerate(self.state.sorted_upgrades_units):
             if server.unit == self.state.server.unit:
                 is_rollback = (
                     self.state.application_upgrade.versions.charm == self.current_versions.charm
@@ -183,6 +187,6 @@ class UpgradesManagerVM(UpgradesManagerBase):
         """Whether upgrade is in progress"""
         return any(
             server.snap_revision != OPENSEARCH_SNAP_REVISION
-            for server in self.state.sorted_server_upgrades
+            for server in self.state.sorted_upgrades_units
             if server.snap_revision
         )

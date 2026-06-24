@@ -326,7 +326,6 @@ CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN = (
 DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
-
 # Endpoints
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"

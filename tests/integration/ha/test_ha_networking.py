@@ -373,15 +373,10 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
         ), "Unit is still reachable from controller"
 
     # verify node not up anymore
-    logger.info("Checking if the first elected CM node %s is down.", first_elected_cm_unit_id)
     assert not await is_up(
         ops_test, first_elected_cm_unit_ip, retries=3, app=app
     ), "Connection still possible to the first CM node where the network was cut."
 
-    logger.info(
-        "Checking that continuous writes are still increasing while the elected CM node %s is down.",
-        first_elected_cm_unit_id,
-    )
     await assert_continuous_writes_increasing(c_writes)
 
     # check new CM got elected
@@ -484,17 +479,10 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
         ), "Unit is still reachable from controller"
 
     # verify node not up anymore
-    logger.info(
-        "Checking if the node %s hosting the primary shard is down.", first_unit_with_primary_shard
-    )
     assert not await is_up(
         ops_test, first_unit_with_primary_shard_ip, retries=3, app=app
     ), "Connection still possible to the first unit with primary shard where the network was cut."
 
-    logger.info(
-        "Checking that continuous writes are still increasing while the node %s hosting the primary shard is down.",
-        first_unit_with_primary_shard,
-    )
     await assert_continuous_writes_increasing(c_writes)
 
     # check new primary shard got elected
