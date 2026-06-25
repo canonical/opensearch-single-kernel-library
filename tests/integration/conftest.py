@@ -115,3 +115,9 @@ async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate):
             CLIENT_CHARM,
         )
         await ops_test.model.wait_for_idle(apps=[CLIENT_CHARM])
+
+
+@pytest.fixture
+async def data_integrator_charm(ubuntu_base: str) -> str:
+    """Return path to data integrator charm according to ubuntu base."""
+    return f"./tests/charms/data-integrator/data-integrator_ubuntu@{ubuntu_base}-amd64.charm"

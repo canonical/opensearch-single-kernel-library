@@ -419,7 +419,10 @@ class OpenSearchEventsHandler(Object):
         elif (
             self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
         ):
-            self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+            try:
+                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+            except OpenSearchHttpError as e:
+                logger.error("unable to get remove lingering relation users and roles %s", e)
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -529,7 +532,7 @@ class OpenSearchEventsHandler(Object):
         )
         if self.charm.unit.is_leader():
             try:
-                self.charm.external_clients_manager.update_relations_roles_mapping()
+                self.charm.external_clients_manager.reconcile_role_mappings()
             except OpenSearchUserMgmtError as e:
                 logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()

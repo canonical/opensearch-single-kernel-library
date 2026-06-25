@@ -642,3 +642,16 @@ class UpgradesStatuses(Enum):
         action="Run `juju trust {charm_app} --scope=cluster`.",
         approved_critical_component=True,
     )
+
+
+class LdapStatuses(Enum):
+    """Collection of charm statuses related to LDAP relation."""
+
+    LDAP_DATA_UNAVAILABLE = StatusObject(status="blocked", message="LDAP data is unavailable")
+    LDAPS_NOT_ENABLED = StatusObject(status="blocked", message="LDAPS is not enabled")
+    CERT_NOT_CONNECTED = StatusObject(
+        status="blocked", message="LDAP certificates are not connected"
+    )
+    RELATION_INVALID = StatusObject(
+        status="blocked", message="LDAP relation must be created on main cluster orchestrator"
+    )

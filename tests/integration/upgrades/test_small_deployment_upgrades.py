@@ -68,7 +68,7 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
@@ -117,7 +117,7 @@ async def test_deploy_latest_from_channel(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         )
         # Relate it to OpenSearch to set up TLS.
-        await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
         await wait_until(
             ops_test,
             apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],

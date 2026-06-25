@@ -5,6 +5,9 @@
 
 """State collection for external client relation."""
 
+import json
+import logging
+
 from ops.model import Application, Relation
 
 from opensearch_single_kernel.core.relations import RelationState
@@ -12,13 +15,17 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     Data,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ExternalOpenSearchClient(RelationState):
     """State collection for a single related external opensearch client."""
 
+    relation: Relation
+
     def __init__(
         self,
-        relation: Relation | None,
+        relation: Relation,
         data_interface: Data,
         component: Application,
         relation_name: str,
@@ -104,3 +111,85 @@ class ExternalOpenSearchClient(RelationState):
     def extra_user_roles(self, roles: str) -> None:
         """Set the extra user roles for this relation."""
         self.update({"extra-user-roles": roles})
+
+    @property
+    def extra_group_roles(self) -> list[str]:
+        """Get the extra group roles for this relation."""
+        return [
+            role.strip() for role in self.relation_data.get("extra-group-roles", "").split(",")
+        ]
+
+    @extra_group_roles.setter
+    def extra_group_roles(self, roles: str) -> None:
+        """Set the extra group roles for this relation."""
+        self.update({"extra-group-roles": roles})
+
+    @property
+    def entity_type(self) -> str:
+        """Get entity type of this relation."""
+        return self.relation_data.get("entity-type", "")
+
+    @property
+    def entity_permissions(self) -> dict[str, list[dict[str, list[str]]]] | None:
+        """Receive, validate and reformat entity permissions into OpenSearch role permissions.
+
+        If request is invalid or absent the None is returned and error is logged.
+        """
+        if not (raw := self.relation_data.get("entity-permissions")):
+            return None
+        try:
+            if (
+                not (parsed := json.loads(raw))
+                or not isinstance(parsed, list)
+                or len(parsed) != 1
+                or not isinstance(permissions := parsed[0], dict)
+                or permissions.keys() != {"resource_name", "resource_type", "privileges"}
+                or not isinstance(resource_name := permissions["resource_name"], list)
+                or permissions["resource_type"] != "index_permissions"
+                or not isinstance(privileges := permissions["privileges"], list)
+            ):
+                logger.error(
+                    "entity-permissions field is malformed in client relation %d", self.relation.id
+                )
+                return None
+
+            return {
+                "index_permissions": [
+                    {
+                        "index_patterns": resource_name,
+                        "allowed_actions": privileges,
+                    }
+                ]
+            }
+        except json.JSONDecodeError as e:
+            logger.error(
+                "Failed to parse entity-permissions field in client relation %d: %s",
+                self.relation.id if self.relation else -1,
+                e,
+            )
+            return None
+
+    @property
+    def requested_entity_secret(self) -> str | None:
+        """Get entity secret id for this relation."""
+        return self.relation_data.get("requested-entity-secret")
+
+    def get_requested_entity(self) -> tuple[str, str] | None:
+        """Retrieve and validate entity from requested entity secret using model.
+
+        If content is invalid or absent the None is returned and error is logged.
+        """
+        if not (requested_entity := self.requested_entity_secret):
+            logger.info(
+                "No requested entities secret provided for GROUP requirer relation %d",
+                self.relation.id,
+            )
+            return None
+        requested_entity = requested_entity.split(":")
+        if len(requested_entity) != 2:
+            logger.error(
+                "Invalid requested entities secret content for GROUP requirer relation %d",
+                self.relation.id,
+            )
+            return None
+        return requested_entity[0], requested_entity[1]

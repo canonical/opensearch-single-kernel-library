@@ -133,7 +133,7 @@ prepare: |
   cd "$SPREAD_PATH"
   snap install --classic concierge
 
-  if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* ]]
+  if [[ $SPREAD_SUITE == *"k8s"* || $SPREAD_TASK == *"oauth"* || $SPREAD_TASK == *"ldap"* ]]
   then
   # Remove docker and fix iptable forwarding rules to avoid conflicts with k8s and cilium
     sudo apt-get purge -y docker.io containerd 2>/dev/null || true
@@ -163,7 +163,7 @@ prepare: |
   if [[ $SPREAD_SUITE == *"vm"* ]]
   then
     concierge prepare --trace -c concierge-lxd.yaml --extra-debs pipx
-    if [[ $SPREAD_TASK == *"oauth"* ]]
+    if [[ $SPREAD_TASK == *"oauth"* || $SPREAD_TASK == *"ldap"* ]]
     then
       mkdir -p ~/.kube
       k8s kubectl config view --raw > ~/.kube/config

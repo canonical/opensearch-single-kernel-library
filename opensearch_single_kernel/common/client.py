@@ -539,7 +539,7 @@ class OpenSearchClient:
         resp = self.request(
             "PUT",
             f"{USER_ROLE_ENDPOINT}/{role_name}",
-            payload={**(permissions or {}), **(action_groups or {})},
+            payload={**(permissions or {"index_permissions": []}), **(action_groups or {})},
         )
 
         if resp.get("status") != "CREATED" and not (
@@ -686,7 +686,7 @@ class OpenSearchClient:
 
         return resp
 
-    def create_user_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+    def put_role_mapping(self, role: str, users: list[str], backend_roles: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 
         Args:
@@ -700,7 +700,7 @@ class OpenSearchClient:
             resp = self.request(
                 "PUT",
                 f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
-                payload={"users": mapped_users, "backend_roles": [role]},
+                payload={"users": users, "backend_roles": backend_roles},
             )
         except OpenSearchHttpError as e:
             logger.error("Couldn't create role mapping: %s", str(e))

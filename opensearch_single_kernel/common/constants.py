@@ -275,6 +275,8 @@ PROMETHEUS_K8S_RELATION = "metrics-endpoint"
 LOKI_K8S_RELATION = "logging"
 GRAFANA_K8S_RELATION = "grafana-dashboard"
 COS_RELATION = "cos-agent"
+LDAP_RELATION = "ldap"
+LDAP_CERTIFICATE_TRANSFER_RELATION = "ldap-certificate-transfer"
 
 
 # Paths

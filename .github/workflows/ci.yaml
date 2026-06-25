@@ -129,6 +129,7 @@ jobs:
           - tests/charms/opensearch_k8s_test_charm
           - tests/charms/opensearch_k8s_2.19.4_test_charm
           - tests/charms/dummy-client-charm
+          - tests/charms/data-integrator
           - tests/integration/relations/opensearch_provider/application-charm
     steps:
       - name: Install CLI

@@ -403,7 +403,9 @@ async def _ensure_small_opensearch_deployed(
         ),
     )
 
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    # Relate it to OpenSearch to set up TLS.
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
+
     await _wait_for_units(ops_test, deploy_type)
     assert len(ops_test.model.applications[APP_NAME].units) == 3
 
@@ -482,9 +484,14 @@ async def _ensure_large_opensearch_deployed(
         "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
     )
 
-    await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    # TLS setup
+    await ops_test.model.integrate(
+        f"{MAIN_ORCHESTRATOR_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
+    )
+    await ops_test.model.integrate(
+        f"{FAILOVER_ORCHESTRATOR_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
+    )
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     await _wait_for_units(ops_test, deploy_type)
     await set_watermark(ops_test, APP_NAME)

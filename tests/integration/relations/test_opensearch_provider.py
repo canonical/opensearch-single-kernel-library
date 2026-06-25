@@ -102,7 +102,9 @@ async def test_create_relation(
             channel="2/edge",
             series=SERIES,
         )
-    await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(
+        f"{OPENSEARCH_APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
+    )
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
         status="active",

@@ -1,0 +1,65 @@
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: data-integrator
+display-name: Data Integrator
+summary: Integrator charm for getting credentials for non-native applications.
+description: |
+  Integrator charm for getting credentials for non-native applications.
+  Not all applications implement a data_interfaces relation but allow setting
+  credentials via config. Also, some of the applications are run outside of juju.
+  This integrator charm allows receiving credentials which can be passed into
+  application config directly without implementing juju-native relation.
+docs: https://discourse.charmhub.io/t/14012
+source: https://github.com/canonical/data-integrator
+issues: https://github.com/canonical/data-integrator/issues
+website:
+  - https://ubuntu.com/data
+  - https://charmhub.io/data-integrator
+  - https://github.com/canonical/data-integrator
+  - https://launchpad.net/~data-platform
+  - https://matrix.to/#/%23charmhub-data-platform%3Aubuntu.com
+maintainers:
+  - Data Platform Team <data-platform@lists.launchpad.net>
+
+peers:
+  data-integrator-peers:
+    interface: data-integrator-peers
+
+requires:
+  mysql:
+    interface: mysql_client
+    limit: 1
+  postgresql:
+    interface: postgresql_client
+    limit: 1
+  mongodb:
+    interface: mongodb_client
+    limit: 1
+  kafka:
+    interface: kafka_client
+    limit: 1
+  zookeeper:
+    interface: zookeeper
+    limit: 1
+  opensearch:
+    interface: opensearch_client
+    limit: 1
+  kyuubi:
+    interface: kyuubi_client
+    limit: 1
+  etcd:
+    interface: etcd_client
+    limit: 1
+  cassandra:
+    interface: cassandra_client
+    limit: 1
+  valkey:
+    interface: valkey_client
+    limit: 1
+
+# subordinate charm integrations
+provides:
+  mongos:
+    interface: mongos_client
+    limit: 1
