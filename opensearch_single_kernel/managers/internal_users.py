@@ -46,7 +46,7 @@ class InternalUsersManager(BaseManager):
         super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
-    def put_or_update_internal_user_leader(
+    def put_or_update_internal_user_leader(  # noqa: C901
         self,
         user: str,
         pwd: str | None = None,
