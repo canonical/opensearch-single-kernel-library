@@ -1,10 +1,11 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Unit Tests for config Manager functions."""
-
 from typing import Any
 from unittest.mock import PropertyMock
+
+import pytest
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode, State
 from opensearch_single_kernel.core.models import (
@@ -22,6 +23,7 @@ from tests.unit.helpers import (
 )
 
 
+@pytest.mark.real_fs
 def test_set_client_auth(harness, mocker):
     """Test setting the client authentication config."""
     yaml_conf_setter = YamlConfigSetter(harness.charm.workload)
@@ -81,6 +83,7 @@ def test_set_client_auth(harness, mocker):
 # TODO: Add tests related to configuring tls
 
 
+@pytest.mark.real_fs
 def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
     """Test setting the core config of a node."""
     yaml_conf_setter = YamlConfigSetter(harness.charm.workload)
@@ -169,6 +172,6 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker):
 
     # test unicast_hosts content
     with open(config_path / ("tmp/" + seed_unicast_hosts), "r") as f:
-        stored = set([line.strip() for line in f.readlines()])
+        stored = set([line.strip() for line in f])
         expected = {"20.20.20.20"}
         assert stored == expected

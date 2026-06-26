@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 from requests import request
 
@@ -13,7 +14,10 @@ from opensearch_single_kernel.common.constants import (
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import (
+    PeerClusterStatuses,
+    ProfileStatuses,
+)
 from tests.integration.conftest import (
     APP_NAME,
     MODEL_CONFIG,
@@ -23,8 +27,13 @@ from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE
 
 logger = logging.getLogger(__name__)
 
-_3CM_AND_3DATA_MISSING_STATUS = (
-    "Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required."
+MISSING_3_DATA_AND_3_CM_STATUS = StatusObject(
+    message="Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required.",
+    status="blocked",
+)
+MISSING_3_DATA_NODES_STATUS = StatusObject(
+    message="Missing requirements: At least 3 data nodes are required.",
+    status="blocked",
 )
 
 
@@ -115,8 +124,7 @@ async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_full_statuses={APP_NAME: {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}},
-        units_full_statuses={APP_NAME: {"units": {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}}},
+        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
         wait_for_exact_units=1,
     )
 
@@ -159,20 +167,7 @@ async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_full_statuses={
-            APP_NAME: {
-                "blocked": ["Missing requirements: Insufficient memory: 3145728.0 < 8388608"]
-            }
-        },
-        units_full_statuses={
-            APP_NAME: {
-                "units": {
-                    "blocked": [
-                        "Missing requirements: Insufficient memory: 3145728.0 < 8388608",
-                    ],
-                }
-            }
-        },
+        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
         wait_for_exact_units=3,
     )
 
@@ -191,8 +186,6 @@ async def test_testing_profile(ops_test: OpsTest, charm: str, series: str) -> No
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=1,
     )
     await check_heap_size(ops_test, 1)
@@ -205,14 +198,12 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_full_statuses={APP_NAME: {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}},
-        units_full_statuses={APP_NAME: {"units": {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}}},
+        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
         wait_for_exact_units=1,
     )
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Skipping large deployment")
 async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: str) -> None:
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:
@@ -252,10 +243,14 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
-        units_full_statuses={
-            "main": {"units": {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}},
-            "data": {"units": {"blocked": [_3CM_AND_3DATA_MISSING_STATUS]}},
+        units_statuses={
+            "main": [
+                MISSING_3_DATA_AND_3_CM_STATUS,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            "data": [MISSING_3_DATA_AND_3_CM_STATUS],
         },
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
@@ -265,27 +260,20 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
-        units_full_statuses={
-            "main": {
-                "units": {
-                    "blocked": [
-                        "Missing requirements: At least 3 data nodes are required.",
-                        CharmStatuses.PEER_CLUSTER_NO_DATA_NODE.value.message,
-                    ]
-                }
-            },
-            "data": {
-                "units": {
-                    "blocked": [
-                        "Missing requirements: At least 3 data nodes are required.",
-                    ]
-                }
-            },
+        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
+        units_statuses={
+            "main": [
+                MISSING_3_DATA_NODES_STATUS,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            "data": [MISSING_3_DATA_NODES_STATUS],
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )
     data_app = ops_test.model.applications["data"]
     await data_app.add_units(count=2)
-    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
+    await wait_until(
+        ops_test, apps=["main", "data"], wait_for_exact_units={"main": 3, "data": 3}, timeout=2000
+    )
 
     await check_heap_size(ops_test, 4, app_name="main")

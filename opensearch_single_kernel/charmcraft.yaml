@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 #
 # This file is here only to ensure libraries can be fetched and updated.
@@ -16,6 +16,8 @@ bases:
         channel: "22.04"
 
 charm-libs:
+  - lib: data_platform_libs.data_interfaces
+    version: "0"
   - lib: grafana_agent.cos_agent
     version: "0"
   - lib: hydra.oauth

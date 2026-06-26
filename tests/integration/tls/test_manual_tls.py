@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import logging
@@ -8,14 +8,20 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG, UNIT_IDS
-from tests.integration.helpers import wait_until
+from tests.integration.helpers import (
+    EmptyActiveStatus,
+    wait_until,
+)
 from tests.integration.tls.helpers_manual_tls import (
     MANUAL_TLS_CERTIFICATES_APP_NAME,
     ManualTLSAgent,
 )
 
 logger = logging.getLogger(__name__)
+
+units_statuses = {"opensearch": [TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value, EmptyActiveStatus]}
 
 
 @pytest.mark.abort_on_fail
@@ -40,7 +46,6 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
     await wait_until(
         ops_test,
         apps=[MANUAL_TLS_CERTIFICATES_APP_NAME],
-        apps_statuses=["active"],
     )
     logger.info("Deployed %s application", MANUAL_TLS_CERTIFICATES_APP_NAME)
 
@@ -62,8 +67,6 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(UNIT_IDS),
         timeout=2000,
     )
@@ -78,7 +81,7 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses=["active", "maintenance"],
+        units_statuses={APP_NAME: [TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value, EmptyActiveStatus]},
         wait_for_exact_units=len(UNIT_IDS) + 1,
     )
 
@@ -95,7 +98,6 @@ async def test_build_and_deploy_with_manual_tls(ops_test: OpsTest, charm, series
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses=["active"],
         wait_for_exact_units=len(UNIT_IDS) + 1,
     )
     assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS) + 1

@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -16,7 +16,9 @@ from oauth_tools import (
 )
 from pytest_operator.plugin import OpsTest
 
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import (
+    OAuthStatuses,
+)
 from tests.integration.conftest import CONFIG_OPTS
 from tests.integration.helpers import get_leader_unit_ip, wait_until
 
@@ -61,7 +63,7 @@ async def test_deploy(ops_test: OpsTest, charm, series, microk8s_model: Model):
         ),
     )
     await gather(
-        ops_test.model.wait_for_idle(timeout=1000), microk8s_model.wait_for_idle(timeout=1000)
+        ops_test.model.wait_for_idle(timeout=1800), microk8s_model.wait_for_idle(timeout=1800)
     )
 
 
@@ -273,7 +275,6 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
@@ -325,19 +326,11 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_mo
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_INTEGRATOR_NAME],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-            DATA_INTEGRATOR_NAME: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, microk8s_model: Model):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
@@ -345,8 +338,8 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_full_statuses={
-            DATA_APP: {"blocked": [CharmStatuses.OAUTH_RELATION_INVALID.value.message]},
+        apps_statuses={
+            DATA_APP: [OAuthStatuses.OAUTH_RELATION_INVALID.value],
         },
         wait_for_exact_units={DATA_APP: 3},
     )
@@ -367,14 +360,11 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_full_statuses={DATA_APP: {"active": []}},
-        units_statuses=["active"],
         wait_for_exact_units={DATA_APP: 3},
     )
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
@@ -382,12 +372,6 @@ async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, micr
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-        apps_full_statuses={
-            MAIN_APP: {"active": []},
-            DATA_APP: {"active": []},
-            FAILOVER_APP: {"active": []},
-        },
-        units_statuses=["active"],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 

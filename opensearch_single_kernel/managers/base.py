@@ -1,43 +1,50 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Base OpenSearch manager."""
+
 import logging
 import random
-from typing import Optional
+
+from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Scope
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+)
+from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.utils.secrets import password_key
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
 
-class BaseManager:
+class BaseManager(ManagerStatusProtocol):
     """Base OpenSearch Manager.
 
     Include a set of functions and properties useful to other managers.
     """
 
-    def __init__(self, state: ClusterState, workload: BaseWorkload):
-        self.state = state
+    def __init__(self, state: ClusterState, workload: BaseWorkload, name: str):
+        self.state: ClusterState = state  # type: ignore[override]
         self.workload = workload
+        self.name = name
 
     @property
     def opensearch_client(self) -> OpenSearchClient:
         """Initialize an opensearch client"""
-        admin_field = password_key("admin")
-        admin_secret = self.state.secrets.get(Scope.APP, admin_field)
         return OpenSearchClient(
-            self.workload, self.state.host_ip, OPENSEARCH_HTTP_PORT, admin_secret
+            self.workload,
+            self.state.host_ip,
+            OPENSEARCH_HTTP_PORT,
+            self.state.application.admin_password,
         )
 
     @property
-    def alt_hosts(self) -> Optional[list[str]]:
+    def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
         all_units_ips = self.state.units_ips
         all_hosts = list(all_units_ips.values())
@@ -45,9 +52,8 @@ class BaseManager:
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.extend([node.ip for node in nodes_conf.values()])
 
-        # TODO: Add getting relation data form state
-        # if peer_cm_rel_data := self.state.peer_cluster_orchestrator.rel_data():
-        #    all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
+        if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
+            all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
 
         random.shuffle(all_hosts)
 
@@ -106,3 +112,14 @@ class BaseManager:
                     )
                     nodes.append(node)
         return nodes
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
+        return [GeneralStatuses.ACTIVE_IDLE.value]

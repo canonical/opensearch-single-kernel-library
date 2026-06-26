@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
@@ -56,8 +55,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1, APP_NAME: 3},
         idle_period=IDLE_PERIOD,
     )
@@ -65,7 +62,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_set_roles_manually(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
 ) -> None:
@@ -94,8 +90,6 @@ async def test_set_roles_manually(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(nodes),
         idle_period=IDLE_PERIOD,
     )
@@ -114,7 +108,6 @@ async def test_set_roles_manually(
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="Test regarding roles will be added when external config is implemented")
 async def test_switch_back_to_auto_generated_roles(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
 ) -> None:
@@ -128,8 +121,6 @@ async def test_switch_back_to_auto_generated_roles(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(nodes),
         idle_period=IDLE_PERIOD,
     )

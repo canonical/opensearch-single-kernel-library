@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Configuration manager."""
+
 import logging
 
 from opensearch_single_kernel.common.constants import (
@@ -18,6 +19,9 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
+)
+from opensearch_single_kernel.common.statuses import (
+    InternalUsersStatuses,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -39,8 +43,7 @@ class InternalUsersManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "internal_users_manager"
+        super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
     def put_or_update_internal_user_leader(
@@ -55,8 +58,8 @@ class InternalUsersManager(BaseManager):
             OpenSearchUserMgmtErorr: In case of error when updating user password.
         """
         # Leader is to set new password and hash, others populate existing hash locally
-        secret = self.state.secrets.get(Scope.APP, password_key(user))
-        if secret and not update:
+        password_secret = self.state.application.get_user_password(user)
+        if password_secret and not update:
             self.save_user_locally(user)
             return
 
@@ -64,15 +67,15 @@ class InternalUsersManager(BaseManager):
 
         # Updating security index
         # We need to do this for all credential changes
-        if secret and update:
+        if password_secret and update:
             try:
-                self.opensearch_client.update_user_password(user, hashed_pwd)
+                self.opensearch_client.patch_user_password(user, hashed_pwd)
             except OpenSearchHttpError as e:
                 raise OpenSearchUserMgmtError(e)
 
         # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
         # we either need to initialize or update (local) credentials as well
-        if not secret or user in OPENSEARCH_SYSTEM_USERS:
+        if not password_secret or user in OPENSEARCH_SYSTEM_USERS:
             self.put_internal_user(user, hashed_pwd)
 
         # Secrets need to be maintained
@@ -84,7 +87,12 @@ class InternalUsersManager(BaseManager):
             self.state.secrets.put(Scope.APP, hash_key(user), hashed_pwd)
 
         if user == ADMIN_USER:
-            self.state.application.update({"admin_user_initialized": "True"})
+            self.state.application.is_admin_user_initialized = True
+            self.state.remove_status_if_present(
+                InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
+                "unit",
+                self.name,
+            )
 
     def purge_initial_default_users(self) -> None:
         """Removes all users from internal_users yaml config.
@@ -103,10 +111,8 @@ class InternalUsersManager(BaseManager):
 
     def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
-        user_hash = hash_key(user)
-        hashed_pwd = self.state.secrets.get(Scope.APP, user_hash)
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, hashed_pwd)
+        self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users."""
@@ -154,7 +160,13 @@ class InternalUsersManager(BaseManager):
             self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
             self.opensearch_client.patch_user(
                 COS_USER,
-                [{"op": "replace", "path": "/opendistro_security_roles", "value": roles}],
+                [
+                    {
+                        "op": "replace",
+                        "path": "/opendistro_security_roles",
+                        "value": roles,
+                    }
+                ],
             )
             self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
         except OpenSearchHttpError as e:

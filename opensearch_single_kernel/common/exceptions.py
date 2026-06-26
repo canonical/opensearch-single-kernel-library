@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Charm-specific exceptions."""
 
 import json
 from typing import Optional
+
+from pydantic import ValidationError
 
 
 class OpenSearchError(Exception):
@@ -95,6 +97,42 @@ class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
 
 
+class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
+    """Raise when relation data is present but fails validation."""
+
+    def __init__(self, error: ValidationError):
+        super().__init__(str(error))
+        self.error = error
+
+
+class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):
+    """Exception thrown when the backup relation data is incomplete or invalid."""
+
+
+class OpenSearchBackupCredentialsIncorrectError(OpenSearchError):
+    """Exception thrown when the backup credentials provided are incorrect."""
+
+
+class OpenSearchRestoreBackupError(OpenSearchError):
+    """Exception thrown when restoring a backup fails."""
+
+
+class OpenSearchPeerClusterRelationDataIncompleteError(OpenSearchError):
+    """Exception thrown when the peer cluster relation data is incomplete or invalid."""
+
+
+class OpenSearchSnapshotsPeerClusterDataConflictError(OpenSearchError):
+    """Exception thrown when there is a conflict in the peer cluster relation data of snapshots."""
+
+
+class OpenSearchPeerClusterDidntSaveCredentialsYetError(OpenSearchError):
+    """Exception thrown when a cluster in the peer cluster relation didn't save the credentials."""
+
+
+class OpenSearchInvalidStorageTypeError(OpenSearchError):
+    """Exception thrown when an invalid storage type is provided for backup/restore operations."""
+
+
 class OpenSearchSmtpMissingParametersError(OpenSearchError):
     """Exception thrown if there are missing parameters when generating smtp config."""
 
@@ -103,3 +141,19 @@ class OpenSearchSmtpMissingParametersError(OpenSearchError):
         super().__init__(
             f"Parameters missing from smtp-integrator: {', '.join(missing_parameters)}"
         )
+
+
+class OpenSearchNoClusterManagersError(OpenSearchError):
+    """Exception thrown when there are no cluster managers in the cluster."""
+
+    def __init__(self):
+        message = "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
+        super().__init__(message)
+
+
+class OpenSearchLockError(OpenSearchError):
+    """Base exception for lock manager errors."""
+
+
+class OpenSearchUpgradePrecheckError(OpenSearchError):
+    """App is not ready to upgrade"""

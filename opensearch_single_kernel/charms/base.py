@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Base Charm."""
@@ -9,10 +9,15 @@ from abc import ABC, abstractmethod
 from time import time_ns
 
 import ops
+from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import EventSource
 
 from opensearch_single_kernel.common.constants import (
+    AZURE_RELATION,
+    GCS_RELATION,
     PEER_RELATION,
+    S3_RELATION,
+    SMTP_RELATION,
     Scope,
     Substrates,
 )
@@ -20,13 +25,15 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.cos import CosEventsHandler
 from opensearch_single_kernel.events.custom_events import (
     ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
+    UpgradeOpenSearch,
+    VerifySnapshotsCredentialsEvent,
 )
 from opensearch_single_kernel.events.external_clients import (
     ExternalClientsEventsHandler,
@@ -36,7 +43,18 @@ from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
 from opensearch_single_kernel.events.notifications import NotificationsEvents
 from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
+from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandler
+from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
+from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
+    AzureStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
+    GcsStorageRequires,
+)
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
@@ -46,10 +64,15 @@ from opensearch_single_kernel.managers.internal_users import InternalUsersManage
 from opensearch_single_kernel.managers.keystore import KeystoreManager
 from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
+from opensearch_single_kernel.managers.peer_cluster import PeerClusterManager
+from opensearch_single_kernel.managers.peer_cluster_orchestrator import (
+    PeerClusterOrchestratorManager,
+)
 from opensearch_single_kernel.managers.plugin import PluginManager
 from opensearch_single_kernel.managers.profiles import ProfilesManager
+from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
-from opensearch_single_kernel.utils.status import Status
+from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -58,18 +81,25 @@ logger = logging.getLogger(__name__)
 class OpenSearchBaseCharm(ops.CharmBase, ABC):
     """Base OpenSearch Charm, this will include base structure for both machine and k8s charms."""
 
+    # Custom Events
     restart_opensearch_event = EventSource(RestartOpenSearch)
     start_opensearch_event = EventSource(StartOpenSearch)
+    upgrade_opensearch_event = EventSource(UpgradeOpenSearch)
+    verify_snapshots_credentials_event = EventSource(VerifySnapshotsCredentialsEvent)
     reload_keystore_event = EventSource(ReloadKeystoreEvent)
 
     def __init__(self, *args):
         super().__init__(*args)
 
-        # Status
-        self.status = Status(self)
-
         # State
-        self.state = ClusterState(self, self.substrate)
+        self.state = ClusterState(
+            self,
+            self.substrate,
+            SmtpRequires(self, SMTP_RELATION),
+            S3Requirer(self, S3_RELATION),
+            AzureStorageRequires(self, AZURE_RELATION),
+            GcsStorageRequires(self, GCS_RELATION),
+        )
 
         # Managers
         self.tls_manager = TlsManager(self.state, self.workload)
@@ -81,19 +111,44 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
         self.config_manager = ConfigManager(self.state, self.workload)
+        self.peer_cluster_orchestrator_manager = PeerClusterOrchestratorManager(
+            self.state, self.workload
+        )
+        self.peer_cluster_manager = PeerClusterManager(self.state, self.workload)
         self.keystore_manager = KeystoreManager(self.state, self.workload)
         self.plugin_manager = PluginManager(self.state, self.workload)
         self.notifications_manager = NotificationsManager(self.state, self.workload)
+        self.snapshots_manager = SnapshotsManager(self.state, self.workload)
+        self.upgrades_manager = UpgradesManagerVM(self.state, self.workload)
 
         # Event Handlers
         self.opensearch_events = OpenSearchEventsHandler(self)
+        self.upgrade_events = UpgradesEventsHandler(self)
         self.tls_events = TLSEventsHandler(self)
+        self.peer_cluster_events = PeerClusterEventsHandler(self)
         self.external_clients_events = ExternalClientsEventsHandler(self)
         self.keystore_events = KeystoreEventsHandler(self)
+        self.snapshots_events = SnapshotsEventsHandler(self)
         self.notifications_events = NotificationsEvents(self)
         self.cos_events = CosEventsHandler(self)
         self.jwt_events = JWTEventsHandler(self)
         self.oauth_events = OAuthEventsHandler(self)
+
+        self.status_handler = StatusHandler(
+            self,
+            self.profiles_manager,
+            self.tls_manager,
+            self.health_manager,
+            self.peer_cluster_manager,
+            self.peer_cluster_orchestrator_manager,
+            self.cluster_manager,
+            self.lock_manager,
+            self.snapshots_manager,
+            self.internal_users_manager,
+            self.external_clients_manager,
+            self.notifications_manager,
+            self.upgrades_manager,
+        )
 
     def trigger_peer_rel_changed(
         self,
@@ -116,7 +171,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     def stop_opensearch(self, *, restart: bool = False) -> None:
         """Stop OpenSearch service."""
-        self.status.set(CharmStatuses.SERVICE_IS_STOPPING)
+        self.status_handler.set_running_status(
+            GeneralStatuses.SERVICE_IS_STOPPING.value,
+            "unit",
+            component_name=self.cluster_manager.name,
+        )
 
         if self.cluster_manager.opensearch_client.is_node_up():
             try:
@@ -139,7 +198,25 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         # Stop the workload
         self.cluster_manager.stop_workload()
-        self.status.set(CharmStatuses.SERVICE_STOPPED)
+
+    def apply_health(
+        self,
+        wait_for_green_first: bool = False,
+        use_localhost: bool = True,
+        app: bool = True,
+        unit: bool = True,
+    ):
+        """Fetch cluster health and set it on the app status."""
+        if app and not self.unit.is_leader():
+            self.trigger_peer_rel_changed(on_other_units=True)
+            return
+
+        return self.health_manager.apply_health(
+            wait_for_green_first=wait_for_green_first,
+            use_localhost=use_localhost,
+            app=app,
+            unit=unit,
+        )
 
     @property
     @abstractmethod

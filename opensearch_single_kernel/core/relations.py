@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Base classes for charm relations."""
@@ -45,13 +45,13 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the store."""
         pass
 
     @abstractmethod
     def get(
-        self, scope: Scope, key: str, default: int | float | str | bool | None = None
+        self, scope: Scope, key: str, default: float | str | bool | None = None
     ) -> int | float | str | bool | None:
         """Get string from the data store."""
         pass
@@ -92,7 +92,7 @@ class RelationDataStore(DataStore):
     """Class representing a relation data store for a charm."""
 
     def __init__(self, charm, relation_name: str):
-        super(RelationDataStore, self).__init__(charm)
+        super().__init__(charm)
         self.relation_name = relation_name
 
     @override
@@ -127,7 +127,7 @@ class RelationDataStore(DataStore):
         self.put(scope, key, payload_str)
 
     @override
-    def has(self, scope: Scope, key: str):
+    def has(self, scope: Scope, key: str) -> bool:
         """Check if the said key is contained in the relation data."""
         if scope is None:
             raise ValueError("Scope undefined.")
@@ -139,7 +139,7 @@ class RelationDataStore(DataStore):
         self,
         scope: Scope,
         key: str,
-        default: int | float | str | bool | None = None,
+        default: float | str | bool | None = None,
         auto_casting: bool = True,
     ) -> int | float | str | bool | None:
         """Get string from the relation data store."""
@@ -228,11 +228,16 @@ class RelationState:
         self.relation_data.update(update_content)
 
         for field in delete_fields:
-            # use del instead of pop here because of error with dataplatform-libs
-            try:
-                del self.relation_data[field]
-            except KeyError:
-                pass
+            if field not in self.relation_data:
+                logger.debug(
+                    f"Field '{field}' not found in relation data for deletion. Skipping deletion for this field."
+                )
+            else:
+                # use del instead of pop here because of error with dataplatform-libs
+                try:
+                    del self.relation_data[field]
+                except KeyError:
+                    pass
 
     def get_object(self, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
@@ -271,13 +276,6 @@ class PeerClusterData(ProviderData, RequirerData):
     def _update_relation_data(self, relation: Relation, data: dict[str, str]) -> None:
         """Set values for fields not caring whether it's a secret or not."""
         super(ProviderData, self)._update_relation_data(relation, data)
-
-
-class PeerCluster(RelationState):
-    """State collection metadata for a peer-cluster application."""
-
-    def __init__(self, relation, data_interface, component):
-        super().__init__(relation, data_interface, component)
 
 
 class JwtData(RequirerData):

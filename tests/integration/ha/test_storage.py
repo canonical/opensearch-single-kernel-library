@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -22,7 +22,13 @@ from tests.integration.ha.helpers import (
     storage_type,
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
-from tests.integration.helpers import app_name, get_application_unit_ids, wait_until
+from tests.integration.helpers import (
+    EmptyActiveStatus,
+    EmptyBlockedStatus,
+    app_name,
+    get_application_unit_ids,
+    wait_until,
+)
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
@@ -56,8 +62,6 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1000,
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -85,8 +89,6 @@ async def test_storage_reuse_after_scale_down(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1000,
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -111,8 +113,7 @@ async def test_storage_reuse_after_scale_down(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active", "blocked"],
-        units_statuses=["active"],
+        apps_statuses={app: [EmptyActiveStatus, EmptyBlockedStatus]},
         timeout=1000,
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -130,8 +131,6 @@ async def test_storage_reuse_after_scale_down(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1000,
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -194,8 +193,6 @@ async def test_storage_reuse_after_scale_to_zero(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1000,
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -233,8 +230,6 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             timeout=1000,
             idle_period=IDLE_PERIOD,
             wait_for_exact_units={
@@ -266,8 +261,7 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active", "blocked"],
-        units_statuses=["active"],
+        apps_statuses={app: [EmptyActiveStatus, EmptyBlockedStatus]},
         timeout=1000,
         wait_for_exact_units={
             app: 1,
@@ -291,8 +285,7 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active", "blocked"],
-        units_statuses=["active"],
+        apps_statuses={app: [EmptyActiveStatus, EmptyBlockedStatus]},
         wait_for_exact_units=1,
         timeout=2400,
     )
@@ -309,8 +302,6 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(storage_ids),
         idle_period=IDLE_PERIOD,
         timeout=2400,

@@ -14,15 +14,13 @@ from ops import (
     RelationCreatedEvent,
     SecretChangedEvent,
 )
-from pydantic.error_wrappers import ValidationError
+from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
-    CertType,
-    Scope,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.common.statuses import CharmStatuses
+from opensearch_single_kernel.common.statuses import JwtStatuses
 from opensearch_single_kernel.core.models import DeploymentType
 
 if TYPE_CHECKING:
@@ -60,7 +58,11 @@ class JWTEventsHandler(Object):
             # in large deployments, JWT configuration must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
             if self.charm.unit.is_leader():
-                self.charm.status.set(CharmStatuses.JWT_RELATION_INVALID, app=True)
+                self.charm.state.add_status_if_not_present(
+                    JwtStatuses.JWT_RELATION_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
 
     def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle changed relation data."""
@@ -76,7 +78,16 @@ class JWTEventsHandler(Object):
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
-                self.charm.status.clear(CharmStatuses.JWT_RELATION_INVALID, app=True)
+                self.charm.state.remove_status_if_present(
+                    JwtStatuses.JWT_RELATION_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
+                self.charm.state.remove_status_if_present(
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
             return
 
         del self.charm.state.server.jwt_auth_configuration
@@ -89,7 +100,7 @@ class JWTEventsHandler(Object):
         if not self.charm.state.jwt.relation:
             return
 
-        if not self.charm.state.jwt.is_related_secret_label(event.secret.label):
+        if not self.charm.state.jwt.is_jwt_secret(event.secret.label):
             logger.debug("Updated secret not relevant")
             return
 
@@ -101,7 +112,16 @@ class JWTEventsHandler(Object):
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
-                self.charm.status.set(CharmStatuses.JWT_RELATION_INVALID, app=True)
+                self.charm.state.add_status_if_not_present(
+                    JwtStatuses.JWT_RELATION_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
+                self.charm.state.remove_status_if_present(
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
             return
 
         if not self.charm.state.application.is_security_index_initialised:
@@ -117,11 +137,19 @@ class JWTEventsHandler(Object):
             # safety mechanism, this should not happen; config is validated on the jwt-integrator
             logger.error(f"Validation failed for JWT authentication config: {e}")
             if self.charm.unit.is_leader():
-                self.charm.status.set(CharmStatuses.JWT_AUTH_CONFIG_INVALID, app=True)
+                self.charm.state.add_status_if_not_present(
+                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                    "app",
+                    self.charm.cluster_manager.name,
+                )
             return
 
         if self.charm.unit.is_leader():
-            self.charm.status.clear(CharmStatuses.JWT_AUTH_CONFIG_INVALID, app=True)
+            self.charm.state.remove_status_if_present(
+                JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
+                "app",
+                self.charm.cluster_manager.name,
+            )
 
         self.charm.config_manager.update_security_config()
         logger.info("Updated JWT authentication configuration")
@@ -133,9 +161,7 @@ class JWTEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (
-            admin_secrets := self.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val)
-        ):
+        if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
 
@@ -146,9 +172,6 @@ class JWTEventsHandler(Object):
             logger.info("Updated Opensearch security index")
         except OpenSearchCmdError as e:
             logger.debug(f"Error when updating the security index: {e.out}")
-            self.charm.status.set(CharmStatuses.SECURITY_INDEX_UPDATE_ERROR, app=True)
             # we need to come back in this case because there will not be a follow-up event
             event.defer()
             return
-
-        self.charm.status.clear(CharmStatuses.SECURITY_INDEX_UPDATE_ERROR, app=True)

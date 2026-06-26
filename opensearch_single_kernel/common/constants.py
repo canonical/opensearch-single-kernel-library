@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
 
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Charm literals."""
 
-
 from enum import Enum
 
 from opensearch_single_kernel.utils.enum import BaseStrEnum
+
+
+class ObjectStorageType(BaseStrEnum):
+    """The object storage types."""
+
+    S3 = "s3"
+    AZURE = "azure"
+    GCS = "gcs"
+    S3_PCLUSTER = "s3-pcluster"
+    AZURE_PCLUSTER = "azure-pcluster"
+    GCS_PCLUSTER = "gcs-pcluster"
+    CONFLICT = "conflict"
 
 
 class Substrates(BaseStrEnum):
@@ -188,16 +199,23 @@ PERFORMANCE_PROFILE = "profile"
 OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
-OPENSEARCH_SYSTEM_USERS = {"admin", "kibanaserver"}
-OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {"monitor"}
+ADMIN_USER = "admin"
 KIBANA_SERVER_USER = "kibanaserver"
 KIBANA_SERVER_ROLE = "kibana_server"
-ADMIN_USER = "admin"
 COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
+OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
+OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
 GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
 
+# OpenSearch indices
+OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
+SYSTEM_INDICES = {
+    ".opendistro_security",
+    ".opensearch-sap-log-types-config",
+    OPENSEARCH_NODE_LOCK_INDEX,
+}
 # TLS
 CA_ALIAS = "ca"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
@@ -221,7 +239,10 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detector*",
     ".opendistro-anomaly-checkpoints",
     ".opendistro-anomaly-detection-state",
+    OPENSEARCH_NODE_LOCK_INDEX,
 ]
+
+
 DEFAULT_EXTRA_USER_ROLE = "default"
 
 
@@ -239,10 +260,16 @@ TLS_RELATION = "certificates"
 NODE_LOCK_RELATION = "node-lock-fallback"
 PEER_CLUSTER_ORCHESTRATOR_RELATION = "peer-cluster-orchestrator"
 PEER_CLUSTER_RELATION = "peer-cluster"
+S3_RELATION = "s3-credentials"
+AZURE_RELATION = "azure-credentials"
+GCS_RELATION = "gcs-credentials"
 CLIENT_RELATION = "opensearch-client"
 COS_RELATION = "cos-agent"
 JWT_CONFIG_RELATION = "jwt-configuration"
 OAUTH_RELATION = "oauth"
+STATUS_PEERS_RELATION = "status-peers"
+SMTP_RELATION = "smtp"
+UPGRADE_RELATION = "upgrade-version-a"
 
 
 # Paths
@@ -258,6 +285,8 @@ HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
 SECRETS_LABEL_SEPARATOR = ":"
+
+# Backup
 S3_CREDENTIALS = "s3-creds"
 S3_PEER_SECRET_KEYS = [
     "secret-key",
@@ -275,6 +304,14 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+S3_CA_ALIAS = "s3-snapshots-gateway"
+STORE_PASSWORD = "changeit"
+S3_REPOSITORY = "s3-repository"
+AZURE_REPOSITORY = "azure-repository"
+GCS_REPOSITORY = "gcs-repository"
+OPENSEARCH_BACKUP_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# SMTP
 SMTP_SECRET_LABEL = "plugin-notifications"
 
 
@@ -296,3 +333,9 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+
+
+# Upgrades
+UPGRADES_COMPATIBILITY_MATRIX = {
+    "2.19.4": {"2.18.0", "2.19.0", "2.19.1", "2.19.2", "2.19.3"},
+}

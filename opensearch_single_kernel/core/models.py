@@ -1,23 +1,42 @@
 #!/usr/bin/env python3
 
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Collection of models used for the operation of the charm."""
 
+import base64
+import binascii
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from enum import IntEnum
 from hashlib import md5
 from typing import Any, Iterator, Literal
 
-from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
+import poetry.core.constraints.version as poetry_version
+from data_platform_helpers.advanced_statuses import StatusObject
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    field_validator,
+    model_validator,
+)
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
+    ADMIN_USER,
+    AZURE_CREDENTIALS,
+    COS_USER,
+    GCS_CREDENTIALS,
+    KIBANA_SERVER_USER,
     MAX_HEAP_SIZE_IN_KB,
+    S3_CREDENTIALS,
     DeploymentType,
     Directive,
     PerformanceType,
@@ -25,6 +44,8 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
+from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 logger = logging.getLogger(__name__)
 
@@ -150,30 +171,21 @@ class Node(Model):
         return False
 
 
-class PeerClusterOrchestrators(Model):
-    """Model class for the PClusters registered main/failover clusters."""
+class DeploymentState(Model):
+    """Full state of a deployment, along with the juju status."""
 
-    _TYPES = Literal["main", "failover"]
+    value: State
+    message: str = Field(default="")
 
-    main_rel_id: int = -1
-    main_app: App | None = None
-    failover_rel_id: int = -1
-    failover_app: App | None = None
+    @model_validator(mode="after")
+    def prevent_none(self):
+        """Validate the message or lack of depending on the state."""
+        if self.value == State.ACTIVE:
+            self.message = ""
+        elif not self.message.strip():
+            raise ValueError("The message must be set when state not Active.")
 
-    def delete(self, typ: _TYPES) -> None:
-        """Delete an orchestrator from the current pair."""
-        if typ == "main":
-            self.main_rel_id = -1
-            self.main_app = None
-        else:
-            self.failover_rel_id = -1
-            self.failover_app = None
-
-    def promote_failover(self) -> None:
-        """Delete previous main orchestrator and promote failover if any."""
-        self.main_app = self.failover_app
-        self.main_rel_id = self.failover_rel_id
-        self.delete("failover")
+        return self
 
 
 class PeerClusterConfig(Model):
@@ -212,44 +224,6 @@ class PeerClusterConfig(Model):
             self.roles.append("data")
             self.roles.remove(f"data.{temperature}")
             self.roles = list(set(self.roles))
-        return self
-
-
-class PeerClusterApp(Model):
-    """Model class for representing an application part of a large deployment."""
-
-    app: App
-    planned_units: int
-    units: list[str]
-    roles: list[str]
-
-
-class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
-    """Model class for all applications in a large deployment as a dict."""
-
-    def __iter__(self) -> Iterator[str]:
-        """Implements the iter magic method."""
-        return iter(self.root)
-
-    def __getitem__(self, item: str) -> PeerClusterApp:
-        """Implements the getitem magic method."""
-        return self.root[item]
-
-
-class DeploymentState(Model):
-    """Full state of a deployment, along with the juju status."""
-
-    value: State
-    message: str = Field(default="")
-
-    @model_validator(mode="after")
-    def prevent_none(self):
-        """Validate the message or lack of depending on the state."""
-        if self.value == State.ACTIVE:
-            self.message = ""
-        elif not self.message.strip():
-            raise ValueError("The message must be set when state not Active.")
-
         return self
 
 
@@ -387,6 +361,503 @@ class PluginConfigInfo(Model):
             self.cleanup[key] = sorted(list(set(current) | set(items)))
 
 
+# --- Backup related models ---
+class S3RelDataCredentials(Model):
+    """Model class for credentials passed on the s3 relation."""
+
+    access_key: str = Field(alias="access-key", default="")
+    secret_key: str = Field(alias="secret-key", default="")
+    s3_tls_ca_chain: str | list[str] | None = Field(default=None, alias="s3-tls-ca-chain")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class S3RelData(Model):
+    """Model class for the S3 relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    bucket: str = Field(default="")
+    endpoint: str = Field(default="")
+    region: str = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    protocol: str | None = None
+    storage_class: str | None = Field(alias="storage-class", default=None)
+    tls_ca_chain: str | list[str] | None = Field(default=None, alias="tls-ca-chain")
+    credentials: S3RelDataCredentials = Field(alias=S3_CREDENTIALS)
+    path_style_access: bool = Field(alias="s3-uri-style", default=False)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_core_fields(self):
+        """Validate the core fields of the S3 relation data."""
+        if (
+            not (self.credentials)
+            or not self.credentials.access_key
+            or not self.credentials.secret_key
+        ):
+            raise ValueError("Missing fields: access_key, secret_key")
+
+        # NOTE: Both bucket and endpoint must be set. If none of them are set,
+        # but credentials were found, this likely means that we are validating for a
+        # non cluster_manager application, which only needs credentials.
+        if self.bucket and not self.endpoint:
+            raise ValueError("Missing field: endpoint")
+        if self.endpoint and not self.bucket:
+            raise ValueError("Missing field: bucket")
+        if not self.region:
+            raise ValueError("Missing field: region")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := self.base_path:
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        self.base_path = base_path or None
+
+        return self
+
+    @field_validator("tls_ca_chain", mode="before", check_fields=False)
+    @classmethod
+    def _tls_chain(cls, v):  # noqa: N805
+        if v is None:
+            return None
+        if isinstance(v, (bytes, bytearray)):
+            v = v.decode()
+        if isinstance(v, list):
+            return "\n".join(s.strip() for s in v if s)
+        if isinstance(v, dict):
+            chain = v.get("chain")
+            if isinstance(chain, list):
+                return "\n".join(s.strip() for s in chain if s)
+
+            return json.dumps(v)
+        return str(v)
+
+    @field_validator("path_style_access", mode="before")
+    def change_path_style_type(cls, value) -> bool:  # noqa: N805
+        """Coerce a type change of the path_style_access into a bool."""
+        if isinstance(value, str):
+            return value.lower() == "path"
+        return bool(value)
+
+    @field_validator(S3_CREDENTIALS, mode="before", check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | S3RelDataCredentials):  # noqa: N805
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf
+        if isinstance(conf, dict):
+            # We are
+            data = S3RelDataCredentials.from_dict(conf)
+
+        for value in data.dict().values():
+            if value.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {value} instead")
+        return data
+
+    @staticmethod
+    def get_endpoint_protocol(endpoint: str) -> str:
+        """Returns the protocol based on the endpoint."""
+        if not endpoint:
+            return "https"
+
+        if endpoint.startswith("http://"):
+            return "http"
+        return "https"
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested S3RelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return cls()
+
+        creds = S3RelDataCredentials(**input_dict)
+        protocol = S3RelData.get_endpoint_protocol(input_dict.get("endpoint"))
+        return cls.from_dict(
+            dict(input_dict) | {"protocol": protocol, S3_CREDENTIALS: creds.dict()}
+        )
+
+
+class AzureRelDataCredentials(Model):
+    """Model class for credentials passed on the Azure relation."""
+
+    storage_account: str = Field(alias="storage-account", default="")
+    secret_key: str = Field(alias="secret-key", default="")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AzureRelData(Model):
+    """Model class for the Azure relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    storage_account: str = Field(alias="storage-account", default="")
+    container: str = Field(default="")
+    endpoint: str | None = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    connection_protocol: str | None = Field(alias="connection-protocol", default=None)
+    credentials: AzureRelDataCredentials = Field(
+        alias=AZURE_CREDENTIALS, default=AzureRelDataCredentials()
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_core_fields(self):  # noqa: N805
+        """Validate the core fields of the azure relation data."""
+        if (
+            not (self.credentials)
+            or not self.credentials.storage_account
+            or not self.credentials.secret_key
+        ):
+            raise ValueError("Missing fields: storage_account, secret_key")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := self.base_path:
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        self.base_path = base_path or None
+
+        return self
+
+    @field_validator(AZURE_CREDENTIALS, mode="before", check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | AzureRelDataCredentials):  # noqa: N805
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf
+        if isinstance(conf, dict):
+            data = AzureRelDataCredentials.from_dict(conf)
+
+        for value in data.dict().values():
+            if value.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {value} instead")
+        return data
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested AzureRelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return cls()
+
+        creds = AzureRelDataCredentials(**input_dict)
+        return cls.from_dict(dict(input_dict) | {AZURE_CREDENTIALS: creds.dict()})
+
+
+class GcsRelDataCredentials(Model):
+    """Model class for credentials passed on the gcs relation."""
+
+    secret_key: str | None = Field(alias="secret-key", default=None)
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("secret_key", mode="before")
+    def _normalize_secret_key(cls, values):  # noqa: N805
+        """Accept either raw JSON or base64-encoded JSON"""
+        if values is None:
+            return None
+
+        content = values.decode() if isinstance(values, (bytes, bytearray)) else str(values)
+        if not (content := content.strip()):
+            return None
+
+        # already JSON
+        if content.startswith("{") and content.endswith("}"):
+            # validate JSON shape
+            json.loads(content)
+            return content
+
+        # base64 (urlsafe)
+        try:
+            decoded_bytes = base64.b64decode(content, altchars=b"-_", validate=True)
+            decoded_text = decoded_bytes.decode("utf-8").strip()
+            json.loads(decoded_text)
+            return decoded_text
+        except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError("secret-key is not valid JSON (raw or base64-encoded)") from e
+
+
+class GcsRelData(Model):
+    """Model class for the GCS relation data.
+
+    This model should receive the data directly from the relation and map it to a model.
+    """
+
+    bucket: str = Field(default="")
+    base_path: str | None = Field(alias="path", default=None)
+    storage_class: str | None = Field(alias="storage-class", default=None)
+    credentials: GcsRelDataCredentials = Field(
+        alias=GCS_CREDENTIALS, default_factory=GcsRelDataCredentials
+    )
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_core_fields(self):
+        """Validate the core fields of the gcs relation data."""
+        if not self.credentials or not self.credentials.secret_key:
+            raise ValueError("Missing fields: secret-key")
+
+        if not self.bucket:
+            raise ValueError("Missing field: bucket")
+
+        # remove any duplicate, prefix or trailing "/" characters
+        if base_path := self.base_path:
+            base_path = re.sub(r"/+", "/", base_path).strip().strip("/")
+        self.base_path = base_path or None
+
+        return self
+
+    @field_validator(GCS_CREDENTIALS, mode="before", check_fields=False)
+    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805):
+        """Ensure the secret content is set."""
+        if not conf:
+            return None
+
+        data = conf if isinstance(conf, dict) else conf.dict(by_alias=True, exclude_none=True)
+        for v in data.values():
+            if isinstance(v, str) and v.startswith("secret://"):
+                raise ValueError(f"The secret content must be passed, received {v} instead")
+        return conf
+
+    @classmethod
+    def from_relation(cls, input_dict: dict[str, Any] | None):
+        """Create a new instance of this class from a json/dict repr.
+
+        This method creates a nested GcsRelDataCredentials object from the input dict.
+        """
+        if not input_dict:
+            return None
+        creds = GcsRelDataCredentials(**input_dict)
+        merged = {**input_dict}
+        merged[GCS_CREDENTIALS] = creds.dict(by_alias=True, exclude_none=True)
+        return cls.parse_obj(merged)
+
+
+ObjectStorageCredentials = S3RelDataCredentials | AzureRelDataCredentials | GcsRelDataCredentials
+
+
+class ObjectStorageConfig(Model):
+    """Model class for the object storage config - for all clouds."""
+
+    s3: S3RelData | None = None
+    azure: AzureRelData | None = None
+    gcs: GcsRelData | None = None
+
+
+# Peer cluster
+class PeerClusterRelDataCredentials(Model):
+    """Model class for credentials passed on the PCluster relation."""
+
+    admin_username: str
+    admin_password: str
+    admin_password_hash: str
+    kibana_password: str
+    kibana_password_hash: str
+    monitor_password: str | None
+    admin_tls: dict[str, str | None] | None
+    s3: S3RelDataCredentials | None
+    azure: AzureRelDataCredentials | None
+    gcs: GcsRelDataCredentials | None
+
+
+class PeerClusterRelData(Model):
+    """Model class for the PCluster relation data."""
+
+    cluster_name: str
+    cm_nodes: list[Node]
+    credentials: PeerClusterRelDataCredentials
+    deployment_desc: DeploymentDescription | None
+    security_index_initialised: bool = False
+    first_data_node: str | None = None
+    plugins: dict[str, PluginConfigInfo] | None = None
+
+    @staticmethod
+    def peer_cluster_rel_data_from_str(
+        secrets, redacted_dict_str: str, peek_secrets: bool = False
+    ):
+        """Construct the peer cluster rel data from the secret data."""
+        content = json.loads(redacted_dict_str)
+        credentials = content["credentials"]
+
+        credentials["admin_password"] = secrets.resolve_credential(
+            credentials["admin_password"], password_key=ADMIN_USER, peek_secrets=peek_secrets
+        )
+        credentials["admin_password_hash"] = secrets.resolve_credential(
+            credentials["admin_password_hash"], hash_key=ADMIN_USER, peek_secrets=peek_secrets
+        )
+
+        credentials["kibana_password"] = secrets.resolve_credential(
+            credentials["kibana_password"],
+            password_key=KIBANA_SERVER_USER,
+            peek_secrets=peek_secrets,
+        )
+        credentials["kibana_password_hash"] = secrets.resolve_credential(
+            credentials["kibana_password_hash"],
+            hash_key=KIBANA_SERVER_USER,
+            peek_secrets=peek_secrets,
+        )
+
+        if credentials.get("monitor_password"):
+            credentials["monitor_password"] = secrets.resolve_credential(
+                credentials["monitor_password"], password_key=COS_USER, peek_secrets=peek_secrets
+            )
+        else:
+            credentials["monitor_password"] = None
+
+        if credentials.get("admin_tls") and isinstance(credentials["admin_tls"], str):
+            credentials["admin_tls"] = secrets.resolve_credential(
+                credentials["admin_tls"], peek_secrets=peek_secrets
+            )
+        else:
+            credentials["admin_tls"] = None
+
+        if (
+            credentials.get("s3")
+            and credentials["s3"].get("access-key")
+            and credentials["s3"].get("secret-key")
+        ):
+            credentials["s3"]["access-key"] = secrets.resolve_credential(
+                credentials["s3"]["access-key"],
+                content_key="s3-access-key",
+                peek_secrets=peek_secrets,
+            )
+            credentials["s3"]["secret-key"] = secrets.resolve_credential(
+                credentials["s3"]["secret-key"],
+                content_key="s3-secret-key",
+                peek_secrets=peek_secrets,
+            )
+            if credentials["s3"].get("s3-tls-ca-chain"):
+                credentials["s3"]["s3-tls-ca-chain"] = secrets.resolve_credential(
+                    credentials["s3"]["s3-tls-ca-chain"],
+                    content_key="s3-tls-ca-chain",
+                    peek_secrets=peek_secrets,
+                )
+        else:
+            credentials["s3"] = {}
+        if (
+            credentials.get("azure")
+            and credentials["azure"].get("storage-account")
+            and credentials["azure"].get("secret-key")
+        ):
+            credentials["azure"]["storage-account"] = secrets.resolve_credential(
+                credentials["azure"]["storage-account"],
+                content_key="azure-storage-account",
+                peek_secrets=peek_secrets,
+            )
+            credentials["azure"]["secret-key"] = secrets.resolve_credential(
+                credentials["azure"]["secret-key"],
+                content_key="azure-secret-key",
+                peek_secrets=peek_secrets,
+            )
+        else:
+            credentials["azure"] = {}
+
+        if credentials.get("gcs", {}).get("secret-key"):
+            credentials["gcs"]["secret-key"] = secrets.resolve_credential(
+                credentials["gcs"]["secret-key"],
+                content_key="gcs-secret-key",
+                peek_secrets=peek_secrets,
+            )
+        else:
+            credentials["gcs"] = {}
+
+        return PeerClusterRelData.from_dict(content)
+
+
+class PeerClusterRelErrorData(Model):
+    """Model class for the PCluster relation data."""
+
+    cluster_name: str | None
+    should_sever_relation: bool
+    should_wait: bool
+    blocked_message: str
+    deployment_desc: DeploymentDescription | None
+
+    def get_status(self) -> StatusObject | None:
+        """Get the status of the error data."""
+        # We need to find the status based on the blocked_message
+        # and the should_wait which means its a waiting status
+        for status in PeerClusterErrorDataStatuses:
+            escaped_message = re.escape(status.value.message)
+
+            # Substitute the escaped curly brace blocks with non-greedy wildcard
+            # Note the triple backslashes: \\\{ matches the literal string "\{"
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
+
+            if re.match(regex_pattern, self.blocked_message):
+                # set message to the original message with placeholders
+                new_status = status.value.model_copy(update={"message": self.blocked_message})
+                return new_status
+        return None
+
+    @staticmethod
+    def get_status_from_message(message: str) -> StatusObject | None:
+        """Get the status of the error data based on the message."""
+        for status in PeerClusterErrorDataStatuses:
+            escaped_message = re.escape(status.value.message)
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
+            if re.match(regex_pattern, message):
+                new_status = status.value.model_copy(update={"message": message})
+                return new_status
+        return None
+
+
+class PeerClusterOrchestrators(Model):
+    """Model class for the PClusters registered main/failover clusters."""
+
+    _TYPES = Literal["main", "failover"]
+
+    main_rel_id: int = -1
+    main_app: App | None = None
+    failover_rel_id: int = -1
+    failover_app: App | None = None
+
+    def delete(self, typ: _TYPES) -> None:
+        """Delete an orchestrator from the current pair."""
+        if typ == "main":
+            self.main_rel_id = -1
+            self.main_app = None
+        else:
+            self.failover_rel_id = -1
+            self.failover_app = None
+
+    def promote_failover(self) -> None:
+        """Delete previous main orchestrator and promote failover if any."""
+        self.main_app = self.failover_app
+        self.main_rel_id = self.failover_rel_id
+        self.delete("failover")
+
+
+class PeerClusterApp(Model):
+    """Model class for representing an application part of a large deployment."""
+
+    app: App
+    planned_units: int
+    units: list[str]
+    roles: list[str]
+
+
+class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
+    """Model class for all applications in a large deployment as a dict."""
+
+    def __iter__(self) -> Iterator[str]:
+        """Implements the iter magic method."""
+        return iter(self.root)
+
+    def __getitem__(self, item: str) -> PeerClusterApp:
+        """Implements the getitem magic method."""
+        return self.root[item]
+
+
 @dataclass(frozen=True)
 class SmtpConfig:
     """SMTP-related config derived from relation data.
@@ -419,3 +890,41 @@ class JWTAuthConfiguration(Model):
     required_audience: str | None = None
     required_issuer: str | None = None
     jwt_clock_skew_tolerance_seconds: int | None = None
+
+
+class UpgradeVersions(Model):
+    """Model class for the charm & workload versions used for upgrades."""
+
+    charm: str
+    workload: str
+
+    @property
+    def charm_parsed(self) -> poetry_version.Version:
+        """Parsed charm version with build version omitted."""
+        return poetry_version.Version.parse(self.charm.split("+")[0])
+
+    @property
+    def workload_parsed(self) -> poetry_version.Version:
+        """Parsed workload version."""
+        return poetry_version.Version.parse(self.workload)
+
+
+class UnitUpgradesState(BaseStrEnum):
+    """Unit state of upgrade."""
+
+    HEALTHY = "healthy"
+    RESTARTING = "restarting"  # Kubernetes only
+    UPGRADING = "upgrading"  # Machines only
+    OUTDATED = "outdated"  # Machines only
+
+
+class LifecycleUnitTearingDownAndAppActive(IntEnum):
+    """Unit is tearing down and 1+ other units are NOT tearing down"""
+
+    FALSE = 0
+    TRUE = 1
+    UNKNOWN = 2
+
+    def __bool__(self) -> bool:
+        """Return bool evaluation."""
+        return self is self.TRUE

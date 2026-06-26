@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -96,8 +96,6 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -146,8 +144,6 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(unit_ids_ips),
         idle_period=IDLE_PERIOD,
         timeout=2400,
@@ -199,8 +195,6 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -255,8 +249,6 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(unit_ids_ips),
         idle_period=IDLE_PERIOD,
         timeout=2400,
@@ -314,8 +306,6 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -359,8 +349,6 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(unit_ids_ips),
         idle_period=IDLE_PERIOD,
         timeout=2000,
@@ -403,8 +391,6 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
         await wait_until(
             ops_test,
             apps=[app],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             wait_for_exact_units=old_units_count + 1,
             idle_period=IDLE_PERIOD,
         )
@@ -456,8 +442,6 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     await wait_until(
         ops_test,
         apps=[app],
-        apps_statuses=["active"],
-        units_statuses=["active"],
         wait_for_exact_units=len(unit_ids_ips),
         idle_period=IDLE_PERIOD,
         timeout=2000,

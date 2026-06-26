@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Cluster manager."""
@@ -9,6 +9,10 @@ import time
 from datetime import datetime
 from typing import Any
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
+from pydantic import ValidationError
 from shortuuid import ShortUUID
 from tenacity import (
     Retrying,
@@ -19,6 +23,7 @@ from tenacity import (
 from opensearch_single_kernel.common.constants import (
     CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN,
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
+    DATA_ROLE_REMOVAL_FORBIDDEN,
     GENERATED_ROLES,
     OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_NO_RELATION,
@@ -26,7 +31,6 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     DeploymentType,
     Directive,
-    Scope,
     StartMode,
     State,
 )
@@ -36,17 +40,25 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchProvidedRolesException,
     OpenSearchStartTimeoutError,
 )
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    JwtStatuses,
+    OAuthStatuses,
+    PeerClusterStatuses,
+)
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
     DeploymentState,
     Node,
     PeerClusterConfig,
+    PeerClusterRelData,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import deployment_type, format_unit_name
+from opensearch_single_kernel.utils.helpers import deployment_type
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -62,8 +74,7 @@ class ClusterManager(BaseManager):
     CONFIG_YML = "opensearch.yml"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "cluster_manager"
+        super().__init__(state, workload, "cluster_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
     def start(self, wait_until_http_200: bool = True) -> None:
@@ -102,6 +113,7 @@ class ClusterManager(BaseManager):
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
             self.state.application.deployment_desc = deployment_desc
             return False
+
         # update cluster deployment desc
         logger.debug("Existing deployment_desc before cluster setup: %s", current_deployment_desc)
         deployment_desc = self._existing_cluster_setup(user_config, current_deployment_desc)
@@ -112,9 +124,59 @@ class ClusterManager(BaseManager):
         # TODO: Should we add an entry on DeploymentDesc "errors" to reflect on status?
         self.state.application.deployment_desc = deployment_desc
 
-        # TODO: once peer clusters relation implemented, we should apply all directives
-        #  + removing them from queue. We currently only apply the status.
         return True
+
+    def reconcile_cluster_config_with_relation_data(
+        self, data: PeerClusterRelData
+    ) -> None:  # noqa: C901
+        """Update current peer cluster related config based on peer_cluster rel_data."""
+        logger.debug("running with relation data")
+        current_deployment_desc = self.state.application.deployment_desc
+
+        config = current_deployment_desc.config
+        deployment_state = current_deployment_desc.state
+        pending_directives = current_deployment_desc.pending_directives
+
+        logger.debug("deployment_desc; %s", current_deployment_desc)
+
+        if Directive.WAIT_FOR_PEER_CLUSTER_RELATION in pending_directives:
+            logger.debug("clearing WAIT_FOR_PEER_CLUSTER_RELATION directive")
+            pending_directives.remove(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
+            if deployment_state.value == State.BLOCKED_WAITING_FOR_RELATION:
+                deployment_state = DeploymentState(value=State.ACTIVE)
+
+        if Directive.VALIDATE_CLUSTER_NAME in pending_directives:
+            if config.cluster_name != data.cluster_name:
+                deployment_state = DeploymentState(
+                    value=State.BLOCKED_WRONG_RELATED_CLUSTER, message=PEER_CLUSTER_WRONG_RELATION
+                )
+            elif deployment_state.value in [
+                State.BLOCKED_WRONG_RELATED_CLUSTER,
+                State.BLOCKED_WAITING_FOR_RELATION,
+                State.ACTIVE,
+            ]:
+                deployment_state = DeploymentState(value=State.ACTIVE)
+                pending_directives.remove(Directive.VALIDATE_CLUSTER_NAME)
+        elif Directive.INHERIT_CLUSTER_NAME in pending_directives:
+            config.cluster_name = data.cluster_name
+            pending_directives.remove(Directive.INHERIT_CLUSTER_NAME)
+            if deployment_state.value == State.BLOCKED_WAITING_FOR_RELATION:
+                deployment_state = DeploymentState(value=State.ACTIVE)
+
+        pending_directives.append(Directive.SHOW_STATUS)
+        new_deployment_desc = DeploymentDescription(
+            app=current_deployment_desc.app,
+            config=config,
+            pending_directives=pending_directives,
+            typ=current_deployment_desc.typ,
+            state=deployment_state,
+            start=current_deployment_desc.start,
+            cluster_name_autogenerated=data.deployment_desc.cluster_name_autogenerated,
+        )
+
+        logger.debug("new_deployment_desc: %s", new_deployment_desc)
+        self.state.application.deployment_desc = new_deployment_desc
+        self.state.application.nodes_config = {node.name: node for node in data.cm_nodes}
 
     def _new_cluster_setup(self, config: PeerClusterConfig) -> DeploymentDescription:
         """Build deployment description of a new cluster."""
@@ -123,7 +185,7 @@ class ClusterManager(BaseManager):
         deployment_state = DeploymentState(value=State.ACTIVE)
         if config.init_hold:
             # checks if peer cluster relation is set
-            if not self.state.peer_cluster_relation:
+            if not self.state.peer_cluster_relations:
                 deployment_state = DeploymentState(
                     value=State.BLOCKED_WAITING_FOR_RELATION,
                     message=PEER_CLUSTER_NO_RELATION,
@@ -240,6 +302,18 @@ class ClusterManager(BaseManager):
             ),
         )
 
+    def nodes_by_role(self, nodes: list[Node]) -> dict[str, list[Node]]:
+        """Get list of nodes by role."""
+        result = {}
+        for node in nodes:
+            for role in node.roles:
+                if role not in result:
+                    result[role] = []
+
+                result[role].append(node)
+
+        return result
+
     def _pre_validate_roles_change(self, new_roles: list[str], prev_roles: list[str]) -> None:
         """Validate that the config changes of roles are allowed to happen."""
         if sorted(prev_roles) == sorted(new_roles):
@@ -264,29 +338,22 @@ class ClusterManager(BaseManager):
             # user requests a forbidden removal of "cluster_manager" role from node
             raise OpenSearchProvidedRolesException(CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN)
 
-        # TODO: enable this check once we have peer cluster relation implemented
+        if "data" in prev_roles and "data" not in new_roles:
+            # this is dangerous as this might induce downtime + error on start when data on disk
+            # we need to check if there are other sub-clusters with the data roles
+            if not self.state.is_peer_cluster_consumer():
+                raise OpenSearchProvidedRolesException(DATA_ROLE_REMOVAL_FORBIDDEN)
 
-        # if "data" in prev_roles and "data" not in new_roles:
-        # this is dangerous as this might induce downtime + error on start when data on disk
-        # we need to check if there are other sub-clusters with the data roles
-        # if not self.is_consumer():
-        # raise OpenSearchProvidedRolesException(DataRoleRemovalForbidden)
-
-        # todo guarantee unicity of unit names on peer_relation_joined
-        # current_cluster_units = [
-        # format_unit_name(unit, app=self.deployment_desc().app)
-        # for unit in all_units(self._charm)
-        # ]
-        # all_nodes = ClusterTopology.nodes(
-        #    self._charm.opensearch, self._opensearch.is_node_up(), self._charm.alt_hosts
-        # )
-        # other_clusters_data_nodes = [
-        # node
-        # for node in ClusterTopology.nodes_by_role(all_nodes)["data"]
-        # if node.name not in current_cluster_units
-        # ]
-        # if not other_clusters_data_nodes:
-        # raise OpenSearchProvidedRolesException(DataRoleRemovalForbidden)
+            # todo guarantee unicity of unit names on peer_relation_joined
+            current_cluster_units = self.state.all_unit_names
+            all_nodes = self._nodes(self.opensearch_client.is_node_up(), self.alt_hosts)
+            other_clusters_data_nodes = [
+                node
+                for node in self.nodes_by_role(all_nodes)["data"]
+                if node.name not in current_cluster_units
+            ]
+            if not other_clusters_data_nodes:
+                raise OpenSearchProvidedRolesException(DATA_ROLE_REMOVAL_FORBIDDEN)
 
     def _user_config(self) -> PeerClusterConfig:
         """Build a user provided config object."""
@@ -303,8 +370,8 @@ class ClusterManager(BaseManager):
     def update_bootstrap_state(self, cleanup_application: bool = False) -> None:
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
         if cleanup_application:
-            self.state.application.update({"bootstrapped": "True"})
-        self.state.server.update({"bootstrap_contributor": ""})
+            self.state.application.bootstrapped = True
+        del self.state.server.is_bootstrap_contributor
 
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
@@ -337,7 +404,7 @@ class ClusterManager(BaseManager):
 
         IMPORTANT: must only run once per cluster, otherwise the index gets overrode
         """
-        admin_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secrets = self.state.application.admin_secrets
         args = [
             f"-cd {self.workload.paths.conf}/opensearch-security/",
             f"-cn {self.state.application.deployment_desc.config.cluster_name}",
@@ -359,7 +426,7 @@ class ClusterManager(BaseManager):
         self.workload.run_script(
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
-        self._put_security_index_initialised()
+        self.state.application.is_security_index_initialised = True
 
     def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> None:
         """Run the security_admin script for specified config file, avoiding changes to others."""
@@ -386,27 +453,6 @@ class ClusterManager(BaseManager):
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
 
-    def check_if_can_start(self) -> bool:
-        """Apply the directives computed by the opensearch peer cluster manager."""
-        if not (deployment_desc := self.state.application.deployment_desc):
-            # the deployment description hasn't finished being computed by the leader
-            return False
-
-        # check possibility to start
-        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
-        if self.check_blocking_directives(deployment_desc):
-            try:
-                self.get_nodes(False)
-            except OpenSearchHttpError:
-                return False
-            return True
-        return False
-
-    def _put_security_index_initialised(self) -> None:
-        """Set the security index initialized flag."""
-        # TODO: Add peer cluster updates here we need to update relations
-        self.state.application.is_security_index_initialised = True
-
     def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
         # it sometimes takes a few seconds before the node is fully "up" otherwise a 503 error
@@ -421,9 +467,7 @@ class ClusterManager(BaseManager):
                 if not self.opensearch_client.is_node_up():
                     raise OpenSearchNotFullyReadyError("Node started but not fully ready yet.")
 
-    def check_blocking_directives(
-        self, deployment_desc: DeploymentDescription | None = None
-    ) -> bool:
+    def no_blocking_directives(self, deployment_desc: DeploymentDescription | None = None) -> bool:
         """Return If we have any blocking directives."""
         if not (deployment_desc := deployment_desc or self.state.application.deployment_desc):
             return False
@@ -485,7 +529,7 @@ class ClusterManager(BaseManager):
         if (
             deployment_desc := self.state.application.deployment_desc
         ).start == StartMode.WITH_GENERATED_ROLES:
-            updated_nodes = self.recompute_nodes_conf(
+            updated_nodes = self.reset_nodes_conf_to_default(
                 app_id=deployment_desc.app.id, nodes=current_nodes
             )
         else:
@@ -560,12 +604,12 @@ class ClusterManager(BaseManager):
         """Get the list of the roles assigned to this node."""
         try:
             return self.opensearch_client.get_roles_by_unit_name(
-                self.state.unit_name, self.alt_hosts
+                self.state.unit_name, self.state.server.unit_id, self.alt_hosts
             )
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
 
-    def recompute_nodes_conf(self, app_id: str, nodes: list[Node]) -> dict[str, Node]:
+    def reset_nodes_conf_to_default(self, app_id: str, nodes: list[Node]) -> dict[str, Node]:
         """Recompute the configuration of all the nodes (cluster set to auto-generate roles)."""
         if not nodes:
             return {}
@@ -586,7 +630,7 @@ class ClusterManager(BaseManager):
                 ip=node.ip,
                 app=node.app,
                 unit_number=node.unit_number,
-                temperature=node.temperature,
+                temperature=None,
             )
         logger.debug(
             "Roles after re-balancing %s",
@@ -603,10 +647,7 @@ class ClusterManager(BaseManager):
             remaining_nodes = [
                 node
                 for node in self.get_nodes(self.opensearch_client.is_node_up())
-                if node.name
-                != format_unit_name(
-                    self.state.unit_name, app=self.state.application.deployment_desc.app
-                )
+                if node.name != self.state.unit_name
             ]
             self.compute_and_broadcast_updated_topology(remaining_nodes)
         elif is_last_unit:
@@ -615,30 +656,13 @@ class ClusterManager(BaseManager):
     def cleanup_on_last_unit_removal(self) -> None:
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
-            self.state.application.update(
-                {
-                    "bootstrap_contributors_count": "",
-                    "nodes_config": "",
-                }
-            )
+            del self.state.application.bootstrap_contributors_count
+            del self.state.application.nodes_config
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
-                self.state.application.update(
-                    {
-                        "is_security_index_initialised": "",
-                        "bootstrapped": "",
-                    }
-                )
-        # TODO: Large Deployment
-        # if self.opensearch_peer_cm.is_provider():
-        #    self.peer_cluster_provider.refresh_relation_data(event, can_defer=False)
-        #    logger.debug("demoting main orchestrator")
-        #    self.opensearch_peer_cm.demote_deployment_type()
-        #    self.peers_data.delete(Scope.APP, "orchestrators")
-        #    self.peer_cluster_provider.clean_all_relation_data()
-        # elif self.opensearch_peer_cm.is_consumer():
-        #    self.peer_cluster_requirer.refresh_requirer_relation_data()
+                del self.state.application.is_security_index_initialised
+                del self.state.application.bootstrapped
 
     def flush_translog_to_disk(self) -> None:
         """Flush OpenSearch translog to disk."""
@@ -667,7 +691,7 @@ class ClusterManager(BaseManager):
         if not (deployment_desc := self.state.application.deployment_desc):
             return False
 
-        if not self.check_blocking_directives(deployment_desc):
+        if not self.no_blocking_directives(deployment_desc):
             return False
 
         if not self.state.application.is_admin_user_initialized:
@@ -690,7 +714,7 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        self.state.server.update({"started": ""})
+        del self.state.server.started
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -708,6 +732,43 @@ class ClusterManager(BaseManager):
                 if e.response_code != 404:
                     continue
 
+    def promote_deployment_type(self) -> None:
+        """Update the deployment type of the current deployment desc."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return
+
+        if deployment_desc.typ != DeploymentType.FAILOVER_ORCHESTRATOR:
+            return
+
+        logger.debug("Promoting deployment type to MAIN_ORCHESTRATOR")
+        deployment_desc.typ = DeploymentType.MAIN_ORCHESTRATOR
+        deployment_desc.promotion_time = datetime.now().timestamp()
+        logger.debug("New deployment description: %s", deployment_desc)
+        if Directive.WAIT_FOR_PEER_CLUSTER_RELATION in deployment_desc.pending_directives:
+            deployment_desc.pending_directives.remove(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
+            if deployment_desc.state.value == State.BLOCKED_WAITING_FOR_RELATION:
+                deployment_desc.state = DeploymentState(value=State.ACTIVE)
+        deployment_desc.pending_directives.append(Directive.SHOW_STATUS)
+        self.state.application.deployment_desc = deployment_desc
+
+    def demote_deployment_type(self) -> None:
+        """Update the deployment type of the current deployment desc."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return
+
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        deployment_desc.typ = DeploymentType.FAILOVER_ORCHESTRATOR
+        deployment_desc.promotion_time = None
+        logger.debug("Demoting deployment type to FAILOVER_ORCHESTRATOR: %s", deployment_desc)
+        deployment_desc.state = DeploymentState(
+            value=State.BLOCKED_WAITING_FOR_RELATION, message=PEER_CLUSTER_NO_RELATION
+        )
+        deployment_desc.pending_directives.append(Directive.SHOW_STATUS)
+        deployment_desc.pending_directives.append(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
+        self.state.application.deployment_desc = deployment_desc
+
     def get_prometheus_labels(self) -> dict[str, str] | None:
         """Return the labels for the prometheus scrape."""
         try:
@@ -722,3 +783,161 @@ class ClusterManager(BaseManager):
             # in the opensearch.yml, nor APIs is responding. Therefore, we need to catch
             # the KeyError here and report the appropriate response.
             return None
+
+    @property
+    def no_cluster_manager_left(self) -> bool:
+        """Return whether there is no cluster manager left in the cluster fleet."""
+        cm_nodes_left = False
+        nodes = self._nodes(True, self.alt_hosts)
+        for node in nodes:
+            # ignore current unit
+            if node.ip == self.state.host_ip:
+                continue
+            if node.is_cm_eligible() and self.opensearch_client.is_node_up(node.ip):
+                cm_nodes_left = True
+                break
+
+        return (
+            len(
+                [
+                    app
+                    for app in self.state.application.apps_in_fleet
+                    if app.app.id != self.state.application.deployment_desc.app.id
+                ]
+            )
+            > 0
+            and not cm_nodes_left
+        )
+
+    def get_cluster_first_data_node(self) -> str | None:
+        """Get the first data node from the cluster relation data."""
+        orchestrators = self.state.application.orchestrators
+
+        if orchestrators.main_app is None:
+            return None
+
+        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
+            is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
+        )
+        peer_cluster_data = remote_peer_cluster.data()
+
+        logger.debug(f"get_cluster_first_data_node : data read: {peer_cluster_data}")
+
+        if not peer_cluster_data:
+            return None
+        return peer_cluster_data.first_data_node
+
+    def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
+        """Check if we should ignore the lock when starting OpenSearch."""
+        return (
+            self.state.server.is_app_leader
+            # data unit
+            and (
+                "data" in deployment_desc.config.roles
+                or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            )
+            and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
+            and (
+                not self.state.application.is_security_index_initialised
+                or (
+                    # in case all data-nodes are powered down after being previously started
+                    # ignore the lock to get a data-node started, as it holds security index
+                    self.state.server.started
+                    and not self.workload.is_service_started()
+                )
+            )
+            and self.get_cluster_first_data_node() is None
+            and (
+                deployment_desc.typ != DeploymentType.FAILOVER_ORCHESTRATOR
+                or self.state.is_failover_and_sole_data_app
+            )
+        )
+
+    def set_first_data_node(self, first_data_node: str | None) -> None:
+        """Set the first data node in the relation data."""
+        orchestrators = self.state.application.orchestrators
+        if orchestrators.main_app is None:
+            return None
+
+        logger.debug(
+            f"Setting first data node '{first_data_node}' for orchestrator {orchestrators.main_app.id}"
+        )
+
+        peer_cluster = self.state.peer_cluster_by_relation_id(
+            is_provider=False, relation_id=orchestrators.main_rel_id
+        )
+        if not peer_cluster:
+            return None
+
+        if first_data_node is None:
+            # if first data node is None, delete the key from the relation data
+            del peer_cluster.first_data_node
+            return None
+
+        # set the first data node in the relation data
+        peer_cluster.first_data_node = first_data_node
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        current_status_list = self.state.statuses.get(scope, self.name).root
+
+        status_list: list[StatusObject] = []
+
+        if scope == "unit":
+            if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
+                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
+            self._add_unit_statuses(status_list)
+
+        if scope == "app":
+            self._add_app_statuses(status_list)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _add_unit_statuses(self, status_list: list[StatusObject]) -> None:
+        """Compute the manager's unit statuses and append them to list."""
+        if (
+            (deployment_desc := self.state.application.deployment_desc)
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.state.application.is_security_index_initialised
+        ):
+            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
+
+    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
+        """Compute the manager's app statuses and append them to list."""
+        if not (deployment_desc := self.state.application.deployment_desc):
+            return None
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            if self.state.oauth_relation:
+                status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
+            if self.state.jwt_relation:
+                status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
+        elif self.state.jwt_relation:
+            try:
+                self.state.jwt.auth_configuration
+            except ValidationError:
+                status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
+
+        if (
+            not self.no_blocking_directives(deployment_desc)
+            and deployment_desc.state.value != State.ACTIVE
+            and deployment_desc.state.message
+        ):
+            status_list.append(
+                format_status(
+                    GeneralStatuses.BLOCKING_DIRECTIVE.value,
+                    params={"directive": deployment_desc.state.message},
+                )
+            )
+
+        if (
+            deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
+            and "data" not in deployment_desc.config.roles
+            and not self.state.application.is_security_index_initialised
+        ):
+            status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)

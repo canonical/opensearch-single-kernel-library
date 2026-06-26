@@ -1,4 +1,4 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 name: opensearch
@@ -20,6 +20,8 @@ peers:
     # DA056 - Upgrading in-place upgrade protocol
     # https://docs.google.com/document/d/1H7qy5SAwLiCOKO9xMQJbbQP5_-jGV6Lhi-mJOk4gZ08/edit
     interface: upgrade
+  status-peers:
+    interface: status-peers
 
 provides:
   peer-cluster-orchestrator:
@@ -48,6 +50,9 @@ requires:
     limit: 1
   azure-credentials:
     interface: azure
+    limit: 1
+  gcs-credentials:
+    interface: gcs
     limit: 1
   oauth:
     interface: oauth

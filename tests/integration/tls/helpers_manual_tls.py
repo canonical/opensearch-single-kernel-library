@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ class ManualTLSAgent:
     async def get_outstanding_certificate_requests(self) -> None:
         """Get the outstanding certificate requests from the TLS operator.
 
-        Raises
+        Raises:
         ------
             GetOutstandingCertificateRequestsError:
                 If getting the outstanding certificate requests fails.

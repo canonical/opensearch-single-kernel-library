@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
+import json
 import logging
 import subprocess
 import time
@@ -19,6 +20,7 @@ from tenacity import (
 
 from opensearch_single_kernel.core.models import App, Node
 from tests.integration.conftest import APP_NAME
+from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.helpers import (
     get_application_unit_ids,
     get_application_unit_ids_hostnames,
@@ -26,6 +28,7 @@ from tests.integration.helpers import (
     get_leader_unit_ip,
     http_request,
     juju_version_major,
+    run_action,
 )
 from tests.integration.models import Shard
 
@@ -429,3 +432,146 @@ async def is_network_restored_after_ip_change(
                 return True
     except RetryError:
         return False
+
+
+async def add_juju_secret(
+    ops_test: OpsTest, charm_name: str, secret_label: str, data: dict[str, str]
+) -> str:
+    """Add a new juju secret."""
+    logger.info(f"Data keys to insert: {data.keys()}")
+
+    # pass arguments as list
+    kv_args = [f"{k}={v}" for k, v in data.items()]
+
+    return_code, stdout, stderr = await ops_test.juju("add-secret", secret_label, *kv_args)
+    logger.info(f"Add secret return code={return_code} stdout={stdout} stderr={stderr}")
+    if return_code != 0:
+        raise AssertionError(
+            f"juju add-secret failed rc={return_code} stderr={stderr} stdout={stdout}"
+        )
+
+    secret_uri = (stdout or "").strip()
+    logger.info(f"Secret uri: {secret_uri}")
+    if not secret_uri:
+        raise AssertionError("juju add-secret returned empty secret URI")
+
+    # grant using the secret URI
+    return_code, stdout, stderr = await ops_test.juju("grant-secret", secret_uri, charm_name)
+    logger.info(f"Grant secret return code={return_code} stdout={stdout} stderr={stderr}")
+    if return_code != 0:
+        raise AssertionError(
+            f"juju grant-secret failed rc={return_code} stderr={stderr} stdout={stdout}"
+        )
+
+    return secret_uri
+
+
+async def wait_for_backup_system_to_settle(
+    ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
+):
+    """Waits the backup to finish and move to the finished state or throws a RetryException."""
+    for attempt in Retrying(stop=stop_after_attempt(8), wait=wait_fixed(15)):
+        with attempt:
+            # First, check if current backups are finished
+            action = await run_action(
+                ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
+            )
+            # Expected format:
+            # namespace(status='completed', response={'return-code': 0, 'backups': '{"1": ...}'})
+            backups = json.loads(action.response["backups"])
+            logger.debug(f"Backups recovered: {backups}")
+            if action.status != "completed" or len(backups) == 0:
+                raise Exception("Failed to retrieve backup list or list is empty")
+
+            logger.debug(f"list-backups output: {action}")
+            # Now, check if we have finished the restore
+            indices_status = await http_request(
+                ops_test,
+                "GET",
+                f"https://{unit_ip}:9200/_recovery?human",
+            )
+            for info in indices_status.values():
+                # Now, check the status of each shard
+                for shard in info["shards"]:
+                    if shard["type"] == "SNAPSHOT" and shard["stage"] != "DONE":
+                        raise Exception(f"Recovery failed for shard {shard}")
+
+
+async def assert_start_and_check_continuous_writes(
+    ops_test: OpsTest, unit_ip: str, app: str
+) -> None:
+    """Start continuous writes and check that documents are increasing after some time.
+
+    Given we are restoring an index, we need to make sure ContinuousWrites restart at
+    the tip of that index instead of doc_id = 0.
+
+    Closes the writer at the end.
+    """
+    initial_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
+    logger.info(
+        f"Index {ContinuousWrites.INDEX_NAME} has {initial_count} documents, starting there"
+    )
+    writer = ContinuousWrites(ops_test, app, initial_count=initial_count)
+    await writer.start()
+    time.sleep(10)
+    # Ensure we have writes happening and the index is consistent at the end
+    await assert_continuous_writes_increasing(writer)
+    await assert_continuous_writes_consistency(ops_test, writer, [app])
+    # Clear the writer manually, as we are not using the conftest c_writes_runner to do so
+    await writer.clear()
+
+
+async def create_backup(
+    ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
+) -> str:
+    """Runs the backup of the cluster."""
+    action = await run_action(ops_test, leader_id, "create-backup", app=app)
+    logger.debug(f"create-backup output: {action}")
+    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    assert action.status == "completed"
+    st = str(action.response.get("status", ""))
+    assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
+    assert action.response.get("backup-id"), "backup-id is missing in response"
+    return action.response["backup-id"]
+
+
+async def restore(
+    ops_test: OpsTest, backup_id: str, unit_ip: str, leader_id: int, app: str = APP_NAME
+) -> bool:
+    """Restores a backup."""
+    action = await run_action(
+        ops_test, leader_id, "restore", params={"backup-id": backup_id}, app=app
+    )
+    logger.debug(f"restore output: {action}")
+
+    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    return action.status == "completed"
+
+
+async def list_backups(ops_test: OpsTest, leader_id: int, app: str = APP_NAME) -> dict[str, str]:
+    action = await run_action(
+        ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
+    )
+    assert action.status == "completed"
+    return json.loads(action.response["backups"])
+
+
+async def assert_restore_indices_and_compare_consistency(
+    ops_test: OpsTest, app: str, leader_id: int, unit_ip: str, backup_id: str
+) -> None:
+    """Ensures that continuous writes index has at least the value below."""
+    original_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
+    # As stated on: https://discuss.elastic.co/t/how-to-parse-snapshot-dat-file/218888,
+    # the only way to discover the documents in a backup is to recover it and check
+    # on opensearch.
+    # The logic below will run over each backup id, restore it and ensure continuous writes
+    # index loss is within the "loss" parameter.
+    assert await restore(ops_test, backup_id, unit_ip, leader_id, app=app)
+    new_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
+    logger.info(
+        f"Testing restore for {ContinuousWrites.INDEX_NAME} - "
+        f"original count pre-restore: {original_count}, and now, new count: {new_count}"
+    )
+    # We expect that new_count has a loss of documents and the numbers are different.
+    # Check if we have data but not all of it.
+    assert 0 < new_count < original_count

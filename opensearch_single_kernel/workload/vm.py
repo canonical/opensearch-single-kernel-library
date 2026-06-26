@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
@@ -8,10 +8,11 @@ import os
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 from charmlibs import pathops
-from charmlibs.pathops import PathProtocol
+from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
@@ -40,8 +41,9 @@ class VMWorkload(BaseWorkload):
 
     SERVICE_NAME = "daemon"
 
-    def __init__(self):
+    def __init__(self, charm_root: Path):
         super().__init__()
+        self.charm_root = charm_root
         for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
             with attempt:
                 cache = snap.SnapCache()
@@ -76,6 +78,7 @@ class VMWorkload(BaseWorkload):
         encoding: str | None = None,
         dir: PathProtocol | None = None,
         delete: bool = True,
+        chown: str | None = None,
         *,
         errors: str | None = None,
         suffix: str | None = None,
@@ -84,6 +87,9 @@ class VMWorkload(BaseWorkload):
         f = tempfile.NamedTemporaryFile(
             mode=mode, encoding=encoding, dir=dir, delete=False, errors=errors, suffix=suffix
         )
+        if chown is not None:
+            command = "sudo chown {} {}".format(chown, f.name)
+            self.run_cmd(command)
         file_path: PathProtocol = self.root / f.name
         try:
             if data:
@@ -121,6 +127,10 @@ class VMWorkload(BaseWorkload):
             return None
 
         return output.out.strip()
+
+    def is_started(self) -> bool:
+        """Check if OpenSearch is started."""
+        return self.is_reachable(self.host, self.port)
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -295,7 +305,6 @@ class VMWorkload(BaseWorkload):
             run_kwargs["input"] = stdin
         try:
             output = subprocess.run(command_with_args, **run_kwargs)
-
             if output.returncode != 0:
                 logger.debug(
                     "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout
@@ -323,7 +332,7 @@ class VMWorkload(BaseWorkload):
     @override
     def paths(self) -> Paths:
         """Return Workload's paths"""
-        return Paths(self.root)
+        return Paths(self.root, LocalPath(self.charm_root))
 
     @property
     @override

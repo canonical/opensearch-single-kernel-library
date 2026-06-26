@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch TLS manager."""
@@ -10,18 +10,31 @@ from datetime import datetime
 from typing import Any
 
 from charmlibs.pathops import PathProtocol
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
+    DeploymentType,
     Scope,
     StoreType,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
+)
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    PeerClusterErrorDataStatuses,
+    TlsStatuses,
+)
+from opensearch_single_kernel.core.models import (
+    PeerClusterRelData,
+    PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
@@ -32,13 +45,14 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     read_ca,
     remove_ca,
-    store_ca,
+    store_ca_chain,
 )
 from opensearch_single_kernel.utils.helpers import (
     cert_expiration_remaining_hours,
     generate_password,
     parse_tls_file,
 )
+from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -53,10 +67,9 @@ class TlsManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "tls_manager"
+        super().__init__(state, workload, "tls_manager")
 
-    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:  # noqa: C901
+    def all_tls_resources_stored(self, only_unit_resources: bool = False) -> bool:
         """Check if all TLS resources are stored on disk."""
         cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
         if not only_unit_resources:
@@ -74,8 +87,7 @@ class TlsManager(BaseManager):
             if not cert_type_path.exists():
                 return False
 
-            scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
-            secret = self.state.secrets.get_object(scope, cert_type.val, peek=True)
+            secret = self.get_secrets_for_cert_type(cert_type)
 
             cert_issuer = self.get_cert_issuer_from_path(
                 store_pwd=secret.get("keystore-password"),
@@ -86,34 +98,32 @@ class TlsManager(BaseManager):
 
             if cert_issuer != ca_issuer:
                 return False
-
+        logger.info("All TLS resources are stored on disk and valid.")
         return True
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secrets = self.state.application.admin_secrets
         ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
         logger.debug("Reading stored ca from %s", ca_trust_store)
-        if not (ca_trust_store.exists() and secrets):
+        if not (ca_trust_store.exists() and admin_secrets):
             return None
 
         return read_ca(
             workload=self.workload,
             alias=alias,
-            store_pwd=secrets.get("truststore-password"),
+            store_pwd=admin_secrets.get("truststore-password"),
             store_path=ca_trust_store,
         )
 
     def all_certificates_available(self) -> bool:
         """Method that checks if all certs available and issued from same CA."""
-        secrets = self.state.secrets
-
-        admin_secrets = secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secrets = self.state.application.admin_secrets
         if not admin_secrets or not admin_secrets.get("cert"):
             return False
 
         for cert_type in [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]:
-            unit_secrets = secrets.get_object(Scope.UNIT, cert_type.val, peek=True)
+            unit_secrets = self.get_secrets_for_cert_type(cert_type)
             if not unit_secrets or not unit_secrets.get("cert"):
                 return False
 
@@ -135,16 +145,13 @@ class TlsManager(BaseManager):
         """
         store_pwd = None
 
-        secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True)
+        secrets = self.get_secrets_for_cert_type(cert_type)
         if secrets:
             store_pwd = secrets.get(f"{store_type.val}-password")
 
-        if not store_pwd:
-            # and not (
-            # TODO: handle this once large deployment is implemented
-            # self.charm.opensearch_peer_cm.is_consumer(of="main")
-            # and cert_type == CertType.APP_ADMIN
-            # ):
+        if not store_pwd and not (
+            self.state.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
+        ):
 
             self.state.secrets.put_object(
                 scope,
@@ -203,15 +210,15 @@ class TlsManager(BaseManager):
         self,
         scope: Scope,
         cert_type: CertType,
-        secrets: dict[str, str] | None = None,
+        secret: dict[str, str] | None = None,
         tls_file: bool = True,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         key = None
         password = None
-        if secrets:
-            key = secrets.get("key") if secrets.get("key") else None
-            password = secrets.get("key-password", None)
+        if secret:
+            key = secret.get("key") if secret.get("key") else None
+            password = secret.get("key-password", None)
 
         if key is None:
             key = generate_private_key()
@@ -250,10 +257,15 @@ class TlsManager(BaseManager):
         return csr
 
     def update_certificate_secret_if_needed(
-        self, scope: Scope, cert_type: CertType, ca_chain: str, certificate: str, ca: str
+        self,
+        scope: Scope,
+        cert_type: CertType,
+        ca_chain: str,
+        certificate: str,
+        ca: str,
     ) -> None:
         """Update the certificate secrets if needed"""
-        current_secret_obj = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+        current_secret_obj = self.get_secrets_for_cert_type(cert_type)
         secret = {
             "chain": current_secret_obj.get("chain"),
             "cert": current_secret_obj.get("cert"),
@@ -292,19 +304,15 @@ class TlsManager(BaseManager):
                 and secrets.get(secret_name, "").rstrip() == event_data.rstrip()
             )
 
-        app_secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        app_secrets = self.state.application.admin_secrets
         if is_secret_found(app_secrets):
             return Scope.APP, CertType.APP_ADMIN, app_secrets
 
-        u_transport_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-        )
+        u_transport_secrets = self.state.server.transport_secrets
         if is_secret_found(u_transport_secrets):
             return Scope.UNIT, CertType.UNIT_TRANSPORT, u_transport_secrets
 
-        u_http_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_HTTP.val, peek=True
-        )
+        u_http_secrets = self.state.server.http_secrets
         if is_secret_found(u_http_secrets):
             return Scope.UNIT, CertType.UNIT_HTTP, u_http_secrets
 
@@ -314,9 +322,7 @@ class TlsManager(BaseManager):
         """Create a new chain.pem file for requests module"""
         logger.debug("Updating requests TLS CA bundle")
         if ca_chain is None:
-            admin_secret = self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
+            admin_secret = self.state.application.admin_secrets
             ca_chain = admin_secret.get("chain")
 
         # we store the pem format to make it easier for the python requests lib
@@ -389,7 +395,6 @@ class TlsManager(BaseManager):
                     mode="w+t", suffix=".cert", data=cert, dir=store_path.parent
                 ) as tmp_cert,
             ):
-
                 cmd = f"openssl pkcs12 -export -in {tmp_cert} -inkey {tmp_key} -out {store_path} -name {name}"
                 args = f"-passout pass:{store_pwd}"
                 if key_pwd:
@@ -408,11 +413,7 @@ class TlsManager(BaseManager):
         """Store admin TLS resources if available and mark unit as configured if correct."""
         # In the case of the first units before TLS is initialized,
         # or non-main orchestrator units having not received the secrets from the main yet
-        if not (
-            current_secrets := self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
-        ):
+        if not (current_secrets := self.state.application.admin_secrets):
             return
 
         # in the case the cluster was bootstrapped with multiple units at the same time
@@ -426,8 +427,9 @@ class TlsManager(BaseManager):
         # Mark this unit as tls configured
         if self.is_fully_configured():
             self.state.server.tls_configured = True
-            # TODO: Update peer cluster relation
-            # self.update_tls_flag_to_peer_cluster_relation("tls_configured", "add")
+            peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
+            for peer_cluster_server in peer_cluster_servers:
+                peer_cluster_server.tls_configured = True
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
@@ -459,7 +461,7 @@ class TlsManager(BaseManager):
     def reload_tls_certificates(self) -> None:
         """Reload transport and HTTP layer communication certificates via REST APIs."""
         # using the SSL API requires authentication with app-admin cert and key
-        admin_secret = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        admin_secret = self.state.application.admin_secrets
         with (
             self.workload.temp_file(
                 mode="w+t", data=admin_secret["cert"], dir=self.workload.paths.conf
@@ -468,7 +470,6 @@ class TlsManager(BaseManager):
                 mode="w+t", data=admin_secret["key"], dir=self.workload.paths.conf
             ) as tmp_key,
         ):
-
             self.opensearch_client.reload_tls_certificates(
                 cert_files=(str(tmp_cert), str(tmp_key))
             )
@@ -483,20 +484,16 @@ class TlsManager(BaseManager):
         """Retrieve the list of certificates for this unit."""
         certs = {}
 
-        transport_secrets = self.state.secrets.get_object(
-            Scope.UNIT, CertType.UNIT_TRANSPORT.val, peek=True
-        )
+        transport_secrets = self.state.server.transport_secrets
         if transport_secrets and transport_secrets.get("cert"):
             certs[CertType.UNIT_TRANSPORT] = transport_secrets["cert"]
 
-        http_secrets = self.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val, peek=True)
+        http_secrets = self.state.server.http_secrets
         if http_secrets and http_secrets.get("cert"):
             certs[CertType.UNIT_HTTP] = http_secrets["cert"]
 
         if self.state.server.is_app_leader:
-            admin_secrets = self.state.secrets.get_object(
-                Scope.APP, CertType.APP_ADMIN.val, peek=True
-            )
+            admin_secrets = self.state.application.admin_secrets
             if admin_secrets and admin_secrets.get("cert"):
                 certs[CertType.APP_ADMIN] = admin_secrets["cert"]
 
@@ -524,7 +521,7 @@ class TlsManager(BaseManager):
 
     def remove_old_ca(self) -> None:
         """Remove old CA cert from trust store."""
-        secrets = self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+        secrets = self.state.application.admin_secrets
         if secrets is None:
             logger.error("Cannot remove old CA: admin secrets not found.")
             return
@@ -541,29 +538,165 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def store_new_ca(self, secrets: dict[str, Any], create_store_pwd: bool) -> bool:
+    def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
         """Add new CA cert to trust store."""
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
 
-        admin_secrets = (
-            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
-        )
+        admin_secrets = self.state.application.admin_secrets
+        cert_secrets = self.get_secrets_for_cert_type(cert_type)
 
-        if not ((secrets or {}).get("ca-cert") and admin_secrets.get("truststore-password")):
+        if not (cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")):
             logger.error("CA cert  or truststore-password not found, quitting.")
             return False
 
-        if not store_ca(
+        if not store_ca_chain(
             workload=self.workload,
             alias=CA_ALIAS,
             store_pwd=admin_secrets.get("truststore-password"),
             store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
-            ca=secrets.get("ca-cert"),
+            ca=cert_secrets.get("ca-cert"),
             keep_previous=True,
+            add_read_perm=True,
         ):
             return False
 
-        self.update_request_ca_bundle(secrets.get("chain"))
+        self.update_request_ca_bundle(cert_secrets.get("chain"))
 
         return True
+
+    def peer_cluster_error_from_tls(
+        self, peer_cluster_rel_data: PeerClusterRelData
+    ) -> PeerClusterRelErrorData | None:
+        """Compute TLS related errors."""
+        blocked_msg, should_sever_relation = None, False
+
+        if self.all_tls_resources_stored():  # compare CAs
+            unit_transport_ca_cert = self.state.secrets.get_object(
+                Scope.UNIT, CertType.UNIT_TRANSPORT.val
+            )["ca-cert"]
+            if unit_transport_ca_cert != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]:
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
+                )
+                should_sever_relation = True
+
+        if (
+            peer_cluster_rel_data.credentials.admin_tls
+            and not peer_cluster_rel_data.credentials.admin_tls.get("truststore-password")
+        ):
+            logger.info("Relation data for TLS is missing.")
+            blocked_msg = (
+                PeerClusterErrorDataStatuses.CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE.value.message
+            )
+            should_sever_relation = True
+
+        if not blocked_msg:
+            return None
+
+        return PeerClusterRelErrorData(
+            cluster_name=peer_cluster_rel_data.cluster_name,
+            should_sever_relation=should_sever_relation,
+            should_wait=not should_sever_relation,
+            blocked_message=blocked_msg,
+            deployment_desc=self.state.application.deployment_desc,
+        )
+
+    def get_secrets_for_cert_type(self, cert_type: CertType) -> dict[str, str]:
+        """Get secrets for a given certificate type."""
+        match cert_type:
+            case CertType.APP_ADMIN:
+                return self.state.application.admin_secrets
+            case CertType.UNIT_TRANSPORT:
+                return self.state.server.transport_secrets
+            case CertType.UNIT_HTTP:
+                return self.state.server.http_secrets
+
+    def cleanup_peer_cluster_error_relation_data(self) -> None:
+        """Clean up the error data in relation data when the error is resolved."""
+        # copy the keys to avoid "dictionary changed size during iteration" error
+        relation_items = list(self.state.application.relation_data.items())
+        for key, _ in relation_items:
+            if key.startswith("error_from_tls"):
+                # get the relation id from key
+                rel_id = int(key.split("-")[-1])
+                relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
+                if rel_id not in relation_ids:
+                    self.state.application.relation_data.pop(key)
+
+    @override
+    def get_statuses(  # noqa: C901
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses."""
+        status_list: list[StatusObject] = []
+        if not self.state.tls_relation:
+            # Unit will fail if we combine the two iF
+            if (
+                self.state.application.deployment_desc
+                and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            ):
+                status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
+            return status_list
+        # Means the unit is  being terminated
+        if not self.state.peer_relation:
+            return status_list
+        if scope == "unit":
+            if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
+                status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
+            # If it is the main orchestrator then it will create all resources
+            # Other types will wait for the Peer cluster Main, we also need to check
+            # That the orchestrators field has been populated, otherwise it might
+            # be a relation that is prohibited
+            # Even the failover
+            if (
+                (
+                    (deployment_desc := self.state.application.deployment_desc)
+                    and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                )
+                or (
+                    self.state.application.orchestrators_dict
+                    and self.state.peer_clusters(remote=True, is_provider=False)
+                )
+                or self.state.peer_clusters(remote=True, is_provider=True)
+            ):
+                if not self.all_tls_resources_stored():
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
+            if not self.state.tls_relation and (certs := self.check_certs_expiration()):
+                missing = [cert.val for cert in certs.keys()]
+                status_list.append(
+                    format_status(
+                        TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
+                        {"certificates": ", ".join(missing)},
+                    )
+                )
+        if scope == "app":
+            if (
+                deployment_desc := self.state.application.deployment_desc
+            ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+                if not self.all_tls_resources_stored():
+                    status_list.append(
+                        TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value
+                        if self.state.tls_relation
+                        else TlsStatuses.TLS_RELATION_MISSING.value
+                    )
+
+            # Clean up any lingering errors
+            self.cleanup_peer_cluster_error_relation_data()
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+                if self.state.application.relation_data.get(
+                    f"error_from_tls-{peer_cluster.relation.id}"
+                ):
+                    status = PeerClusterRelErrorData.get_status_from_message(
+                        self.state.application.relation_data[
+                            f"error_from_tls-{peer_cluster.relation.id}"
+                        ]
+                    )
+                    if status:
+                        status_list.append(status)
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

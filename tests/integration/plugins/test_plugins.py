@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import asyncio
@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
@@ -85,6 +86,11 @@ TEXT_EMBEDDING_MODEL = {
     "model_format": "TORCH_SCRIPT",
 }
 
+CosBlockedStatus = StatusObject(
+    status="blocked",
+    message="",
+)
+
 
 async def _wait_for_units(
     ops_test: OpsTest,
@@ -99,8 +105,6 @@ async def _wait_for_units(
         await wait_until(
             ops_test,
             apps=[APP_NAME],
-            apps_statuses=["active"],
-            units_statuses=["active"],
             timeout=1800,
             wait_for_exact_units={APP_NAME: 3},
             idle_period=IDLE_PERIOD,
@@ -109,7 +113,8 @@ async def _wait_for_units(
             await wait_until(
                 ops_test,
                 apps=[COS_APP_NAME],
-                units_statuses=["blocked"],
+                units_statuses={COS_APP_NAME: [CosBlockedStatus]},
+                apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
                 timeout=1800,
                 idle_period=IDLE_PERIOD,
             )
@@ -128,8 +133,6 @@ async def _wait_for_units(
             FAILOVER_ORCHESTRATOR_NAME: 2,
             APP_NAME: 1,
         },
-        apps_statuses=["active"],
-        units_statuses=["active"],
         timeout=1800,
         idle_period=IDLE_PERIOD,
     )
@@ -137,7 +140,8 @@ async def _wait_for_units(
         await wait_until(
             ops_test,
             apps=[COS_APP_NAME],
-            units_statuses=["blocked"],
+            units_statuses={COS_APP_NAME: [CosBlockedStatus]},
+            apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
             timeout=1800,
             idle_period=IDLE_PERIOD,
         )
@@ -329,7 +333,6 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
@@ -467,7 +470,6 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str):
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
@@ -490,7 +492,6 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, deploy_type: str)
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
@@ -702,7 +703,6 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards
@@ -848,7 +848,6 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the ISM and job scheduler plugins are enabled and functional."""
     leader_unit_ip = await get_leader_unit_ip(ops_test)

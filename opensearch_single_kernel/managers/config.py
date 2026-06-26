@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """OpenSearch Config manager."""
@@ -10,7 +10,7 @@ from typing import Any
 from opensearch_single_kernel.common.constants import (
     CertType,
 )
-from opensearch_single_kernel.core.models import OpenSearchProfile
+from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -27,8 +27,7 @@ class ConfigManager(BaseManager):
     JVM_OPTIONS = "jvm.options"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload)
-        self.name = "config_manager"
+        super().__init__(state, workload, "config_manager")
 
     @property
     def yaml_setter(self) -> YamlConfigSetter:
@@ -205,7 +204,7 @@ class ConfigManager(BaseManager):
         """
         return (
             {"plugins.security.authcz.admin_dn": [tls_subject]}
-            if (tls_subject := self.state.tls_subject)
+            if (tls_subject := self.state.application.tls_subject)
             else {}
         )
 
@@ -214,24 +213,29 @@ class ConfigManager(BaseManager):
 
         Intended for opensearch.yml config file.
         """
-        layer = "http" if cert_type == CertType.UNIT_HTTP else "transport"
+        if cert_type == CertType.UNIT_HTTP:
+            layer = "http"
+            keystore_pwd = self.state.server.http_keystore_password
+        else:
+            layer = "transport"
+            keystore_pwd = self.state.server.transport_keystore_password
 
-        return (
-            {
-                f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
-                f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
-                f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
-                f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
-                f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
-                f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
-                f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
-                f"plugins.security.ssl.{layer}.truststore_password": truststore_pwd,
-                f"plugins.security.ssl.{layer}.enabled_protocols": "TLSv1.2",
-            }
-            if (truststore_pwd := self.state.tls_truststore_password)
-            and (keystore_pwd := self.state.get_tls_keystore_password(cert_type))
-            else {}
-        )
+        truststore_pwd = self.state.application.tls_truststore_password
+
+        if not (truststore_pwd and keystore_pwd):
+            return {}
+
+        return {
+            f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
+            f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
+            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
+            f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
+            f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
+            f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
+            f"plugins.security.ssl.{layer}.truststore_password": truststore_pwd,
+            f"plugins.security.ssl.{layer}.enabled_protocols": "TLSv1.2",
+        }
 
     @property
     def _opensearch_data_temperature(self) -> str | None:
@@ -470,12 +474,12 @@ class ConfigManager(BaseManager):
             },
         }
 
-    def update_seeds_config(self) -> None:
+    def update_seeds_config(self, nodes: list[Node] | None = None) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using values from nodes_config."""
+        nodes = nodes or []
         if nodes_config := self.state.application.nodes_config:
-            self._update_seeds_file(
-                [node.ip for node in list(nodes_config.values()) if node.is_cm_eligible()]
-            )
+            nodes.extend(list(nodes_config.values()))
+        self._update_seeds_file([node.ip for node in list(nodes) if node.is_cm_eligible()])
 
     def _update_seeds_file(self, cm_ips: list[str] | None) -> None:
         """Reconcile Opensearch unicast_hosts.txt config file using provided values."""
@@ -507,13 +511,13 @@ class ConfigManager(BaseManager):
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{str(heap_size_in_kb)}k",
+            f"-Xms{heap_size_in_kb}k",
             regex=True,
         )
 
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{str(heap_size_in_kb)}k",
+            f"-Xmx{heap_size_in_kb}k",
             regex=True,
         )

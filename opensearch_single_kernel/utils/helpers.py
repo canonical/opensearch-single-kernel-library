@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """A set of helpers functions."""
 
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -24,7 +25,10 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import App, PeerClusterConfig
+from opensearch_single_kernel.core.models import (
+    App,
+    PeerClusterConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,3 +190,22 @@ def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | 
     except json.JSONDecodeError as e:
         logger.error("Malformed JSON in secret %s: %s", label, e)
         return None
+
+
+def lock_unit_name(full_unit_id: str) -> str:
+    """Build back the juju formatted unit name."""
+    # we first take out the app id suffix
+    full_unit_id_split = full_unit_id.split(".")[0].rsplit("-")
+    return "{}/{}".format("-".join(full_unit_id_split[:-1]), full_unit_id_split[-1])
+
+
+def hash_credentials(credentials: dict[str, str]) -> str:
+    """Return a hash of the given credentials.
+
+    Args:
+        credentials: credentials in a dict
+
+    Returns:
+        hash of the credentials
+    """
+    return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()

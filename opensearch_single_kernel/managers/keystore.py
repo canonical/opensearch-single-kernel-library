@@ -1,4 +1,4 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Implements the keystore logic.
@@ -8,8 +8,17 @@ This module manages OpenSearch keystore access and lifecycle.
 
 import logging
 
+from tenacity import retry, stop_after_attempt, wait_fixed
+
+from opensearch_single_kernel.common.constants import ObjectStorageType
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+)
+from opensearch_single_kernel.core.models import (
+    AzureRelDataCredentials,
+    GcsRelDataCredentials,
+    ObjectStorageCredentials,
+    S3RelDataCredentials,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -25,8 +34,7 @@ class KeystoreManager(BaseManager):
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the keystore manager class."""
-        super().__init__(state, workload)
-        self.name = "keystore_manager"
+        super().__init__(state, workload, "keystore_manager")
 
     def _create_if_needed(self) -> None:
         """Creates the keystore if not already present."""
@@ -34,6 +42,93 @@ class KeystoreManager(BaseManager):
             return
 
         self.workload.run_cmd(self.KEYSTORE, "create")
+
+    def put_object_storage_credentials(
+        self,
+        object_storage_type: ObjectStorageType,
+        object_storage_credentials: ObjectStorageCredentials,
+        gcs_file_path: str | None = None,
+    ) -> None:
+        """Put S3 credentials in the keystore."""
+        if object_storage_type == ObjectStorageType.S3 and isinstance(
+            object_storage_credentials, S3RelDataCredentials
+        ):
+            self.put_entries(
+                {
+                    "s3.client.default.access_key": object_storage_credentials.access_key,
+                    "s3.client.default.secret_key": object_storage_credentials.secret_key,
+                }
+            )
+        elif object_storage_type == ObjectStorageType.AZURE and isinstance(
+            object_storage_credentials, AzureRelDataCredentials
+        ):
+            self.put_entries(
+                {
+                    "azure.client.default.account": object_storage_credentials.storage_account,
+                    "azure.client.default.key": object_storage_credentials.secret_key,
+                }
+            )
+        elif object_storage_type == ObjectStorageType.GCS and isinstance(
+            object_storage_credentials, GcsRelDataCredentials
+        ):
+            if gcs_file_path is None:
+                raise ValueError(
+                    "GCS credentials file path must be provided for GCS object storage."
+                )
+            self.put_file_entry(key="gcs.client.default.credentials_file", filename=gcs_file_path)
+        else:
+            raise ValueError(f"Unknown object storage type: {object_storage_type}")
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
+    def cleanup_storage_credentials(self, object_storage_type) -> None:
+        """Remove keystore entries for the given object storage type with retries.
+
+        Args:
+            object_storage_type: Object storage type to use
+            keystore_entries: Keystore entries to remove
+
+        Retries on OpenSearchCmdError unless the error indicates the entries
+        do not exist.
+        """
+        keystore_entries = []
+        if object_storage_type == ObjectStorageType.S3:
+            keystore_entries = ["s3.client.default.access_key", "s3.client.default.secret_key"]
+        elif object_storage_type == ObjectStorageType.AZURE:
+            keystore_entries = ["azure.client.default.account", "azure.client.default.key"]
+        else:
+            keystore_entries = ["gcs.client.default.credentials_file"]
+
+        if not keystore_entries:
+            logger.warning(
+                "No keystore entries defined for object storage type %s. Skipping cleanup.",
+                object_storage_type,
+            )
+            return None
+        try:
+            self.remove_entries(keystore_entries)
+            logger.info("Removed keystore entries for %s", object_storage_type)
+        except OpenSearchCmdError as e:
+            parts = [
+                getattr(e, "stdout", "") or "",
+                getattr(e, "stderr", "") or "",
+                str(e) or "",
+            ]
+            msg = " ".join(parts).lower()
+            if "does not exist" in msg and "keystore" in msg:
+                # treat as successful cleanup
+                logger.info(
+                    "Keystore entries already absent for %s (message: %s).",
+                    object_storage_type,
+                    msg,
+                )
+                return None
+
+            logger.warning(
+                "Keystore cleanup attempt failed for %s: %s",
+                object_storage_type,
+                msg or repr(e),
+            )
+            raise
 
     def put_entries(self, entries: dict[str, str]) -> None:
         """Add new key/val entries on the keystore."""

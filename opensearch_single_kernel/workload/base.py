@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Base interface for common workload operations."""
@@ -39,99 +39,120 @@ class Paths:
             bin: Path to the bin/ folder
     """
 
-    def __init__(self, root: PathProtocol):
+    def __init__(self, root: PathProtocol, charm_root: PathProtocol):
         super().__init__()
         self.root = root
+        self.charm_root = charm_root
 
     @property
     def base_snap_dir(self) -> PathProtocol:
-        """Return path to the Base snap directory."""
+        """Get path to the Base snap directory."""
         return self.root / BASE_SNAP_DIR
 
     @property
     def snap_data(self) -> PathProtocol:
-        """Return path to the snap data directory."""
+        """Get path to the snap data directory."""
         return self.base_snap_dir / SNAP_DATA
 
     @property
     def snap_common(self) -> PathProtocol:
-        """Return path to the snap common directory."""
+        """Get path to the snap common directory."""
         return self.base_snap_dir / SNAP_COMMON
 
     @property
     def snap(self) -> PathProtocol:
-        """Return path to the snap directory."""
+        """Get path to the snap directory."""
         return self.root / SNAP
 
     @property
     def home(self) -> PathProtocol:
-        """Return path to the home snap directory."""
+        """Get path to the home snap directory."""
         return self.snap_data / OpenSearchPaths.HOME.val
 
     @property
     def conf(self) -> PathProtocol:
-        """Return path to the conf snap directory."""
+        """Get path to the conf snap directory."""
         return self.snap_data / OpenSearchPaths.CONF.val
 
     @property
     def opensearch_config(self) -> PathProtocol:
-        """Return path to the opensearch.yml config file."""
+        """Get path to the opensearch.yml config file."""
         return self.conf / "opensearch.yml"
 
     @property
     def opensearch_keystore(self) -> PathProtocol:
-        """Return path to the opensearch keystore."""
+        """Get path to the opensearch keystore."""
         return self.conf / "opensearch.keystore"
 
     @property
     def data(self) -> PathProtocol:
-        """Return path to the data snap directory."""
+        """Get path to the data snap directory."""
         return self.snap_common / OpenSearchPaths.DATA.val
 
     @property
     def logs(self) -> PathProtocol:
-        """Return path to the logs snap directory."""
+        """Get path to the logs snap directory."""
         return self.snap_common / OpenSearchPaths.LOGS.val
 
     @property
     def jdk(self) -> PathProtocol:
-        """Return path to the jdk directory."""
+        """Get path to the jdk directory."""
         return self.snap / OpenSearchPaths.JDK.val
 
     @property
     def tmp(self) -> PathProtocol:
-        """Return path to the tmp directory."""
+        """Get path to the tmp directory."""
         return self.snap_common / OpenSearchPaths.TMP.val
 
     @property
     def bin(self) -> PathProtocol:
-        """Return path to the bin directory."""
+        """Get path to the bin directory."""
         return self.snap / OpenSearchPaths.BIN.val
 
     @property
     def plugins(self) -> PathProtocol:
-        """Returns Plugins Path"""
+        """Get Plugins Path"""
         return self.home / "plugins"
 
     @property
     def certs(self) -> PathProtocol:
-        """Returns Certificates Path"""
+        """Get Certificates Path"""
         return self.conf / "certificates"
 
     @property
     def certs_relative(self) -> str:
-        """Returns Certificates relative Path"""
+        """Get Certificates relative Path"""
         return "certificates"
 
     @property
     def certs_chain(self) -> PathProtocol:
-        """Returns path to the certificates chain file."""
+        """Get path to the certificates chain file."""
         return self.certs / "chain.pem"
 
     @property
     def seed_hosts(self) -> PathProtocol:
-        """Returns path to the Opensearch seed hosts config file."""
+        """Get path to the Opensearch seed hosts config file."""
         return self.conf / "unicast_hosts.txt"
+
+    @property
+    def charm_version(self) -> PathProtocol:
+        """Get path to charm version file."""
+        return self.charm_root / "charm_version"
+
+    @property
+    def workload_version(self) -> PathProtocol:
+        """Get path to workload version file."""
+        return self.charm_root / "workload_version"
+
+    @property
+    def compatibility_matrix(self) -> PathProtocol:
+        """Get path to compatibility matrix file."""
+        return self.data / "compatibility_matrix.json"
+
+    @property
+    def grafana_dashboard(self) -> PathProtocol:
+        """Get path to grafana dashboard file."""
+        return self.charm_root / "src/grafana_dashboards/opensearch.json"
 
 
 # --- Base Workload
@@ -215,6 +236,37 @@ class BaseWorkload(ABC):
         ) as e:
             raise OpenSearchFileOperationError(e)
 
+    def exists(self, path: pathops.PathProtocol) -> bool:
+        """Check if a file or directory exists on disk.
+
+        Args:
+            path (str): The file or directory path to check.
+
+        Returns:
+            bool: True if the file or directory exists, False otherwise.
+        """
+        try:
+            return path.exists()
+        except (PermissionError, pathops.PebbleConnectionError) as e:
+            raise OpenSearchFileOperationError(e)
+
+    def unlink(self, path: pathops.PathProtocol, missing_ok: bool = False) -> None:
+        """Remove a file from disk.
+
+        Args:
+            path (str): The file path to remove.
+            missing_ok (bool): Whether to ignore the error if the file does not exist.
+        """
+        try:
+            path.unlink(missing_ok=missing_ok)
+        except (
+            FileNotFoundError,
+            IsADirectoryError,
+            PermissionError,
+            pathops.PebbleConnectionError,
+        ) as e:
+            raise OpenSearchFileOperationError(e)
+
     @contextmanager
     def temp_file(
         self,
@@ -254,6 +306,7 @@ class BaseWorkload(ABC):
             with socket.create_connection((host, port), timeout=5):
                 return True
         except OSError as e:
+            logger.debug("Cannot connect to the OpenSearch server...")
             logger.debug("Connection to %s:%d fails with: %s", host, port, e)
             return False
 
