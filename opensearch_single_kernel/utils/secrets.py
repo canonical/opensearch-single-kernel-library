@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """A set of utility functions for secrets management."""
+
 from typing import Any
 
 from opensearch_single_kernel.common.constants import (

@@ -4,7 +4,6 @@
 
 """Kubernetes Workload."""
 
-
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 

@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Base class for the OpenSearch Health management."""
+
 import logging
 import time
 

@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 """Unit test for the opensearch_peer_clusters library."""
+
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest

@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Utilities for reading / writing certificates."""
+
 import logging
 import re
 

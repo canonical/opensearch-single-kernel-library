@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 """Unit Tests for config Manager functions."""
+
 from typing import Any
 from unittest.mock import PropertyMock
 
