@@ -15,6 +15,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.10,<4.0"
+version = "0.0.6"
 
 
 [project.urls]
@@ -30,7 +31,6 @@ package-mode = true
 packages = [{ include = "opensearch_single_kernel" }]
 include = ["opensearch_single_kernel/templates/"]
 exclude = ["opensearch_single_kernel/charmcraft.yaml"]
-version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"

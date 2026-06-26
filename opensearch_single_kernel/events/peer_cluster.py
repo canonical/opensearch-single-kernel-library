@@ -539,7 +539,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         try:
-            config_profile = self.charm.profiles_manager.config_profile
+            config_profile = self.charm.profiles_manager.get_config_profile()
         except ValueError:
             return
 
