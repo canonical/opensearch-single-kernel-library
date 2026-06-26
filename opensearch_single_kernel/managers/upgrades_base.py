@@ -48,6 +48,45 @@ class UpgradesManagerBase(BaseManager):
         self.reconcile_compatibility_matrix()
 
     @property
+    def current_versions(self) -> UpgradeVersions:
+        """Get the intended versions of OpenSearch by current charm."""
+        return UpgradeVersions(
+            charm=self.workload.paths.charm_version.read_text().strip(),
+            workload=self.workload.paths.workload_version.read_text().strip(),
+        )
+
+    @property
+    def is_compatible(self) -> bool:
+        """Whether upgrade is supported from previous versions"""
+        assert (previous_versions := self.state.application_upgrade.versions)
+
+        try:
+            if (
+                previous_versions.charm_parsed > self.current_versions.charm_parsed
+                or previous_versions.charm_parsed.major != self.current_versions.charm_parsed.major
+            ):
+                logger.debug(
+                    f"{previous_versions.charm_parsed=} incompatible with {self.current_versions.charm_parsed=}"
+                )
+                return False
+            if (
+                previous_versions.workload_parsed > self.current_versions.workload_parsed
+                or previous_versions.workload_parsed.major
+                != self.current_versions.workload_parsed.major
+            ):
+                logger.debug(
+                    f"{previous_versions.workload_parsed=} incompatible with {self.current_versions.workload_parsed=}"
+                )
+                return False
+            logger.debug(
+                f"Versions before upgrade compatible with versions after upgrade {previous_versions=} {self.current_versions=}"
+            )
+            return True
+        except KeyError as exception:
+            logger.debug(f"Version missing from {previous_versions=}", exc_info=exception)
+            return False
+
+    @property
     @abc.abstractmethod
     def in_progress(self) -> bool:
         """Whether upgrade is in progress"""
@@ -135,25 +174,6 @@ class UpgradesManagerBase(BaseManager):
         except OpenSearchHttpError:
             raise OpenSearchUpgradePrecheckError("Cluster is unreachable")
 
-    def update_grafana_dashboards_title(self, charm_revision: str) -> None:
-        """Update the title of the Grafana dashboard file to include the charm revision."""
-        dashboard = json.loads(self.workload.read_text(self.workload.paths.grafana_dashboard))
-
-        old_title = dashboard.get("title", "Charmed OpenSearch")
-        title_prefix = old_title.split(" - Rev")[0]
-        new_title = f"{old_title} - Rev {charm_revision}"
-        dashboard["title"] = f"{title_prefix} - Rev {charm_revision}"
-
-        logger.info(
-            "Changing the title of grafana dashboard from %s to %s",
-            old_title,
-            new_title,
-        )
-
-        self.workload.write_text(
-            json.dumps(dashboard, indent=4), self.workload.paths.grafana_dashboard
-        )
-
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
@@ -174,19 +194,6 @@ class UpgradesManagerBase(BaseManager):
             self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
         else:
             self.workload.run_cmd("opensearch.node", "override-version y")
-
-    def reconcile_compatibility_matrix(self) -> dict[str, set[str]]:
-        """Reconcile compatibility matrix file."""
-        disk_matrix = self.compatibility_matrix
-        current_matrix = UPGRADES_COMPATIBILITY_MATRIX
-        if disk_matrix != current_matrix:
-            # deeply fuse dictionaries
-            for key, value in current_matrix.items():
-                disk_matrix[key] = disk_matrix.setdefault(key, value) | set(value)  # union of sets
-            self.compatibility_matrix = disk_matrix
-            logger.debug("Reconciled compatibility matrix file")
-
-        return disk_matrix
 
     @property
     def compatibility_matrix(self) -> dict[str, set[str]]:
@@ -209,6 +216,19 @@ class UpgradesManagerBase(BaseManager):
             self.workload.write_text(content, self.workload.paths.compatibility_matrix)
         except OpenSearchFileOperationError as e:
             logger.debug("Failed to write compatibility matrix file: %s", str(e))
+
+    def reconcile_compatibility_matrix(self) -> dict[str, set[str]]:
+        """Reconcile compatibility matrix file."""
+        disk_matrix = self.compatibility_matrix
+        current_matrix = UPGRADES_COMPATIBILITY_MATRIX
+        if disk_matrix != current_matrix:
+            # deeply fuse dictionaries
+            for key, value in current_matrix.items():
+                disk_matrix[key] = disk_matrix.setdefault(key, value) | set(value)  # union of sets
+            self.compatibility_matrix = disk_matrix
+            logger.debug("Reconciled compatibility matrix file")
+
+        return disk_matrix
 
     @property
     def is_rollback(self) -> bool:
@@ -247,46 +267,26 @@ class UpgradesManagerBase(BaseManager):
         logger.warning("Rollback not supported from %s to %s", unit_bag_version, version_on_disk)
         return False
 
+    def update_grafana_dashboards_title(self, charm_revision: str) -> None:
+        """Update the title of the Grafana dashboard file to include the charm revision."""
+        dashboard = json.loads(self.workload.read_text(self.workload.paths.grafana_dashboard))
+
+        old_title = dashboard.get("title", "Charmed OpenSearch")
+        title_prefix = old_title.split(" - Rev")[0]
+        new_title = f"{old_title} - Rev {charm_revision}"
+        dashboard["title"] = f"{title_prefix} - Rev {charm_revision}"
+
+        logger.info(
+            "Changing the title of grafana dashboard from %s to %s",
+            old_title,
+            new_title,
+        )
+
+        self.workload.write_text(
+            json.dumps(dashboard, indent=4), self.workload.paths.grafana_dashboard
+        )
+
     @abc.abstractmethod
     def save_revision_after_first_install(self) -> None:
         """Save revision on first install"""
         ...
-
-    @property
-    def current_versions(self) -> UpgradeVersions:
-        """Get the intended versions of OpenSearch by current charm."""
-        return UpgradeVersions(
-            charm=self.workload.paths.charm_version.read_text().strip(),
-            workload=self.workload.paths.workload_version.read_text().strip(),
-        )
-
-    @property
-    def is_compatible(self) -> bool:
-        """Whether upgrade is supported from previous versions"""
-        assert (previous_versions := self.state.application_upgrade.versions)
-
-        try:
-            if (
-                previous_versions.charm_parsed > self.current_versions.charm_parsed
-                or previous_versions.charm_parsed.major != self.current_versions.charm_parsed.major
-            ):
-                logger.debug(
-                    f"{previous_versions.charm_parsed=} incompatible with {self.current_versions.charm_parsed=}"
-                )
-                return False
-            if (
-                previous_versions.workload_parsed > self.current_versions.workload_parsed
-                or previous_versions.workload_parsed.major
-                != self.current_versions.workload_parsed.major
-            ):
-                logger.debug(
-                    f"{previous_versions.workload_parsed=} incompatible with {self.current_versions.workload_parsed=}"
-                )
-                return False
-            logger.debug(
-                f"Versions before upgrade compatible with versions after upgrade {previous_versions=} {self.current_versions=}"
-            )
-            return True
-        except KeyError as exception:
-            logger.debug(f"Version missing from {previous_versions=}", exc_info=exception)
-            return False
