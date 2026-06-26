@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from ops import (
     ActionEvent,
     Object,
+    RelationBrokenEvent,
     RelationCreatedEvent,
 )
 
@@ -54,6 +55,9 @@ class TLSEventsHandler(Object):
         # Events
         self.framework.observe(
             self.charm.on[TLS_RELATION].relation_created, self._on_tls_relation_created
+        )
+        self.framework.observe(
+            self.charm.on[TLS_RELATION].relation_broken, self._on_tls_relation_broken
         )
 
         self.framework.observe(self.certs.on.certificate_available, self._on_certificate_available)
@@ -327,6 +331,14 @@ class TLSEventsHandler(Object):
         """Handle a cert that was revoked or has expired"""
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
+
+    def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Notify the charm that the relation is broken."""
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
 
     def on_tls_conf_set(
         self,

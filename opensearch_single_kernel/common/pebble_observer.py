@@ -31,7 +31,7 @@ class PebbleObserver(Object):
 
     def start(self) -> None:
         """Start observer if not running; restart if previous process is dead."""
-        if (existing_pid := self._charm.state.server.pebble_observer_pid) is not None:
+        if existing_pid := self._charm.state.server.pebble_observer_pid:
             try:
                 os.kill(existing_pid, 0)
                 return  # process is alive
@@ -74,7 +74,7 @@ class PebbleObserver(Object):
 
     def stop(self) -> None:
         """SIGTERM the observer subprocess and clear stored PID."""
-        if (pid := self._charm.state.server.pebble_observer_pid) is None:
+        if not (pid := self._charm.state.server.pebble_observer_pid):
             return
 
         try:

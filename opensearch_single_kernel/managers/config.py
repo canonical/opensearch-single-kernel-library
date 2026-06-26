@@ -44,7 +44,7 @@ class ConfigManager(BaseManager):
         self,
         roles: list[str] | None = None,
         cm_names: list[str] | None = None,
-        cm_ips: list[str] | None = None,
+        cm_hosts: list[str] | None = None,
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
@@ -54,7 +54,7 @@ class ConfigManager(BaseManager):
         Args:
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
-            cm_ips: override seed hosts got from nodes_config with IPs of CMs only.
+            cm_hosts: override seed hosts got from nodes_config with IPs of CMs only.
 
         Raises:
             OpenSearchFileOperationError: if there is an error writing to any of the config files
@@ -80,8 +80,8 @@ class ConfigManager(BaseManager):
 
         self.update_security_config()
 
-        if cm_ips:
-            self._update_seeds_file(cm_ips)
+        if cm_hosts:
+            self._update_seeds_file(cm_hosts)
         else:
             self.update_seeds_config()
 

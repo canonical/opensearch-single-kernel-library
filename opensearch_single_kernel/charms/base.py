@@ -230,9 +230,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.trigger_peer_rel_changed(on_other_units=True)
             return
 
-        return self.health_manager.get(
+        status = self.health_manager.get(
             wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
         )
+        logger.info("Current health of cluster: %s", status)
+        return status
 
     @property
     @abstractmethod

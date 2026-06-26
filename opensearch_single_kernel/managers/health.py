@@ -44,10 +44,7 @@ class HealthManager(BaseManager):
         local_app_only: bool = True,
     ) -> str:
         """Fetch the current cluster status."""
-        if (
-            not (deployment_desc := self.state.application.deployment_desc)
-            or not self.state.server.started
-        ):
+        if not (deployment_desc := self.state.application.deployment_desc):
             return HealthColors.UNKNOWN
 
         # the health depends on data nodes, for large deployments: an ML cluster

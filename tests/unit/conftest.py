@@ -17,6 +17,7 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     S3_RELATION,
     TLS_RELATION,
+    UPGRADE_RELATION,
 )
 from tests.helpers import Substrate
 from tests.integration.conftest import ACTIONS, CONFIG, METADATA
@@ -87,6 +88,9 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
     rel_id = harness.add_relation(PEER_RELATION, harness.charm.app.name)
     harness.add_relation_unit(rel_id, f"{harness.charm.app.name}/0")
     harness.add_relation(TLS_RELATION, harness.charm.app.name)
+    with harness.hooks_disabled():
+        upgrade_rel_id = harness.add_relation(UPGRADE_RELATION, harness.charm.app.name)
+        harness.add_relation_unit(upgrade_rel_id, f"{harness.charm.app.name}/0")
 
     return harness
 
