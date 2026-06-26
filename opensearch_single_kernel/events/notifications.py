@@ -93,9 +93,9 @@ class NotificationsEvents(Object):
 
         try:
             config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
-        except OpenSearchSmtpMissingParametersError:
+        except OpenSearchSmtpMissingParametersError as e:
             logger.error(
-                "SMTP parameters missing. Cannot create notification configs without them."
+                "SMTP parameters missing. Cannot create notification configs without them: %s", e
             )
             return
 
@@ -268,8 +268,8 @@ class NotificationsEvents(Object):
 
         try:
             self.charm.keystore_manager.put_entries(keys)
+            self.charm.reload_keystore_event.emit()
         except OpenSearchCmdError as e:
             logger.error("Failed to write SMTP credentials to keystore: %s", e)
             event.defer()
             return
-        self.charm.reload_keystore_event.emit()

@@ -181,7 +181,7 @@ class PeerClusterStatuses(Enum):
     )
     DATA_ROLE_REMOVAL_FORBIDDEN = StatusObject(
         status="blocked",
-        message="The 'cluster_manager' and 'voting_only' roles cannot be both set on the same nodes.",
+        message="Removal of data role from current deployment not allowed - the data cannot be reallocated.",
     )
     PEER_CLUSTER_MISSING_RELATIONS = StatusObject(
         status="blocked",

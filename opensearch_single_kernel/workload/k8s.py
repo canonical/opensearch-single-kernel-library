@@ -309,9 +309,7 @@ class K8sWorkload(BaseWorkload):
                 file_path.unlink()
             except FileNotFoundError:
                 pass
-            except PebbleConnectionError as e:
-                logger.warning("Failed to delete temp file %s: %s", file_path, e)
-            except (PebbleError, ModelError, OSError, ValueError) as e:
+            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
                 logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
@@ -353,7 +351,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            if (service := self._get_service()) is None:
+            if not (service := self._get_service()):
                 return False
 
             if service.current == ServiceStatus.ACTIVE:
@@ -395,7 +393,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            if (service := self._get_service()) is None:
+            if not (service := self._get_service()):
                 return False
 
             return service.current == ServiceStatus.ERROR
@@ -420,9 +418,7 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            if (
-                service := self._get_service()
-            ) is not None and service.current == ServiceStatus.ACTIVE:
+            if (service := self._get_service()) and service.current == ServiceStatus.ACTIVE:
                 logger.info("The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME)
                 return
 

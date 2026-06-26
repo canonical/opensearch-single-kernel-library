@@ -238,7 +238,7 @@ class TlsManager(BaseManager):
 
             if self.state.substrate == Substrates.VM:
                 ips.add(self.state.node_host)
-                if (public_ip := self.workload.get_host_public_ip()) is not None:
+                if public_ip := self.workload.get_host_public_ip():
                     ips.add(public_ip)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
@@ -256,8 +256,6 @@ class TlsManager(BaseManager):
             except (socket.herror, socket.gaierror):
                 continue
 
-        # empty strings would be invalid in SANs.
-        # Do not return IPs in SANs for K8s
         sans["sans_ip"] = (
             [ip for ip in ips if ip.strip()] if self.state.substrate == Substrates.VM else []
         )
@@ -677,10 +675,10 @@ class TlsManager(BaseManager):
         logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
         try:
             self.remove_old_ca()
+            return self.update_request_ca_bundle()
         except OpenSearchFileOperationError as e:
             logger.error("Error removing old CA during rotation finalization: %s", e)
             return False
-        return self.update_request_ca_bundle()
 
     def get_unit_certificates(self) -> dict[CertType, str]:
         """Retrieve the list of certificates for this unit."""

@@ -516,7 +516,7 @@ class OpenSearchEventsHandler(Object):
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
         try:
-            config_profile = self.charm.profiles_manager.config_profile
+            config_profile = self.charm.profiles_manager.get_config_profile()
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
@@ -611,17 +611,14 @@ class OpenSearchEventsHandler(Object):
                 component_name=self.charm.internal_users_manager.name,
             )
 
-        # Restore purged system users in local `internal_users.yml` with corresponding credentials
         if not self.charm.unit.is_leader():
             return
 
+        # Restore purged system users in local `internal_users.yml` with corresponding credentials
         for user in OPENSEARCH_SYSTEM_USERS:
-            try:
-                self.charm.internal_users_manager.put_or_update_internal_user_leader(
-                    user, update=False
-                )
-            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
-                logger.error("An error occurred while updating internal user %s", str(e))
+            if not self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                user, update=False
+            ):
                 event.defer()
                 return
 
@@ -922,7 +919,7 @@ class OpenSearchEventsHandler(Object):
                 computed_roles, cm_names, cm_ips
             )
 
-            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_ips=cm_ips)
+            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_hosts=cm_ips)
         except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
             logger.debug("Error getting the nodes: %s", e)
             self.charm.lock_manager.release()
@@ -1200,7 +1197,7 @@ class OpenSearchEventsHandler(Object):
             True if the profile passed validation and all requirements.
         """
         try:
-            self.charm.profiles_manager.config_profile
+            self.charm.profiles_manager.get_config_profile()
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",

@@ -96,4 +96,4 @@ resources:
     description: OCI image for opensearch
     #upstream-source: ghcr.io/canonical/opensearch:2.19.4-24.04_edge
     # TODO: Update upstream once image is published
-    upstream-source: skourta/opensearch:2.19.4
+    upstream-source: ghcr.io/canonical/opensearch:2.19.5-24.04_edge

@@ -16,6 +16,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
@@ -50,17 +51,27 @@ class InternalUsersManager(BaseManager):
         user: str,
         pwd: str | None = None,
         update: bool = True,
-    ) -> None:
+    ) -> bool:
         """Create system user or update it with a new password.
 
-        Raise:
-            OpenSearchUserMgmtErorr: In case of error when updating user password.
+        Args:
+            user: The system user to create or update.
+            pwd: The password to set for the user. If None, a random password will be generated.
+            update: If True, update the user's password if it already exists. If False,
+                do not update the password if the user already exists.
+
+        Returns:
+            True if the user was created or updated, False if an error occurred.
         """
         # Leader is to set new password and hash, others populate existing hash locally
         password_secret = self.state.application.get_user_password(user)
         if password_secret and not update:
-            self.save_user_locally(user)
-            return
+            try:
+                self.save_user_locally(user)
+                return True
+            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                logger.error("An error occurred while saving internal user %s: %s", user, str(e))
+                return False
 
         hashed_pwd, pwd = generate_hashed_password(pwd)
 
@@ -70,12 +81,17 @@ class InternalUsersManager(BaseManager):
             try:
                 self.opensearch_client.patch_user_password(user, hashed_pwd)
             except OpenSearchHttpError as e:
-                raise OpenSearchUserMgmtError(e)
+                logger.error("Failed to update user %s password: %s", user, e)
+                return False
 
         # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
         # we either need to initialize or update (local) credentials as well
         if not password_secret or user in OPENSEARCH_SYSTEM_USERS:
-            self.put_internal_user(user, hashed_pwd)
+            try:
+                self.put_internal_user(user, hashed_pwd)
+            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                logger.error("An error occurred while updating internal user %s: %s", user, str(e))
+                return False
 
         # Secrets need to be maintained
         # For System Users we also save the hash key
@@ -92,6 +108,7 @@ class InternalUsersManager(BaseManager):
                 "unit",
                 self.name,
             )
+        return True
 
     def purge_initial_default_users(self) -> None:
         """Removes all users from internal_users yaml config.
