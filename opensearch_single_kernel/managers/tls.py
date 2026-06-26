@@ -220,7 +220,7 @@ class TlsManager(BaseManager):
         # Base DNS names: how this unit can be addressed by clients and other nodes.
         # unit_name is the Juju unit, gethostname/getfqdn cover short and fully-qualified
         # hostnames used in configs or DNS.
-        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn, "localhost"}
+        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn}
         logger.info(f"This is the current DNS {dns}")
         # VM certificates must be reachable by the unit IP. On K8s, pod IPs are ephemeral
         # across pod recreation, so only stable DNS names should be included.
