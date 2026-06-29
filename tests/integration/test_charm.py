@@ -303,8 +303,6 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-# k8s can use any rock and the rock is not pinned anywhere
-@pytest.mark.skip_if_substrate("k8s")
 async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
     """Test to check if the workload_version file is updated."""
     leader_id = await get_leader_unit_id(ops_test)
