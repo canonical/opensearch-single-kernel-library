@@ -17,6 +17,7 @@ from ..ha.helpers import (
 from ..helpers import APP_NAME, app_name, deploy_opensearch, set_watermark, wait_until
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
+    K8S_VERSION_N,
     PROFILES_REVISION,
     UPGRADE_PARAMS,
     VM_VERSION_N,
@@ -166,7 +167,11 @@ async def test_upgrade_to_local(
     await assert_upgrade_to_local(
         ops_test, app=app, charm=charm, substrate=substrate, charm_resources=charm_resources
     )
-    await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
+    if substrate == "k8s":
+        version = K8S_VERSION_N
+    else:
+        version = VM_VERSION_N
+    await assert_version_units(ops_test, app, version, substrate)
     if substrate == "k8s":
         # Update since the ips have changed after upgrade
         await c_writes.update()

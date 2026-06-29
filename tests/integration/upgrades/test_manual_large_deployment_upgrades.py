@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import PeerClusterStatuses
@@ -54,55 +55,73 @@ APPS = {
     MAIN_APP: 3,
 }
 
+NO_DATA_NODE_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 data nodes are required.",
+)
+NO_CM_STATUS = StatusObject(
+    status="blocked",
+    message="Missing requirements: At least 1 cluster manager nodes are required.",
+)
 
-async def _build_env(ops_test: OpsTest, version: str, series: str, substrate: str) -> None:
+
+async def _build_env(
+    ops_test: OpsTest, version: str, series: str, substrate: str, charm_path: str | None = None
+) -> None:
     """Sets up environment for given version and series"""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    revision = None
-    charm_resources = None
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
 
     if substrate == "k8s":
+        revision = None
         charm_resources = K8S_VERSION_TO_RESOURCE[version]
         config = {"profile": "testing"}
+        charm = charm_path
+        channel = None
     else:
         revision = VM_VERSION_TO_REVISION[version][series]
         config = testing_config_if_supported(revision)
+        charm = OPENSEARCH_CHARM
+        channel = OPENSEARCH_CHANNEL
+        charm_resources = None
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
         ),
         ops_test.model.deploy(
-            OPENSEARCH_CHARM,
-            channel=OPENSEARCH_CHANNEL,
+            charm,
+            channel=channel,
             application_name=MAIN_APP,
             num_units=APPS[MAIN_APP],
             revision=revision,
             resources=charm_resources,
             series=series,
+            trust=substrate == "k8s",
             config={"cluster_name": "upgrades"} | config,
         ),
         ops_test.model.deploy(
-            OPENSEARCH_CHARM,
-            channel=OPENSEARCH_CHANNEL,
+            charm,
+            channel=channel,
             application_name=FAILOVER_APP,
             num_units=APPS[FAILOVER_APP],
             revision=revision,
             resources=charm_resources,
             series=series,
+            trust=substrate == "k8s",
             config={"cluster_name": "upgrades", "init_hold": True, "roles": "cluster_manager"}
             | config,
         ),
         ops_test.model.deploy(
-            OPENSEARCH_CHARM,
-            channel=OPENSEARCH_CHANNEL,
+            charm,
+            channel=channel,
             application_name=APP_NAME,
             num_units=APPS[APP_NAME],
             revision=revision,
             resources=charm_resources,
             series=series,
+            trust=substrate == "k8s",
             config={"cluster_name": "upgrades", "init_hold": True, "roles": "data"} | config,
         ),
     )
@@ -117,6 +136,10 @@ async def _build_env(ops_test: OpsTest, version: str, series: str, substrate: st
         apps_statuses={
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             APP_NAME: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+        },
+        units_statuses={
+            FAILOVER_APP: [NO_DATA_NODE_STATUS],
+            APP_NAME: [NO_CM_STATUS],
         },
         wait_for_exact_units={app: units for app, units in APPS.items()},
         idle_period=IDLE_PERIOD,
@@ -142,13 +165,17 @@ async def _build_env(ops_test: OpsTest, version: str, series: str, substrate: st
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_starting_version(ops_test: OpsTest, series, substrate) -> None:
+async def test_deploy_starting_version(
+    ops_test: OpsTest, series, substrate, charm_version_minus_1
+) -> None:
     """Build and deploy the charm for large deployment tests."""
     # deploy version n-2 for current series
     if substrate == "k8s":
         # Deploy from the local 2.19.4 charm to have n-1 version available
         # TODO: Once revision released deploy from channel and remove local charm
-        await _build_env(ops_test, K8S_VERSION_N_MINUS_1, series, substrate)
+        await _build_env(
+            ops_test, K8S_VERSION_N_MINUS_1, series, substrate, charm_path=charm_version_minus_1
+        )
     else:
         await _build_env(ops_test, VM_VERSION_N_MINUS_2, series, substrate)
 
@@ -202,9 +229,9 @@ async def test_upgrade_to_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_version(ops_test: OpsTest, version, series) -> None:
+async def test_deploy_version(ops_test: OpsTest, version, series, substrate) -> None:
     """Deploy OpenSearch at given version."""
-    await _build_env(ops_test, version, series)
+    await _build_env(ops_test, version, series, substrate)
 
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
