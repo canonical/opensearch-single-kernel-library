@@ -68,3 +68,7 @@ terraform.rc
 
 coverage.xml
 last_written_value
+.claude
+*.cert
+*.pem
+microceph_credentials.txt

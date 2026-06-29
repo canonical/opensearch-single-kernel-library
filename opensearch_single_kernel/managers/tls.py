@@ -17,7 +17,6 @@ from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
-    CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
@@ -542,8 +541,9 @@ class TlsManager(BaseManager):
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            if not self.workload.exists(certs_dir / CA_TRUSTSTORE_P12):
-                return False
+            # Note: cacerts.p12 is intentionally NOT checked here. It is the snapshot-gateway
+            # truststore (S3/GCS/Azure CA), managed by the snapshots manager and absent unless a
+            # backup backend with a custom CA is related. OpenSearch's own truststore is ca.p12.
             if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
                 return False
             if not self.workload.exists(certs_dir / "chain.pem"):
@@ -582,8 +582,11 @@ class TlsManager(BaseManager):
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             # create_store_pwd=False, passwords should already be in secrets
-            # don't mutate secrets here
-            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False)
+            # don't mutate secrets here.
+            # keep_previous=False: this is keystore recovery from secrets, not a rotation;
+            # preserving a "previous" CA here would create a spurious old-ca entry and kick
+            # off the CA-rotation routine (rolling restarts + cert renewal) on every reconcile.
+            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False)
 
         # recreate PKCS12 stores for all cert types we might need on startup.
         for scope, cert_type in [
@@ -748,11 +751,17 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
+    def store_new_ca(
+        self, cert_type: CertType, create_store_pwd: bool, keep_previous: bool = True
+    ) -> bool:
         """Add new CA cert to trust store.
 
-        Returns:
-            True on success, False if data is missing or a filesystem error occurred.
+        keep_previous renames the current CA to old-ca before importing the new one, which is
+        the behaviour required for a genuine CA rotation. Callers that merely rebuild the
+        keystore from secrets (e.g. K8s pod-restart recovery) must pass keep_previous=False,
+        otherwise they spuriously create an old-ca entry and trigger the rotation routine.
+
+        Returns True on success, False if a filesystem error occurred.
         """
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
@@ -771,7 +780,7 @@ class TlsManager(BaseManager):
                 store_pwd=admin_secrets.get("truststore-password"),
                 store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
                 ca=cert_secrets.get("ca-cert"),
-                keep_previous=True,
+                keep_previous=keep_previous,
                 use_sudo=self.state.substrate == Substrates.VM,
             ):
                 return False

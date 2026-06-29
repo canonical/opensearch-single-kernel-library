@@ -37,6 +37,11 @@ THREE_CM_THREE_DATA_STATUS = format_status(
     {"requirements": "At least 3 cluster manager nodes and 3 data nodes are required."},
 )
 
+THREE_DATA_STATUS = format_status(
+    ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+    {"requirements": "At least 3 data nodes are required."},
+)
+
 MEMORY_NOT_ENOUGH_STATUS = format_status(
     ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
     {"requirements": "Insufficient memory: 3145728.0 < 8388608"},
@@ -207,8 +212,6 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-# TODO add when LD is on for K8S
-@pytest.mark.skip(reason="Skipping large deployment")
 async def test_large_deployment_cluster(
     ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
 ) -> None:
@@ -243,6 +246,12 @@ async def test_large_deployment_cluster(
         resources=charm_resources,
     )
 
+    if TLS_CERTIFICATES_APP_NAME not in ops_test.model.applications:
+        config = {"ca-common-name": "CN_CA"}
+        await ops_test.model.deploy(
+            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
+        )
+
     # integrate TLS to all applications
     for app in ["main", "data"]:
         await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
@@ -255,9 +264,12 @@ async def test_large_deployment_cluster(
     await wait_until(
         ops_test,
         apps=["main", "data"],
+        apps_statuses={
+            "main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value],
+        },
         units_statuses={
-            "main": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
-            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            "main": [THREE_CM_THREE_DATA_STATUS],
+            "data": [THREE_CM_THREE_DATA_STATUS],
         },
         wait_for_exact_units={"main": 1, "data": 1},
     )
@@ -268,12 +280,12 @@ async def test_large_deployment_cluster(
     await wait_until(
         ops_test,
         apps=["main", "data"],
+        apps_statuses={
+            "main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value],
+        },
         units_statuses={
-            "main": [
-                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
-            ],
-            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            "main": [THREE_DATA_STATUS],
+            "data": [THREE_DATA_STATUS],
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )

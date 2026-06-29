@@ -218,10 +218,7 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.check_profile_requirements()
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
+        if not self.charm.profiles_manager.check_profile_requirements():
             event.defer()
             return
 
@@ -382,11 +379,7 @@ class OpenSearchEventsHandler(Object):
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
             return
-        try:
-            if not self.check_profile_requirements():
-                return
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
+        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         # if node already shutdown - leave
@@ -538,12 +531,7 @@ class OpenSearchEventsHandler(Object):
             )
             return
 
-        try:
-            if not self.check_profile_requirements():
-                event.defer()
-                return
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
+        if not self.charm.profiles_manager.check_profile_requirements():
             event.defer()
             return
 
@@ -761,7 +749,6 @@ class OpenSearchEventsHandler(Object):
                 "unit",
                 self.charm.cluster_manager.name,
             )
-            event.defer()
             return
         # We are requesting start of openSearch
 
@@ -880,13 +867,8 @@ class OpenSearchEventsHandler(Object):
         # - blocking directives
         # - admin user and security index configured/initialised
         # - cluster health
-        try:
-            if not self.check_profile_requirements():
-                logger.info("Conditions not met to start opensearch. Will retry next event.")
-                event.defer()
-                return
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
+        if not self.charm.profiles_manager.check_profile_requirements():
+            logger.info("Conditions not met to start opensearch. Will retry next event.")
             event.defer()
             return
 
@@ -1233,23 +1215,6 @@ class OpenSearchEventsHandler(Object):
             pass
 
         return True
-
-    def check_profile_requirements(self) -> bool:
-        """Check all requirements of profile.
-
-        Returns:
-            True if the profile passed validation and all requirements.
-        """
-        try:
-            self.charm.profiles_manager.get_config_profile()
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.charm.state.config.get("profile"),
-            )
-            return False
-
-        return not self.charm.profiles_manager.get_missing_requirements()
 
     def cleanup_start_state(self) -> None:
         """Clean Up Start statuses and state."""
