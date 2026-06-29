@@ -19,9 +19,9 @@ from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     PROFILES_REVISION,
     UPGRADE_PARAMS,
-    VERSION_N,
-    VERSION_N_MINUS_1,
-    VERSION_N_MINUS_2,
+    VM_VERSION_N,
+    VM_VERSION_N_MINUS_1,
+    VM_VERSION_N_MINUS_2,
     VM_VERSION_TO_REVISION,
     assert_rollback_to_revision,
     assert_upgrade_to_local,
@@ -129,7 +129,7 @@ async def test_deploy_latest_from_channel(
 
         await set_watermark(ops_test, APP_NAME)
     else:
-        await _build_env(ops_test, VERSION_N_MINUS_2, series)
+        await _build_env(ops_test, VM_VERSION_N_MINUS_2, series)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
@@ -141,10 +141,10 @@ async def test_upgrade_to_n_minus_1(
 ) -> None:
     """Test upgrade from upstream (n-2) to currently n-1 built version."""
     app = (await app_name(ops_test)) or APP_NAME
-    revision = VM_VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_2, substrate)
+    revision = VM_VERSION_TO_REVISION[VM_VERSION_N_MINUS_1][series]
+    await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_2, substrate)
     await assert_upgrade_to_revision(ops_test, app=app, revision=revision)
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_1, substrate)
+    await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_1, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
@@ -166,7 +166,7 @@ async def test_upgrade_to_local(
     await assert_upgrade_to_local(
         ops_test, app=app, charm=charm, substrate=substrate, charm_resources=charm_resources
     )
-    await assert_version_units(ops_test, app, VERSION_N, substrate)
+    await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
     if substrate == "k8s":
         # Update since the ips have changed after upgrade
         await c_writes.update()
@@ -217,7 +217,7 @@ async def test_upgrade_from_version_to_local(
     """Test upgrade from usptream to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME
     await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
-    await assert_version_units(ops_test, app, VERSION_N, substrate)
+    await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)

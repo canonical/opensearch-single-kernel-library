@@ -33,13 +33,19 @@ TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VERSION_N = "2.19.4"
-VERSION_N_MINUS_1 = "2.18.0"
-VERSION_N_MINUS_2 = "2.17.0"
+VM_VERSION_N = "2.19.4"
+VM_VERSION_N_MINUS_1 = "2.18.0"
+VM_VERSION_N_MINUS_2 = "2.17.0"
 
 VM_VERSION_TO_REVISION = {
-    VERSION_N_MINUS_2: {"jammy": 168, "noble": 206},
-    VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
+    VM_VERSION_N_MINUS_2: {"jammy": 168, "noble": 206},
+    VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
+}
+
+K8S_VERSION_N = "2.19.5"
+K8S_VERSION_N_MINUS_1 = "2.19.4"
+K8S_VERSION_TO_RESOURCE = {
+    K8S_VERSION_N_MINUS_1: {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
 }
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
@@ -49,7 +55,7 @@ UPGRADE_PARAMS = [
         version,
         id=FROM_VERSION_PREFIX.format(version),
         marks=pytest.mark.group(
-            id="two_version_upgrade" if version == VERSION_N_MINUS_2 else "one_version_upgrade"
+            id="two_version_upgrade" if version == VM_VERSION_N_MINUS_2 else "one_version_upgrade"
         ),
     )
     for version in VM_VERSION_TO_REVISION.keys()

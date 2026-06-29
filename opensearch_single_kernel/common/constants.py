@@ -357,4 +357,5 @@ PEBBLE_SERVICE_GROUP = "_daemon_"
 # Upgrades
 UPGRADES_COMPATIBILITY_MATRIX = {
     "2.19.4": {"2.18.0", "2.19.0", "2.19.1", "2.19.2", "2.19.3"},
+    "2.19.5": {"2.19.1", "2.19.4"},
 }
