@@ -263,13 +263,6 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.charm.profiles_manager.check_profile_requirements()
-        except OpenSearchCmdError as e:
-            logger.warning(f"Error checking profile requirements: {e}. Deferring event.")
-            event.defer()
-            return
-
         if not self.charm.unit.is_leader():
             return
 

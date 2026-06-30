@@ -150,7 +150,9 @@ async def test_build_and_deploy(
 
 
 @pytest.mark.abort_on_fail
-async def test_promotion(ops_test: OpsTest, failover_model: Model, data_model: Model) -> None:
+async def test_failover_orchestrator_promotion(
+    ops_test: OpsTest, failover_model: Model, data_model: Model
+) -> None:
     """Test that the failover orchestrator promotes itself
 
     when the majority of relations with main are severed
