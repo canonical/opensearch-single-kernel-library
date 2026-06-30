@@ -42,6 +42,8 @@ class UpgradesManagerVM(UpgradesManagerBase):
     @property
     def unit_status(self) -> tuple[StatusObject | None, dict[str, Any] | None]:
         """Get unit upgrade status."""
+        if not self.state.upgrade_relation:
+            return (None, None)
         if not self.in_progress:
             return (None, None)
 
