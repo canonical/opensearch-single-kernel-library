@@ -58,7 +58,7 @@ class ProfilesManager(BaseManager):
             True if the profile passed validation and all requirements.
         """
         try:
-            self.config_profile
+            self.get_config_profile()
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
