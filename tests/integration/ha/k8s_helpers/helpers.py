@@ -330,6 +330,19 @@ def pebble_patch_restart_delay(
                     response.returncode == 0
                 ), f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
 
+    # pebble replan restarts the service; wait until opensearch is back up on port 9200
+    for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3)):
+        with attempt:
+            result = subprocess.run(
+                f"juju ssh --container opensearch {unit_name} lsof -ti:9200".split(),
+                capture_output=True,
+                text=True,
+                env={**os.environ, "JUJU_MODEL": model_name},
+            )
+            assert (
+                result.stdout.strip()
+            ), f"opensearch not yet listening on port 9200 on {unit_name}"
+
 
 def copy_file_into_pod(
     client: client.api.core_v1_api.CoreV1Api,
