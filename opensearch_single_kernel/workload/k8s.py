@@ -216,15 +216,6 @@ class K8sWorkload(BaseWorkload):
     def _build_pebble_layer(self) -> Layer:
         """Build Pebble layer for OpenSearch service."""
         opensearch_cmd = (self.paths.bin / "opensearch").as_posix()
-        opensearch_home = self.paths.home.as_posix()
-        opensearch_conf = self.paths.conf.as_posix()
-        java_home = self.paths.jdk.as_posix()
-
-        # build PATH with Java bin, OpenSearch bin, and system paths
-        path_value = (
-            "%s/bin:/usr/share/opensearch/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            % java_home
-        )
 
         layer_dict = {
             "summary": "OpenSearch service layer",
@@ -239,12 +230,6 @@ class K8sWorkload(BaseWorkload):
                     "startup": "disabled",
                     "user": PEBBLE_SERVICE_USER,
                     "group": PEBBLE_SERVICE_GROUP,
-                    "environment": {
-                        "OPENSEARCH_HOME": opensearch_home,
-                        "OPENSEARCH_PATH_CONF": opensearch_conf,
-                        "JAVA_HOME": java_home,
-                        "PATH": path_value,
-                    },
                 }
             },
         }
