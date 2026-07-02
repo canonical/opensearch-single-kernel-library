@@ -6,7 +6,6 @@ import asyncio
 import logging
 
 import pytest
-from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 from requests import request
 
@@ -18,52 +17,37 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
     ProfileStatuses,
 )
+from opensearch_single_kernel.utils.status import format_status
 from tests.integration.conftest import (
     APP_NAME,
     MODEL_CONFIG,
 )
-from tests.integration.helpers import wait_until
+from tests.integration.helpers import (
+    deploy_opensearch,
+    get_cloud_type,
+    get_leader_unit_ip,
+    wait_until,
+)
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
 
-MISSING_3_DATA_AND_3_CM_STATUS = StatusObject(
-    message="Missing requirements: At least 3 cluster manager nodes and 3 data nodes are required.",
-    status="blocked",
-)
-MISSING_3_DATA_NODES_STATUS = StatusObject(
-    message="Missing requirements: At least 3 data nodes are required.",
-    status="blocked",
+THREE_CM_THREE_DATA_STATUS = format_status(
+    ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+    {"requirements": "At least 3 cluster manager nodes and 3 data nodes are required."},
 )
 
-
-async def get_cloud_type(ops_test: OpsTest) -> str:
-    """Return current cloud type of the selected controller.
-
-    Args:
-        ops_test (OpsTest): ops_test plugin
-
-    Returns:
-        string: current type of the underlying cloud
-    """
-    assert ops_test.model, "Model must be present"
-    controller = await ops_test.model.get_controller()
-    cloud = await controller.cloud()
-    return cloud.cloud.type_
-
-
-async def get_constraints(ops_test: OpsTest) -> str | None:
-    """Get constraints for the OpenSearch charm based on the cloud type."""
-    cloud_type = await get_cloud_type(ops_test)
-    if cloud_type == "lxd":
-        return "mem=8G"
-    return None
+MEMORY_NOT_ENOUGH_STATUS = format_status(
+    ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+    {"requirements": "Insufficient memory: 3145728.0 < 8388608"},
+)
 
 
 async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str = APP_NAME):
     """A dummy test to make pytest happy when all other tests are skipped."""
     os_app = ops_test.model.applications[app_name]
     unit = os_app.units[0]
+    unit_ip = await get_leader_unit_ip(ops_test, app=app_name)
 
     action = await unit.run_action("get-password")
     action = await action.wait()
@@ -76,7 +60,7 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
     # request the OpenSearch endpoint to get the JVM settings
     jvm_response = request(
         "GET",
-        f"https://{unit.public_address}:9200/_nodes/stats/jvm",
+        f"https://{unit_ip}:9200/_nodes/stats/jvm",
         verify=False,
         auth=("admin", password),
     )
@@ -94,23 +78,27 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
-    constraints = await get_constraints(ops_test)
-    logger.info(f"Using constraints: {constraints}")
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(
+        deploy_opensearch(
+            ops_test,
             charm,
-            num_units=1,
+            substrate,
+            APP_NAME,
+            1,
             series=series,
-            constraints=constraints,
+            constraints="mem=8G",
             config={"profile": "production"},
+            resources=charm_resources,
         ),
     )
 
@@ -120,11 +108,11 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
-    """Wait for blocked cluster with cluster topology error"""
+    """Wait for blocked cluster with cluster topology error."""
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
+        units_statuses={APP_NAME: [THREE_CM_THREE_DATA_STATUS]},
         wait_for_exact_units=1,
     )
 
@@ -144,21 +132,27 @@ async def test_scale_to_active(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -> None:
+async def test_insufficient_memory(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test insufficient memory scenario."""
     cloud_name = await get_cloud_type(ops_test)
-    if cloud_name != "lxd":
-        pytest.skip("This test is only applicable for LXD cloud type")
+    if cloud_name not in {"kubernetes", "lxd"}:
+        pytest.skip("This test is only applicable for Kubernetes and LXD cloud types")
 
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
 
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        num_units=3,
+        substrate,
+        APP_NAME,
+        3,
         series=series,
         constraints="mem=3G",
         config={"profile": "production"},
+        resources=charm_resources,
     )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     # we do not wait for idle in this wait because the 3 units will keep trying
@@ -167,20 +161,28 @@ async def test_insufficient_memory(ops_test: OpsTest, charm: str, series: str) -
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
+        units_statuses={APP_NAME: [MEMORY_NOT_ENOUGH_STATUS]},
         wait_for_exact_units=3,
     )
 
 
 @pytest.mark.abort_on_fail
-async def test_testing_profile(ops_test: OpsTest, charm: str, series: str) -> None:
+async def test_testing_profile(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test testing profile"""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test)
 
-    await ops_test.model.deploy(
-        charm, num_units=1, series=series, config={"profile": "testing"}, constraints=constraints
+    await deploy_opensearch(
+        ops_test,
+        charm,
+        substrate,
+        APP_NAME,
+        1,
+        series=series,
+        config={"profile": "testing"},
+        resources=charm_resources,
     )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
@@ -193,42 +195,52 @@ async def test_testing_profile(ops_test: OpsTest, charm: str, series: str) -> No
 
 @pytest.mark.abort_on_fail
 async def test_config_changed_to_production(ops_test: OpsTest) -> None:
+    """Switch to production profile and expect blocked."""
     os_app = ops_test.model.applications[APP_NAME]
     await os_app.set_config({"profile": "production"})
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value]},
+        units_statuses={APP_NAME: [THREE_CM_THREE_DATA_STATUS]},
         wait_for_exact_units=1,
     )
 
 
 @pytest.mark.abort_on_fail
-async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: str) -> None:
+# TODO add when LD is on for K8S
+@pytest.mark.skip(reason="Skipping large deployment")
+async def test_large_deployment_cluster(
+    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+) -> None:
     """Test large deployment cluster scenario."""
     if APP_NAME in ops_test.model.applications:
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    constraints = await get_constraints(ops_test)
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        application_name="main",
-        num_units=1,
+        substrate,
+        "main",
+        1,
         series=series,
+        constraints="mem=8G",
         config={"cluster_name": "test", "roles": "cluster_manager", "profile": "production"},
-        constraints=constraints,
+        resources=charm_resources,
     )
-    await ops_test.model.deploy(
+    await deploy_opensearch(
+        ops_test,
         charm,
-        application_name="data",
-        num_units=1,
+        substrate,
+        "data",
+        1,
         series=series,
+        constraints="mem=8G",
         config={
             "cluster_name": "test",
             "init_hold": True,
             "roles": "data",
             "profile": "production",
         },
-        constraints=constraints,
+        resources=charm_resources,
     )
 
     # integrate TLS to all applications
@@ -244,13 +256,9 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
         ops_test,
         apps=["main", "data"],
         units_statuses={
-            "main": [
-                MISSING_3_DATA_AND_3_CM_STATUS,
-                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
-            ],
-            "data": [MISSING_3_DATA_AND_3_CM_STATUS],
+            "main": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
+            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
-        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
@@ -260,20 +268,17 @@ async def test_large_deployment_cluster(ops_test: OpsTest, charm: str, series: s
     await wait_until(
         ops_test,
         apps=["main", "data"],
-        apps_statuses={"main": [PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value]},
         units_statuses={
             "main": [
-                MISSING_3_DATA_NODES_STATUS,
+                ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
                 PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
             ],
-            "data": [MISSING_3_DATA_NODES_STATUS],
+            "data": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )
     data_app = ops_test.model.applications["data"]
     await data_app.add_units(count=2)
-    await wait_until(
-        ops_test, apps=["main", "data"], wait_for_exact_units={"main": 3, "data": 3}, timeout=2000
-    )
+    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
 
     await check_heap_size(ops_test, 4, app_name="main")

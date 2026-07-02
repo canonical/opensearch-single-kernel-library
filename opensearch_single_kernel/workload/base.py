@@ -7,21 +7,28 @@
 import logging
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import List, Optional
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
+from ops import ModelError
+from ops.pebble import Error as PebbleError
 
 from opensearch_single_kernel.common.constants import (
     BASE_SNAP_DIR,
+    DIR_PERMISSIONS_READONLY,
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
     OpenSearchPaths,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +90,11 @@ class Paths:
     def opensearch_keystore(self) -> PathProtocol:
         """Get path to the opensearch keystore."""
         return self.conf / "opensearch.keystore"
+
+    @property
+    def opensearch_keystore_binary(self) -> str:
+        """Name of the opensearch-keystore binary."""
+        return "opensearch.keystore"
 
     @property
     def data(self) -> PathProtocol:
@@ -176,15 +188,33 @@ class BaseWorkload(ABC):
         """Return the Workload's paths"""
         pass
 
-    def write_text(self, content: str, path: pathops.PathProtocol) -> None:
+    @property
+    @abstractmethod
+    def workload_present(self) -> bool:
+        """Flag to check if workload is present and ready."""
+        pass
+
+    @property
+    @abstractmethod
+    def can_connect(self) -> bool:
+        """Flag to check if workload is present and Pebble API is connectable."""
+        pass
+
+    def write_text(
+        self, content: str, path: pathops.PathProtocol, mode: int | None = None
+    ) -> None:
         """Write content to a file on disk.
 
         Args:
             content (str): The content to be written.
             path (str): The file path where the content should be written.
+            mode (int, optional): The mode/permissions to use when writing the file.
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error during the file write operation.
         """
         try:
-            path.write_text(content)
+            path.write_text(content, mode=mode)
         except (
             FileNotFoundError,
             LookupError,
@@ -210,29 +240,39 @@ class BaseWorkload(ABC):
             FileNotFoundError,
             UnicodeError,
             PermissionError,
+            PebbleError,
+            ModelError,
             pathops.PebbleConnectionError,
         ) as e:
             raise OpenSearchFileOperationError(e)
 
     def mkdir(
-        self, path: pathops.PathProtocol, parents: bool = False, exist_ok: bool = False
+        self,
+        path: pathops.PathProtocol,
+        mode: int = DIR_PERMISSIONS_READONLY,
+        parents: bool = False,
+        exist_ok: bool = False,
     ) -> None:
         """Create a directory on disk.
 
         Args:
             path (str): The directory path to create.
+            mode (int): The mode/permissions to use for the new directory.
             parents (bool): Whether to create parent directories if they do not exist.
             exist_ok (bool): Whether to ignore the error if the directory already exists.
         """
         try:
-            path.mkdir(parents=parents, exist_ok=exist_ok)
+            path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
         except (
+            PebbleError,
+            ModelError,
             FileExistsError,
             FileNotFoundError,
             LookupError,
             NotADirectoryError,
             PermissionError,
             pathops.PebbleConnectionError,
+            ValueError,
         ) as e:
             raise OpenSearchFileOperationError(e)
 
@@ -244,6 +284,9 @@ class BaseWorkload(ABC):
 
         Returns:
             bool: True if the file or directory exists, False otherwise.
+
+        Raises:
+            OpenSearchFileOperationError: If there is an error accessing the file system.
         """
         try:
             return path.exists()
@@ -268,19 +311,21 @@ class BaseWorkload(ABC):
             raise OpenSearchFileOperationError(e)
 
     @contextmanager
+    @abstractmethod
     def temp_file(
         self,
         mode: str = "w+b",
         data: str | None = None,
-        encoding=None,
+        encoding: str | None = None,
         dir: PathProtocol | None = None,
-        delete=True,
+        delete: bool = True,
+        chown: str | None = None,
         *,
-        errors=None,
-        suffix=None,
-    ):
+        errors: str | None = None,
+        suffix: str | None = None,
+    ) -> Generator[PathProtocol, None, None]:
         """Context manager for creating temporary files."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def is_service_started(self, paused: Optional[bool] = False) -> bool:
@@ -290,9 +335,10 @@ class BaseWorkload(ABC):
         """
         pass
 
+    @property
     @abstractmethod
-    def get_host_public_ip(self) -> Optional[str]:
-        """Fetches the Public IP address of the current unit."""
+    def keytool_cmd(self) -> str:
+        """Return the keytool command appropriate for this workload substrate."""
         pass
 
     @abstractmethod
@@ -319,17 +365,17 @@ class BaseWorkload(ABC):
     def run_cmd(
         self,
         command: str,
-        args: str = None,
+        args: str | None = None,
         use_errors_replace: bool = False,
-        stdin: str = None,
+        stdin: str | None = None,
     ) -> SimpleNamespace:
         """Run Command in CLI"""
         pass
 
     @abstractmethod
-    def meminfo(self) -> dict[str, float]:
-        """Read the /proc/meminfo file and return the values."""
-        pass
+    def memtotal(self) -> float:
+        """Return the total memory of the system in kbytes."""
+        raise NotImplementedError
 
     @abstractmethod
     def is_failed(self) -> bool:
@@ -346,38 +392,55 @@ class BaseWorkload(ABC):
         """Start the opensearch service."""
         pass
 
-    @abstractmethod
-    def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
-        """Apply a system requirement."""
-        pass
-
-    @abstractmethod
     def _get_kernel_property_value(self, prop: str) -> int:
-        """Get the value of a kernel parameter."""
-        pass
+        """Get the value of a kernel parameter.
 
+        Args:
+            prop: Kernel property name (e.g., "vm.max_map_count").
+
+        Returns:
+            int: Kernel property value.
+
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read.
+        """
+        try:
+            return int(self.run_cmd("sysctl", args=f"-n {prop}").out.rstrip())
+        except OpenSearchCmdError as e:
+            error_message = e.err or e.out or str(e)
+            logger.warning("sysctl -n %s failed: %s", prop, error_message)
+            # Propagate error
+            raise e
+
+    @abstractmethod
     def check_missing_system_requirements(self) -> List[str]:
-        """Checks the system requirements."""
-        missing_requirements = []
+        """Checks the system requirements.
 
-        prop, val = "vm.max_map_count", 262144
-        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
-            prop, val
-        ):
-            missing_requirements.append(f"{prop} should be at least {val}")
+        Raises:
+            OpenSearchCmdError: If the kernel property value cannot be read
+                or if applying a system requirement fails.
+        """
+        raise NotImplementedError
 
-        prop, val = "vm.swappiness", 0
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, 0
-        ):
-            missing_requirements.append(f"{prop} should be at most {val}")
+    @abstractmethod
+    def chain_path(self) -> str:
+        """Get the certificate chain to use for requests"""
+        raise NotImplementedError
 
-        prop, val = "net.ipv4.tcp_retries2", 5
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, val
-        ):
-            missing_requirements.append(f"{prop} should be at most {val}")
+    @abstractmethod
+    def get_workload_version(self) -> str:
+        """Get the workload version."""
+        raise NotImplementedError
 
-        if missing_requirements:
-            logger.error("Missing system requirements: %s", missing_requirements)
-        return missing_requirements
+    @property
+    def version(self) -> str:
+        """Returns the version number of this opensearch instance."""
+        # Will have a format similar to:
+        # Version: 2.14.0, Build: tar/.../2024-05-27T21:17:37.476666822Z, JVM: 21.0.2
+        result = self.get_workload_version()
+        logger.debug("version call output: %s", result)
+        return result.split(", ")[0].split(": ")[1]
+
+    def get_host_public_ip(self) -> str | None:
+        """Get the public IP address of the host."""
+        return None

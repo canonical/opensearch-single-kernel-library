@@ -8,7 +8,7 @@ This module manages OpenSearch keystore access and lifecycle.
 
 import logging
 
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_result, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import ObjectStorageType
 from opensearch_single_kernel.common.exceptions import (
@@ -30,18 +30,21 @@ logger = logging.getLogger(__name__)
 class KeystoreManager(BaseManager):
     """Manages keystore."""
 
-    KEYSTORE = "opensearch.keystore"
-
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         """Creates the keystore manager class."""
         super().__init__(state, workload, "keystore_manager")
+
+    @property
+    def keystore(self) -> str:
+        """Return the path to the keystore."""
+        return self.workload.paths.opensearch_keystore_binary
 
     def _create_if_needed(self) -> None:
         """Creates the keystore if not already present."""
         if self.workload.paths.opensearch_keystore.exists():
             return
 
-        self.workload.run_cmd(self.KEYSTORE, "create")
+        self.workload.run_cmd(self.keystore, "create")
 
     def put_object_storage_credentials(
         self,
@@ -134,11 +137,11 @@ class KeystoreManager(BaseManager):
         """Add new key/val entries on the keystore."""
         for key, val in entries.items():
             # adding the '--force' flag will create the keystore if not present
-            self.workload.run_cmd(self.KEYSTORE, f"add {key} --force", stdin=val)
+            self.workload.run_cmd(self.keystore, f"add {key} --force", stdin=val)
 
     def put_file_entry(self, key: str, filename: str) -> None:
         """Add a new file entry in the keystore."""
-        self.workload.run_cmd(self.KEYSTORE, f"add-file {key} {filename} --force")
+        self.workload.run_cmd(self.keystore, f"add-file {key} {filename} --force")
 
     def put_notifications_plugin_smtp_credentials(
         self, account_id: str, user: str | None, password: str | None
@@ -164,26 +167,31 @@ class KeystoreManager(BaseManager):
                 continue
 
             try:
-                self.workload.run_cmd(self.KEYSTORE, f"remove {key}")
+                self.workload.run_cmd(self.keystore, f"remove {key}")
             except OpenSearchCmdError as e:
                 err_text = e.err or ""
                 if "does not exist in the keystore" in err_text:
                     continue
                 raise
 
-    def list_keys(self) -> list[str]:
-        """List all keys in the keystore."""
-        self._create_if_needed()
-        return self.workload.run_cmd(self.KEYSTORE, "list").splitlines()
-
+    @retry(
+        retry=retry_if_result(lambda x: not x),
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(2),
+        retry_error_callback=lambda _: False,
+    )
     def reload(self) -> bool:
         """Reload the keystore.
 
         Returns:
             whether a reload was successful.
         """
-        self._create_if_needed()
-        self.workload.run_cmd(self.KEYSTORE, "upgrade")
+        try:
+            self._create_if_needed()
+            self.workload.run_cmd(self.keystore, "upgrade")
+        except OpenSearchCmdError as e:
+            logger.error("Keystore operation failed: %s", e)
+            return False
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup

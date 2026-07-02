@@ -11,9 +11,7 @@ from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, Statu
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_HTTP_PORT,
-)
+from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Substrates
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
@@ -38,7 +36,7 @@ class BaseManager(ManagerStatusProtocol):
         """Initialize an opensearch client"""
         return OpenSearchClient(
             self.workload,
-            self.state.host_ip,
+            self.state.node_host,
             OPENSEARCH_HTTP_PORT,
             self.state.application.admin_password,
         )
@@ -46,25 +44,26 @@ class BaseManager(ManagerStatusProtocol):
     @property
     def alt_hosts(self) -> list[str] | None:
         """Return an alternative host (of another node)in case the current is offline."""
-        all_units_ips = self.state.units_ips
-        all_hosts = list(all_units_ips.values())
+        all_hosts = self.state.peer_unit_hosts
 
         if nodes_conf := self.state.application.nodes_config:
-            all_hosts.extend([node.ip for node in nodes_conf.values()])
+            all_hosts.update([node.ip for node in nodes_conf.values()])
 
         if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
-            all_hosts.extend([node.ip for node in peer_cm_rel_data.cm_nodes])
-
-        random.shuffle(all_hosts)
+            all_hosts.update([node.ip for node in peer_cm_rel_data.cm_nodes])
 
         if not all_hosts:
             return None
 
         client = self.opensearch_client
 
-        return [
-            host for host in all_hosts if host != self.state.host_ip and client.is_node_up(host)
+        active_hosts = [
+            host for host in all_hosts if host != self.state.node_host and client.is_node_up(host)
         ]
+
+        random.shuffle(active_hosts)
+
+        return active_hosts
 
     def get_cluster_managers_ips(self, nodes: list[Node]) -> list[str]:
         """Get the nodes of cluster manager eligible nodes."""
@@ -102,10 +101,12 @@ class BaseManager(ManagerStatusProtocol):
             response = self.opensearch_client.get_nodes(host, alt_hosts)
             if "nodes" in response:
                 for obj in response["nodes"].values():
+                    # For k8s we need to use the host instead of IP
+                    host = obj["ip"] if self.state.substrate == Substrates.VM else obj["host"]
                     node = Node(
                         name=obj["name"],
                         roles=obj["roles"],
-                        ip=obj["ip"],
+                        ip=host,
                         app=App(id=obj["attributes"]["app_id"]),
                         unit_number=int(obj["name"].split(".")[0].split("-")[-1]),
                         temperature=obj.get("attributes", {}).get("temp"),

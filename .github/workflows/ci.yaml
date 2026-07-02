@@ -126,10 +126,13 @@ jobs:
       matrix:
         path:
           - tests/charms/opensearch_test_charm
+          - tests/charms/opensearch_k8s_test_charm
+          - tests/charms/dummy-client-charm
           - tests/integration/relations/opensearch_provider/application-charm
     steps:
       - name: Install CLI
-        run: pipx install git+https://github.com/canonical/data-platform-workflows@v31.1.1#subdirectory=python/cli
+        run: pipx install
+          git+https://github.com/canonical/data-platform-workflows@v31.1.1#subdirectory=python/cli
       - name: Checkout
         uses: actions/checkout@v4
         with:

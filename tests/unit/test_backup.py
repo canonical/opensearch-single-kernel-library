@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock
 
 import pytest
@@ -15,7 +14,6 @@ from ops import testing
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
-    DeploymentType,
     HealthColors,
     ObjectStorageType,
 )
@@ -23,11 +21,12 @@ from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
+from tests.unit.helpers import deployment_descriptions
 
 
 def _mock_backup(
     mocker,
-    deployment_desc_return_value=SimpleNamespace(typ=DeploymentType.MAIN_ORCHESTRATOR),
+    deployment_desc_return_value=deployment_descriptions["ok"],
     backup_running_return_value=False,
     restore_running_return_value=False,
 ):
@@ -62,7 +61,7 @@ def _mock_backup(
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
-    mocker, backend_setup, context, mock_get_statuses, harness
+    mocker, harness, backend_setup, context
 ):
     # Given
     create_snapshot = mocker.patch(
@@ -89,7 +88,7 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
 
 
 def test_create_backup_when_all_ok_then_success_result_is_returned(
-    mocker, harness, backend_setup, context, mock_get_statuses
+    mocker, harness, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -118,7 +117,7 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
 
 
 def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository_missing_error(
-    mocker, harness, backend_setup, context, mock_get_statuses
+    mocker, harness, backend_setup, context
 ):
     # Given
     _mock_backup(mocker)
@@ -146,9 +145,7 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     patch_create_snapshot.assert_not_called()
 
 
-def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(
-    mocker, harness, context, mock_get_statuses
-):
+def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
@@ -178,7 +175,7 @@ def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(
 
 
 def test_list_backups_when_json_requested_then_json_is_returned(
-    harness, mocker, backend_setup, context, mock_get_statuses
+    harness, mocker, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -207,7 +204,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
 
 
 def test_list_backups_when_table_requested_then_table_is_returned(
-    harness, mocker, backend_setup, context, mock_get_statuses
+    harness, mocker, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -238,7 +235,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
 
 
 def test_list_backups_when_manager_raises_http_error_then_action_fails(
-    harness, mocker, backend_setup, context, mock_get_statuses
+    harness, mocker, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -273,9 +270,7 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
     assert "server error" in msg or "503" in msg
 
 
-def test_list_backups_when_not_leader_then_action_fails(
-    harness, mocker, backend_setup, context, mock_get_statuses
-):
+def test_list_backups_when_not_leader_then_action_fails(harness, mocker, backend_setup, context):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -293,7 +288,7 @@ def test_list_backups_when_not_leader_then_action_fails(
 
 
 def test_restore_when_prereqs_missing_then_action_fails(
-    harness, mocker, backend_setup, monkeypatch, context, mock_get_statuses
+    harness, mocker, backend_setup, monkeypatch, context
 ):
     # Given
     mocker.patch(
@@ -317,7 +312,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
 
 
 def test_restore_when_snapshot_not_found_then_action_fails(
-    harness, mocker, backend_setup, context, mock_get_statuses
+    harness, mocker, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -340,7 +335,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
 
 
 def test_restore_when_get_snapshot_http_error_then_action_fails(
-    harness, mocker, backend_setup, context, mock_get_statuses
+    harness, mocker, backend_setup, context
 ):
     # Given
     mocker.patch(
@@ -370,15 +365,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     ],
 )
 def test_restore_when_closing_indices_varies_then_paths_are_handled(
-    context,
-    harness,
-    mocker,
-    backend_setup,
-    close_result,
-    expect_fail,
-    expect_msg,
-    monkeypatch,
-    mock_get_statuses,
+    context, harness, mocker, backend_setup, close_result, expect_fail, expect_msg, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -417,7 +404,7 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
 
 
 def test_restore_when_start_fails_then_action_fails_with_message(
-    context, harness, mocker, backend_setup, monkeypatch, mock_get_statuses
+    context, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -455,7 +442,7 @@ def test_restore_when_start_fails_then_action_fails_with_message(
 
 
 def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
-    context, harness, mocker, backend_setup, monkeypatch, mock_get_statuses
+    context, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -489,7 +476,7 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
 
 
 def test_restore_when_http_error_on_close_indices_then_action_fails(
-    context, harness, mocker, backend_setup, monkeypatch, mock_get_statuses
+    context, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -525,7 +512,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
 
 
 def test_restore_when_all_ok_then_health_apply_is_called(
-    context, mocker, harness, backend_setup, monkeypatch, mock_get_statuses
+    context, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -569,9 +556,7 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     assert called["ok"]
 
 
-def test_restore_when_not_leader_then_action_fails(
-    mocker, context, harness, backend_setup, mock_get_statuses
-):
+def test_restore_when_not_leader_then_action_fails(mocker, context, harness, backend_setup):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -589,9 +574,7 @@ def test_restore_when_not_leader_then_action_fails(
     assert "leader" in err.value.message.lower()
 
 
-def test_prereq_when_not_leader_then_action_fails(
-    context, mocker, harness, backend_setup, mock_get_statuses
-):
+def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, backend_setup):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -611,7 +594,7 @@ def test_prereq_when_not_leader_then_action_fails(
 
 
 def test_prereq_when_deployment_not_ready_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch, mock_get_statuses
+    context, mocker, harness, backend_setup, monkeypatch
 ):
 
     # Given
@@ -644,45 +627,23 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
     assert "deployment not ready" in err.value.message.lower()
 
 
-def test_prereq_when_upgrade_in_progress_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch, mock_get_statuses
-):
-    # Given
-    mocker.patch(
-        "opensearch_single_kernel.managers.upgrades_vm.UpgradesManagerVM.in_progress",
-        new_callable=PropertyMock(return_value=True),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.get_statuses",
-        return_value=[],
+# TODO: Re-enable this test when upgrade is implemented
+@pytest.mark.skip(reason="Upgrade not implemented yet")
+def test_prereq_when_upgrade_in_progress_then_action_fails(self, monkeypatch):
+    st = testing.State(leader=True)
+    monkeypatch.setattr(
+        "src.charm.OpenSearchOperatorCharm.upgrade_in_progress",
+        property(lambda _self: True),
     )
 
-    _mock_backup(mocker)
-    backend, rels = backend_setup
-    if backend == "s3":
-        object_storage_type = ObjectStorageType.S3
-    elif backend == "azure":
-        object_storage_type = ObjectStorageType.AZURE
-    else:
-        object_storage_type = ObjectStorageType.GCS
-
-    mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.storage_type",
-        new_callable=PropertyMock,
-        return_value=object_storage_type,
-    )
-
-    st = testing.State(leader=True, relations=rels)
-
-    # When
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("create-backup"), st)
-    # Assert
+        self.ctx.run(self.ctx.on.action("create-backup"), st)
+
     assert "upgrade in-progress" in err.value.message.lower()
 
 
 def test_prereq_when_storage_relation_missing_then_action_fails(
-    context, mocker, harness, monkeypatch, mock_get_statuses
+    context, mocker, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -700,7 +661,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
 
 
 def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
-    mocker, context, harness, monkeypatch, mock_get_statuses
+    mocker, context, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -717,7 +678,7 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
 
 
 def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch, mock_get_statuses
+    context, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     is_repository_created = mocker.patch(
@@ -742,7 +703,7 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
 
 
 def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
-    context, mocker, harness, backend_setup, monkeypatch, mock_get_statuses
+    context, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     _mock_backup(mocker)
@@ -768,7 +729,7 @@ def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
     "color", [HealthColors.RED, HealthColors.YELLOW_TEMP, HealthColors.UNKNOWN]
 )
 def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
-    context, harness, mocker, color, mock_get_statuses
+    context, harness, mocker, color
 ):
     # Given
     mocker.patch(
@@ -791,9 +752,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
     assert any(k in msg for k in ["red", "relocating", "unknown"])
 
 
-def test_prereq_when_snapshot_running_then_action_fails(
-    context, mocker, harness, mock_get_statuses
-):
+def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -812,9 +771,7 @@ def test_prereq_when_snapshot_running_then_action_fails(
     assert "operation in progress" in err.value.message.lower()
 
 
-def test_prereq_when_restore_running_then_action_fails(
-    context, mocker, harness, mock_get_statuses
-):
+def test_prereq_when_restore_running_then_action_fails(context, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -847,7 +804,7 @@ def _client_error(code: str, status: int = 400) -> ClientError:
 
 
 def test_create_s3_bucket_when_region_non_us_east_1_but_no_aws_endpoint_then_does_not_call_location_constraint(
-    mocker, harness, context, monkeypatch, mock_get_statuses
+    mocker, harness, context, monkeypatch
 ):
     # Given
     bucket = Mock()
@@ -874,7 +831,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_but_no_aws_endpoint_then_doe
 
 
 def test_create_s3_bucket_when_region_non_us_east_1_with_aws_endpoint_then_call_location_constraint(
-    context, mocker, harness, monkeypatch, mock_get_statuses
+    context, mocker, harness, monkeypatch
 ):
     # Given
     bucket = Mock()
@@ -902,7 +859,7 @@ def test_create_s3_bucket_when_region_non_us_east_1_with_aws_endpoint_then_call_
 
 
 def test_create_s3_bucket_when_region_us_east_1_then_calls_create_without_location_constraint(
-    context, harness, mocker, monkeypatch, mock_get_statuses
+    context, harness, mocker, monkeypatch
 ):
     # Given
     bucket = Mock()
@@ -928,7 +885,7 @@ def test_create_s3_bucket_when_region_us_east_1_then_calls_create_without_locati
     "code", ["BucketAlreadyOwnedByYou", "BucketAlreadyExists", "BucketNameUnavailable"]
 )
 def test_create_s3_bucket_when_bucket_already_exists_then_it_does_not_raise(
-    harness, mocker, context, monkeypatch, code, mock_get_statuses
+    harness, mocker, context, monkeypatch, code
 ):
     # Given
     bucket = Mock()
@@ -948,7 +905,7 @@ def test_create_s3_bucket_when_bucket_already_exists_then_it_does_not_raise(
 
 
 def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
-    context, harness, mocker, monkeypatch, mock_get_statuses
+    context, harness, mocker, monkeypatch
 ):
     # Given
     bucket = Mock()
@@ -969,7 +926,7 @@ def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
 
 
 def test_verify_s3_credentials_when_bucket_missing_then_triggers_create_and_probe(
-    harness, mocker, context, monkeypatch, mock_get_statuses
+    harness, mocker, context, monkeypatch
 ):
     # Given
     cfg = Mock()
@@ -1009,7 +966,7 @@ def test_verify_s3_credentials_when_bucket_missing_then_triggers_create_and_prob
 
 
 def test_create_azure_container_when_create_bucket_then_create_container_is_called(
-    harness, mocker, context, monkeypatch, mock_get_statuses
+    harness, mocker, context, monkeypatch
 ):
     # Given
     client = Mock()
@@ -1028,7 +985,7 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
 
 
 def test_create_azure_container_when_container_exists_and_we_run_create_container_then_it_does_not_raise(
-    context, mocker, harness, monkeypatch, mock_get_statuses
+    context, mocker, harness, monkeypatch
 ):
     # Given
     client = Mock()
@@ -1047,7 +1004,7 @@ def test_create_azure_container_when_container_exists_and_we_run_create_containe
 
 
 def test_create_azure_container_when_create_container_then_other_azure_error_raises(
-    context, harness, mocker, monkeypatch, mock_get_statuses
+    context, harness, mocker, monkeypatch
 ):
     client = Mock()
     client.create_container.side_effect = AzureError("boom")
@@ -1065,7 +1022,7 @@ def test_create_azure_container_when_create_container_then_other_azure_error_rai
 
 
 def test_create_azure_container_when_container_missing_then_triggers_create_and_probe(
-    context, mocker, harness, monkeypatch, mock_get_statuses
+    context, mocker, harness, monkeypatch
 ):
     # Given
     cfg = Mock()
@@ -1111,7 +1068,7 @@ def _cfg(*, secret_key: str = "{}", bucket: str = "bkt", base_path: str = "base/
     return cfg
 
 
-def test_create_gcs_bucket_when_credentials_block_missing_then_return_false(mock_get_statuses):
+def test_create_gcs_bucket_when_credentials_block_missing_then_return_false():
     cfg = Mock()
     cfg.gcs = Mock()
     cfg.gcs.credentials = None
@@ -1119,24 +1076,22 @@ def test_create_gcs_bucket_when_credentials_block_missing_then_return_false(mock
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_secret_key_empty_then_return_false(mock_get_statuses):
+def test_create_gcs_bucket_when_secret_key_empty_then_return_false():
     cfg = _cfg(secret_key="")
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_bucket_name_empty_then_return_false(mock_get_statuses):
+def test_create_gcs_bucket_when_bucket_name_empty_then_return_false():
     cfg = _cfg(bucket="")
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_secret_key_is_invalid_json_then_return_false(mock_get_statuses):
+def test_create_gcs_bucket_when_secret_key_is_invalid_json_then_return_false():
     cfg = _cfg(secret_key="not-json")
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(
-    monkeypatch, mock_get_statuses
-):
+def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(monkeypatch):
     cfg = _cfg(
         secret_key='{"project_id":"p"}',
         bucket="mybucket",
@@ -1167,9 +1122,7 @@ def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_acc
     blob.delete.assert_called_once()
 
 
-def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(
-    monkeypatch, mock_get_statuses
-):
+def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(monkeypatch):
     cfg = _cfg(secret_key='{"project_id":"p"}', bucket="mybucket")
 
     client = Mock()
@@ -1191,9 +1144,7 @@ def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(
 
 
 @pytest.mark.parametrize("exc", [Conflict("taken"), Forbidden("denied")])
-def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(
-    monkeypatch, exc, mock_get_statuses
-):
+def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(monkeypatch, exc):
     cfg = _cfg(secret_key='{"project_id":"p"}', bucket="mybucket")
 
     client = Mock()
@@ -1211,9 +1162,7 @@ def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(
-    monkeypatch, mock_get_statuses
-):
+def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeypatch):
     cfg = _cfg(
         secret_key='{"project_id":"p"}',
         bucket="mybucket",

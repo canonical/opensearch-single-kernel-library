@@ -11,6 +11,7 @@ from time import time_ns
 import ops
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import EventSource
+from ops.charm import CharmEvents
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -25,10 +26,12 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
+from opensearch_single_kernel.common.pebble_observer import PebbleObserver
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.events.cos import CosEventsHandler
 from opensearch_single_kernel.events.custom_events import (
+    PebbleCanConnectEvent,
     ReloadKeystoreEvent,
     RestartOpenSearch,
     StartOpenSearch,
@@ -78,8 +81,16 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 logger = logging.getLogger(__name__)
 
 
+class OpenSearchCharmEvents(CharmEvents):
+    """Custom charm events for OpenSearch, extending Juju's built-in CharmEvents."""
+
+    pebble_can_connect = EventSource(PebbleCanConnectEvent)
+
+
 class OpenSearchBaseCharm(ops.CharmBase, ABC):
     """Base OpenSearch Charm, this will include base structure for both machine and k8s charms."""
+
+    on = OpenSearchCharmEvents()  # type: ignore[assignment]
 
     # Custom Events
     restart_opensearch_event = EventSource(RestartOpenSearch)
@@ -133,6 +144,10 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.cos_events = CosEventsHandler(self)
         self.jwt_events = JWTEventsHandler(self)
         self.oauth_events = OAuthEventsHandler(self)
+
+        # Re-dispatch deferred events once pebble is ready; without this, a slow pebble startup
+        # leaves the charm stuck with all events deferred and no trigger to replay them.
+        self.pebble_observer = PebbleObserver(self)
 
         self.status_handler = StatusHandler(
             self,
@@ -211,12 +226,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.trigger_peer_rel_changed(on_other_units=True)
             return
 
-        return self.health_manager.apply_health(
-            wait_for_green_first=wait_for_green_first,
-            use_localhost=use_localhost,
-            app=app,
-            unit=unit,
+        status = self.health_manager.get(
+            wait_for_green_first=wait_for_green_first, use_localhost=use_localhost
         )
+        logger.info("Current health of cluster: %s", status)
+        return status
 
     @property
     @abstractmethod

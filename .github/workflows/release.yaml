@@ -23,7 +23,7 @@ jobs:
     name: Release to PyPI (part 1)
     uses: canonical/data-platform-workflows/.github/workflows/release_python_package_part1.yaml@v31.1.1
     permissions:
-      contents: write  # Needed to create git tag
+      contents: write # Needed to create git tag
 
   # Separate job needed to workaround https://github.com/pypi/warehouse/issues/11096
   release-trusted-publishing:
@@ -42,7 +42,7 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
     permissions:
-      id-token: write  # Needed for PyPI trusted publishing
+      id-token: write # Needed for PyPI trusted publishing
 
   release-part2:
     name: Release to PyPI (part 2)
@@ -53,7 +53,7 @@ jobs:
     with:
       git-tag: ${{ needs.release-part1.outputs.git-tag }}
     permissions:
-      contents: write  # Needed to create GitHub release
+      contents: write # Needed to create GitHub release
 
   wait-for-pypi-available:
     name: Wait for PyPI release to be available

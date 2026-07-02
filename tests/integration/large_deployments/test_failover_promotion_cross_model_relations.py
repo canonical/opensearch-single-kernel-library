@@ -145,8 +145,7 @@ async def test_failover_promotion(
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
     )
     await failover_model.wait_for_idle(
-        apps=[FAILOVER_APP],
-        raise_on_blocked=False,
+        apps=[FAILOVER_APP], raise_on_blocked=False, timeout=TIMEOUT
     )
     await failover_model.remove_saas(MAIN_ORCHESTRATOR_OFFER)
 
@@ -167,10 +166,7 @@ async def test_failover_promotion(
         f"{DATA_APP}:{PEER_CLUSTER_RELATION}",
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
     )
-    await data_model.wait_for_idle(
-        apps=[DATA_APP],
-        raise_on_blocked=False,
-    )
+    await data_model.wait_for_idle(apps=[DATA_APP], raise_on_blocked=False, timeout=TIMEOUT)
     await data_model.remove_saas(MAIN_ORCHESTRATOR_OFFER)
     with ops_test.model_context("data"):
         logger.info("Ensuring failover was promoted to main...")

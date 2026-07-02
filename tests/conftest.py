@@ -42,5 +42,5 @@ def skip_for_substrate(request, substrate: Substrate):
 def opensearch_base_path(substrate) -> Path:
     """The base path for the files of the opensearch charms, according to the substrate."""
     if substrate == "k8s":
-        return Path("tests/charms/opensearch_k8s_test_charm")
-    return Path("tests/charms/opensearch_test_charm")
+        return Path("./tests/charms/opensearch_k8s_test_charm")
+    return Path("./tests/charms/opensearch_test_charm")

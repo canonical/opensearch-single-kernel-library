@@ -207,7 +207,7 @@ COS_ROLE = "readall_and_monitor"
 OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
-GENERATED_ROLES = ["data", "ingest", "ml", "cluster_manager"]
+GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
 
 # OpenSearch indices
 OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
@@ -218,8 +218,8 @@ SYSTEM_INDICES = {
 }
 # TLS
 CA_ALIAS = "ca"
+CA_TRUSTSTORE_P12 = "cacerts.p12"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
-KEYTOOL = "opensearch.keytool"
 OLD_CA_PREFIX = "old-"
 CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -241,7 +241,6 @@ PROTECTED_INDEX_NAMES = [
     ".opendistro-anomaly-detection-state",
     OPENSEARCH_NODE_LOCK_INDEX,
 ]
-
 
 DEFAULT_EXTRA_USER_ROLE = "default"
 
@@ -328,12 +327,33 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
 
-
 # Endpoints
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
 USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
+
+# Root group id (gid 0). Used when we want root to have group-level access.
+ROOT_GID = 0
+
+# Container name for K8s deployments
+CONTAINER_NAME = "opensearch"
+
+# Service name for Pebble
+OPENSEARCH_PEBBLE_SERVICE_NAME = "opensearch"
+
+# File permissions as octal
+# standard directory permissions
+DIR_PERMISSIONS_READONLY = 0o750
+# certificates directory permissions
+# minimum permissions: daemon can write, root can list/read.
+DIR_PERMISSIONS_CERTIFICATES = 0o750
+# secure directory permissions
+DIR_PERMISSIONS_SECURE = 0o775
+
+# Pebble service user/group
+PEBBLE_SERVICE_USER = "_daemon_"
+PEBBLE_SERVICE_GROUP = "_daemon_"
 
 # Upgrades
 UPGRADES_COMPATIBILITY_MATRIX = {

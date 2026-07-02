@@ -25,6 +25,7 @@ from opensearch_single_kernel.common.constants import (
     Directive,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -264,7 +265,12 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.opensearch_events.check_profile_requirements()
+        try:
+            self.charm.opensearch_events.check_profile_requirements()
+        except OpenSearchCmdError as e:
+            logger.warning(f"Error checking profile requirements: {e}. Deferring event.")
+            event.defer()
+            return
 
         if not self.charm.unit.is_leader():
             return
@@ -345,10 +351,6 @@ class PeerClusterEventsHandler(Object):
                 orchestrators, data, event_rel_id=event.relation.id
             )
             logger.debug(f"Errors from providers: {errors_data}, rel_error_id: {rel_error_id}")
-            self.reconcile_peer_cluster_errors(
-                label="error_from_providers-%s" % rel_error_id,
-                error=errors_data,
-            )
             if errors_data:
                 reconcile_deployment_desc = True
         except OpenSearchPeerClusterRelationDataIncompleteError as e:
@@ -373,15 +375,11 @@ class PeerClusterEventsHandler(Object):
         data = PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.charm.state.secrets, data["data"]
         )
-        logger.debug(f"Checking Rquirer errors with data: {data}")
+        logger.debug(f"Checking Requirer errors with data: {data}")
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
             orchestrators, deployment_desc, data, event.relation.id
         )
         logger.debug(f"Requirer errors: {requirer_errors}")
-        self.reconcile_peer_cluster_errors(
-            label="error_from_requirer-%s" % event.relation.id,
-            error=requirer_errors,
-        )
         if requirer_errors:
             logger.debug("Error from requirer")
             return
@@ -450,21 +448,6 @@ class PeerClusterEventsHandler(Object):
 
         orchestrators = self.charm.state.application.orchestrators
 
-        # a non elected orchestrator is departing (wrong relation), or the current is a
-        # main orchestrator and a failover is departing, we can safely ignore.
-        if event.relation.id not in [
-            orchestrators.main_rel_id,
-            orchestrators.failover_rel_id,
-        ]:
-            self.reconcile_peer_cluster_errors(
-                label="error_from_providers-%s" % event.relation.id, error=None
-            )
-
-            self.reconcile_peer_cluster_errors(
-                label="error_from_requirer-%s" % event.relation.id, error=None
-            )
-            return
-
         # handle scale-down at the charm level storage detaching
         if len(event.relation.units) > 0:
             return
@@ -488,14 +471,6 @@ class PeerClusterEventsHandler(Object):
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 )
-                # clear previously set errors due to this relation
-
-        self.reconcile_peer_cluster_errors(
-            label="error_from_providers-%s" % event.relation.id, error=None
-        )
-        self.reconcile_peer_cluster_errors(
-            label="error_from_requirer-%s" % event.relation.id, error=None
-        )
 
         # clear or set missing orchestrator status
         self.apply_orchestrator_status()
@@ -566,7 +541,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         try:
-            config_profile = self.charm.profiles_manager.config_profile
+            config_profile = self.charm.profiles_manager.get_config_profile()
         except ValueError:
             return
 
@@ -574,7 +549,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         self.charm.config_manager._update_jvm_heap_size(
-            config_profile.get_jvm_heap_size(self.charm.workload.meminfo()["MemTotal"])
+            config_profile.get_jvm_heap_size(self.charm.workload.memtotal())
         )
         # store profile in unit state
         self.charm.state.server.profile = config_profile

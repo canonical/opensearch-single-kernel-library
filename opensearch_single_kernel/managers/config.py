@@ -8,12 +8,18 @@ import logging
 from typing import Any
 
 from opensearch_single_kernel.common.constants import (
+    CA_ALIAS,
     CertType,
+    Substrates,
 )
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
+from opensearch_single_kernel.utils.helpers import (
+    k8s_fqdn,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -38,7 +44,7 @@ class ConfigManager(BaseManager):
         self,
         roles: list[str] | None = None,
         cm_names: list[str] | None = None,
-        cm_ips: list[str] | None = None,
+        cm_hosts: list[str] | None = None,
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
@@ -48,7 +54,10 @@ class ConfigManager(BaseManager):
         Args:
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
-            cm_ips: override seed_hosts got from nodes_config.
+            cm_hosts: override seed hosts got from nodes_config with IPs of CMs only.
+
+        Raises:
+            OpenSearchFileOperationError: if there is an error writing to any of the config files
 
         Returns:
             whether the config was changed.
@@ -59,27 +68,26 @@ class ConfigManager(BaseManager):
         config = (
             self._opensearch_static_config()
             | self._opensearch_general_config(roles)
-            | self._opensearch_host_config()
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
             | self._opensearch_tls_config(CertType.UNIT_HTTP)
             | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
+            | {"network.publish_host": self.state.node_host}
         )
 
         self._update_static_jvm_options()
 
         self.update_security_config()
 
-        if cm_ips:
-            self._update_seeds_file(cm_ips)
+        if cm_hosts:
+            self._update_seeds_file(cm_hosts)
         else:
             self.update_seeds_config()
 
         self.state.server.last_host_ip = self.state.host_ip
-
-        res = self.yaml_setter.rewrite(self.CONFIG_YML, config)
-        return res
+        # rewrite() returns whether the on-disk YAML text changed after the update.
+        return self.yaml_setter.rewrite(self.CONFIG_YML, config)
 
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
@@ -138,39 +146,25 @@ class ConfigManager(BaseManager):
         }
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
-        """Get set of general config options for the Opensearch from the deployment_desc.
-
-        Intended for opensearch.yml config file.
-        """
-        return (
-            {
-                "cluster.name": deployment_desc.config.cluster_name,
-                "node.name": self.state.unit_name,
-                "network.host": ["_site_", *sorted(self.state.network_hosts)],
-                "http.publish_host": self.workload.get_host_public_ip()
-                or self.state.network_ingress_address,
-                "node.roles": sorted(roles),
-                "node.attr.app_id": deployment_desc.app.id,  # Set the current app full id
-                "path.data": self.workload.paths.data.as_posix(),
-                "path.logs": self.workload.paths.logs.as_posix(),
-                "path.home": self.workload.paths.home.as_posix(),
-            }
-            if (deployment_desc := self.state.application.deployment_desc)
-            else {}
-        )
-
-    def _opensearch_host_config(self) -> dict[str, Any]:
-        """Get set of network host config options for the Opensearch.
-
-        Intended for opensearch.yml config file.
-        """
-        return {"network.publish_host": self.state.host_ip} if self.state.host_ip else {}
+        """General OpenSearch settings written to opensearch.yml."""
+        publish_hosts = [self.state.node_host]
+        if self.state.substrate == Substrates.VM:
+            if public_ip := self.workload.get_host_public_ip():
+                publish_hosts.append(public_ip)
+        return {
+            "cluster.name": self.state.application.deployment_desc.config.cluster_name,
+            "node.name": self.state.unit_name,
+            "network.host": self.state.network_hosts,
+            "http.publish_host": publish_hosts,
+            "node.roles": sorted(roles),
+            "node.attr.app_id": self.state.application.deployment_desc.app.id,
+            "path.data": self.workload.paths.data.as_posix(),
+            "path.logs": self.workload.paths.logs.as_posix(),
+            "path.home": self.workload.paths.home.as_posix(),
+        }
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
-        """Get the set of network host config options for the Opensearch.
-
-        Intended for opensearch.yml config file.
-        """
+        """Optional data temperature settings written to opensearch.yml."""
         return (
             {"node.attr.temp": self._opensearch_data_temperature}
             if self._opensearch_data_temperature
@@ -229,7 +223,7 @@ class ConfigManager(BaseManager):
             f"plugins.security.ssl.{layer}.keystore_type": "PKCS12",
             f"plugins.security.ssl.{layer}.keystore_filepath": f"{self.workload.paths.certs_relative}/{cert_type.val}.p12",
             f"plugins.security.ssl.{layer}.truststore_type": "PKCS12",
-            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/ca.p12",
+            f"plugins.security.ssl.{layer}.truststore_filepath": f"{self.workload.paths.certs_relative}/{CA_ALIAS}.p12",
             f"plugins.security.ssl.{layer}.keystore_alias": cert_type.val,
             f"plugins.security.ssl.{layer}.keystore_keypassword": keystore_pwd,
             f"plugins.security.ssl.{layer}.keystore_password": keystore_pwd,
@@ -474,24 +468,46 @@ class ConfigManager(BaseManager):
             },
         }
 
-    def update_seeds_config(self, nodes: list[Node] | None = None) -> None:
-        """Reconcile Opensearch unicast_hosts.txt config file using values from nodes_config."""
+    def update_seeds_config(self, nodes: list[Node] | None = None) -> bool:
+        """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config.
+
+        Returns:
+            True on success, False if a filesystem error occurred.
+        """
         nodes = nodes or []
         if nodes_config := self.state.application.nodes_config:
             nodes.extend(list(nodes_config.values()))
-        self._update_seeds_file([node.ip for node in list(nodes) if node.is_cm_eligible()])
+        try:
+            if self.state.substrate == Substrates.K8S:
+                self._update_seeds_file(
+                    [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
+                )
+            else:
+                self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
+        except OpenSearchFileOperationError as e:
+            logger.error("An error occurred while updating seeds config: %s", e)
+            return False
+        return True
 
-    def _update_seeds_file(self, cm_ips: list[str] | None) -> None:
-        """Reconcile Opensearch unicast_hosts.txt config file using provided values."""
-        # only update the file if there is data to update
-        if not cm_ips:
+    def _update_seeds_file(self, cm_hosts: list[str] | None) -> None:
+        """Reconcile OpenSearch unicast_hosts.txt using provided values.
+
+        Args:
+            cm_hosts: list of host IPs or DNS names to be written to unicast_hosts
+
+        Returns:
+            None
+
+        Raises:
+            OpenSearchFileOperationError: if there is an error writing to the seeds file.
+        """
+        if not cm_hosts:
             return
-        cm_ips_set = set(cm_ips)
-        lines = "\n".join(sorted([entry for entry in cm_ips_set if entry.strip()]))
+        lines = "\n".join(sorted(set(cm_hosts)))
         self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
 
     def update_profile_configuration(self, profile: OpenSearchProfile) -> bool:
-        """Update Opensearch JVM config file with the values from provided performance profile.
+        """Update JVM heap in jvm.options based on the performance profile.
 
         Returns:
             whether the configuration changed and restart required.
@@ -499,9 +515,11 @@ class ConfigManager(BaseManager):
         current_profile = self.state.server.profile
         logger.debug("current profile: %s, config profile: %s", current_profile, profile)
         if current_profile is None or current_profile != profile:
-            self._update_jvm_heap_size(
-                profile.get_jvm_heap_size(self.workload.meminfo()["MemTotal"])
+            heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
+            logger.debug(
+                "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
+            self._update_jvm_heap_size(heap_size)
             self.state.server.profile = profile
             return True
         return False
@@ -514,7 +532,6 @@ class ConfigManager(BaseManager):
             f"-Xms{heap_size_in_kb}k",
             regex=True,
         )
-
         self.yaml_setter.replace(
             self.JVM_OPTIONS,
             "-Xmx[0-9]+[kmgKMG]",
