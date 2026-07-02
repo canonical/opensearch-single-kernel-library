@@ -597,11 +597,10 @@ class ClusterState(Object):
     @property
     def network_hosts(self) -> list[str]:
         """All HTTP/Transport hosts for the current node."""
-        hosts = ["_site_"]
-        if self.substrate == Substrates.K8S:
-            # K8s we allow binding on all interfaces
-            return hosts + [self.fqdn] + ["_local_"]  # only the DNS name that's in the cert SANs
-        return hosts + [socket.getfqdn(), self.host_ip]
+        hosts = ["_site_", self.fqdn]
+        if self.substrate == Substrates.VM:
+            hosts.append(self.host_ip)
+        return hosts
 
     @property
     def port(self) -> int:

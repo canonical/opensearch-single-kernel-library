@@ -207,9 +207,17 @@ def store_ca_chain(  # noqa: C901
                             store_args,
                         )
                         workload.run_cmd(changealias_cmd, store_args)
-                    except OpenSearchCmdError:
+                    except OpenSearchCmdError as retry_err:
+                        logger.error(
+                            "Failed to rename existing alias: %s",
+                            (retry_err.out or "") + (retry_err.err or ""),
+                        )
                         return False
                 elif ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
+                    logger.error(
+                        "Failed to rename existing alias: %s",
+                        msg,
+                    )
                     return False
 
         # import the cert

@@ -37,7 +37,6 @@ from tests.integration.ha.helpers_data import (
 )
 from tests.integration.ha.k8s_helpers.helpers import (
     k8s_all_processes_down,
-    k8s_send_process_control_signal,
     pebble_patch_restart_delay,
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
@@ -178,16 +177,9 @@ async def test_kill_db_process_node_with_primary_shard(
         )
 
     # Kill the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_unit_with_primary_shard}",
-            ops_test.model_full_name,
-            "SIGKILL",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test, app, first_unit_with_primary_shard, signal="SIGKILL"
-        )
+    await send_kill_signal_to_process(
+        ops_test, app, first_unit_with_primary_shard, signal="SIGKILL", substrate=substrate
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -248,16 +240,9 @@ async def test_kill_db_process_node_with_elected_cm(
         )
 
     # Kill the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_elected_cm_unit_id}",
-            ops_test.model_full_name,
-            "SIGKILL",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test, app, first_elected_cm_unit_id, signal="SIGKILL"
-        )
+    await send_kill_signal_to_process(
+        ops_test, app, first_elected_cm_unit_id, signal="SIGKILL", substrate=substrate
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -312,16 +297,9 @@ async def test_freeze_db_process_node_with_primary_shard(
         )
 
     # Freeze the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_unit_with_primary_shard}",
-            ops_test.model_full_name,
-            "SIGSTOP",
-        )
-    else:
-        opensearch_pid = await send_kill_signal_to_process(
-            ops_test, app, first_unit_with_primary_shard, signal="SIGSTOP"
-        )
+    opensearch_pid = await send_kill_signal_to_process(
+        ops_test, app, first_unit_with_primary_shard, signal="SIGSTOP", substrate=substrate
+    )
 
     # wait until the SIGSTOP fully takes effect
     time.sleep(10)
@@ -351,20 +329,14 @@ async def test_freeze_db_process_node_with_primary_shard(
         ), "Primary shard still assigned to the unit where the service was stopped."
 
     # Un-Freeze the opensearch process in the node previously hosting the primary shard
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_unit_with_primary_shard}",
-            ops_test.model_full_name,
-            "SIGCONT",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test,
-            app,
-            first_unit_with_primary_shard,
-            signal="SIGCONT",
-            opensearch_pid=opensearch_pid,
-        )
+    await send_kill_signal_to_process(
+        ops_test,
+        app,
+        first_unit_with_primary_shard,
+        signal="SIGCONT",
+        opensearch_pid=opensearch_pid,
+        substrate=substrate,
+    )
 
     # verify that the opensearch service is back running on the unit previously hosting the p_shard
     assert await is_up(
@@ -417,16 +389,9 @@ async def test_freeze_db_process_node_with_elected_cm(
         )
 
     # Freeze the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_elected_cm_unit_id}",
-            ops_test.model_full_name,
-            "SIGSTOP",
-        )
-    else:
-        opensearch_pid = await send_kill_signal_to_process(
-            ops_test, app, first_elected_cm_unit_id, signal="SIGSTOP"
-        )
+    opensearch_pid = await send_kill_signal_to_process(
+        ops_test, app, first_elected_cm_unit_id, signal="SIGSTOP", substrate=substrate
+    )
 
     # wait until the SIGSTOP fully takes effect
     time.sleep(10)
@@ -448,20 +413,14 @@ async def test_freeze_db_process_node_with_elected_cm(
     ), "Cluster manager still assigned to the unit where the service was stopped."
 
     # Un-Freeze the opensearch process in the node previously elected CM
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_elected_cm_unit_id}",
-            ops_test.model_full_name,
-            "SIGCONT",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test,
-            app,
-            first_elected_cm_unit_id,
-            signal="SIGCONT",
-            opensearch_pid=opensearch_pid,
-        )
+    await send_kill_signal_to_process(
+        ops_test,
+        app,
+        first_elected_cm_unit_id,
+        signal="SIGCONT",
+        opensearch_pid=opensearch_pid,
+        substrate=substrate,
+    )
 
     # verify that the opensearch service is back running on the unit previously elected CM unit
     assert await is_up(
@@ -505,16 +464,9 @@ async def test_restart_db_process_node_with_elected_cm(
         )
 
     # restart the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_elected_cm_unit_id}",
-            ops_test.model_full_name,
-            "SIGTERM",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test, app, first_elected_cm_unit_id, signal="SIGTERM"
-        )
+    await send_kill_signal_to_process(
+        ops_test, app, first_elected_cm_unit_id, signal="SIGTERM", substrate=substrate
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -568,16 +520,9 @@ async def test_restart_db_process_node_with_primary_shard(
         )
 
     # restart the opensearch process
-    if substrate == "k8s":
-        k8s_send_process_control_signal(
-            f"{app}/{first_unit_with_primary_shard}",
-            ops_test.model_full_name,
-            "SIGTERM",
-        )
-    else:
-        await send_kill_signal_to_process(
-            ops_test, app, first_unit_with_primary_shard, signal="SIGTERM"
-        )
+    await send_kill_signal_to_process(
+        ops_test, app, first_unit_with_primary_shard, signal="SIGTERM", substrate=substrate
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -637,20 +582,14 @@ async def test_full_cluster_crash(
 
     logger.info("Killing all units simultaneously.")
     # kill all units simultaneously
-    if substrate == "k8s":
-        for unit_id in get_application_unit_ids(ops_test, app):
-            k8s_send_process_control_signal(
-                f"{app}/{unit_id}",
-                ops_test.model_name,
-                "SIGKILL",
+    await asyncio.gather(
+        *[
+            send_kill_signal_to_process(
+                ops_test, app, unit_id, signal="SIGKILL", substrate=substrate
             )
-    else:
-        await asyncio.gather(
-            *[
-                send_kill_signal_to_process(ops_test, app, unit_id, signal="SIGKILL")
-                for unit_id in get_application_unit_ids(ops_test, app)
-            ]
-        )
+            for unit_id in get_application_unit_ids(ops_test, app)
+        ]
+    )
 
     logger.info("All kill signals sent. Verifying that all units are down.")
     # check that all units being down at the same time.
@@ -724,20 +663,14 @@ async def test_full_cluster_restart(
             await update_restart_delay(ops_test, app, unit_id, RESTART_DELAY)
 
     # kill all units simultaneously
-    if substrate == "k8s":
-        for unit_id in get_application_unit_ids(ops_test, app):
-            k8s_send_process_control_signal(
-                f"{app}/{unit_id}",
-                ops_test.model_name,
-                "SIGTERM",
+    await asyncio.gather(
+        *[
+            send_kill_signal_to_process(
+                ops_test, app, unit_id, signal="SIGTERM", substrate=substrate
             )
-    else:
-        await asyncio.gather(
-            *[
-                send_kill_signal_to_process(ops_test, app, unit_id, signal="SIGTERM")
-                for unit_id in get_application_unit_ids(ops_test, app)
-            ]
-        )
+            for unit_id in get_application_unit_ids(ops_test, app)
+        ]
+    )
 
     # check that all units being down at the same time.
     if substrate == "k8s":

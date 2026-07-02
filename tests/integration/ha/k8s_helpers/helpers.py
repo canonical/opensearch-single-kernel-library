@@ -243,92 +243,6 @@ def _remote_exit_code_from_error(error: subprocess.CalledProcessError) -> int:
     return error.returncode
 
 
-def k8s_send_process_control_signal(
-    unit_name: str,
-    model_full_name: str,
-    signal: str,
-    db_process: str = OPENSEARCH_PROCESS_PATTERN,
-) -> None:
-    """Send control signal to a database process running on a Juju unit.
-
-    Args:
-        unit_name: the Juju unit running the process
-        model_full_name: the Juju model for the unit
-        signal: the signal to issue, e.g., `SIGKILL`, `SIGTERM`, `SIGSTOP`, `SIGCONT`
-        db_process: the path to the database process binary
-    """
-    normalized_signal = signal.upper()
-    command = [
-        "juju",
-        "ssh",
-        "--container",
-        "opensearch",
-        unit_name,
-        "pkill",
-        "--signal",
-        normalized_signal,
-        "-f",
-        db_process,
-    ]
-    env = {**os.environ, "JUJU_MODEL": model_full_name}
-
-    try:
-        subprocess.check_output(
-            command, env=env, stderr=subprocess.PIPE, universal_newlines=True, timeout=5
-        )
-        # For SIGSTOP and SIGCONT, check_output should succeed cleanly and reach here.
-        logger.info(
-            "Signal %s successfully sent to database process on unit %s.",
-            normalized_signal,
-            unit_name,
-        )
-
-    except subprocess.CalledProcessError as e:
-        # Exit code 137 = SIGKILL container death
-        # Exit code 143 = SIGTERM container death
-        # Exit code 255 = SSH disconnect caused by sudden container termination
-        termination_signals = ["SIGKILL", "SIGTERM"]
-        expected_exit_codes = (137, 143, 255)
-        exit_code = _remote_exit_code_from_error(e)
-
-        if normalized_signal in termination_signals and exit_code in expected_exit_codes:
-            logger.info(
-                "Process terminated successfully via %s (received expected exit code %s).",
-                normalized_signal,
-                exit_code,
-            )
-        else:
-            logger.error(
-                "Failed to send signal %s to process %s on unit %s",
-                normalized_signal,
-                db_process,
-                unit_name,
-            )
-            logger.error("Error details: return code %s, stderr: %s", e.returncode, e.stderr)
-            raise
-
-    except subprocess.TimeoutExpired as e:
-        if normalized_signal == "SIGSTOP":
-            logger.info(
-                "Signal %s likely reached process %s on unit %s; Juju exec timed out after "
-                "the process stopped.",
-                normalized_signal,
-                db_process,
-                unit_name,
-            )
-        else:
-            logger.error(
-                "Timeout while sending signal %s to process %s on unit %s",
-                normalized_signal,
-                db_process,
-                unit_name,
-            )
-            logger.error("Error details: %s", e)
-            raise
-
-    time.sleep(3)  # give some time for the signal to take effect before the test continues
-
-
 def pebble_patch_restart_delay(
     model_name: str,
     unit_name: str,
@@ -415,6 +329,19 @@ def pebble_patch_restart_delay(
                 assert (
                     response.returncode == 0
                 ), f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+
+    # pebble replan restarts the service; wait until opensearch is back up on port 9200
+    for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3)):
+        with attempt:
+            result = subprocess.run(
+                f"juju ssh --container opensearch {unit_name} lsof -ti:9200".split(),
+                capture_output=True,
+                text=True,
+                env={**os.environ, "JUJU_MODEL": model_name},
+            )
+            assert (
+                result.stdout.strip()
+            ), f"opensearch not yet listening on port 9200 on {unit_name}"
 
 
 def copy_file_into_pod(

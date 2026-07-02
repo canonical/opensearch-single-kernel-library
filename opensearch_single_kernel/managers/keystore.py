@@ -53,7 +53,7 @@ class KeystoreManager(BaseManager):
         object_storage_credentials: ObjectStorageCredentials,
         gcs_file_path: str | None = None,
     ) -> None:
-        """Put S3 credentials in the keystore."""
+        """Put object storage credentials in the keystore."""
         if object_storage_type == ObjectStorageType.S3 and isinstance(
             object_storage_credentials, S3RelDataCredentials
         ):
@@ -89,8 +89,15 @@ class KeystoreManager(BaseManager):
         wait=wait_fixed(3),
         retry_error_callback=lambda _: False,
     )
-    def cleanup_storage_credentials(self, object_storage_type) -> bool:
-        """Remove keystore entries for the given object storage type. Returns True on success."""
+    def cleanup_storage_credentials(self, object_storage_type: ObjectStorageType) -> bool:
+        """Remove keystore entries for the given object storage type. Returns True on success.
+
+        Args:
+            object_storage_type: The type of object storage (S3, Azure, GCS).
+
+        Returns:
+            True if the cleanup was successful, False otherwise.
+        """
         keystore_entries = []
         if object_storage_type == ObjectStorageType.S3:
             keystore_entries = ["s3.client.default.access_key", "s3.client.default.secret_key"]
