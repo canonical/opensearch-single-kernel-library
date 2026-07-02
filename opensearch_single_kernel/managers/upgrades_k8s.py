@@ -67,9 +67,15 @@ class UpgradesManagerK8s(UpgradesManagerBase):
 
     def save_revision_after_first_install(self) -> None:
         """Save revision on first install"""
-        self.state.server_upgrade.workload_version = self.current_versions.workload
+        # Save versions on initial start
         logger.debug(
-            f"Saved {self.current_versions.workload=} in unit databag after first install"
+            "Setting %r in upgrade peer relation app databag",
+            self.current_versions,
+        )
+        self.state.application_upgrade.versions = self.current_versions
+        logger.debug(
+            "Set %r in upgrade peer relation app databag",
+            self.current_versions,
         )
 
     @property
@@ -81,9 +87,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             else:
-                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, {
-                    "param": "check-workload-container"
-                }
+                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
         if not self.in_progress:
             return (None, None)
@@ -130,14 +134,12 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         - force upgrade of next unit if 1 or more upgraded units are unhealthy
         """
         message: str | None = None
-        force = action_event is not None and force
-        from_event = action_event is not None
 
         units = self.state.sorted_upgrades_units
 
         partition = self._determine_partition(
             units,
-            from_event=from_event,
+            from_event=action_event is not None,
             force=force,
         )
         logger.debug(f"{self.partition=}, {partition=}")
@@ -152,7 +154,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         # This does not address the situation where another unit > 1 restarts and sets the
         # partition during the `stop` event, but that is unlikely to occur in the small time window
         # that causes the unit to hang.
-        if from_event:
+        if action_event:
             assert len(units) >= 2
             if partition > int(units[1].unit.name.split("/")[-1]):
                 message = "Highest number unit is unhealthy. Refresh will not resume."
@@ -176,7 +178,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         if partition < self.partition:
             self.partition = partition
             logger.debug(
-                f"Lowered partition to {partition} {from_event=} {force=} {self.in_progress=}"
+                f"Lowered partition to {partition} {action_event} {force=} {self.in_progress=}"
             )
         return message
 
@@ -255,11 +257,19 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         return 0
 
     @property
-    def in_progress(self) -> bool:
-        """Whether upgrade is in progress"""
-        # We compare the revision of the StatefulSet with the pods
-        app_version = self.k8s_client.get_revision()
-        logger.debug(f"Current StatefulSet revision: {app_version}")
-        unit_versions = self.k8s_client.list_revisions()
-        logger.debug(f"Current unit revisions: {unit_versions}")
-        return any(revision != app_version for revision in unit_versions.values())
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        """{Unit name: Kubernetes controller revision hash}
+
+        Even if the workload container version is the same, the workload will restart if the
+        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
+
+        Therefore, we must use the revision hash instead of the workload container version. (To
+        satisfy the requirement that if and only if this version changes, the workload will
+        restart.)
+        """
+        return self.k8s_client.list_revisions()
+
+    @property
+    def _app_workload_container_version(self) -> str:
+        """App's Kubernetes controller revision hash"""
+        return self.k8s_client.get_revision()

@@ -10,9 +10,12 @@ Based off specification: DA058 - In-Place Upgrades - Kubernetes v2
 import abc
 import json
 import logging
+import re
+from functools import cache
 from typing import Any
 
 import ops
+import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
@@ -22,8 +25,10 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchK8sDeployedWithoutTrustError,
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
@@ -87,9 +92,15 @@ class UpgradesManagerBase(BaseManager):
             return False
 
     @property
-    @abc.abstractmethod
     def in_progress(self) -> bool:
-        """Whether upgrade is in progress"""
+        """Whether an upgrade is in progress"""
+        logger.debug(
+            f"{self._app_workload_container_version=} {self._unit_workload_container_versions=}"
+        )
+        return any(
+            version != self._app_workload_container_version
+            for version in self._unit_workload_container_versions.values()
+        )
 
     @property
     @abc.abstractmethod
@@ -99,6 +110,15 @@ class UpgradesManagerBase(BaseManager):
     @property
     def app_status(self) -> StatusObject | None:
         """App upgrade status"""
+        if self.state.substrate == Substrates.K8S:
+            try:
+                self.k8s_client.check_if_deployed_without_trust()
+            except OpenSearchK8sDeployedWithoutTrustError as e:
+                return format_status(
+                    UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
+                    {"charm_app": e.app_name},
+                )
+
         if not self.in_progress:
             return None
         if not self.is_compatible:
@@ -188,6 +208,42 @@ class UpgradesManagerBase(BaseManager):
 
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
+    @cache
+    def get_version_before_override(self) -> poetry_version.Version | None:
+        """Get the version of OpenSearch before override-version is run."""
+        if self.workload.is_service_started():
+            logger.debug("Service is started. The override version can not be run unless we stop.")
+            return None
+
+        # Removed the stray ':' after 'version' to accurately match the CLI output
+        regex = r"last written by OpenSearch version \[([0-9]+\.[0-9]+\.[0-9]+)\]"
+
+        try:
+            if self.state.substrate == Substrates.K8S:
+                output = self.workload.run_script(
+                    "bin/opensearch-node", "override-version", stdin="N\n"
+                )
+            else:
+                # Separated the command and passed 'N' via stdin to match the K8s behavior
+                output = self.workload.run_cmd("opensearch.node", "override-version", stdin="N\n")
+
+            # Optional: strip() the output if your framework doesn't do it automatically
+            if isinstance(output, str):
+                output = output.strip()
+
+        except OpenSearchCmdError as e:
+            # If the workload runner raises an exception upon the tool exiting/aborting,
+            # the output containing the version string is often trapped inside
+            # the exception message (stderr).
+            output = str(e.err)
+
+        version = re.search(regex, str(output))
+
+        if version:
+            return poetry_version.Version.parse(version.group(1))
+
+        return None
+
     def override_version(self) -> None:
         """Override the version on disk to allow rollback to proceed."""
         if self.state.substrate == Substrates.K8S:
@@ -233,38 +289,53 @@ class UpgradesManagerBase(BaseManager):
     @property
     def is_rollback(self) -> bool:
         """Whether this upgrade is a rollback"""
-        logger.debug("Checking if rollback: %s", self.state.application_upgrade.versions)
-        if not self.state.application_upgrade.versions or not (
-            unit_bag_version := self.state.server_upgrade.workload_version_parsed
-        ):
-            return False
-        version_on_disk = self.current_versions.workload_parsed
-        logger.debug("Checking if rollback: %s > %s", str(unit_bag_version), str(version_on_disk))
-        return unit_bag_version > version_on_disk
+        # Basically We call it a rollback if:
+        # 1. We are in the highest numbered unit (i.e. the first unit to upgrade)
+        # 2. We are in the middle of an upgrade (i.e. not all units have upgraded)
+        # 3. The upgrade is compatible (i.e It is not a downgrade)
+        # 4. The version in databag match the version in file
+        # 5. We have still not overridden the version on disk
+        logger.debug("Checking if this is a rollback")
+        logger.debug(
+            f"{self.state.server_upgrade.unit.name=} {self.state.sorted_upgrades_units[0].unit.name=} {self.in_progress=} {self.is_compatible=} {self.state.application_upgrade.versions.workload_parsed=} {self.current_versions.workload_parsed=}"
+        )
+
+        return (
+            self.state.server_upgrade.unit.name == self.state.sorted_upgrades_units[0].unit.name
+            and self.in_progress
+            and self.is_compatible
+            and self.state.application_upgrade.versions.workload_parsed
+            == self.current_versions.workload_parsed
+            and self.get_version_before_override() is not None
+        )
 
     @property
     def can_rollback(self) -> bool:
         """Whether rollback is supported to previous versions"""
-        if not self.state.application_upgrade.versions or not (
-            unit_bag_version := self.state.server_upgrade.workload_version_parsed
-        ):
+        if not self.state.application_upgrade.versions:
             return False
 
+        version_before_override = self.get_version_before_override()
+        if not version_before_override:
+            logger.debug("Version before override not found")
+            return False
         version_on_disk = self.current_versions.workload_parsed
         compatibility_matrix = self.reconcile_compatibility_matrix()
 
         if (
-            str(unit_bag_version) in compatibility_matrix
-            and str(version_on_disk) in compatibility_matrix[str(unit_bag_version)]
+            str(version_before_override) in compatibility_matrix
+            and str(version_on_disk) in compatibility_matrix[str(version_before_override)]
         ):
             logger.debug(
                 "Rollback supported from %s to %s",
-                unit_bag_version,
+                version_before_override,
                 version_on_disk,
             )
             return True
 
-        logger.warning("Rollback not supported from %s to %s", unit_bag_version, version_on_disk)
+        logger.warning(
+            "Rollback not supported from %s to %s", version_before_override, version_on_disk
+        )
         return False
 
     def update_grafana_dashboards_title(self, charm_revision: str) -> None:
@@ -290,3 +361,21 @@ class UpgradesManagerBase(BaseManager):
     def save_revision_after_first_install(self) -> None:
         """Save revision on first install"""
         ...
+
+    @property
+    @abc.abstractmethod
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        """{Unit name: Kubernetes controller revision hash}
+
+        Even if the workload container version is the same, the workload will restart if the
+        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
+
+        Therefore, we must use the revision hash instead of the workload container version. (To
+        satisfy the requirement that if and only if this version changes, the workload will
+        restart.)
+        """
+
+    @property
+    @abc.abstractmethod
+    def _app_workload_container_version(self) -> str:
+        """App's Kubernetes controller revision hash"""

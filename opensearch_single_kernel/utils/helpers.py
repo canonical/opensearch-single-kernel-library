@@ -22,7 +22,7 @@ from typing import Any
 
 import bcrypt
 from cryptography import x509
-from ops import Unit
+from ops import Unit, pebble
 
 from opensearch_single_kernel.common.constants import (
     PROTECTED_INDEX_NAMES,
@@ -433,11 +433,25 @@ def wait_for_process_output(
     try:
         stdout, stderr = process.wait_output()
         return stdout, stderr
-    except Exception as e:
+    except pebble.ExecError as e:
+        # 1. Safely extract and decode the raw, untruncated buffers
+        out_raw = (
+            e.stdout.decode("utf-8", "replace")
+            if isinstance(e.stdout, bytes)
+            else (e.stdout or "")
+        )
+        err_raw = (
+            e.stderr.decode("utf-8", "replace")
+            if isinstance(e.stderr, bytes)
+            else (e.stderr or "")
+        )
+
+        # 2. Fall back to stdout if stderr is empty
+        full_err_output = err_raw if err_raw else out_raw
+        error_string = full_err_output.lower()
         # On failure (notably a timed-out exec), Pebble may leave its non-daemon
         # I/O threads running, which blocks interpreter shutdown. Tear them down.
         _cleanup_exec_process(process)
-        error_string = str(e).lower()
         missing_keystore = (
             "opensearch.keystore" in error_string and "does not exist" in error_string
         ) or "keystore file does not exist" in error_string
@@ -449,7 +463,12 @@ def wait_for_process_output(
             )
         else:
             logger.warning("wait_output() failed for %s: %s", masked_command, e)
-        raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
+
+        raise OpenSearchCmdError(cmd=original_command, out="", err=full_err_output) from None
+    except Exception as e:
+        _cleanup_exec_process(process)
+        logger.warning("wait_output() failed unexpectedly for %s: %s", masked_command, e)
+        raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from None
 
 
 def lock_unit_name(full_unit_id: str) -> str:

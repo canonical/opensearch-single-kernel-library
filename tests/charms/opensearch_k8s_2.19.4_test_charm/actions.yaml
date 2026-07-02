@@ -1,4 +1,4 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 set-tls-private-key:
@@ -64,21 +64,17 @@ restore:
   required:
     - backup-id
 
-pre-upgrade-check:
+pre-refresh-check:
   description: Check if charm is ready to upgrade
 
-resume-upgrade:
-  description: Upgrade remaining units (after you manually verified that upgraded units are healthy).
+resume-refresh:
+  description: Refresh remaining units (after you manually verified that refreshed units are healthy).
+  params:
+    force:
+      type: boolean
+      default: false
+      description: a boolean indicating whether to force the refresh to continue even if some refreshed units are not healthy.
 
-force-upgrade:
-  description: |
-    Potential of *data loss* and *downtime*
-
-    Force upgrade of this unit.
-
-    Use to
-    - force incompatible upgrade and/or
-    - continue upgrade if 1+ upgraded units have non-active status
 
 status-detail:
   description: Gets statuses of the charm
@@ -86,9 +82,8 @@ status-detail:
     recompute:
       type: boolean
       default: false
-      description: a boolean indicating whether a unit should recompute all statuses.   - continue upgrade if 1+ upgraded units have non-active status
+      description: a boolean indicating whether a unit should recompute all statuses.
 
-# TODO to be changed when implementing refresh V3
 force-refresh-start:
   description: |
     Potential of data loss and downtime
@@ -104,13 +99,4 @@ force-refresh-start:
         Potential of data loss and downtime
 
         If `false`, force refresh if new version of OpenSearch and/or charm is not compatible with previous version
-
-    check-workload-container:
-      type: boolean
-      default: true
-      description: |
-        Potential of data loss and downtime during and after refresh
-
-        If `false`, allow refresh to PostgreSQL container version that has not been validated to work with the charm revision
-
   additionalProperties: false

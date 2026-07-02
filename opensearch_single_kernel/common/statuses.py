@@ -336,7 +336,7 @@ class UpgradesStatuses(Enum):
     )
     K8S_UPGRADES_ACTIVE_OUTDATED = StatusObject(
         status="active",
-        message="OpenSearch {workload_version} running (outdated); Charmed operator {charm_version}",
+        message="OpenSearch {workload_version} running (restart pending); Charmed operator {charm_version}",
         approved_critical_component=True,
     )
     UPGRADES_ACTIVE_OUTDATED = StatusObject(
@@ -376,6 +376,11 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_ROLLBACK_INCOMPATIBLE = StatusObject(
         status="blocked",
-        message="Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `{param}` set to false to override node version and attempt startup procedure",
+        message="Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure",
+        approved_critical_component=True,
+    )
+    K8S_DEPLOYED_WITHOUT_TRUST = StatusObject(
+        status="blocked",
+        message="Run `juju trust {charm_app} --scope=cluster`. Needed for in-place refreshes",
         approved_critical_component=True,
     )

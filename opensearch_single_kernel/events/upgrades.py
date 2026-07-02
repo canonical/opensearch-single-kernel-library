@@ -43,6 +43,9 @@ class UpgradesEventsHandler(Object):
 
     lifecycle_state_stored = ops.StoredState()
 
+    # This is to differentiate between substrates
+    UPGRADE_NOTATION = "refresh" if Substrates.K8S else "upgrade"
+
     def __init__(self, charm: "OpenSearchBaseCharm") -> None:
         super().__init__(charm, key="upgrade_events")
         self.charm = charm
@@ -62,12 +65,25 @@ class UpgradesEventsHandler(Object):
         self.framework.observe(
             self.charm.on[UPGRADE_RELATION].relation_changed, self._reconcile_upgrade
         )
-        self.framework.observe(
-            self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
-        )
-        self.framework.observe(self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action)
-        self.framework.observe(self.charm.on.force_upgrade_action, self._on_force_upgrade_action)
-        self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
+        if self.charm.substrate == Substrates.K8S:
+            self.framework.observe(
+                self.charm.on.pre_refresh_check_action, self._on_pre_upgrade_check_action
+            )
+            self.framework.observe(
+                self.charm.on.resume_refresh_action, self._on_resume_upgrade_action
+            )
+        else:
+            self.framework.observe(
+                self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
+            )
+            self.framework.observe(
+                self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action
+            )
+            self.framework.observe(
+                self.charm.on.force_upgrade_action, self._on_force_upgrade_action
+            )
+            self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
+
         self.framework.observe(
             self.charm.on.force_refresh_start_action,
             self._on_refresh_force_start_action,
@@ -77,8 +93,6 @@ class UpgradesEventsHandler(Object):
         """Handle relation created events."""
         assert self.charm.state.upgrade_relation
 
-        self.charm.upgrades_manager.save_revision_after_first_install()
-
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
             return
@@ -87,21 +101,11 @@ class UpgradesEventsHandler(Object):
             logger.debug("Skipping upgrade relation created because upgrade in progress")
             return
 
-        # Save versions on initial start
-        if self.charm.unit.is_leader():
-            logger.debug(
-                "Setting %r in upgrade peer relation app databag",
-                self.charm.upgrades_manager.current_versions,
-            )
-            self.charm.state.application_upgrade.versions = (
-                self.charm.upgrades_manager.current_versions
-            )
-            logger.debug(
-                "Set %r in upgrade peer relation app databag",
-                self.charm.upgrades_manager.current_versions,
-            )
+        self.charm.upgrades_manager.save_revision_after_first_install()
 
-    def _reconcile_upgrade(self, during_upgrade=False):  # noqa: C901
+    def _reconcile_upgrade(  # noqa: C901
+        self, during_upgrade=False, action_event=None, force=False
+    ):
         """Handle upgrade events."""
         if not self.charm.state.upgrade_relation:
             logger.debug("Peer relation not available")
@@ -212,7 +216,9 @@ class UpgradesEventsHandler(Object):
             if not during_upgrade and self.charm.upgrades_manager.opensearch_client.is_node_up():
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
-                self.charm.upgrades_manager.reconcile_partition()
+                self.charm.upgrades_manager.reconcile_partition(
+                    action_event=action_event, force=force
+                )
 
         self._set_upgrade_status()
 
@@ -271,7 +277,7 @@ class UpgradesEventsHandler(Object):
     def _on_pre_upgrade_check_action(self, event: ops.ActionEvent) -> None:
         """Handle pre-upgrade-check action."""
         if not self.authorized_leader:
-            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader pre-upgrade-check`)"
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader pre-{self.UPGRADE_NOTATION}-check`)"
             logger.debug(f"Pre-upgrade check event failed: {message}")
             event.fail(message)
             return
@@ -284,26 +290,29 @@ class UpgradesEventsHandler(Object):
             self._run_general_prechecks()
             self.charm.upgrades_manager.pre_upgrade_check()
         except OpenSearchUpgradePrecheckError as exception:
-            message = f"Charm is *not* ready for upgrade. Pre-upgrade check failed: {exception}"
-            logger.debug(f"Pre-upgrade check event failed: {message}")
+            message = f"Charm is *not* ready for {self.UPGRADE_NOTATION}. Pre-{self.UPGRADE_NOTATION}-check failed: {exception}"
+            logger.debug(f"Pre-{self.UPGRADE_NOTATION}-check event failed: {message}")
             event.fail(message)
             return
-        message = "Charm is ready for upgrade"
+        message = f"Charm is ready for {self.UPGRADE_NOTATION}"
         event.set_results({"result": message})
         logger.debug(f"Pre-upgrade check event succeeded: {message}")
 
     def _on_resume_upgrade_action(self, event: ops.ActionEvent) -> None:
         """Handle resume-upgrade action."""
         if not self.authorized_leader:
-            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-upgrade`)"
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-{self.UPGRADE_NOTATION}`)"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
         if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
-            message = "No upgrade in progress"
+            message = f"No {self.UPGRADE_NOTATION} in progress"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
+        if self.charm.substrate == Substrates.K8S:
+            # Get force parameter
+            self._reconcile_upgrade(action_event=event, force=event.params.get("force", False))
         try:
             self.charm.upgrades_manager.reconcile_partition(action_event=event)
         except OpenSearchReconcilePartitionError as e:
@@ -315,6 +324,11 @@ class UpgradesEventsHandler(Object):
 
     def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
         """Handle force-upgrade action."""
+        if self.charm.substrate == Substrates.K8S:
+            message = "Force upgrade is not supported on Kubernetes. Use `resume-upgrade` action with `force` parameter instead."
+            logger.debug(f"Force upgrade event failed: {message}")
+            event.fail(message)
+            return
         if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
             message = "No upgrade in progress"
             logger.debug(f"Force upgrade event failed: {message}")
@@ -332,13 +346,10 @@ class UpgradesEventsHandler(Object):
             return
         logger.debug("Forcing upgrade")
         event.log(f"Forcefully upgrading {self.charm.unit.name}")
-        if self.charm.substrate == Substrates.VM:
-            # TODO: replace `ignore_lock=False` with `event.params["ignore-lock"]` if specification
-            # DA091 approved
-            # (https://docs.google.com/document/d/1rwnS-deJU9Mzc8BFkl3UGgjZiBa6e3bxoT-6BQo9e3E/edit)
-            self.charm.upgrade_opensearch_event.emit(ignore_lock=False)
-        else:
-            self.charm.upgrades_manager.reconcile_partition(action_event=event, force=True)
+        # TODO: replace `ignore_lock=False` with `event.params["ignore-lock"]` if specification
+        # DA091 approved
+        # (https://docs.google.com/document/d/1rwnS-deJU9Mzc8BFkl3UGgjZiBa6e3bxoT-6BQo9e3E/edit)
+        self.charm.upgrade_opensearch_event.emit(ignore_lock=False)
         event.set_results({"result": f"Forcefully upgraded {self.charm.unit.name}"})
         logger.debug("Forced upgrade")
 
@@ -410,19 +421,12 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
-        if self.charm.substrate == Substrates.VM and event.params.get("check-compatibility", True):
+        if event.params.get("check-compatibility", True):
             message = "Rollbacks are not supported. This action will attempt to start the unit with the current version of OpenSearch. If the current version is incompatible with the cluster, the unit may fail to start. Rerun with `check-compatibility` set to false to override this check and attempt startup procedure."
             logger.debug("Refresh force start event failed: %s", message)
             event.fail(message)
             return
-        if self.charm.substrate == Substrates.K8S and event.params.get(
-            "check-workload-container", True
-        ):
-            # Cannot force refresh start if workload container image check fails
-            message = "Cannot force refresh start if workload container image check fails. Rerun with `check-workload-container` set to false to override this check and attempt startup procedure."
-            logger.debug("Refresh force start event failed: %s", message)
-            event.fail(message)
-            return
+
         if self.charm.substrate == Substrates.VM:
             self.charm.upgrade_opensearch_event.emit(override_version=True)
             event.set_results(
@@ -536,13 +540,6 @@ class UpgradesEventsHandler(Object):
             event.defer()
             return
 
-        # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
-        self.charm.state.server_upgrade.workload_version = (
-            self.charm.upgrades_manager.current_versions.workload
-        )
-        logger.debug(
-            f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
-        )
         # Configure and start the workload
         if not self.charm.cluster_manager.no_blocking_directives():
             logger.debug("Cannot start OpenSearch after upgrade, cluster not ready")

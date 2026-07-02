@@ -475,11 +475,13 @@ class OpenSearchEventsHandler(Object):
 
     def _on_stop(self, event: StopEvent) -> None:
         """Event handler for stop event."""
-        self.charm.pebble_observer.stop()
-        if self.charm.substrate == Substrates.K8S and (
-            type(self.charm.upgrades_manager) is UpgradesManagerK8s
+        if (
+            self.charm.substrate == Substrates.K8S
+            and (type(self.charm.upgrades_manager) is UpgradesManagerK8s)
+            and self.charm.upgrades_manager.in_progress
         ):
             self.charm.upgrades_manager.prepare_for_shutdown()
+        self.charm.pebble_observer.stop()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
@@ -796,6 +798,8 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
+        # This will block unit to start if it is an upgrade
+        # until the user unblock with `force-refresh-start`
         if (
             not event.after_upgrade
             and self.charm.substrate == Substrates.K8S
@@ -1077,17 +1081,6 @@ class OpenSearchEventsHandler(Object):
 
         # TODO: Handle refresh relation data of peer cluster
         if event.after_upgrade:
-            # Once we are sure that the cluster is healthy, we can mark the unit as healthy
-            if self.charm.state.substrate == Substrates.K8S:
-                if self.charm.upgrades_manager.is_rollback:
-                    # This means we run force-refresh-start to override version
-                    self.charm.upgrades_manager.reconcile_partition(action_event=event, force=True)
-                    self.charm.state.server_upgrade.workload_version = (
-                        self.charm.upgrades_manager.current_versions.workload
-                    )
-                    logger.debug(
-                        f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
-                    )
             if self.charm.state.substrate == Substrates.VM or (
                 self.charm.state.substrate == Substrates.K8S
                 and self.charm.upgrades_manager.is_compatible

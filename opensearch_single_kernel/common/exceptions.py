@@ -163,6 +163,7 @@ class OpenSearchK8sDeployedWithoutTrustError(OpenSearchError):
     """Exception thrown when the charm is deployed on k8s without the --trust flag."""
 
     def __init__(self, *, app_name: str):
+        self.app_name = app_name
         super().__init__(
             f"Run `juju trust {app_name} --scope=cluster` and `juju resolve` for each unit (or remove & re-deploy {app_name} with `--trust`)"
         )

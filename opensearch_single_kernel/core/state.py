@@ -270,7 +270,7 @@ class ClusterState(Object):
     @property
     def namespace(self) -> str:
         """K8S only: The namespace."""
-        return self.model.unit._backend.model_name
+        return self.model.name
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 
