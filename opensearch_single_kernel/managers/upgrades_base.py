@@ -295,11 +295,6 @@ class UpgradesManagerBase(BaseManager):
         # 3. The upgrade is compatible (i.e It is not a downgrade)
         # 4. The version in databag match the version in file
         # 5. We have still not overridden the version on disk
-        logger.debug("Checking if this is a rollback")
-        logger.debug(
-            f"{self.state.server_upgrade.unit.name=} {self.state.sorted_upgrades_units[0].unit.name=} {self.in_progress=} {self.is_compatible=} {self.state.application_upgrade.versions.workload_parsed=} {self.current_versions.workload_parsed=}"
-        )
-
         return (
             self.state.server_upgrade.unit.name == self.state.sorted_upgrades_units[0].unit.name
             and self.in_progress
