@@ -65,7 +65,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """Sets the partition number."""
         self.k8s_client.set_partition(value)
 
-    def save_revision_after_first_install(self) -> None:
+    def save_upgrades_versions(self) -> None:
         """Save revision on first install"""
         # Save versions on initial start
         logger.debug(

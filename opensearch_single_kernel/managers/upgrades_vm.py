@@ -51,9 +51,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             if self.state.server_upgrade.unit_state is UnitUpgradesState.OUTDATED:
-                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, {
-                    "param": "check-compatibility"
-                }
+                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
         if self.state.server_upgrade.snap_revision == OPENSEARCH_SNAP_REVISION:
             return (
@@ -159,9 +157,8 @@ class UpgradesManagerVM(UpgradesManagerBase):
             f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.current_versions.workload=} in unit databag after upgrade"
         )
 
-    def save_revision_after_first_install(self) -> None:
+    def save_upgrades_versions(self) -> None:
         """Save revision on first install"""
-        self.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
         logger.debug(
             "Setting %r in upgrade peer relation app databag",
             self.current_versions,

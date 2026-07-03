@@ -477,7 +477,7 @@ class OpenSearchEventsHandler(Object):
         """Event handler for stop event."""
         if (
             self.charm.substrate == Substrates.K8S
-            and (type(self.charm.upgrades_manager) is UpgradesManagerK8s)
+            and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
             and self.charm.upgrades_manager.in_progress
         ):
             self.charm.upgrades_manager.prepare_for_shutdown()
@@ -635,6 +635,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.pebble_observer.start()
 
         if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+            logger.debug("Rollback in progress, deferring start event.")
             event.defer()
             return
 
@@ -704,6 +705,7 @@ class OpenSearchEventsHandler(Object):
             )
             event.defer()
             return
+
         if not self.charm.tls_manager.all_tls_resources_stored():
             event.defer()
             return

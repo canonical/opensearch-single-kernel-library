@@ -50,7 +50,6 @@ class UpgradesManagerBase(BaseManager):
         workload: BaseWorkload,
     ) -> None:
         super().__init__(state, workload, "upgrades_manager")
-        self.reconcile_compatibility_matrix()
 
     @property
     def current_versions(self) -> UpgradeVersions:
@@ -130,6 +129,8 @@ class UpgradesManagerBase(BaseManager):
             # User confirmation needed to resume upgrade (i.e. upgrade second unit)
             # Statuses over 120 characters are truncated in `juju status` as of juju 3.1.6 and
             # 2.9.45
+            if self.state.substrate == Substrates.K8S:
+                return UpgradesStatuses.K8S_UPGRADES_WAITING_FOR_RESUME.value
             return UpgradesStatuses.UPGRADES_WAITING_FOR_RESUME.value
         return UpgradesStatuses.UPGRADES_UPGRADING.value
 
@@ -353,7 +354,7 @@ class UpgradesManagerBase(BaseManager):
         )
 
     @abc.abstractmethod
-    def save_revision_after_first_install(self) -> None:
+    def save_upgrades_versions(self) -> None:
         """Save revision on first install"""
         ...
 

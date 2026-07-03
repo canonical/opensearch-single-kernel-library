@@ -9,9 +9,10 @@ import typing
 
 import ops
 from data_platform_helpers.version_check import get_charm_revision
-from ops import Object, UpgradeCharmEvent
+from ops import ActionEvent, Object, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_SNAP_REVISION,
     UPGRADE_RELATION,
     HealthColors,
     Substrates,
@@ -91,8 +92,11 @@ class UpgradesEventsHandler(Object):
 
     def _on_upgrade_peer_relation_created(self, _) -> None:
         """Handle relation created events."""
-        assert self.charm.state.upgrade_relation
-
+        if self.charm.substrate == Substrates.VM:
+            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+            self.charm.state.server_upgrade.workload_version = (
+                self.charm.upgrades_manager.current_versions.workload
+            )
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
             return
@@ -101,11 +105,14 @@ class UpgradesEventsHandler(Object):
             logger.debug("Skipping upgrade relation created because upgrade in progress")
             return
 
-        self.charm.upgrades_manager.save_revision_after_first_install()
+        self.charm.upgrades_manager.save_upgrades_versions()
 
     def _reconcile_upgrade(  # noqa: C901
-        self, during_upgrade=False, action_event=None, force=False
-    ):
+        self,
+        during_upgrade: bool = False,
+        action_event: ActionEvent | None = None,
+        force: bool = False,
+    ) -> None:
         """Handle upgrade events."""
         if not self.charm.state.upgrade_relation:
             logger.debug("Peer relation not available")
@@ -143,34 +150,10 @@ class UpgradesEventsHandler(Object):
             self._set_upgrade_status()
             return
 
-        # CHECK FOR ROLLBACK
-        if (
-            self.charm.upgrades_manager.is_rollback
-            and not self.charm.upgrades_manager.can_rollback
-        ):
-            logger.error(
-                "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
-            )
-            self._set_upgrade_status()
-            # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
-            return
-
-        if (
-            self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED
-            and type(self.charm.upgrades_manager) is UpgradesManagerVM
+        if self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED and isinstance(
+            self.charm.upgrades_manager, UpgradesManagerVM
         ):
             # This is only for VM charms
-            logger.debug(
-                f"Rollback status: is_rollback={self.charm.upgrades_manager.is_rollback}, can_rollback={self.charm.upgrades_manager.can_rollback}"
-            )
-            if self.charm.upgrades_manager.is_rollback:
-                logger.warning("Rollback detected")
-                logger.warning(
-                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
-                )
-                self._set_upgrade_status()
-                self.charm.lock_manager.release()
-                return
             try:
                 if self.charm.upgrades_manager.requires_general_prechecks:
                     self._run_general_prechecks()
@@ -184,6 +167,7 @@ class UpgradesEventsHandler(Object):
                 )
                 logger.error(exception)
                 return
+
             if authorized:
                 self._set_upgrade_status()
                 self.charm.upgrade_opensearch_event.emit()
@@ -191,20 +175,9 @@ class UpgradesEventsHandler(Object):
                 logger.debug("Waiting to upgrade")
 
         if self.charm.upgrades_manager.unit_state is UnitUpgradesState.RESTARTING:
-            logger.debug(
-                f"Rollback status: is_rollback={self.charm.upgrades_manager.is_rollback}, can_rollback={self.charm.upgrades_manager.can_rollback}"
-            )
-            if self.charm.upgrades_manager.is_rollback:
-                logger.warning("Rollback detected")
-                logger.warning(
-                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
-                )
-                self._set_upgrade_status()
-                return
-            # This is only K8s
             if not self.charm.upgrades_manager.is_compatible:
                 logger.info(
-                    "Refresh incompatible. If you accept potential *data loss* and *downtime*, you can continue with force-upgrade"
+                    "Refresh incompatible. If you accept potential *data loss* and *downtime*, you can continue with resume-refresh"
                 )
                 self.charm.state.add_status_if_not_present(
                     UpgradesStatuses.UPGRADES_INCOMPATIBLE.value,
@@ -212,6 +185,7 @@ class UpgradesEventsHandler(Object):
                     self.charm.upgrades_manager.name,
                 )
                 return
+
         if self.charm.state.substrate == Substrates.K8S:
             if not during_upgrade and self.charm.upgrades_manager.opensearch_client.is_node_up():
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
@@ -265,6 +239,7 @@ class UpgradesEventsHandler(Object):
 
     def _on_upgrade_charm(self, event: UpgradeCharmEvent) -> None:
         """Handle Juju upgrade charm event."""
+        self.charm.upgrades_manager.reconcile_compatibility_matrix()
         self.charm.upgrades_manager.update_grafana_dashboards_title(
             get_charm_revision(self.charm.model.unit)
         )
@@ -281,11 +256,13 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Pre-upgrade check event failed: {message}")
             event.fail(message)
             return
+
         if not self.charm.state.upgrade_relation or self.charm.upgrades_manager.in_progress:
             message = "Upgrade already in progress"
             logger.debug(f"Pre-upgrade check event failed: {message}")
             event.fail(message)
             return
+
         try:
             self._run_general_prechecks()
             self.charm.upgrades_manager.pre_upgrade_check()
@@ -294,6 +271,7 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Pre-{self.UPGRADE_NOTATION}-check event failed: {message}")
             event.fail(message)
             return
+
         message = f"Charm is ready for {self.UPGRADE_NOTATION}"
         event.set_results({"result": message})
         logger.debug(f"Pre-upgrade check event succeeded: {message}")
@@ -329,33 +307,38 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
+
         if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
             message = "No upgrade in progress"
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
+
         if not self.charm.state.application_upgrade.upgrade_resumed:
             message = f"Run `juju run {self.charm.app.name}/leader resume-upgrade` before trying to force upgrade"
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
+
         if self.charm.upgrades_manager.unit_state is not UnitUpgradesState.OUTDATED:
             message = "Unit already upgraded"
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
+
         logger.debug("Forcing upgrade")
         event.log(f"Forcefully upgrading {self.charm.unit.name}")
         # TODO: replace `ignore_lock=False` with `event.params["ignore-lock"]` if specification
         # DA091 approved
         # (https://docs.google.com/document/d/1rwnS-deJU9Mzc8BFkl3UGgjZiBa6e3bxoT-6BQo9e3E/edit)
         self.charm.upgrade_opensearch_event.emit(ignore_lock=False)
+
         event.set_results({"result": f"Forcefully upgraded {self.charm.unit.name}"})
         logger.debug("Forced upgrade")
 
     def _upgrade_opensearch(self, event: UpgradeOpenSearch) -> None:  # noqa: C901
         """Handle upgrade OpenSearch event."""
-        if not (type(self.charm.upgrades_manager) is UpgradesManagerVM):
+        if not (isinstance(self.charm.upgrades_manager, UpgradesManagerVM)):
             logger.debug(
                 "Upgrade OpenSearch event handler should only be called for machine charms"
             )
@@ -377,9 +360,7 @@ class UpgradesEventsHandler(Object):
             self.charm.cluster_manager.opensearch_client.disable_shard_allocation()
         except OpenSearchHttpError:
             logger.exception("Failed to disable shard allocation before upgrade")
-            self.charm.lock_manager.release()
-            event.defer()
-            return
+
         try:
             self.charm.cluster_manager.opensearch_client.flush_translog()
         except OpenSearchHttpError as e:
@@ -397,6 +378,26 @@ class UpgradesEventsHandler(Object):
 
         self.charm.upgrades_manager.upgrade_unit(snap=self.charm.workload)
 
+        # We check if it is a rollback here only if the unit is highest order
+        # If we reach this point we are sure its compatible and upgrade is in progress
+        # CHECK FOR ROLLBACK
+        if self.charm.upgrades_manager.is_rollback:
+            if not self.charm.upgrades_manager.can_rollback:
+                logger.error(
+                    "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
+                )
+                self._set_upgrade_status()
+                # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
+                return
+            else:
+                logger.warning("Rollback detected")
+                logger.warning(
+                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
+                )
+                self._set_upgrade_status()
+                self.charm.lock_manager.release()
+                return
+
         if event.override_version:
             logger.debug("Overriding OpenSearch version")
             try:
@@ -413,6 +414,7 @@ class UpgradesEventsHandler(Object):
             logger.debug("For refresh start event failed: No rollback in progress")
             event.fail("No rollback in progress")
             return
+
         if (
             self.charm.substrate == Substrates.VM
             and self.charm.upgrades_manager.unit_state is not UnitUpgradesState.OUTDATED
@@ -421,6 +423,7 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
             return
+
         if event.params.get("check-compatibility", True):
             message = "Rollbacks are not supported. This action will attempt to start the unit with the current version of OpenSearch. If the current version is incompatible with the cluster, the unit may fail to start. Rerun with `check-compatibility` set to false to override this check and attempt startup procedure."
             logger.debug("Refresh force start event failed: %s", message)
@@ -531,6 +534,15 @@ class UpgradesEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.upgrades_manager.in_progress:
+            logger.debug("Upgrade not in progress. OpenSearch version unchanged")
+            return
+
+        if not self.charm.upgrades_manager.is_compatible:
+            logger.error("Refresh is incompatible")
+            self._set_upgrade_status()
+            return
+
         if self.charm.upgrades_manager.is_rollback:
             logger.warning("Rollback detected")
             logger.warning(
@@ -545,5 +557,4 @@ class UpgradesEventsHandler(Object):
             logger.debug("Cannot start OpenSearch after upgrade, cluster not ready")
             event.defer()
             return
-        if self.charm.upgrades_manager.is_compatible:
-            self.charm.start_opensearch_event.emit(ignore_lock=True, after_upgrade=True)
+        self.charm.start_opensearch_event.emit(ignore_lock=True, after_upgrade=True)
