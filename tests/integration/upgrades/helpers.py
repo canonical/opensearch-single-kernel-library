@@ -214,8 +214,9 @@ async def assert_upgrade_to_local(
     leader_id = [u.id for u in units if u.is_leader][0]
 
     # run pre-upgrade-check action on leader
-    action = await run_action(ops_test, leader_id, "pre-upgrade-check", app=app)
-    logger.info("pre-upgrade-check: %s", action)
+    action_name = "pre-upgrade-check" if substrate == "vm" else "pre-refresh-check"
+    action = await run_action(ops_test, leader_id, action_name, app=app)
+    logger.info("%s: %s", action_name, action)
     assert action.status == "completed"
 
     async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
@@ -239,8 +240,9 @@ async def assert_upgrade_to_local(
         )
 
         # run resume-upgrade action on leader
-        action = await run_action(ops_test, leader_id, "resume-upgrade", app=app)
-        logger.info("resume-upgrade: %s", action)
+        action_name = "resume-upgrade" if substrate == "vm" else "resume-refresh"
+        action = await run_action(ops_test, leader_id, action_name, app=app)
+        logger.info("%s: %s", action_name, action)
         assert action.status == "completed"
 
         await wait_until(
