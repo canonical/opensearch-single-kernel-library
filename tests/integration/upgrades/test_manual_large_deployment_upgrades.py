@@ -137,10 +137,6 @@ async def _build_env(
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             APP_NAME: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
-        units_statuses={
-            FAILOVER_APP: [NO_DATA_NODE_STATUS],
-            APP_NAME: [NO_CM_STATUS],
-        },
         wait_for_exact_units={app: units for app, units in APPS.items()},
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
