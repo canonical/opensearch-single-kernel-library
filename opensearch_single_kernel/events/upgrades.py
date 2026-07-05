@@ -288,17 +288,16 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
+        force = False
         if self.charm.substrate == Substrates.K8S:
             # Get force parameter
-            self._reconcile_upgrade(action_event=event, force=event.params.get("force", False))
+            force = event.params.get("force", False)
         try:
-            self.charm.upgrades_manager.reconcile_partition(action_event=event)
+            self.charm.upgrades_manager.reconcile_partition(action_event=event, force=force)
         except OpenSearchReconcilePartitionError as e:
             logger.debug(f"Resume upgrade event failed: {e}")
             event.fail(str(e))
             return
-        # If next to upgrade, upgrade leader unit
-        self._reconcile_upgrade()
 
     def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
         """Handle force-upgrade action."""

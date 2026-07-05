@@ -357,7 +357,7 @@ class UpgradesStatuses(Enum):
     )
     K8S_UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
-        message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
+        message="Upgrading. Verify highest unit is healthy & run `resume-refresh` action.",
         approved_critical_component=True,
     )
     UPGRADES_INCOMPATIBLE = StatusObject(

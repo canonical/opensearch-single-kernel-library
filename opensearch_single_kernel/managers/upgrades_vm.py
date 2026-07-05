@@ -115,7 +115,6 @@ class UpgradesManagerVM(UpgradesManagerBase):
                         == self.current_versions.charm
                     ):
                         # Assumes charm version uniquely identifies charm revision
-                        logger.debug("Rollback detected. Skipping pre-upgrade check")
                         try:
                             self.opensearch_client.enable_shard_allocation(
                                 alt_hosts=self.alt_hosts,

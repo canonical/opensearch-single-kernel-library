@@ -180,6 +180,8 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             logger.debug(
                 f"Lowered partition to {partition} {action_event} {force=} {self.in_progress=}"
             )
+        if action_event:
+            action_event.set_results({"result": message})
         return message
 
     def prepare_for_shutdown(self) -> None:  # pragma: nocover
