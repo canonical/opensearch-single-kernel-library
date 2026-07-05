@@ -293,7 +293,10 @@ class UpgradesEventsHandler(Object):
             # Get force parameter
             force = event.params.get("force", False)
         try:
-            self.charm.upgrades_manager.reconcile_partition(action_event=event, force=force)
+            message = self.charm.upgrades_manager.reconcile_partition(
+                action_event=event, force=force
+            )
+            event.set_results({"result": message})
         except OpenSearchReconcilePartitionError as e:
             logger.debug(f"Resume upgrade event failed: {e}")
             event.fail(str(e))
