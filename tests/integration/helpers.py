@@ -1195,7 +1195,8 @@ async def get_unit_relation_data(
     target_unit_name: str,
     relation_name: str,
     key: str,
-    relation_id: str = None,
+    local_unit: bool = False,
+    relation_id: str | None = None,
 ) -> Optional[str]:
     """Get relation data for an application.
 
@@ -1228,6 +1229,11 @@ async def get_unit_relation_data(
         raise ValueError(
             f"no relation data could be grabbed on relation with endpoint {relation_name}"
         )
+    if local_unit:
+        # In this case we read our own data
+        for idx in range(len(relation_data)):
+            if "local-unit" in relation_data[idx] and relation_data[idx]["local-unit"]:
+                return relation_data[idx]["local-unit"].get("data", {}).get(key, {})
     # Consider the case we are dealing with subordinate charms, e.g. grafana-agent
     # The field "relation-units" is structured slightly different.
     for idx in range(len(relation_data)):

@@ -209,14 +209,15 @@ async def wait_until_upgrade_state_healthy(ops_test: OpsTest, app: str):
     """Waits until the given unit is healthy after an upgrade"""
 
     async def is_highest_order_unit_healthy(units: list[Unit]) -> bool:
-        highest_unit = sorted(units, key=lambda u: u.name.split("/")[-1])[-1]
+        highest_unit = sorted(units, key=lambda u: u.id)[-1]
         logger.info("Waiting for unit '%s' to be healthy...", highest_unit.name)
         # Check relation data
         relation_data = await get_unit_relation_data(
             ops_test,
-            unit_name=highest_unit.name,
-            target_unit_name=highest_unit.name,
+            unit_name=highest_unit.short_name.replace("-", "/"),
+            target_unit_name=highest_unit.short_name.replace("-", "/"),
             relation_name=UPGRADE_RELATION,
+            local_unit=True,
             key="state",
         )
         return relation_data == "healthy"
