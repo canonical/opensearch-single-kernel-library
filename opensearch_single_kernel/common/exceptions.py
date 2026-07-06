@@ -171,3 +171,7 @@ class OpenSearchK8sDeployedWithoutTrustError(OpenSearchError):
 
 class OpenSearchReconcilePartitionError(OpenSearchError):
     """Exception thrown when there is an error reconciling the partition during a k8s upgrade."""
+
+    def __init__(self, *, message: str):
+        self.message = message
+        super().__init__(message)

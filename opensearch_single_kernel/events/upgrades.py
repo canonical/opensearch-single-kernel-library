@@ -185,7 +185,10 @@ class UpgradesEventsHandler(Object):
                 return
 
         if self.charm.state.substrate == Substrates.K8S:
-            if self.charm.upgrades_manager.opensearch_client.is_node_up():
+            if (
+                self.charm.state.application.deployment_desc
+                and self.charm.upgrades_manager.opensearch_client.is_node_up()
+            ):
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
@@ -295,7 +298,7 @@ class UpgradesEventsHandler(Object):
             event.set_results({"result": message})
         except OpenSearchReconcilePartitionError as e:
             logger.debug(f"Resume upgrade event failed: {e}")
-            event.fail(str(e))
+            event.fail(e.message)
             return
 
     def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
