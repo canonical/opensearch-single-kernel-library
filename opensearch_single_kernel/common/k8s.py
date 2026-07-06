@@ -78,6 +78,7 @@ class K8sClient:
 
     def set_partition(self, value: int) -> None:
         """Sets the partition value."""
+        logger.debug(f"From unit {self.pod_name} setting partition to {value} for {self.app_name}")
         self.client.patch(
             res=StatefulSet,
             name=self.app_name,

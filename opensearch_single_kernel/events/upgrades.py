@@ -9,7 +9,7 @@ import typing
 
 import ops
 from data_platform_helpers.version_check import get_charm_revision
-from ops import ActionEvent, Object, UpgradeCharmEvent
+from ops import Object, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_SNAP_REVISION,
@@ -109,9 +109,7 @@ class UpgradesEventsHandler(Object):
 
     def _reconcile_upgrade(  # noqa: C901
         self,
-        during_upgrade: bool = False,
-        action_event: ActionEvent | None = None,
-        force: bool = False,
+        _: typing.Optional[ops.RelationChangedEvent] = None,
     ) -> None:
         """Handle upgrade events."""
         if not self.charm.state.upgrade_relation:
@@ -187,12 +185,10 @@ class UpgradesEventsHandler(Object):
                 return
 
         if self.charm.state.substrate == Substrates.K8S:
-            if not during_upgrade and self.charm.upgrades_manager.opensearch_client.is_node_up():
+            if self.charm.upgrades_manager.opensearch_client.is_node_up():
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
-                self.charm.upgrades_manager.reconcile_partition(
-                    action_event=action_event, force=force
-                )
+                self.charm.upgrades_manager.reconcile_partition()
 
         self._set_upgrade_status()
 
