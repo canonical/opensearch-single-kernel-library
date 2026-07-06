@@ -130,6 +130,18 @@ async def _build_env(
     for app in list(APPS.keys()):
         await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
+    # When deploying LD in VM we are deploying 2.18 which is different from K8s version
+    units_statuses = None
+    if substrate == "k8s":
+        units_statuses = {
+            MAIN_APP: [
+                NO_DATA_NODE_STATUS,
+                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
+            ],
+            FAILOVER_APP: [NO_DATA_NODE_STATUS],
+            APP_NAME: [NO_CM_STATUS],
+        }
+
     await wait_until(
         ops_test,
         apps=list(APPS.keys()),
@@ -137,6 +149,7 @@ async def _build_env(
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             APP_NAME: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
+        units_statuses=units_statuses,
         wait_for_exact_units={app: units for app, units in APPS.items()},
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,

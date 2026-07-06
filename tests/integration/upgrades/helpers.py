@@ -12,16 +12,20 @@ import pytest
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
+from opensearch_single_kernel.common.constants import UPGRADE_RELATION
 from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
 from tests.integration.conftest import CONFIG_OPTS
+from tests.integration.models import Unit
 
 from ..helpers import (
     EmptyBlockedStatus,
     cluster_health,
     get_application_units,
+    get_unit_relation_data,
     http_request,
     run_action,
     wait_until,
+    wait_until_async_condition_on_units,
     wait_until_condition_on_units,
 )
 
@@ -201,6 +205,30 @@ async def assert_upgrade_to_revision(
         logger.info("Upgrade of '%s' completed", app)
 
 
+async def wait_until_upgrade_state_healthy(ops_test: OpsTest, app: str):
+    """Waits until the given unit is healthy after an upgrade"""
+
+    async def is_highest_order_unit_healthy(units: list[Unit]) -> bool:
+        highest_unit = sorted(units, key=lambda u: u.name.split("/")[-1])[-1]
+        logger.info("Waiting for unit '%s' to be healthy...", highest_unit.name)
+        # Check relation data
+        relation_data = await get_unit_relation_data(
+            ops_test,
+            unit_name=highest_unit.name,
+            target_unit_name=highest_unit.name,
+            relation_name=UPGRADE_RELATION,
+            key="state",
+        )
+        return relation_data == "healthy"
+
+    await wait_until_async_condition_on_units(
+        ops_test,
+        app=app,
+        condition=is_highest_order_unit_healthy,
+        timeout=TIMEOUT,
+    )
+
+
 async def assert_upgrade_to_local(
     ops_test: OpsTest,
     app: str,
@@ -239,6 +267,7 @@ async def assert_upgrade_to_local(
             idle_period=IDLE_PERIOD,
         )
 
+        await wait_until_upgrade_state_healthy(ops_test, app)
         # run resume-upgrade action on leader
         action_name = "resume-upgrade" if substrate == "vm" else "resume-refresh"
         action = await run_action(ops_test, leader_id, action_name, app=app)

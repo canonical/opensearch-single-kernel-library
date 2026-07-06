@@ -158,7 +158,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             assert len(units) >= 2
             if partition > int(units[1].unit.name.split("/")[-1]):
                 message = "Highest number unit is unhealthy. Refresh will not resume."
-                raise OpenSearchReconcilePartitionError(message)
+                raise OpenSearchReconcilePartitionError(message=message)
             if force:
                 # If a unit was unhealthy and the upgrade was forced, only
                 # the next unit will upgrade. As long as 1 or more units
