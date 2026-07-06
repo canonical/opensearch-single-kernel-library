@@ -722,7 +722,9 @@ async def run_action(
     action = await ops_test.model.units.get(unit_name).run_action(action_name, **(params or {}))
     action = await action.wait()
 
-    return SimpleNamespace(status=action.status or "completed", response=action.results)
+    return SimpleNamespace(
+        status=action.status or "completed", response=action.results, message=action.message
+    )
 
 
 async def get_secrets(
