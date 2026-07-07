@@ -134,10 +134,6 @@ async def _build_env(
     units_statuses = None
     if substrate == "k8s":
         units_statuses = {
-            MAIN_APP: [
-                NO_DATA_NODE_STATUS,
-                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
-            ],
             FAILOVER_APP: [NO_DATA_NODE_STATUS],
             APP_NAME: [NO_CM_STATUS],
         }
