@@ -1044,7 +1044,9 @@ class OpenSearchEventsHandler(Object):
 
         if event.after_upgrade:
             try:
-                self.charm.cluster_manager.opensearch_client.enable_shard_allocation()
+                self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
+                    alt_hosts=self.charm.cluster_manager.alt_hosts
+                )
             except OpenSearchHttpError:
                 logger.exception("Failed to re-enable allocation after upgrade")
                 event.defer()

@@ -236,7 +236,11 @@ class UpgradesManagerBase(BaseManager):
             # If the workload runner raises an exception upon the tool exiting/aborting,
             # the output containing the version string is often trapped inside
             # the exception message (stderr).
-            output = str(e.err)
+            if self.state.substrate == Substrates.VM:
+                output = str(e.out)
+            else:
+                # On K8s the output is stderr so we get both stdout and stderr from pebble
+                output = str(e.err)
 
         version = re.search(regex, str(output))
 
@@ -296,6 +300,9 @@ class UpgradesManagerBase(BaseManager):
         # 3. The upgrade is compatible (i.e It is not a downgrade)
         # 4. The version in databag match the version in file
         # 5. We have still not overridden the version on disk
+        logger.debug(
+            f"{self.state.server_upgrade.unit.name=} {self.state.sorted_upgrades_units[0].unit.name=} {self.in_progress=} {self.is_compatible=} {self.state.application_upgrade.versions.workload_parsed=} {self.current_versions.workload_parsed=} {self.get_version_before_override()=}"
+        )
         return (
             self.state.server_upgrade.unit.name == self.state.sorted_upgrades_units[0].unit.name
             and self.in_progress

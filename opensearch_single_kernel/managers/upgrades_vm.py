@@ -19,7 +19,6 @@ from opensearch_single_kernel.core.models import UnitUpgradesState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
-from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -141,20 +140,6 @@ class UpgradesManagerVM(UpgradesManagerBase):
                 logger.debug(f"Upgrade not authorized. Waiting for {unit.unit.name=} to upgrade")
                 return False
         return False
-
-    def upgrade_unit(self, *, snap: BaseWorkload) -> None:
-        """Upgrade this unit.
-
-        Only applies to machine charm
-        """
-        logger.debug("Upgrading unit")
-        self.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
-        snap.install()
-        self.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-        self.state.server_upgrade.workload_version = self.current_versions.workload
-        logger.debug(
-            f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.current_versions.workload=} in unit databag after upgrade"
-        )
 
     def save_upgrades_versions(self) -> None:
         """Save revision on first install"""

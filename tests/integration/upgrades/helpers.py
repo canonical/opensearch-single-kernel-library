@@ -273,7 +273,17 @@ async def assert_upgrade_to_local(
         action_name = "resume-upgrade" if substrate == "vm" else "resume-refresh"
         action = await run_action(ops_test, leader_id, action_name, app=app)
         logger.info("%s: %s", action_name, action)
-        assert action.status == "completed"
+        # If leader is second unit to upgrade, the task would be terminated
+        # Since unit will restart
+        second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
+        if substrate == "k8s" and second_unit == leader_id:
+            logger.info(
+                "Unit '%s' is leader, action may be terminated due to unit restart."
+                " Skipping status check.",
+                second_unit,
+            )
+        else:
+            assert action.status == "completed"
 
         await wait_until(
             ops_test,

@@ -83,17 +83,18 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """Get unit upgrade status."""
         if not self.state.upgrade_relation:
             return (None, None)
-        if self.is_rollback:
-            if not self.can_rollback:
-                return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
-            else:
-                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
         if not self.in_progress:
             return (None, None)
 
         if not self.is_compatible:
             return (UpgradesStatuses.UPGRADES_INCOMPATIBLE.value, None)
+
+        if self.is_rollback:
+            if not self.can_rollback:
+                return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
+            else:
+                return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
         version = self.k8s_client.list_revisions().get(self.state.server.unit.name)
         if version == self.k8s_client.get_revision():
@@ -139,7 +140,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
 
         partition = self._determine_partition(
             units,
-            from_event=action_event is not None,
+            action_event=action_event,
             force=force,
         )
         logger.debug(f"{self.partition=}, {partition=}")
@@ -154,9 +155,14 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         # This does not address the situation where another unit > 1 restarts and sets the
         # partition during the `stop` event, but that is unlikely to occur in the small time window
         # that causes the unit to hang.
+        if partition < self.partition:
+            self.partition = partition
+            logger.debug(
+                f"Lowered partition to {partition} {action_event} {force=} {self.in_progress=}"
+            )
         if action_event:
             assert len(units) >= 2
-            if partition > int(units[1].unit.name.split("/")[-1]):
+            if self.partition > int(units[1].unit.name.split("/")[-1]):
                 message = "Highest number unit is unhealthy. Refresh will not resume."
                 raise OpenSearchReconcilePartitionError(message=message)
             if force:
@@ -175,11 +181,6 @@ class UpgradesManagerK8s(UpgradesManagerBase):
                 message = f"Attempting to refresh unit {partition}."
             else:
                 message = f"Refresh resumed. Unit {partition} is refreshing next."
-        if partition < self.partition:
-            self.partition = partition
-            logger.debug(
-                f"Lowered partition to {partition} {action_event} {force=} {self.in_progress=}"
-            )
         return message
 
     def prepare_for_shutdown(self) -> None:  # pragma: nocover
@@ -222,7 +223,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
 
     def _determine_partition(
-        self, units: list[UpgradeServerState], from_event: bool, force: bool
+        self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
     ) -> int:
         """Determine the new partition to use.
 
@@ -235,7 +236,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         if not self.in_progress:
             return 0
         logger.debug(f"{self.state.server_upgrade.relation_data=}")
-        logger.debug(f"{from_event=}, {force=}, {self.in_progress=}")
+        logger.debug(f"{action_event=}, {force=}, {self.in_progress=}")
         for upgrade_order_index, server_upgrade_unit in enumerate(units):
             logger.debug(f"{upgrade_order_index=}, {server_upgrade_unit=}")
             # Note: upgrade_order_index != unit number
@@ -250,7 +251,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             ) or workload_container_versions[
                 server_upgrade_unit.unit.name
             ] != app_container_version:
-                if not from_event and upgrade_order_index == 1:
+                if not action_event and upgrade_order_index == 1:
                     # User confirmation needed to resume upgrade (i.e. upgrade second unit)
                     return int(units[0].unit.name.split("/")[-1])
                 return int(server_upgrade_unit.unit.name.split("/")[-1])

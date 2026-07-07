@@ -189,6 +189,12 @@ class UpgradesEventsHandler(Object):
                 self.charm.state.application.deployment_desc
                 and self.charm.upgrades_manager.opensearch_client.is_node_up()
             ):
+                try:
+                    self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
+                        alt_hosts=self.charm.cluster_manager.alt_hosts
+                    )
+                except OpenSearchHttpError:
+                    logger.exception("Failed to re-enable allocation after upgrade")
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
@@ -377,7 +383,9 @@ class UpgradesEventsHandler(Object):
             return
         logger.debug("Stopped OpenSearch before upgrade")
 
-        self.charm.upgrades_manager.upgrade_unit(snap=self.charm.workload)
+        logger.debug("Upgrading unit")
+        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
+        self.charm.workload.install()
 
         # We check if it is a rollback here only if the unit is highest order
         # If we reach this point we are sure its compatible and upgrade is in progress
@@ -405,6 +413,14 @@ class UpgradesEventsHandler(Object):
                 self.charm.upgrades_manager.override_version()
             except OpenSearchCmdError as e:
                 logger.error("Failed to override OpenSearch version: %s", str(e))
+
+        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
+        )
+        logger.debug(
+            f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
+        )
 
         logger.debug("Starting OpenSearch after upgrade")
         self.charm.start_opensearch_event.emit(ignore_lock=event.ignore_lock, after_upgrade=True)
