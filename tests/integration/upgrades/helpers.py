@@ -276,7 +276,7 @@ async def assert_upgrade_to_local(
         # If leader is second unit to upgrade, the task would be terminated
         # Since unit will restart
         second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
-        if substrate == "k8s" and second_unit == leader_id:
+        if substrate == "k8s" and second_unit.id == leader_id:
             logger.info(
                 "Unit '%s' is leader, action may be terminated due to unit restart."
                 " Skipping status check.",
