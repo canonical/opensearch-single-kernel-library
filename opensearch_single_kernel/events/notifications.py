@@ -24,19 +24,15 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
-)
-from opensearch_single_kernel.common.statuses import (
-    NotificationsStatuses,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
-    SecretError,
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     DEFAULT_RELATION_NAME as SMTP_RELATION,
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
+    SecretError,
     SmtpDataAvailableEvent,
 )
 from opensearch_single_kernel.utils.helpers import decode_plugin_secret_content
@@ -70,7 +66,6 @@ class NotificationsEvents(Object):
         Args:
             event: Smtp credentials available event
         """
-        is_leader = self.charm.unit.is_leader()
         smtp_data = None
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment not ready. Deferring event.")
@@ -78,12 +73,6 @@ class NotificationsEvents(Object):
             return
 
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            if is_leader:
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_RELATION_INVALID.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                )
             return
 
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -97,65 +86,18 @@ class NotificationsEvents(Object):
             )
         except SecretError as e:
             logger.error(f"Could not read smtp relation data: {e}")
-            if is_leader:
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_COULD_NOT_READ_DATA.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    {"id": event.relation.id, "exc": str(e)},
-                    {"id": event.relation.id},
-                )
-                return
-
-        if is_leader:
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_COULD_NOT_READ_DATA.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
+            return
 
         if not smtp_data:
-            if is_leader:
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    {"id": event.relation.id},
-                    {"id": event.relation.id},
-                )
             return
-        if is_leader:
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
 
         try:
             config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
         except OpenSearchSmtpMissingParametersError as e:
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_MISSING_REQUIRED_PARAMETERS.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    {"id": event.relation.id, "params": ", ".join(e.missing_parameters)},
-                    {"id": event.relation.id},
-                )
-            return
-
-        if self.charm.unit.is_leader():
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_MISSING_REQUIRED_PARAMETERS.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
+            logger.error(
+                "SMTP parameters missing. Cannot create notification configs without them: %s", e
             )
+            return
 
         # create/update SMTP sender config (config_id is relation-based)
         if self.charm.unit.is_leader():
@@ -173,28 +115,21 @@ class NotificationsEvents(Object):
                     config.smtp_account_id,
                     str(e),
                 )
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    dynamic_params={"id": event.relation.id},
-                )
                 event.defer()
                 return
 
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
-
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
-            credentials = self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
-                config.smtp_account_id, smtp_data.user, smtp_data.password
-            )
+            try:
+                credentials = (
+                    self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
+                        config.smtp_account_id, smtp_data.user, smtp_data.password
+                    )
+                )
+            except OpenSearchCmdError as e:
+                logger.error("Failed to write SMTP credentials to keystore: %s", e)
+                event.defer()
+                return
 
             # reload secure settings
             self.charm.reload_keystore_event.emit()
@@ -214,14 +149,6 @@ class NotificationsEvents(Object):
             return
         # create recipient group and email channel if recipients are provided
         if smtp_data.recipients:
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
-
             try:
                 self.charm.notifications_manager.put_email_group(
                     group_id=config.group_id,
@@ -239,29 +166,8 @@ class NotificationsEvents(Object):
                     config.group_id,
                     str(e),
                 )
-                self.charm.state.add_status_if_not_present(
-                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    dynamic_params={"id": event.relation.id},
-                )
                 event.defer()
                 return
-            self.charm.state.remove_status_if_present(
-                NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                "app",
-                self.charm.notifications_manager.name,
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
-        else:
-            self.charm.state.add_status_if_not_present(
-                NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
-                "app",
-                self.charm.notifications_manager.name,
-                {"id": event.relation.id},
-                {"id": event.relation.id},
-            )
 
         # propagate to subclusters if this is the main provider
         if self.charm.state.is_peer_cluster_provider():
@@ -274,24 +180,6 @@ class NotificationsEvents(Object):
         Args:
             event: RelationBrokenEvent
         """
-        if self.charm.unit.is_leader():
-            for status in NotificationsStatuses:
-                if status is NotificationsStatuses.SMTP_RELATION_INVALID:
-                    continue
-                self.charm.state.remove_status_if_present(
-                    status.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                    interpolated=True,
-                    search_parameters={"id": event.relation.id},
-                )
-            if not self.charm.state.smtp_relations:
-                self.charm.state.remove_status_if_present(
-                    NotificationsStatuses.SMTP_RELATION_INVALID.value,
-                    "app",
-                    self.charm.notifications_manager.name,
-                )
-
         label = self.charm.notifications_manager.label(event.relation.id)
         plugin_config = self.charm.state.server.plugin_config_info.get(label)
         if not plugin_config:
@@ -328,8 +216,11 @@ class NotificationsEvents(Object):
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:
-            self.charm.keystore_manager.remove_entries(keys)
-            self.charm.reload_keystore_event.emit()
+            try:
+                self.charm.keystore_manager.remove_entries(keys)
+                self.charm.reload_keystore_event.emit()
+            except OpenSearchCmdError as e:
+                logger.error("Failed to remove SMTP credentials from keystore: %s", e)
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
 
@@ -375,5 +266,10 @@ class NotificationsEvents(Object):
             },
         )
 
-        self.charm.keystore_manager.put_entries(keys)
-        self.charm.reload_keystore_event.emit()
+        try:
+            self.charm.keystore_manager.put_entries(keys)
+            self.charm.reload_keystore_event.emit()
+        except OpenSearchCmdError as e:
+            logger.error("Failed to write SMTP credentials to keystore: %s", e)
+            event.defer()
+            return

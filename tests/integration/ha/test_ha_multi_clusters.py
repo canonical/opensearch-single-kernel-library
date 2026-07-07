@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -41,11 +43,19 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
+    os_deploy_kwargs = {
+        "application_name": APP_NAME,
+        "num_units": 2,
+        "series": series,
+        "config": CONFIG_OPTS,
+    }
+    if substrate == "k8s":
+        os_deploy_kwargs["resources"] = charm_resources
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(charm, num_units=2, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(charm, **os_deploy_kwargs),
     )
 
     # Relate it to OpenSearch to set up TLS.
@@ -65,7 +75,13 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 
 async def test_multi_clusters_db_isolation(
-    ops_test: OpsTest, charm, series, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest,
+    charm,
+    series,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    substrate,
+    charm_resources,
 ) -> None:
     """Check that writes in cluster not replicated to another cluster."""
     app = (await app_name(ops_test)) or APP_NAME
@@ -74,13 +90,15 @@ async def test_multi_clusters_db_isolation(
     unit_ids = get_application_unit_ids(ops_test, app=app)
 
     # deploy new cluster
-    await ops_test.model.deploy(
-        charm,
-        num_units=1,
-        application_name=SECOND_APP_NAME,
-        series=series,
-        config=CONFIG_OPTS,
-    )
+    deploy_kwargs = {
+        "application_name": SECOND_APP_NAME,
+        "num_units": 1,
+        "series": series,
+        "config": CONFIG_OPTS,
+    }
+    if substrate == "k8s":
+        deploy_kwargs["resources"] = charm_resources
+    await ops_test.model.deploy(charm, **deploy_kwargs)
     await ops_test.model.integrate(SECOND_APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
     # wait

@@ -206,7 +206,7 @@ class UpgradesManagerBase(BaseManager):
         except OpenSearchFileOperationError as e:
             logger.debug("Failed to read compatibility matrix file: %s", str(e))
             return {}
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, TypeError) as e:
             logger.error("Failed to decode compatibility matrix file: %s", str(e))
             return {}
 

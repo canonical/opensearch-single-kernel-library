@@ -158,6 +158,9 @@ class PeerClusterManager(BaseManager):
                     f"{trigger}_app": remote_orchestrators[f"{trigger}_app"],
                 }
             )
+            self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
+                local_orchestrators
+            )
 
         return PeerClusterOrchestrators.from_dict(local_orchestrators)
 
@@ -380,11 +383,13 @@ class PeerClusterManager(BaseManager):
         """Delete the orchestrator that left the relation from the state and cluster fleet."""
         orchestrators = self.state.application.orchestrators
         # delete the orchestrator that triggered this event
-        orchestrator_app_id = (
-            orchestrators.main_app.id
-            if event_src_cluster_type == "main"
-            else orchestrators.failover_app.id
-        )
+        if event_src_cluster_type == "main" and orchestrators.main_app:
+            orchestrator_app_id = orchestrators.main_app.id
+        elif event_src_cluster_type == "failover" and orchestrators.failover_app:
+            orchestrator_app_id = orchestrators.failover_app.id
+        else:
+            return
+
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.pop(orchestrator_app_id, None)
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
@@ -423,12 +428,16 @@ class PeerClusterManager(BaseManager):
             scope, self.name, running_status_only=True
         ).root
 
+        if not self.state.application.deployment_desc:
+            return status_list
+
         if scope == "app":
             # Only if we are a requirer and we have some orchestrators
+            orchestrators = self.state.application.orchestrators
             if (
                 self.state.is_peer_cluster_consumer()
                 and self.state.peer_clusters(is_provider=False, remote=True)
-                and (orchestrators := self.state.application.orchestrators)
+                and orchestrators
             ):
                 if not orchestrators.main_app and orchestrators.failover_app:
                     status_list.append(
@@ -438,28 +447,21 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
-            # Clean up any lingering errors
-            self.cleanup_error_in_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                if self.state.application.relation_data.get(
-                    f"error_from_providers-{peer_cluster.relation.id}"
-                ):
-                    status = PeerClusterRelErrorData.get_status_from_message(
-                        self.state.application.relation_data[
-                            f"error_from_providers-{peer_cluster.relation.id}"
-                        ]
+                # check if there is an error
+                if error_data := peer_cluster.error_data:
+                    status_list.append(error_data.get_status())
+
+                # requirer errors
+                if data := peer_cluster.data():
+                    requirer_errors = self.requirer_errors(
+                        orchestrators=orchestrators,
+                        deployment_desc=self.state.application.deployment_desc,
+                        peer_cluster_rel_data=data,
+                        # only check if we have orchestrators in the data bag
+                        event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
                     )
-                    if status:
-                        status_list.append(status)
-                if self.state.application.relation_data.get(
-                    f"error_from_requirer-{peer_cluster.relation.id}"
-                ):
-                    status = PeerClusterRelErrorData.get_status_from_message(
-                        self.state.application.relation_data[
-                            f"error_from_requirer-{peer_cluster.relation.id}"
-                        ]
-                    )
-                    if status:
+                    if requirer_errors and (status := requirer_errors.get_status()):
                         status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

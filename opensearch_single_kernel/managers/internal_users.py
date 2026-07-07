@@ -16,7 +16,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchError,
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
@@ -46,22 +46,32 @@ class InternalUsersManager(BaseManager):
         super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
-    def put_or_update_internal_user_leader(
+    def put_or_update_internal_user_leader(  # noqa: C901
         self,
         user: str,
         pwd: str | None = None,
         update: bool = True,
-    ) -> None:
+    ) -> bool:
         """Create system user or update it with a new password.
 
-        Raise:
-            OpenSearchUserMgmtErorr: In case of error when updating user password.
+        Args:
+            user: The system user to create or update.
+            pwd: The password to set for the user. If None, a random password will be generated.
+            update: If True, update the user's password if it already exists. If False,
+                do not update the password if the user already exists.
+
+        Returns:
+            True if the user was created or updated, False if an error occurred.
         """
         # Leader is to set new password and hash, others populate existing hash locally
         password_secret = self.state.application.get_user_password(user)
         if password_secret and not update:
-            self.save_user_locally(user)
-            return
+            try:
+                self.save_user_locally(user)
+                return True
+            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                logger.error("An error occurred while saving internal user %s: %s", user, str(e))
+                return False
 
         hashed_pwd, pwd = generate_hashed_password(pwd)
 
@@ -71,12 +81,17 @@ class InternalUsersManager(BaseManager):
             try:
                 self.opensearch_client.patch_user_password(user, hashed_pwd)
             except OpenSearchHttpError as e:
-                raise OpenSearchUserMgmtError(e)
+                logger.error("Failed to update user %s password: %s", user, e)
+                return False
 
         # In case it's a new user, OR it's a system user (that has an entry in internal_users.yml)
         # we either need to initialize or update (local) credentials as well
         if not password_secret or user in OPENSEARCH_SYSTEM_USERS:
-            self.put_internal_user(user, hashed_pwd)
+            try:
+                self.put_internal_user(user, hashed_pwd)
+            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
+                logger.error("An error occurred while updating internal user %s: %s", user, str(e))
+                return False
 
         # Secrets need to be maintained
         # For System Users we also save the hash key
@@ -93,6 +108,7 @@ class InternalUsersManager(BaseManager):
                 "unit",
                 self.name,
             )
+        return True
 
     def purge_initial_default_users(self) -> None:
         """Removes all users from internal_users yaml config.
@@ -115,9 +131,15 @@ class InternalUsersManager(BaseManager):
         self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
-        """User creation for specific system users."""
+        """User creation for specific system users.
+
+        Raises:
+            OpenSearchUserMgmtError: If user is not an internal user.
+            OpenSearchFileOperationError: If internal_users.yml cannot be read or written
+              due to any reason
+        """
         if user not in OPENSEARCH_USERS:
-            raise OpenSearchError(f"User {user} is not an internal user.")
+            raise OpenSearchUserMgmtError(f"User {user} is not an internal user.")
 
         logger.debug("Creating internal user %s, with %s", user, hashed_pwd)
 

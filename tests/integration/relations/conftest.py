@@ -16,7 +16,7 @@ MICROK8S_CLOUD_NAME = "uk8s"
 
 @pytest.fixture(scope="module")
 async def ops_test_microk8s(
-    request, tmp_path_factory, ops_test: OpsTest
+    request, tmp_path_factory, ops_test: OpsTest, substrate
 ) -> AsyncGenerator[OpsTest, Any]:
     """Create second OpsTest object, that is connected to the MicroK8s cloud.
 
@@ -27,6 +27,10 @@ async def ops_test_microk8s(
     Returns:
         OpsTest object with MicroK8s connection and Juju model.
     """
+    if substrate == "k8s":
+        yield ops_test
+        return
+
     model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
     request.config.option.controller = ops_test.controller_name
     request.config.option.cloud = MICROK8S_CLOUD_NAME
@@ -46,11 +50,11 @@ async def ops_test_microk8s(
 @pytest.fixture(scope="module")
 async def application_charm() -> str:
     """Build the application charm."""
-    return "./tests/integration/relations/opensearch_provider/application-charm/application_ubuntu@22.04-amd64.charm"
+    return "./tests/integration/relations/opensearch_provider/application-charm/application_ubuntu@24.04-amd64.charm"
 
 
 @pytest.fixture(scope="module")
-async def microk8s_model(ops_test: OpsTest) -> AsyncGenerator[Model, Any]:
+async def microk8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
     """Create new Juju model on the connected MicroK8s cloud.
 
     Automatically destroys that model unless keep models parameter is used.
@@ -58,6 +62,10 @@ async def microk8s_model(ops_test: OpsTest) -> AsyncGenerator[Model, Any]:
     Returns:
         Connected Juju model.
     """
+    if substrate == "k8s":
+        assert ops_test.model is not None, "OpsTest model is not connected"
+        yield ops_test.model
+        return
     model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
     controller = Controller()
     await controller.connect()

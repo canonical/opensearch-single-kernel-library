@@ -51,6 +51,10 @@ NO_CM_STATUS = StatusObject(
     message="Missing requirements: At least 1 cluster manager nodes are required.",
 )
 
+TLS_NOT_FULLY_CONFIGURED_IN_MAIN = StatusObject(
+    status="blocked", message="TLS not fully configured in related 'main-orchestrator'."
+)
+
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
@@ -85,7 +89,11 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=DATA_APP,
             num_units=2,
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
             | CONFIG_OPTS,
         ),
         ops_test.model.deploy(
@@ -93,7 +101,11 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=INVALID_APP,
             num_units=1,
             series=series,
-            config={"cluster_name": INVALID_CLUSTER_NAME, "init_hold": True, "roles": "data.cold"}
+            config={
+                "cluster_name": INVALID_CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.cold",
+            }
             | CONFIG_OPTS,
         ),
     )
@@ -137,7 +149,7 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         apps=[MAIN_APP, FAILOVER_APP],
         apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
-            FAILOVER_APP: [PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value],
+            FAILOVER_APP: [TLS_NOT_FULLY_CONFIGURED_IN_MAIN],
         },
         units_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
@@ -192,8 +204,12 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         },
         units_statuses={
             DATA_APP: [NO_CM_STATUS],
+            INVALID_APP: [TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value],
         },
-        wait_for_exact_units={MAIN_APP: APP_UNITS[MAIN_APP], INVALID_APP: APP_UNITS[INVALID_APP]},
+        wait_for_exact_units={
+            MAIN_APP: APP_UNITS[MAIN_APP],
+            INVALID_APP: APP_UNITS[INVALID_APP],
+        },
         idle_period=IDLE_PERIOD,
         timeout=1800,
     )

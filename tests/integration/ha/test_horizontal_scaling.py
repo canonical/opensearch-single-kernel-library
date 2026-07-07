@@ -10,6 +10,7 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import HealthStatuses
+from tests.helpers import Substrate
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -48,7 +49,9 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, substrate, charm_resources
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -58,11 +61,19 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
+    os_deploy_kwargs = {
+        "application_name": APP_NAME,
+        "num_units": 1,
+        "series": series,
+        "config": CONFIG_OPTS,
+    }
+    if substrate == "k8s":
+        os_deploy_kwargs["resources"] = charm_resources
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
         ),
-        ops_test.model.deploy(charm, num_units=1, series=series, config=CONFIG_OPTS),
+        ops_test.model.deploy(charm, **os_deploy_kwargs),
     )
 
     # Relate it to OpenSearch to set up TLS.
@@ -75,14 +86,20 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_horizontal_scale_up(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    substrate,
 ) -> None:
     """Tests that new added units to the cluster are discoverable."""
     app = (await app_name(ops_test)) or APP_NAME
     init_units_count = len(ops_test.model.applications[app].units)
 
     # scale up
-    await ops_test.model.applications[app].add_unit(count=2)
+    if substrate == "k8s":
+        await ops_test.model.applications[app].scale(scale_change=2)
+    else:
+        await ops_test.model.applications[app].add_unit(count=2)
     await wait_until(
         ops_test,
         apps=[app],
@@ -120,7 +137,7 @@ async def test_horizontal_scale_up(
 
 @pytest.mark.abort_on_fail
 async def test_safe_scale_down_shards_realloc(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, substrate: Substrate
 ) -> None:
     """Tests the shutdown of a node, and re-allocation of shards to a newly joined unit.
 
@@ -131,7 +148,10 @@ async def test_safe_scale_down_shards_realloc(
     init_units_count = len(ops_test.model.applications[app].units)
 
     # scale up
-    await ops_test.model.applications[app].add_unit(count=1)
+    if substrate == "k8s":
+        await ops_test.model.applications[app].scale(scale_change=1)
+    else:
+        await ops_test.model.applications[app].add_unit(count=1)
     await wait_until(
         ops_test,
         apps=[app],
@@ -149,19 +169,25 @@ async def test_safe_scale_down_shards_realloc(
 
     # create indices with right num of primary and replica shards, and populate with data
     await create_dummy_indexes(ops_test, app, leader_unit_ip, max_r_shards=init_units_count)
-    await create_dummy_docs(ops_test, app, leader_unit_ip)
+    await create_dummy_docs(ops_test, app, leader_unit_ip, substrate=substrate)
 
     # get initial cluster health - expected to be all good: green
-    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip, wait_for_green_first=True)
+    logger.info("Checking initial cluster health and allocation...")
+    cluster_health_resp = await cluster_health(
+        ops_test, leader_unit_ip, wait_for_green_first=True, app=app
+    )
     assert cluster_health_resp["status"] == "green"
     assert cluster_health_resp["unassigned_shards"] == 0
 
     # get initial cluster allocation (nodes and their corresponding shards)
-    init_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip)
+    init_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
     assert init_shards_per_node.get(-1, 0) == 0  # unallocated shards
 
     # remove the service in the chosen unit
-    await ops_test.model.applications[app].destroy_unit(f"{app}/{unit_id_to_stop}")
+    if substrate == "k8s":
+        await ops_test.model.applications[app].scale(scale_change=-1)
+    else:
+        await ops_test.model.applications[app].destroy_unit(f"{app}/{unit_id_to_stop}")
     await wait_until(
         ops_test,
         apps=[app],
@@ -171,12 +197,16 @@ async def test_safe_scale_down_shards_realloc(
     )
 
     # check if at least partial shard re-allocation happened
-    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip)
+    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
 
     # some shards should have been reallocated, NOT ALL due to already existing replicas elsewhere
     assert new_shards_per_node.get(-1, 0) > 0  # some shards not reallocated
 
     are_some_shards_reallocated = False
+
+    if substrate == "k8s":
+        unit_ids_to_keep = get_application_unit_ids(ops_test, app=app)
+
     for unit_id in unit_ids_to_keep:
         are_some_shards_reallocated = (
             are_some_shards_reallocated
@@ -185,13 +215,16 @@ async def test_safe_scale_down_shards_realloc(
     assert are_some_shards_reallocated
 
     # get new cluster health
-    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip)
+    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip, app=app)
 
     # not all replica shards should have been reallocated
     assert cluster_health_resp["status"] == "yellow"
 
     # scale up by 1 unit
-    await ops_test.model.applications[app].add_unit(count=1)
+    if substrate == "k8s":
+        await ops_test.model.applications[app].scale(scale_change=1)
+    else:
+        await ops_test.model.applications[app].add_unit(count=1)
     await wait_until(
         ops_test,
         apps=[app],
@@ -199,18 +232,20 @@ async def test_safe_scale_down_shards_realloc(
         idle_period=IDLE_PERIOD,
     )
 
-    new_unit_id = [
-        int(unit.name.split("/")[1])
-        for unit in ops_test.model.applications[app].units
-        if int(unit.name.split("/")[1]) not in unit_ids
-    ][0]
+    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
+    if substrate == "vm":
+        # on k8s we will have the same unit id for the new unit
+        new_unit_id = [
+            int(unit.name.split("/")[1])
+            for unit in ops_test.model.applications[app].units
+            if int(unit.name.split("/")[1]) not in unit_ids
+        ][0]
 
-    # check if the previously unallocated shards have successfully moved to the newest unit
-    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip)
-    assert new_shards_per_node[new_unit_id] > 0
+        # check if the previously unallocated shards have successfully moved to the newest unit
+        assert new_shards_per_node[new_unit_id] > 0
 
     # get new cluster health
-    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip)
+    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip, app=app)
     assert cluster_health_resp["status"] == "green"
     assert cluster_health_resp["unassigned_shards"] == 0
     assert new_shards_per_node.get(-1, 0) == 0
@@ -222,8 +257,11 @@ async def test_safe_scale_down_shards_realloc(
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
 
 
+# skip if k8s as we cannot target units
+@pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
 async def test_safe_scale_down_remove_leaders(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, substrate: Substrate
 ) -> None:
     """Tests the removal of specific units (elected cm, juju leader, node with prim shard).
 

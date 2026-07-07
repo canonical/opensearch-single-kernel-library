@@ -24,6 +24,7 @@ from opensearch_single_kernel.common.constants import (
     STORE_PASSWORD,
     ObjectStorageType,
     Scope,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
@@ -242,6 +243,7 @@ class SnapshotsManager(BaseManager):
             alias=S3_CA_ALIAS,
             store_pwd=STORE_PASSWORD,
             store_path=store_path,
+            use_sudo=self.state.substrate == Substrates.VM,
         )
 
     def store_s3_ca(self, s3_tls_ca_chain: str | None) -> None:
@@ -266,6 +268,7 @@ class SnapshotsManager(BaseManager):
             alias=S3_CA_ALIAS,
             store_pwd=STORE_PASSWORD,
             store_path=store_path,
+            use_sudo=self.state.substrate == Substrates.VM,
         )
 
         # Import fresh CA
@@ -277,6 +280,7 @@ class SnapshotsManager(BaseManager):
             ca=s3_tls_ca_chain,
             keep_previous=False,
             snap_user_with_write_permission=True,
+            use_sudo=self.state.substrate == Substrates.VM,
         )
 
     def write_gcs_service_account_json(

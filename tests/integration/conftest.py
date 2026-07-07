@@ -6,17 +6,20 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pytest_operator.plugin import OpsTest
 
 from tests.helpers import Substrate
 
 logger = getLogger(__name__)
 
 
-CONFIG = str(yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text()))
-ACTIONS = str(
-    yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
-)
+CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
+ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
+
 METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
+K8S_METADATA = yaml.safe_load(
+    Path("./tests/charms/opensearch_k8s_test_charm/metadata.yaml").read_text()
+)
 
 
 APP_NAME = METADATA["name"]
@@ -27,6 +30,15 @@ IDLE_PERIOD = 75
 
 
 CONFIG_OPTS = {"profile": "testing"}
+PRODUCTION_CONFIG_OPTS = {"profile": "production"}
+CLIENT_CHARM = "client-charm"
+
+
+def get_unit_ids(substrate: str) -> list[int]:
+    """Return the unit ids supported by the test topology for a substrate."""
+    # TODO: Expand K8s integration topology to multi-unit and remove this special-case.
+    return [0] if substrate == "k8s" else UNIT_IDS
+
 
 MODEL_CONFIG = {
     "logging-config": "<root>=INFO;unit=DEBUG",
@@ -63,3 +75,37 @@ def charm(substrate: Substrate, opensearch_base_path: str, ubuntu_base: str) -> 
     if substrate == "k8s":
         return f"./{opensearch_base_path}/opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm"
     return f"./{opensearch_base_path}/opensearch_ubuntu@{ubuntu_base}-amd64.charm"
+
+
+@pytest.fixture
+def charm_resources(substrate: Substrate) -> dict[str, str]:
+    """Resources to pass to `juju deploy` for the OpenSearch charm.
+
+    Juju does not reliably auto-populate OCI image resources for locally packed charms in all
+    environments. For the K8s substrate, explicitly provide the `opensearch-image` resource so the
+    controller can fetch the image. The K8s workload image is published independently from the
+    charm base variants, so we always use the upstream image declared in metadata.
+    """
+    if substrate != "k8s":
+        return {}
+
+    upstream = (
+        (K8S_METADATA.get("resources") or {}).get("opensearch-image", {}).get("upstream-source")
+    )
+    if not upstream:
+        raise RuntimeError(
+            "K8s test charm metadata is missing resources.opensearch-image.upstream-source"
+        )
+
+    return {"opensearch-image": upstream}
+
+
+@pytest.fixture(autouse=True)
+async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate):
+    """Deploy the client charm."""
+    if substrate == "k8s" and CLIENT_CHARM not in ops_test.model.applications:
+        await ops_test.model.deploy(
+            "./tests/charms/dummy-client-charm/dummy-client-charm_amd64.charm",
+            CLIENT_CHARM,
+        )
+        await ops_test.model.wait_for_idle(apps=[CLIENT_CHARM])

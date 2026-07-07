@@ -11,6 +11,7 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 
 from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
@@ -52,20 +53,20 @@ class ProfilesManager(BaseManager):
 
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
-        memory_size = self.workload.meminfo()["MemTotal"]
+        if not profile.memory_requirements.memory_size:
+            return []
 
-        if (
-            profile.memory_requirements.memory_size
-            and memory_size < profile.memory_requirements.memory_size
-        ):
+        memory_size = self.workload.memtotal()
+        logger.debug("Unit memory size: %s", memory_size)
+
+        if memory_size < profile.memory_requirements.memory_size:
             logger.error(
                 "Insufficient memory: %s < %s",
                 memory_size,
                 profile.memory_requirements.memory_size,
             )
             return [
-                "Insufficient memory: %s < %s"
-                % (memory_size, profile.memory_requirements.memory_size)
+                f"Insufficient memory: {memory_size} < {profile.memory_requirements.memory_size}"
             ]
 
         return []
@@ -110,10 +111,9 @@ class ProfilesManager(BaseManager):
     @property
     def profile(self) -> OpenSearchProfile:
         """Get the current profile."""
-        return self.state.server.profile or self.config_profile
+        return self.state.server.profile or self.get_config_profile()
 
-    @property
-    def config_profile(self) -> OpenSearchProfile:
+    def get_config_profile(self) -> OpenSearchProfile:
         """Get the current config profile."""
         return (
             ProductionProfile()
@@ -126,25 +126,26 @@ class ProfilesManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-
         status_list: list[StatusObject] = []
-        missing_requirements = self.get_missing_requirements()
+
+        if not self.state.current_peer_cluster_app:
+            return [GeneralStatuses.ACTIVE_IDLE.value]
+
         if scope == "unit":
             try:
-                self.config_profile
+                _ = self.get_config_profile()
             except ValueError:
-                status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+                return [ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value]
 
-            if missing_requirements:
-                status_list.append(
-                    format_status(
-                        ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
-                        {"requirements": " - ".join(missing_requirements)},
+            try:
+                if missing_requirements := self.get_missing_requirements():
+                    status_list.append(
+                        format_status(
+                            ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
+                            {"requirements": "; ".join(missing_requirements)},
+                        )
                     )
-                )
+            except OpenSearchCmdError as e:
+                logger.warning("Error checking profile requirements: %s", e)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

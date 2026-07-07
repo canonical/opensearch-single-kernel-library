@@ -72,3 +72,7 @@ class ReloadKeystoreEvent(EventBase):
 
 class VerifySnapshotsCredentialsEvent(EventBase):
     """Event to verify backup credentials on main orchestrator leader unit."""
+
+
+class PebbleCanConnectEvent(EventBase):
+    """Periodic pebble-can-connect trigger independent of update-status."""

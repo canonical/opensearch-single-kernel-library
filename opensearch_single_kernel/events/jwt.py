@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import JwtStatuses
 from opensearch_single_kernel.core.models import DeploymentType
 
@@ -165,13 +164,10 @@ class JWTEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.charm.cluster_manager.apply_security_config(
-                admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
-            )
-            logger.info("Updated Opensearch security index")
-        except OpenSearchCmdError as e:
-            logger.debug(f"Error when updating the security index: {e.out}")
+        if not self.charm.cluster_manager.apply_security_config(
+            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+        ):
             # we need to come back in this case because there will not be a follow-up event
             event.defer()
             return
+        logger.info("Updated Opensearch security index")

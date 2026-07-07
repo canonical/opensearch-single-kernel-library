@@ -197,7 +197,8 @@ class LockManager(PeerLockManager):
         Returns:
             Whether lock was acquired
         """
-        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
+        logger.debug("[Node lock] Attempting to acquire lock")
+        host = self.state.node_host if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] 1+ opensearch nodes online")
@@ -212,12 +213,16 @@ class LockManager(PeerLockManager):
                 raise OpenSearchLockError("Failed to acquire lock due to absence of online nodes")
             try:
                 unit_with_lock = self.opensearch_client.get_unit_with_lock(host, self.alt_hosts)
+                logger.debug("[Node lock] Unit with opensearch lock: %s", unit_with_lock)
             except OpenSearchHttpError:
                 logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock
                 # this avoids hitting deadlock situations in cases where
                 # the .charm_node_lock index is not available
                 if online_nodes <= 1:
+                    logger.debug(
+                        "[Node lock] Falling back to peer databag lock due to error checking OpenSearch lock and 1 or fewer online nodes"
+                    )
                     return super().acquire()
                 else:
                     return False
@@ -227,12 +232,15 @@ class LockManager(PeerLockManager):
             # Then, when 1+ OpenSearch nodes are online, a unit that no longer exists could hold
             # the lock.
             if not unit_with_lock and online_nodes > 0:
-                logger.debug("[Node lock] Attempting to acquire opensearch lock")
+                logger.debug(
+                    "[Node lock] Attempting to acquire opensearch lock via opensearch itself"
+                )
                 # Acquire opensearch lock
                 # Create index if it doesn't exist
                 if not self.opensearch_client.create_lock_index_if_needed(
                     host, alt_hosts, self.state.application.app.planned_units() > 1
                 ):
+                    logger.debug("[Node lock] Failed to create lock index")
                     return False
 
                 # Attempt to create document id 0
@@ -240,14 +248,20 @@ class LockManager(PeerLockManager):
                     if not self.opensearch_client.create_lock_document(
                         host, self.alt_hosts, self.state.unit_name
                     ):
+                        logger.debug("[Node lock] Failed to create lock document")
                         return False
                 except OpenSearchHttpError:
                     logger.exception("Error creating OpenSearch lock document")
                     # in this case, try to acquire peer databag lock as fallback
                     return super().acquire()
 
+                logger.debug("[Node lock] Created lock document to acquire opensearch lock")
                 unit_with_lock = self.state.unit_name
 
+            logger.debug(
+                "[Node lock] Unit with opensearch lock after attempting to acquire: %s",
+                unit_with_lock,
+            )
             if unit_with_lock == self.state.unit_name:
                 # Lock acquired
                 # Release peer databag lock, if any
@@ -284,7 +298,7 @@ class LockManager(PeerLockManager):
         # fetch current app description
         current_app = self.state.application.deployment_desc.app
 
-        host = self.state.host_ip if self.opensearch_client.is_node_up() else None
+        host = self.state.node_host if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts
         if host or alt_hosts:
             logger.debug("[Node lock] Checking which unit has opensearch lock")

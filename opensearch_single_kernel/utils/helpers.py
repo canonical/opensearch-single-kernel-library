@@ -4,16 +4,21 @@
 
 """A set of helpers functions."""
 
+
 import base64
+import errno
 import hashlib
 import json
 import logging
 import math
 import re
 import secrets
+import socket
 import string
+import threading
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable
+from typing import Any
 
 import bcrypt
 from cryptography import x509
@@ -25,10 +30,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import (
-    App,
-    PeerClusterConfig,
-)
+from opensearch_single_kernel.core.models import App, PeerClusterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,44 @@ def deployment_type(
         if not config.init_hold
         else DeploymentType.FAILOVER_ORCHESTRATOR
     )
+
+
+def get_k8s_fqdn(name: str) -> str:
+    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+    try:
+        info = socket.getaddrinfo(
+            name,
+            None,
+            family=socket.AF_UNSPEC,
+            flags=socket.AI_CANONNAME,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as e:
+        logger.warning(
+            "Failed to resolve canonical name for %s: %s. \nFalling back on default fqdn.",
+            name,
+            e,
+        )
+        return socket.getfqdn(name)
+
+    for entry in info:
+        if canonname := entry[3]:
+            return canonname
+
+    logger.warning(
+        "Failed to resolve canonical name for %s. \nFalling back on default fqdn.", name
+    )
+    return socket.getfqdn(name)
+
+
+def k8s_fqdn(unit_name: str | None) -> str:
+    """Return the canonical K8s seed host for a unit."""
+    # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
+    pod_prefix = (unit_name or "").split(".", 1)[0]
+    # remove the last -digit to get the app name: "app-0" -> "app"
+    app_name = "-".join(pod_prefix.split("-")[:-1])
+    service_name = f"{pod_prefix}.{app_name}-endpoints"
+    return get_k8s_fqdn(service_name)
 
 
 def normalized_tls_subject(subject: str) -> str:
@@ -190,6 +230,226 @@ def decode_plugin_secret_content(content: dict, label: str) -> dict[str, str] | 
     except json.JSONDecodeError as e:
         logger.error("Malformed JSON in secret %s: %s", label, e)
         return None
+
+
+def build_command_list(command_with_args: str) -> list[str]:
+    """Build command list for container.exec().
+
+    Detects shell metacharacters and wraps command in shell if needed.
+    Otherwise splits command into list of arguments.
+
+    Args:
+        command_with_args: Full command string with arguments.
+
+    Returns:
+        list[str]: Command list suitable for container.exec().
+    """
+    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
+    if any(char in command_with_args for char in shell_metachars):
+        return ["sh", "-c", command_with_args]
+    if " " in command_with_args:
+        return command_with_args.split()
+    return [command_with_args]
+
+
+# Validated against ops/pebble 3.7.1; ExecProcess exposes these private
+# attributes used by the best-effort teardown below.
+_EXEC_THREAD_JOIN_TIMEOUT = 5
+
+
+def _is_expected_exec_teardown_error(exc: BaseException | None) -> bool:
+    """Return True if exc is the expected fallout of shutting an exec websocket.
+
+    When we deliberately shut down a Pebble exec websocket (see
+    `_cleanup_exec_process`), the pump thread blocked in ``ws.recv()`` wakes up
+    and raises. Those raises are expected and benign; everything else should
+    keep the default behaviour.
+    """
+    if exc is None:
+        return False
+    # websocket-client raises these when recv() hits a closed socket. Match by
+    # name on purpose: it keeps this helper usable VM-side where the websocket
+    # package (a Pebble-only transitive dependency) may not be importable.
+    return (
+        type(exc).__name__ in {"WebSocketConnectionClosedException", "WebSocketTimeoutException"}
+        or isinstance(exc, (BrokenPipeError, ConnectionError))
+        or (isinstance(exc, OSError) and exc.errno == errno.EBADF)
+    )
+
+
+def _raised_in_pebble_pump(traceback: Any) -> bool:
+    """Return True if the traceback runs through a Pebble exec pump thread.
+
+    The pump threads are ``shutil.copyfileobj`` reading a Pebble websocket, so
+    their traceback always passes through ``ops.pebble`` (and usually
+    ``websocket``). Checking the originating module keeps suppression scoped to
+    those threads rather than every thread in the process.
+    """
+    tb = traceback
+    while tb is not None:
+        module = tb.tb_frame.f_globals.get("__name__", "")
+        if module.startswith("ops.pebble") or module.startswith("websocket"):
+            return True
+        tb = tb.tb_next
+    return False
+
+
+_excepthook_lock = threading.Lock()
+_excepthook_installed = False
+
+
+def _install_pebble_pump_excepthook() -> None:
+    """Install (once) a ``threading.excepthook`` that silences pump-thread noise.
+
+    When we shut a Pebble exec websocket down during teardown, the pump thread
+    blocked in ``ws.recv()`` raises ``WebSocketConnectionClosedException``. Unlike
+    the success path, ``ws.shutdown()`` (a bare ``socket.close()``) does not
+    reliably interrupt a thread already blocked in the OS ``recv()`` syscall, so
+    the raise can land *after* teardown returns -- or not until interpreter
+    shutdown. Suppression therefore has to be persistent, not scoped to the
+    teardown call, which is why this installs a long-lived hook instead of using
+    a context manager.
+
+    The hook is deliberately narrow: it only swallows the expected
+    websocket-close error types *and* only when the traceback originates in
+    ``ops.pebble``/``websocket``. Everything else falls through to the previous
+    hook, so unrelated thread exceptions are untouched. Installation is
+    idempotent and guarded by a lock so repeated teardowns don't chain hooks.
+    """
+    global _excepthook_installed
+    with _excepthook_lock:
+        if _excepthook_installed:
+            return
+        previous_hook = threading.excepthook
+
+        def hook(args: threading.ExceptHookArgs) -> None:
+            if _is_expected_exec_teardown_error(args.exc_value) and _raised_in_pebble_pump(
+                args.exc_traceback
+            ):
+                logger.debug(
+                    "Suppressed expected Pebble exec I/O thread error: %r", args.exc_value
+                )
+                return
+            previous_hook(args)
+
+        threading.excepthook = hook
+        _excepthook_installed = True
+
+
+def _cancel_exec_stdin(process: Any) -> None:
+    """Stop the stdin pump thread, if exec was given stdin."""
+    if (cancel_stdin := getattr(process, "_cancel_stdin", None)) is None:
+        return
+    try:
+        cancel_stdin()
+    except Exception as cleanup_error:  # noqa: BLE001 - best effort teardown
+        logger.debug("Failed to cancel exec stdin during cleanup: %s", cleanup_error)
+
+
+def _shutdown_exec_websockets(process: Any) -> None:
+    """Shut down the exec websockets so blocked pump threads wake up."""
+    for ws_attr in ("_stdio_ws", "_stderr_ws", "_control_ws"):
+        try:
+            ws = getattr(process, ws_attr)
+        except AttributeError:
+            logger.warning(
+                "Pebble ExecProcess has no %s; exec teardown may be incomplete "
+                "(ops version change?)",
+                ws_attr,
+            )
+            continue
+        if ws is None:
+            continue
+        try:
+            ws.shutdown()
+        except Exception as cleanup_error:  # noqa: BLE001 - best effort teardown
+            logger.debug("Failed to shut down exec %s during cleanup: %s", ws_attr, cleanup_error)
+
+
+def _join_exec_threads(process: Any) -> None:
+    """Join the exec I/O threads so they don't outlive the call."""
+    try:
+        threads = process._threads
+    except AttributeError:
+        logger.warning(
+            "Pebble ExecProcess has no _threads; exec teardown may be incomplete "
+            "(ops version change?)"
+        )
+        return
+    for thread in threads or []:
+        try:
+            thread.join(timeout=_EXEC_THREAD_JOIN_TIMEOUT)
+        except Exception as cleanup_error:  # noqa: BLE001 - best effort teardown
+            logger.debug("Failed to join exec I/O thread during cleanup: %s", cleanup_error)
+        if thread.is_alive():
+            logger.warning("Exec I/O thread %s still alive after cleanup", thread.name)
+
+
+def _cleanup_exec_process(process: Any) -> None:
+    """Tear down the I/O threads/websockets of a Pebble exec process.
+
+    Pebble's ``ExecProcess.wait_output()``/``wait()`` only join their internal
+    I/O threads and shut down the websockets on the success path. If
+    ``wait_change`` raises (e.g. the exec ``timeout`` elapses) the exception
+    propagates before that cleanup runs, leaving the stdout/stderr/stdin pump
+    threads blocked on websockets that are never closed. Those threads are
+    created with the default ``daemon=False``, so they keep the interpreter
+    alive: when the hook process tries to exit, ``threading._shutdown()`` blocks
+    forever joining them (manifesting as a hang in ``lock.acquire()``).
+
+    This best-effort cleanup cancels stdin, shuts the websockets down so the
+    pump threads hit EOF, and joins them so they don't outlive the call. The
+    pump threads raise ``WebSocketConnectionClosedException`` as they unwind,
+    possibly after this returns, so we install a persistent excepthook to keep
+    those expected errors out of the logs (see
+    ``_install_pebble_pump_excepthook``).
+
+    Args:
+        process: the ``ExecProcess`` returned by ``container.exec()``.
+    """
+    _install_pebble_pump_excepthook()
+    _cancel_exec_stdin(process)
+    _shutdown_exec_websockets(process)
+    _join_exec_threads(process)
+
+
+def wait_for_process_output(
+    process: Any, masked_command: str, original_command: str
+) -> tuple[str, str]:
+    """Wait for process to complete and return output.
+
+    Args:
+        process: Process object from container.exec() (has wait_output()).
+        masked_command: Command string with sensitive info masked for logging.
+        original_command: Original command string for error messages.
+
+    Returns:
+        tuple[str, str]: (stdout, stderr). stderr is typically empty when
+        combine_stderr=True was used for exec().
+
+    Raises:
+        OpenSearchCmdError: If process fails or returns non-zero exit code.
+    """
+    try:
+        stdout, stderr = process.wait_output()
+        return stdout, stderr
+    except Exception as e:
+        # On failure (notably a timed-out exec), Pebble may leave its non-daemon
+        # I/O threads running, which blocks interpreter shutdown. Tear them down.
+        _cleanup_exec_process(process)
+        error_string = str(e).lower()
+        missing_keystore = (
+            "opensearch.keystore" in error_string and "does not exist" in error_string
+        ) or "keystore file does not exist" in error_string
+        if missing_keystore:
+            logger.debug(
+                "wait_output() failed for %s (expected missing opensearch.keystore): %s",
+                masked_command,
+                e,
+            )
+        else:
+            logger.warning("wait_output() failed for %s: %s", masked_command, e)
+        raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from e
 
 
 def lock_unit_name(full_unit_id: str) -> str:

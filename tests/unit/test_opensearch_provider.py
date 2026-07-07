@@ -82,7 +82,7 @@ def test_on_index_requested(harness, mocker):
         return_value=("hashed_pw", "password"),
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.version",
+        "opensearch_single_kernel.workload.base.BaseWorkload.version",
         new_callable=PropertyMock,
         return_value="1",
     )
@@ -181,7 +181,7 @@ def test_on_index_requested_kibanaserver(harness, mocker):
         return_value=("hashed_pw", "password"),
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.version",
+        "opensearch_single_kernel.workload.base.BaseWorkload.version",
         new_callable=PropertyMock,
         return_value="1",
     )

@@ -4,10 +4,11 @@
 
 """Helper functions related to testing the different plugins."""
 
+import base64
 import json
 import logging
 import random
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from pytest_operator.plugin import OpsTest
 from tenacity import (
@@ -21,10 +22,61 @@ from tenacity import (
     wait_random,
 )
 
+from tests.helpers import Substrate
+from tests.integration.conftest import CLIENT_CHARM
+
 from ..ha.helpers_data import bulk_insert, create_index
-from ..helpers import http_request
+from ..helpers import (
+    _find_k8s_unit_for_endpoint,
+    _k8s_unit_fqdn,
+    get_secrets,
+    http_request,
+    run_action,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def k8s_generate_bulk_training_data(
+    ops_test: OpsTest,
+    index_name: str,
+    vector_name: str,
+    docs_count: int = 100,
+    dimensions: int = 4,
+    has_result: bool = True,
+    unit_ip: str = "",
+    app: str = "",
+) -> list[float]:
+    admin_secrets = await get_secrets(ops_test, app=app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, f"https://{unit_ip}:9200/_bulk", app)
+    if not k8s_unit:
+        raise RuntimeError(
+            f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
+        )
+    logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
+    action = await run_action(
+        ops_test,
+        app=CLIENT_CHARM,
+        action_name="generate-bulk-training-data",
+        params={
+            "index-name": index_name,
+            "vector-name": vector_name,
+            "docs-count": docs_count,
+            "dimensions": dimensions,
+            "has-result": has_result,
+            "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+            "username": "admin",
+            "password": admin_secrets["password"],
+            "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
+        },
+        unit_id=None,
+    )
+    if action.status != "completed":
+        raise RuntimeError(f"Failed to create dummy docs through {CLIENT_CHARM} action")
+    result = action.response.get("result", {})
+    vector = json.loads(action.response.get("vector", "[]"))
+    logger.info("Dummy docs created with result: %s", result)
+    return vector
 
 
 def generate_bulk_training_data(
@@ -33,7 +85,7 @@ def generate_bulk_training_data(
     docs_count: int = 100,
     dimensions: int = 4,
     has_result: bool = False,
-) -> Tuple[str, List[str]]:
+) -> tuple[str, list[list[float]]]:
     random.seed("seed")
     print("The seed for randomness is: 'seed'")
 
@@ -41,7 +93,7 @@ def generate_bulk_training_data(
     if has_result:
         responses = random.randbytes(docs_count)
     result = ""
-    result_list = []
+    result_list: list[list[float]] = []
     for i in range(docs_count):
         result += json.dumps({"index": {"_index": index_name, "_id": i}}) + "\n"
         result_list.append([float(data[j]) for j in range(i * dimensions, (i + 1) * dimensions)])
@@ -94,8 +146,9 @@ async def create_index_and_bulk_insert(
     index_name: str,
     shards: int,
     vector_name: str,
-    model_name: str = None,
-) -> List[float]:
+    model_name: str | None = None,
+    substrate: Substrate = "vm",
+) -> list[float]:
     if model_name:
         extra_mappings = {
             "properties": {
@@ -126,12 +179,25 @@ async def create_index_and_bulk_insert(
         extra_index_settings=extra_index_settings,
         extra_mappings=extra_mappings,
     )
+    if substrate == "k8s":
+        vector = await k8s_generate_bulk_training_data(
+            ops_test=ops_test,
+            index_name=index_name,
+            vector_name=vector_name,
+            docs_count=1000,
+            dimensions=4,
+            has_result=True,
+            unit_ip=endpoint,
+            app=app,
+        )
+        return vector
+
     payload, payload_list = generate_bulk_training_data(
         index_name, vector_name, docs_count=1000, dimensions=4, has_result=True
     )
     # Insert data in bulk
     await bulk_insert(ops_test, app, endpoint, payload)
-    return payload_list
+    return payload_list[0]
 
 
 def bulk_encode(docs: List[Dict[str, Any]], index_name: str) -> str:
@@ -164,6 +230,6 @@ async def poll_until(
                     return True
                 logger.info(f"Condition not met: {response}")
                 raise TryAgain
-    except RetryError:
+    except (RetryError, TryAgain):
         logger.info("Polling timed out")
         return False

@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-# Copyright 2026 Canonical Ltd.
+# Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Application charm that connects to opensearch using the opensearch-client relation."""
 
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Any
 
 import requests
 from charms.data_platform_libs.v0.data_interfaces import (
     AuthenticationEvent,
     OpenSearchRequires,
 )
-from ops.charm import ActionEvent, CharmBase
-from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus
+from ops import ActionEvent, ActiveStatus, BlockedStatus, CharmBase, main
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +31,12 @@ class ApplicationCharm(CharmBase):
         super().__init__(*args)
         # Default charm events.
         self.framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.start, self._on_start)
 
         # `albums` index is used in integration test
         self.first_opensearch = OpenSearchRequires(self, "first-index", "albums", "")
 
-        index_name = f'{self.app.name.replace("-", "_")}_second_opensearch'
+        index_name = f"{self.app.name.replace('-', '_')}_second_opensearch"
         # set invalid permissions to guarantee we still get default permissions.
         self.second_opensearch = OpenSearchRequires(self, "second-index", index_name, "hackerman")
 
@@ -56,10 +55,15 @@ class ApplicationCharm(CharmBase):
                 relation_handler.on.index_created, self._on_authentication_updated
             )
             self.framework.observe(
-                relation_handler.on.authentication_updated, self._on_authentication_updated
+                relation_handler.on.authentication_updated,
+                self._on_authentication_updated,
             )
 
         self.framework.observe(self.on.run_request_action, self._on_run_request_action)
+
+    def _on_start(self, _):
+        """Check connection on start."""
+        self.unit.status = BlockedStatus("Waiting for connection to opensearch charm")
 
     def _on_update_status(self, _) -> None:
         """Health check for index connection."""
@@ -108,6 +112,8 @@ class ApplicationCharm(CharmBase):
         with open(CERT_PATH, "w") as f:
             f.write(tls_ca)
 
+        self.unit.status = ActiveStatus()
+
     # ==============
     #  Action hooks
     # ==============
@@ -122,6 +128,10 @@ class ApplicationCharm(CharmBase):
             payload = payload.replace("\\", "")
 
         requires = self._get_requires(event.params["relation-name"])
+        if not requires:
+            event.fail("Invalid relation name provided.")
+            return
+
         username = requires.fetch_relation_field(relation_id, "username")
         password = requires.fetch_relation_field(relation_id, "password")
         hosts = requires.fetch_relation_field(relation_id, "endpoints")
@@ -158,8 +168,8 @@ class ApplicationCharm(CharmBase):
         relation_id: int,
         method: str,
         endpoint: str,
-        payload: Optional[Dict[str, any]] = None,
-    ) -> Union[Dict[str, any], List[any]]:
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | list[Any]:
         """Make an HTTP request to a specific relation."""
         requires = self._get_requires(relation_name)
         username = requires.fetch_relation_field(relation_id, "username")
@@ -189,8 +199,8 @@ class ApplicationCharm(CharmBase):
         username: str,
         password: str,
         host: str,
-        payload: Optional[Dict[str, any]] = None,
-    ) -> Union[Dict[str, any], List[any]]:
+        payload: dict[str, any] | None = None,
+    ) -> dict[str, any] | list[any]:
         """Make an HTTP request.
 
         TODO swap this over to a more normal opensearch client
@@ -206,8 +216,7 @@ class ApplicationCharm(CharmBase):
         if None in [endpoint, method]:
             raise ValueError("endpoint or method missing")
 
-        if endpoint.startswith("/"):
-            endpoint = endpoint[1:]
+        endpoint = endpoint.removeprefix("/")
 
         full_url = f"https://{host}:{port}/{endpoint}"
 
@@ -215,7 +224,10 @@ class ApplicationCharm(CharmBase):
             "verify": CERT_PATH,
             "method": method.upper(),
             "url": full_url,
-            "headers": {"Content-Type": "application/json", "Accept": "application/json"},
+            "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
         }
 
         if isinstance(payload, str):
