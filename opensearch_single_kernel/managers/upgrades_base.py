@@ -11,7 +11,6 @@ import abc
 import json
 import logging
 import re
-from functools import cache
 from typing import Any
 
 import ops
@@ -209,7 +208,6 @@ class UpgradesManagerBase(BaseManager):
 
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
-    @cache
     def get_version_before_override(self) -> poetry_version.Version | None:
         """Get the version of OpenSearch before override-version is run."""
         if self.workload.is_service_started():
@@ -254,7 +252,7 @@ class UpgradesManagerBase(BaseManager):
         if self.state.substrate == Substrates.K8S:
             self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
         else:
-            self.workload.run_cmd("opensearch.node", "override-version y")
+            self.workload.run_cmd("opensearch.node", "override-version", stdin="y\n")
 
     @property
     def compatibility_matrix(self) -> dict[str, set[str]]:

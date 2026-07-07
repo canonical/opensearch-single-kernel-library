@@ -49,7 +49,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         if self.is_rollback:
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
-            if self.state.server_upgrade.unit_state is UnitUpgradesState.OUTDATED:
+            else:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
         if self.state.server_upgrade.snap_revision == OPENSEARCH_SNAP_REVISION:

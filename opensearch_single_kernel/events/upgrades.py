@@ -383,37 +383,36 @@ class UpgradesEventsHandler(Object):
             return
         logger.debug("Stopped OpenSearch before upgrade")
 
-        logger.debug("Upgrading unit")
-        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
-        self.charm.workload.install()
-
-        # We check if it is a rollback here only if the unit is highest order
-        # If we reach this point we are sure its compatible and upgrade is in progress
-        # CHECK FOR ROLLBACK
-        if self.charm.upgrades_manager.is_rollback:
-            if not self.charm.upgrades_manager.can_rollback:
-                logger.error(
-                    "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
-                )
-                self._set_upgrade_status()
-                # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
-                return
-            else:
-                logger.warning("Rollback detected")
-                logger.warning(
-                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
-                )
-                self._set_upgrade_status()
-                self.charm.lock_manager.release()
-                return
-
         if event.override_version:
             logger.debug("Overriding OpenSearch version")
             try:
                 self.charm.upgrades_manager.override_version()
             except OpenSearchCmdError as e:
                 logger.error("Failed to override OpenSearch version: %s", str(e))
+        else:
+            logger.debug("Upgrading unit")
+            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
+            self.charm.workload.install()
 
+            # We check if it is a rollback here only if the unit is highest order
+            # If we reach this point we are sure its compatible and upgrade is in progress
+            # CHECK FOR ROLLBACK
+            if self.charm.upgrades_manager.is_rollback:
+                if not self.charm.upgrades_manager.can_rollback:
+                    logger.error(
+                        "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
+                    )
+                    self._set_upgrade_status()
+                    # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
+                    return
+                else:
+                    logger.warning("Rollback detected")
+                    logger.warning(
+                        "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
+                    )
+                    self._set_upgrade_status()
+                    self.charm.lock_manager.release()
+                    return
         self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
