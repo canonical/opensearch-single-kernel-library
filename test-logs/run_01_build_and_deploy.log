@@ -1,0 +1,40 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /home/ubuntu/.cache/pypoetry/virtualenvs/opensearch-charms-single-kernel-C0NIuQcE-py3.12/bin/python
+cachedir: .pytest_cache
+rootdir: /home/ubuntu/opensearch-single-kernel-library
+configfile: pyproject.toml
+plugins: anyio-4.13.0, operator-0.42.1, allure-pytest-2.16.0, asyncio-0.21.2, playwright-0.8.0, base-url-2.1.0, mock-3.15.1, allure-pytest-default-results-0.1.4, microceph-0.1.0
+asyncio: mode=Mode.AUTO
+collecting ... collected 1 item
+
+tests/integration/test_charm.py::test_build_and_deploy FAILED
+
+=================================== FAILURES ===================================
+____________________________ test_build_and_deploy _____________________________
+tests/integration/test_charm.py:105: in test_build_and_deploy
+    await deploy_opensearch(
+tests/integration/helpers.py:133: in deploy_opensearch
+    juju.deploy(charm, **deploy_kwargs)
+../.cache/pypoetry/virtualenvs/opensearch-charms-single-kernel-C0NIuQcE-py3.12/lib/python3.12/site-packages/jubilant/_juju.py:730: in deploy
+    with self._deploy_tempdir(charm, resources) as (_charm, resources):
+/usr/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+../.cache/pypoetry/virtualenvs/opensearch-charms-single-kernel-C0NIuQcE-py3.12/lib/python3.12/site-packages/jubilant/_juju.py:1802: in _deploy_tempdir
+    shutil.copy(charm, temp)
+/usr/lib/python3.12/shutil.py:435: in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+/usr/lib/python3.12/shutil.py:260: in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+E   FileNotFoundError: [Errno 2] No such file or directory: './tests/charms/opensearch_test_charm/opensearch_ubuntu@22.04-amd64.charm'
+------------------------------ Captured log call -------------------------------
+INFO     jubilant:_juju.py:551 cli: juju model-config --model testing 'logging-config=<root>=INFO;unit=DEBUG' update-status-hook-interval=1m 'cloudinit-userdata=postruncmd:
+        - [ '"'"'sysctl'"'"', '"'"'-w'"'"', '"'"'vm.max_map_count=262144'"'"' ]
+        - [ '"'"'sysctl'"'"', '"'"'-w'"'"', '"'"'fs.file-max=1048576'"'"' ]
+        - [ '"'"'sysctl'"'"', '"'"'-w'"'"', '"'"'vm.swappiness=0'"'"' ]
+        - [ '"'"'sysctl'"'"', '"'"'-w'"'"', '"'"'net.ipv4.tcp_retries2=5'"'"' ]
+    '
+=========================== short test summary info ============================
+FAILED tests/integration/test_charm.py::test_build_and_deploy - FileNotFoundE...
+============================== 1 failed in 1.16s ===============================

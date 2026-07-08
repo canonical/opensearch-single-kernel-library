@@ -19,11 +19,11 @@ from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 from uuid import uuid4
 
+import jubilant
 import requests
 import yaml
 from data_platform_helpers.advanced_statuses import StatusObject
 from opensearchpy import OpenSearch
-from pytest_operator.plugin import OpsTest
 from tenacity import (
     RetryError,
     Retrying,
@@ -64,12 +64,33 @@ EmptyMaintenanceStatus = StatusObject(
     message="",
 )
 
+# Cache of model name -> model uuid to avoid repeated `juju show-model` calls.
+_MODEL_UUID_CACHE: Dict[str, str] = {}
 
-def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:
+
+def _model_name(juju: jubilant.Juju) -> str:
+    """Return the active Juju model name."""
+    return juju.model or juju.status().model.name
+
+
+def _model_uuid(juju: jubilant.Juju) -> str:
+    """Return the active Juju model uuid (cached)."""
+    name = _model_name(juju)
+    if name not in _MODEL_UUID_CACHE:
+        _MODEL_UUID_CACHE[name] = juju.show_model(name).model_uuid
+    return _MODEL_UUID_CACHE[name]
+
+
+def _is_k8s(juju: jubilant.Juju) -> bool:
+    """Return whether the current model runs on a Kubernetes (CAAS) substrate."""
+    return juju.status().model.type == "caas"
+
+
+def get_raw_application(juju: jubilant.Juju, app: str) -> Dict[str, Any]:
     """Get raw application details."""
     return json.loads(
         subprocess.check_output(
-            f"juju status --model {ops_test.model.info.name} {app} --format=json".split()
+            f"juju status --model {_model_name(juju)} {app} --format=json".split()
         )
     )["applications"][app]
 
@@ -80,7 +101,7 @@ def _get_unit_address(raw_unit: dict[str, Any]) -> Optional[str]:
 
 
 async def deploy_opensearch(  # noqa: C901
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     charm: str,
     substrate: str,
     application_name: str,
@@ -88,18 +109,18 @@ async def deploy_opensearch(  # noqa: C901
     *,
     series: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
-    constraints: Optional[str] = None,
+    constraints: Optional[Dict[str, Any]] = None,
     resources: Optional[Dict[str, str]] = None,
     storage: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Deploy the OpenSearch charm."""
-    deploy_kwargs = {
-        "application_name": application_name,
+    deploy_kwargs: Dict[str, Any] = {
+        "app": application_name,
         "num_units": num_units,
     }
-    # Juju does not use `series` for K8s applications.
+    # Juju does not use `series`/`base` for K8s applications.
     if series and substrate != "k8s":
-        deploy_kwargs["series"] = series
+        deploy_kwargs["base"] = _series_to_base(series)
     if config:
         deploy_kwargs["config"] = config
     if constraints:
@@ -109,15 +130,21 @@ async def deploy_opensearch(  # noqa: C901
     if storage:
         deploy_kwargs["storage"] = storage
 
-    await ops_test.model.deploy(charm, **deploy_kwargs)
+    juju.deploy(charm, **deploy_kwargs)
 
 
-async def get_cloud_type(ops_test: OpsTest) -> str:
+def _series_to_base(series: str) -> str:
+    """Convert a legacy series name to a Juju base string."""
+    mapping = {
+        "jammy": "ubuntu@22.04",
+        "noble": "ubuntu@24.04",
+    }
+    return mapping.get(series, series)
+
+
+async def get_cloud_type(juju: jubilant.Juju) -> str:
     """Return current cloud type of the selected controller."""
-    assert ops_test.model, "Model must be present"
-    controller = await ops_test.model.get_controller()
-    cloud = await controller.cloud()
-    return cloud.cloud.type_
+    return juju.status().model.cloud
 
 
 def now() -> str:
@@ -161,14 +188,13 @@ def _progress_line(units: List[Unit]) -> str:
     return log
 
 
-async def get_unit_hostname(ops_test: OpsTest, unit_id: int, app: str) -> str:
+async def get_unit_hostname(juju: jubilant.Juju, unit_id: int, app: str) -> str:
     """Get the hostname of a specific unit."""
-    _, hostname, _ = await ops_test.juju("ssh", f"{app}/{unit_id}", "hostname")
-    return hostname.strip()
+    return juju.ssh(f"{app}/{unit_id}", "hostname").strip()
 
 
 async def _get_unit(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     raw_app: dict[str, Any],
     unit_name: str,
@@ -178,7 +204,7 @@ async def _get_unit(
     """Create a Unit object from raw unit data."""
     unit_id = int(unit_name.split("/")[-1])
 
-    app_id = f"{ops_test.model.uuid}/{app}"
+    app_id = f"{_model_uuid(juju)}/{app}"
     app_short_id = md5(app_id.encode()).hexdigest()[:3]
     # K8s units may not have "machine" or use a different structure; use -1 when missing.
     machine_val = raw_unit.get("machine", -1)
@@ -187,7 +213,7 @@ async def _get_unit(
     ip = _get_unit_address(raw_unit) or ""
 
     try:
-        hostname = await get_unit_hostname(ops_test, unit_id, app)
+        hostname = await get_unit_hostname(juju, unit_id, app)
     except Exception:
         # On K8s use address as hostname for wait logic.
         hostname = ip
@@ -217,34 +243,31 @@ async def _get_unit(
     )
 
 
-async def get_application_units(ops_test: OpsTest, app: str) -> List[Unit]:
+async def get_application_units(juju: jubilant.Juju, app: str) -> List[Unit]:
     """Get fully detailed units of an application."""
-    # Juju incorrectly reports the IP addresses after the network is restored this is reported as a
-    # bug here: https://github.com/juju/python-libjuju/issues/738. Once this bug is resolved use of
-    # `get_unit_ip` should be replaced with `.public_address`
-    if app not in ops_test.model.applications:
+    status = json.loads(
+        subprocess.check_output(f"juju status --model {_model_name(juju)} --format=json".split())
+    )["applications"]
+    if app not in status:
         return []
-    raw_app = get_raw_application(ops_test, app)
+    raw_app = get_raw_application(juju, app)
     units = []
     for u_name, raw_unit in raw_app.get("units", {}).items():
         if not _get_unit_address(raw_unit):
             # unit not ready yet...
             continue
-        units.append(_get_unit(ops_test, app, raw_app, u_name, raw_unit))
+        units.append(_get_unit(juju, app, raw_app, u_name, raw_unit))
 
     return await asyncio.gather(*units) if units else []
 
 
 async def get_application_subordinate_units(
-    ops_test: OpsTest, principal_app: str, app: str
+    juju: jubilant.Juju, principal_app: str, app: str
 ) -> List[Unit]:
     """Get fully detailed units of an application."""
-    # Juju incorrectly reports the IP addresses after the network is restored this is reported as a
-    # bug here: https://github.com/juju/python-libjuju/issues/738. Once this bug is resolved use of
-    # `get_unit_ip` should be replaced with `.public_address`
-    raw_app = get_raw_application(ops_test, app)
+    raw_app = get_raw_application(juju, app)
     units = []
-    for principal_unit in get_raw_application(ops_test, principal_app)["units"].values():
+    for principal_unit in get_raw_application(juju, principal_app)["units"].values():
         u_name, raw_unit = None, None
         for u_name, raw_unit in principal_unit["subordinates"].items():
             if u_name.startswith(f"{app}/"):
@@ -256,7 +279,7 @@ async def get_application_subordinate_units(
             # unit not ready yet...
             continue
 
-        units.append(_get_unit(ops_test, app, raw_app, u_name, raw_unit, subordinate=True))
+        units.append(_get_unit(juju, app, raw_app, u_name, raw_unit, subordinate=True))
     return await asyncio.gather(*units) if units else []
 
 
@@ -287,7 +310,7 @@ def _check_status(status: Status, check: StatusObject) -> bool:
 
 
 def _is_every_condition_on_app_met(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     units: list[Unit] | None,
     app_statuses: list[StatusObject] | None,
@@ -296,7 +319,7 @@ def _is_every_condition_on_app_met(
     if units:
         current_status = units[0].app_status
     else:
-        current_status = get_raw_application(ops_test, app)["application-status"]
+        current_status = get_raw_application(juju, app)["application-status"]
         current_status = Status(
             value=current_status["current"],
             since=current_status["since"],
@@ -339,7 +362,7 @@ def _is_every_condition_on_units_met(
 
 
 async def _is_every_condition_met(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     apps: List[str],
     wait_for_exact_units: Dict[str, int],
     apps_statuses: dict[str, list[StatusObject]] | None,
@@ -348,24 +371,24 @@ async def _is_every_condition_met(
 ) -> bool:
     """Evaluate if all the deployment status conditions are met."""
     for app in apps:
-        app_dict = get_raw_application(ops_test, app)
+        app_dict = get_raw_application(juju, app)
         expected_units = wait_for_exact_units[app]
         if "subordinate-to" in app_dict:
             logger.debug(f"Subordinate app: {app}")
             # In this case, we must search for the principal app
             units = await get_application_subordinate_units(
-                ops_test, app_dict["subordinate-to"][0], app
+                juju, app_dict["subordinate-to"][0], app
             )
         else:
             logger.debug(f"This is a principal app: {app}")
-            units = await get_application_units(ops_test, app)
+            units = await get_application_units(juju, app)
 
         if -1 < expected_units != len(units):
             logger.info(f"{app} -- expected units: {expected_units} -- current: {len(units)}")
             return False
 
         if not _is_every_condition_on_app_met(
-            ops_test=ops_test,
+            juju=juju,
             app=app,
             units=(units if expected_units > -1 else None),
             app_statuses=apps_statuses.get(app) if apps_statuses else None,
@@ -375,7 +398,7 @@ async def _is_every_condition_met(
             return False
 
         if expected_units > -1 and not _is_every_condition_on_units_met(
-            model=ops_test.model.info.name,
+            model=_model_name(juju),
             units=units,
             unit_statuses=units_statuses.get(app) if units_statuses else None,
             idle_period=idle_period,
@@ -388,7 +411,7 @@ async def _is_every_condition_met(
 
 
 async def wait_until(  # noqa: C901
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     apps: list[str],
     apps_statuses: dict[str, list[StatusObject]] | None = None,
     units_statuses: dict[str, list[StatusObject]] | None = None,
@@ -399,7 +422,7 @@ async def wait_until(  # noqa: C901
     """Block and wait until a set of statuses and timeouts are met.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         apps: A list of applications whose statuses to test against
         apps_statuses: List of acceptable statuses to wait for by each specified app.
             The final computed status (e.g. that one shown in juju status) is only checked.
@@ -429,15 +452,15 @@ async def wait_until(  # noqa: C901
     try:
         logger.info("\n\n\n")
         logger.info(
-            subprocess.check_output(
-                f"juju status --model {ops_test.model.info.name}", shell=True
-            ).decode("utf-8")
+            subprocess.check_output(f"juju status --model {_model_name(juju)}", shell=True).decode(
+                "utf-8"
+            )
         )
         for attempt in Retrying(stop=stop_after_delay(timeout), wait=wait_fixed(10)):
             with attempt:
                 logger.info(f"\n\n\n{now()} -- Waiting for model...")
                 if await _is_every_condition_met(
-                    ops_test=ops_test,
+                    juju=juju,
                     apps=apps,
                     wait_for_exact_units=wait_for_exact_units,
                     apps_statuses=apps_statuses,
@@ -450,29 +473,29 @@ async def wait_until(  # noqa: C901
     except RetryError:
         logger.error("wait_until -- Timed out!\n\n\n")
         logger.info(
-            subprocess.check_output(
-                f"juju status --model {ops_test.model.info.name}", shell=True
-            ).decode("utf-8")
+            subprocess.check_output(f"juju status --model {_model_name(juju)}", shell=True).decode(
+                "utf-8"
+            )
         )
-        _dump_juju_logs(model=ops_test.model.info.name, lines=3000)
+        _dump_juju_logs(model=_model_name(juju), lines=3000)
         raise
 
 
 async def wait_until_condition_on_units(
-    ops_test: OpsTest, app: str, condition: Callable[[list[Unit]], bool], timeout: int = 1200
+    juju: jubilant.Juju, app: str, condition: Callable[[list[Unit]], bool], timeout: int = 1200
 ) -> None:
     """Block and wait until a condition is met on the units in `app` or timeout."""
     try:
         logger.info("\n\n\n")
         logger.info(
-            subprocess.check_output(
-                f"juju status --model {ops_test.model.info.name}", shell=True
-            ).decode("utf-8")
+            subprocess.check_output(f"juju status --model {_model_name(juju)}", shell=True).decode(
+                "utf-8"
+            )
         )
         for attempt in Retrying(stop=stop_after_delay(timeout), wait=wait_fixed(10)):
             with attempt:
                 logger.info("Waiting for condition...")
-                units = await get_application_units(ops_test, app)
+                units = await get_application_units(juju, app)
                 if condition(units):
                     logger.info(f"{now()} -- Waiting for condition: complete.\n\n\n")
                     return
@@ -480,107 +503,102 @@ async def wait_until_condition_on_units(
     except RetryError:
         logger.error("wait_until_condition_on_units -- Timed out!\n\n\n")
         logger.info(
-            subprocess.check_output(
-                f"juju status --model {ops_test.model.info.name}", shell=True
-            ).decode("utf-8")
+            subprocess.check_output(f"juju status --model {_model_name(juju)}", shell=True).decode(
+                "utf-8"
+            )
         )
-        _dump_juju_logs(model=ops_test.model.info.name, lines=3000)
+        _dump_juju_logs(model=_model_name(juju), lines=3000)
         raise
 
 
-async def get_application_unit_ids_ips(ops_test: OpsTest, app: str = APP_NAME) -> Dict[int, str]:
+async def get_application_unit_ids_ips(juju: jubilant.Juju, app: str = APP_NAME) -> Dict[int, str]:
     """List the units of an application by id and corresponding IP.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         app: the name of the app
 
     Returns:
         Dictionary unit_id / IP, of the application
     """
     result = {}
-    for unit in await get_application_units(ops_test, app):
+    for unit in await get_application_units(juju, app):
         result[unit.id] = unit.ip
 
     return result
 
 
 async def get_application_unit_ids_hostnames(
-    ops_test: OpsTest, app: str = APP_NAME
+    juju: jubilant.Juju, app: str = APP_NAME
 ) -> Dict[int, str]:
     """List the units of an application by id and corresponding host name."""
     result = {}
-    for unit in ops_test.model.applications[app].units:
-        unit_id = int(unit.name.split("/")[1])
-        result[unit_id] = await get_unit_hostname(ops_test, unit_id, app)
+    for unit_name in get_raw_application(juju, app).get("units", {}):
+        unit_id = int(unit_name.split("/")[1])
+        result[unit_id] = await get_unit_hostname(juju, unit_id, app)
 
     return result
 
 
-def get_application_unit_ids(ops_test: OpsTest, app: str = APP_NAME) -> List[int]:
+def get_application_unit_ids(juju: jubilant.Juju, app: str = APP_NAME) -> List[int]:
     """List the unit IDs of an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         app: the name of the app
 
     Returns:
         list of current unit ids of the application
     """
-    return [int(unit.name.split("/")[1]) for unit in ops_test.model.applications[app].units]
+    return [
+        int(unit_name.split("/")[1])
+        for unit_name in get_raw_application(juju, app).get("units", {})
+    ]
 
 
 def get_file_contents(
-    ops_test: OpsTest, unit: str, filename: str, substrate: Substrate = "vm"
-) -> bytes:
+    juju: jubilant.Juju, unit: str, filename: str, substrate: Substrate = "vm"
+) -> str:
     """Read file contents from a unit."""
-    command = ["juju", "ssh", "-m", ops_test.model.name]
     if substrate == "k8s":
-        command.extend(["--container", "opensearch", unit, "cat", filename])
-    else:
-        command.extend([unit, "sudo", "cat", filename])
-
-    return subprocess.check_output(command)
+        return juju.ssh(unit, "cat", filename, container="opensearch")
+    return juju.ssh(unit, "sudo", "cat", filename)
 
 
 def get_conf_as_dict(
-    ops_test: OpsTest, unit: str, filename: str, substrate: Substrate = "vm"
+    juju: jubilant.Juju, unit: str, filename: str, substrate: Substrate = "vm"
 ) -> dict[str, str]:
     """Convert a yml config file to a dict."""
-    config = get_file_contents(ops_test, unit, filename, substrate)
-    return yaml.safe_load(str(config.decode("utf-8")).replace("ll", ""))
+    config = get_file_contents(juju, unit, filename, substrate)
+    return yaml.safe_load(config.replace("ll", ""))
 
 
-async def get_leader_unit_id(ops_test: OpsTest, app: str = APP_NAME) -> int:
+async def get_leader_unit_id(juju: jubilant.Juju, app: str = APP_NAME) -> int:
     """Helper function that retrieves the leader unit ID."""
-    leader_unit = None
-    for unit in ops_test.model.applications[app].units:
-        if await unit.is_leader_from_status():
-            leader_unit = unit
-            break
-
-    return int(leader_unit.name.split("/")[1])
+    for unit_name, unit in juju.status().apps[app].units.items():
+        if unit.leader:
+            return int(unit_name.split("/")[1])
 
 
-async def get_leader_unit_ip(ops_test: OpsTest, app: str = APP_NAME) -> str:
+async def get_leader_unit_ip(juju: jubilant.Juju, app: str = APP_NAME) -> str:
     """Helper function that retrieves the leader unit IP."""
-    for unit in await get_application_units(ops_test, app):
+    for unit in await get_application_units(juju, app):
         if unit.is_leader:
             return unit.ip
 
 
 async def _find_k8s_unit_for_endpoint(
-    ops_test: OpsTest, endpoint: str, app: str
+    juju: jubilant.Juju, endpoint: str, app: str
 ) -> Optional[Unit]:
     """Return the K8s unit matching the endpoint host, if any."""
-    if ops_test.request.config.option.substrate != "k8s":
+    if not _is_k8s(juju):
         return None
 
     hostname = urlparse(endpoint).hostname
     if not hostname:
         return None
 
-    for unit in await get_application_units(ops_test, app):
+    for unit in await get_application_units(juju, app):
         # On K8s the pod hostname is the Juju short unit name, e.g. `opensearch-0`.
         # We use that as the signal to run requests from inside the pod so TLS can
         # use the pod DNS name rather than the external pod IP.
@@ -590,11 +608,6 @@ async def _find_k8s_unit_for_endpoint(
     return None
 
 
-def _model_name(ops_test: OpsTest) -> str:
-    """Return the active Juju model name from pytest-operator."""
-    return getattr(ops_test, "model_name", None) or ops_test.model.info.name
-
-
 def _request_path(endpoint: str) -> str:
     """Return the path and query string for an HTTP endpoint."""
     parsed_endpoint = urlparse(endpoint)
@@ -602,9 +615,9 @@ def _request_path(endpoint: str) -> str:
     return f"{path}?{parsed_endpoint.query}" if parsed_endpoint.query else path
 
 
-def _k8s_unit_fqdn(ops_test: OpsTest, app: str, unit: Unit) -> str:
+def _k8s_unit_fqdn(juju: jubilant.Juju, app: str, unit: Unit) -> str:
     """Return the fully qualified domain name for a K8s unit"""
-    return f"{unit.short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
+    return f"{unit.short_name}.{app}-endpoints.{_model_name(juju)}.svc.cluster.local"
 
 
 def _http_request_headers(
@@ -626,8 +639,8 @@ def _http_request_headers(
 
 
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
-async def run_action(
-    ops_test: OpsTest,
+async def run_action(  # noqa: C901
+    juju: jubilant.Juju,
     unit_id: Optional[int],
     action_name: str,
     params: Optional[Dict[str, any]] = None,
@@ -638,28 +651,27 @@ async def run_action(
     Returns:
         A SimpleNamespace with "status, response (results)"
     """
-    if app not in ops_test.model.applications:
+    if app not in juju.status().apps:
         return SimpleNamespace(
             status="failed",
-            response={"error": f"Application {app} not found in model {ops_test.model.info.name}"},
+            response={"error": f"Application {app} not found in model {_model_name(juju)}"},
         )
     if unit_id is None:
         online_units = []
-        for unit in await get_application_units(ops_test, app):
+        for unit in await get_application_units(juju, app):
             if unit.workload_status.value != "active":
                 continue
 
             # K8s units do not expose SSH on port 22, so Juju actions should target
             # any active unit directly.
-            # libjuju reports machine_id == -1 for CAAS/K8s units, which do not have
-            # a backing Juju machine or SSH on port 22.
             # try to juju exec
-            if ops_test.request.config.option.substrate == "k8s":
-                return_code, output, _ = await ops_test.juju(
-                    "exec", "--wait", "5s", "--unit", f"{app}/{unit.id}", "echo hello"
-                )
-                if return_code == 0 and output.strip() == "hello":
-                    online_units.append(unit)
+            if _is_k8s(juju):
+                try:
+                    task = juju.exec("echo hello", unit=f"{app}/{unit.id}", wait=5)
+                    if task.return_code == 0 and task.stdout.strip() == "hello":
+                        online_units.append(unit)
+                except jubilant.TaskError:
+                    pass
                 continue
 
             ping = subprocess.call(
@@ -677,20 +689,23 @@ async def run_action(
 
         unit_id = random.choice(online_units).id
 
-    unit_name = [
-        unit.name
-        for unit in ops_test.model.applications[app].units
-        if unit.name.endswith(f"/{unit_id}")
-    ][0]
+    unit_name = f"{app}/{unit_id}"
 
-    action = await ops_test.model.units.get(unit_name).run_action(action_name, **(params or {}))
-    action = await action.wait()
+    try:
+        task = juju.run(unit_name, action_name, params or {})
+    except jubilant.TaskError as e:
+        return SimpleNamespace(status="failed", response=e.task.results)
+    except jubilant.CLIError as e:
+        return SimpleNamespace(status="failed", response={"error": str(e)})
 
-    return SimpleNamespace(status=action.status or "completed", response=action.results)
+    return SimpleNamespace(status=task.status or "completed", response=task.results)
 
 
 async def get_secrets(
-    ops_test: OpsTest, unit_id: Optional[int] = None, username: str = "admin", app: str = APP_NAME
+    juju: jubilant.Juju,
+    unit_id: Optional[int] = None,
+    username: str = "admin",
+    app: str = APP_NAME,
 ) -> Dict[str, str]:
     """Use the charm action to retrieve the admin password and chain.
 
@@ -699,12 +714,12 @@ async def get_secrets(
     """
     # can retrieve from any unit running unit, so we pick the first
     return (
-        await run_action(ops_test, unit_id, "get-password", {"username": username}, app=app)
+        await run_action(juju, unit_id, "get-password", {"username": username}, app=app)
     ).response
 
 
 async def http_request(  # noqa: C901
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     method: str,
     endpoint: str,
     payload: Optional[Union[str, Dict[str, any]]] = None,
@@ -720,7 +735,7 @@ async def http_request(  # noqa: C901
     """Makes an HTTP request.
 
     Args:
-        ops_test: The ops test framework instance.
+        juju: The jubilant Juju instance.
         method: the HTTP method (GET, POST, HEAD etc.)
         endpoint: the url to be called.
         payload: the body of the request if any.
@@ -733,9 +748,9 @@ async def http_request(  # noqa: C901
     Returns:
         A json object.
     """
-    admin_secrets = await get_secrets(ops_test, app=app)
-    if ops_test.request.config.option.substrate == "k8s":
-        k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+    admin_secrets = await get_secrets(juju, app=app)
+    if _is_k8s(juju):
+        k8s_unit = await _find_k8s_unit_for_endpoint(juju, endpoint, app)
         if not k8s_unit:
             raise RuntimeError(
                 f"No unit found for endpoint {endpoint}. Cannot make request from {CLIENT_CHARM}."
@@ -743,12 +758,12 @@ async def http_request(  # noqa: C901
         # K8s requests that start from a pod IP are executed from inside the
         # cluster so they can use the stable unit service DNS name with strict TLS.
         logger.info(
-            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {_k8s_unit_fqdn(ops_test, app, k8s_unit)} route: {_request_path(endpoint)}"
+            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {_k8s_unit_fqdn(juju, app, k8s_unit)} route: {_request_path(endpoint)}"
         )
         params: dict[str, Any] = {
             "method": method,
             "route": _request_path(endpoint),
-            "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+            "host": _k8s_unit_fqdn(juju, app, k8s_unit),
             "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
             "timeout": int(timeout),
         }
@@ -763,7 +778,7 @@ async def http_request(  # noqa: C901
             params["headers"] = json.dumps(headers)
 
         action = await run_action(
-            ops_test,
+            juju,
             None,
             "request",
             params,
@@ -817,7 +832,7 @@ async def http_request(  # noqa: C901
 
         if resp.status_code == 503:
             logger.debug("\n\n\n\n -- Error 503 -- \n")
-            await debug_failed_unit(ops_test, app, endpoint)
+            await debug_failed_unit(juju, app, endpoint)
 
         if resp_status_code:
             return resp.status_code
@@ -829,25 +844,27 @@ async def http_request(  # noqa: C901
         return resp
 
 
-async def debug_failed_unit(ops_test: OpsTest, app: str, endpoint: str) -> None:
+async def debug_failed_unit(juju: jubilant.Juju, app: str, endpoint: str) -> None:
     """Print the logs of a unit failing with a certain set of statuses."""
     unit_ip = endpoint[8:].split(":")[0]
 
-    ids_ips = await get_application_unit_ids_ips(ops_test, app=app)
+    ids_ips = await get_application_unit_ids_ips(juju, app=app)
     unit_id = [u_id for u_id, u_ip in ids_ips.items() if u_ip == unit_ip][0]
 
     root = "/var/snap/opensearch"
     files_to_debug = [
-        f"{root}/common/logs/{app}-{ops_test.model_name}.log",
+        f"{root}/common/logs/{app}-{_model_name(juju)}.log",
         f"{root}/current/config/opensearch.yml",
         f"{root}/current/config/unicast_hosts.txt",
     ]
     for f in files_to_debug:
         logger.debug(f"{f}:\n")
 
-        get_logs_cmd = f"run --unit {app}/{unit_id} -- sudo cat {f}"
-        _, out, err = await ops_test.juju(*get_logs_cmd.split())
-        logger.debug(f"out:\n{out}\n---\nerr:\n{err}")
+        try:
+            out = juju.ssh(f"{app}/{unit_id}", "sudo", "cat", f)
+            logger.debug(f"out:\n{out}")
+        except jubilant.CLIError as err:
+            logger.debug(f"err:\n{err}")
 
         logger.debug("\n\n------------------\n\n")
 
@@ -877,30 +894,28 @@ def opensearch_client(
     )
 
 
-async def get_application_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> List[str]:
+async def get_application_unit_ips(juju: jubilant.Juju, app: str = APP_NAME) -> List[str]:
     """List the unit IPs of an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         app: the name of the app
 
     Returns:
         list of current IPs of the application
     """
-    return [unit.ip for unit in await get_application_units(ops_test, app)]
+    return [unit.ip for unit in await get_application_units(juju, app)]
 
 
-async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
-    secrets_raw = await ops_test.juju("list-secrets")
+async def get_secret_by_label(juju: jubilant.Juju, label: str) -> Dict[str, str]:
+    secrets_raw = juju.cli("list-secrets")
     secret_ids = [
-        secret_line.split()[0] for secret_line in secrets_raw[1].split("\n")[1:] if secret_line
+        secret_line.split()[0] for secret_line in secrets_raw.split("\n")[1:] if secret_line
     ]
 
     for secret_id in secret_ids:
-        secret_data_raw = await ops_test.juju(
-            "show-secret", "--format", "json", "--reveal", secret_id
-        )
-        secret_data = json.loads(secret_data_raw[1])
+        secret_data_raw = juju.cli("show-secret", "--format", "json", "--reveal", secret_id)
+        secret_data = json.loads(secret_data_raw)
 
         if label == secret_data[secret_id].get("label"):
             return secret_data[secret_id]["content"]["Data"]
@@ -911,19 +926,19 @@ async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
     stop=stop_after_attempt(15),
 )
 async def check_cluster_formation_successful(
-    ops_test: OpsTest, unit_ip: str, unit_names: list[str], app: str = APP_NAME
+    juju: jubilant.Juju, unit_ip: str, unit_names: list[str], app: str = APP_NAME
 ) -> bool:
     """Returns whether the cluster formation was successful and all nodes successfully joined.
 
     Args:
-        ops_test: The ops test framework instance.
+        juju: The jubilant Juju instance.
         unit_ip: The ip of the unit of the OpenSearch unit.
         unit_names: The list of unit names in the cluster.
 
     Returns:
         Whether The cluster formation is successful.
     """
-    response = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
+    response = await http_request(juju, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
     if "_nodes" not in response or "nodes" not in response:
         return False
 
@@ -940,13 +955,13 @@ async def check_cluster_formation_successful(
     stop=stop_after_attempt(15),
 )
 async def cluster_health(
-    ops_test: OpsTest, unit_ip: str, wait_for_green_first: bool = False, app: str = APP_NAME
+    juju: jubilant.Juju, unit_ip: str, wait_for_green_first: bool = False, app: str = APP_NAME
 ) -> Dict[str, any]:
     """Fetch the cluster health."""
     if wait_for_green_first:
         try:
             return await http_request(
-                ops_test,
+                juju,
                 "GET",
                 f"https://{unit_ip}:9200/_cluster/health?wait_for_status=green&timeout=1m",
                 app=app,
@@ -956,45 +971,47 @@ async def cluster_health(
             pass
 
     return await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_cluster/health",
         app=app,
     )
 
 
-async def get_application_unit_ips_names(ops_test: OpsTest, app: str = APP_NAME) -> Dict[str, str]:
+async def get_application_unit_ips_names(
+    juju: jubilant.Juju, app: str = APP_NAME
+) -> Dict[str, str]:
     """List the units of an application by name and corresponding IPs.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         app: the name of the app
 
     Returns:
         Dictionary unit_name / IP, of the application
     """
     result = {}
-    for unit in await get_application_units(ops_test, app):
+    for unit in await get_application_units(juju, app):
         result[unit.name] = unit.ip
 
     return result
 
 
-def get_application_unit_names(ops_test: OpsTest, app: str = APP_NAME) -> List[str]:
+def get_application_unit_names(juju: jubilant.Juju, app: str = APP_NAME) -> List[str]:
     """List the unit names of an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         app: the name of the app
 
     Returns:
         list of current unit names of the application
     """
-    app_id = f"{ops_test.model.uuid}/{app}"
+    app_id = f"{_model_uuid(juju)}/{app}"
     app_short_id = md5(app_id.encode()).hexdigest()[:3]
     return [
-        f"{unit.name.replace('/', '-')}.{app_short_id}"
-        for unit in ops_test.model.applications[app].units
+        f"{unit_name.replace('/', '-')}.{app_short_id}"
+        for unit_name in get_raw_application(juju, app).get("units", {})
     ]
 
 
@@ -1003,11 +1020,11 @@ def get_application_unit_names(ops_test: OpsTest, app: str = APP_NAME) -> List[s
     stop=stop_after_attempt(25),
 )
 async def cluster_voting_config_exclusions(
-    ops_test: OpsTest, unit_ip: str, app: str = APP_NAME
+    juju: jubilant.Juju, unit_ip: str, app: str = APP_NAME
 ) -> list[dict[str, str]]:
     """Fetch the cluster allocation of shards."""
     result = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_cluster/state/metadata/voting_config_exclusions",
         app=app,
@@ -1019,12 +1036,12 @@ async def cluster_voting_config_exclusions(
     )
 
 
-async def execute_update_status_manually(ops_test: OpsTest, app: str):
+async def execute_update_status_manually(juju: jubilant.Juju, app: str):
     """Execute the update-status hook manually."""
-    leader_id = await get_leader_unit_id(ops_test, app)
+    leader_id = await get_leader_unit_id(juju, app)
 
     cmd = '"export JUJU_DISPATCH_PATH=hooks/update-status; ./dispatch"'
-    exec_cmd = f"juju exec -u opensearch/{leader_id} -m {ops_test.model.name} -- {cmd}"
+    exec_cmd = f"juju exec -u opensearch/{leader_id} -m {_model_name(juju)} -- {cmd}"
     try:
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
@@ -1040,13 +1057,13 @@ async def execute_update_status_manually(ops_test: OpsTest, app: str):
 
 @retry(wait=wait_fixed(wait=30), stop=stop_after_attempt(15))
 async def set_watermark(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
 ) -> None:
     """Set watermark on the application."""
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"https://{unit_ip}:9200/_cluster/settings",
         {
@@ -1073,7 +1090,7 @@ def is_reachable(host: str, port: int) -> bool:
 
 
 async def is_up(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     unit_ip: str,
     retries: int = 25,
     app: str = APP_NAME,
@@ -1084,7 +1101,7 @@ async def is_up(
         for attempt in Retrying(stop=stop_after_attempt(retries), wait=wait_fixed(wait=15)):
             with attempt:
                 await http_request(
-                    ops_test, "GET", f"https://{unit_ip}:9200/", app=app, timeout=timeout
+                    juju, "GET", f"https://{unit_ip}:9200/", app=app, timeout=timeout
                 )
                 return True
     except RetryError:
@@ -1092,14 +1109,14 @@ async def is_up(
     return False
 
 
-async def get_reachable_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> List[str]:
+async def get_reachable_unit_ips(juju: jubilant.Juju, app: str = APP_NAME) -> List[str]:
     """Helper function to retrieve the IP addresses of all online units."""
     result = []
-    for ip in await get_application_unit_ips(ops_test, app):
+    for ip in await get_application_unit_ips(juju, app):
         if not is_reachable(ip, 9200):
             continue
 
-        if await is_up(ops_test, ip, retries=1):
+        if await is_up(juju, ip, retries=1):
             result.append(ip)
 
     return result
@@ -1111,19 +1128,20 @@ def juju_version_major() -> int:
     return int(version.strip().decode("utf-8").split(".")[0])
 
 
-async def get_controller_hostname(ops_test: OpsTest) -> str:
+async def get_controller_hostname(juju: jubilant.Juju) -> str:
     """Return controller machine hostname."""
-    _, raw_controller, _ = await ops_test.juju("show-controller")
+    raw_controller = juju.cli("show-controller", include_model=False)
 
     controller = yaml.safe_load(raw_controller.strip())
+    controller_name = next(iter(controller))
 
     return [
         machine.get("instance-id")
-        for machine in controller[ops_test.controller_name]["controller-machines"].values()
+        for machine in controller[controller_name]["controller-machines"].values()
     ][0]
 
 
-async def app_name(ops_test: OpsTest) -> str | None:
+async def app_name(juju: jubilant.Juju) -> str | None:
     """Returns the name of the cluster running OpenSearch.
 
     This is important since not all deployments of the OpenSearch charm have the
@@ -1131,9 +1149,7 @@ async def app_name(ops_test: OpsTest) -> str | None:
     Note: if multiple clusters are running OpenSearch this will return the one first found.
     """
     apps = json.loads(
-        subprocess.check_output(
-            f"juju status --model {ops_test.model.info.name} --format=json".split()
-        )
+        subprocess.check_output(f"juju status --model {_model_name(juju)} --format=json".split())
     )["applications"]
 
     logger.info(f"Apps inside app_name: {apps}")
@@ -1154,7 +1170,7 @@ async def app_name(ops_test: OpsTest) -> str | None:
 
 
 async def get_unit_relation_data(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     unit_name: str,
     target_unit_name: str,
     relation_name: str,
@@ -1164,8 +1180,9 @@ async def get_unit_relation_data(
     """Get relation data for an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         unit_name: The name of the unit
+        target_unit_name: The name of the related unit
         relation_name: name of the relation to get connection data from
         key: key of data to be retrieved
         relation_id: id of the relation to get connection data from
@@ -1179,7 +1196,7 @@ async def get_unit_relation_data(
             or if there is no data for the particular relation endpoint
             and/or alias.
     """
-    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
+    raw_data = juju.cli("show-unit", unit_name)
     if not raw_data:
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)

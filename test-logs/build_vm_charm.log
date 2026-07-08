@@ -1,0 +1,108 @@
+clearing out libs for charm
+copying over libs from single kernel charm
+Building charm tests/charms/opensearch_test_charm
+
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm/opensearch_single_kernel ~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /home/ubuntu/opensearch-single-kernel-library/tests/charms/opensearch_test_charm/opensearch_single_kernel/.git/
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+Creating virtualenv non-package-mode-rSuMPbZ7-py3.12 in /home/ubuntu/.cache/pypoetry/virtualenvs
+
+Updating dependencies
+Resolving dependencies...
+
+Package operations: 75 installs, 0 updates, 0 removals
+
+  - Installing pycparser (2.22)
+  - Installing cffi (1.17.1)
+  - Installing pyasn1 (0.6.3)
+  - Installing certifi (2025.1.31)
+  - Installing charset-normalizer (3.4.1)
+  - Installing cryptography (45.0.4)
+  - Installing idna (3.10)
+  - Installing protobuf (7.34.1)
+  - Installing pyasn1-modules (0.4.2)
+  - Installing six (1.17.0)
+  - Installing typing-extensions (4.13.2)
+  - Installing urllib3 (2.4.0)
+  - Installing zipp (3.23.0)
+  - Installing attrs (25.3.0)
+  - Installing google-auth (2.49.1)
+  - Installing googleapis-common-protos (1.74.0)
+  - Installing h11 (0.16.0)
+  - Installing importlib-metadata (8.7.0)
+  - Installing mdurl (0.1.2)
+  - Installing jmespath (1.0.1)
+  - Installing proto-plus (1.27.2)
+  - Installing python-dateutil (2.9.0.post0)
+  - Installing requests (2.32.4)
+  - Installing rpds-py (0.24.0)
+  - Installing annotated-types (0.7.0)
+  - Installing anyio (4.14.1)
+  - Installing botocore (1.38.36)
+  - Installing distlib (0.4.0)
+  - Installing filelock (3.20.0)
+  - Installing google-crc32c (1.8.0)
+  - Installing httpcore (1.0.9)
+  - Installing opentelemetry-api (1.38.0)
+  - Installing platformdirs (4.3.7)
+  - Installing pygments (2.19.2)
+  - Installing pyyaml (6.0.2)
+  - Installing pydantic-core (2.33.2)
+  - Installing typing-inspection (0.4.2)
+  - Installing referencing (0.36.2)
+  - Installing markdown-it-py (4.0.0)
+  - Installing google-api-core (2.30.2)
+  - Installing websocket-client (1.8.0)
+  - Installing azure-core (1.39.0)
+  - Installing cfgv (3.5.0)
+  - Installing google-cloud-core (2.5.1)
+  - Installing google-resumable-media (2.8.2)
+  - Installing httpx (0.28.1)
+  - Installing identify (2.6.15)
+  - Installing jsonschema-specifications (2024.10.1)
+  - Installing nodeenv (1.9.1)
+  - Installing pydantic (2.11.10)
+  - Installing isodate (0.7.2)
+  - Installing lightkube-models (1.35.0.8)
+  - Installing s3transfer (0.13.0)
+  - Installing ops (3.5.2)
+  - Installing rich (14.3.3)
+  - Installing virtualenv (20.35.4)
+  - Installing tenacity (9.1.2)
+  - Installing ruamel-yaml-clib (0.2.12)
+  - Installing azure-storage-blob (12.28.0)
+  - Installing boto3 (1.38.36)
+  - Installing charmlibs-pathops (1.2.0.post0)
+  - Installing cosl (1.9.2)
+  - Installing data-platform-helpers (0.1.7)
+  - Installing dnspython (2.8.0)
+  - Installing google-cloud-storage (2.19.0)
+  - Installing jsonschema (4.24.0)
+  - Installing lightkube (0.17.2)
+  - Installing overrides (7.7.0)
+  - Installing pre-commit (4.4.0)
+  - Installing shortuuid (1.0.13)
+  - Installing poetry-core (1.9.1)
+  - Installing ruamel-yaml (0.18.14)
+  - Installing bcrypt (4.3.0)
+  - Installing email-validator (2.3.0)
+  - Installing opensearch-charms-single-kernel (0.0.6 /home/ubuntu/opensearch-single-kernel-library/tests/charms/opensearch_test_charm/opensearch_single_kernel)
+
+Writing lock file
+Resolving dependencies...
+Starting charmcraft, version 4.3.0
+Logging execution to '/home/ubuntu/.local/state/charmcraft/log/charmcraft-20260708-181937.089541.log'
+Platform 'amd64' not found in the project definition.
+Detailed information: Valid platforms are: 'ubuntu@22.04:amd64', 'ubuntu@24.04:amd64'.
+Full execution log: '/home/ubuntu/.local/state/charmcraft/log/charmcraft-20260708-181937.089541.log'

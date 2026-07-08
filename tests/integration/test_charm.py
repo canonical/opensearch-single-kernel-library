@@ -9,9 +9,9 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import jubilant
 import pytest
 import yaml
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import (
     OPENSEARCH_SNAP_REVISION,
@@ -46,13 +46,13 @@ DEFAULT_NUM_UNITS = 2
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy_and_remove_single_unit(
-    charm, series, ops_test: OpsTest, substrate, charm_resources
+    charm, series, juju: jubilant.Juju, substrate, charm_resources
 ) -> None:
     """Build and deploy OpenSearch with a single unit and remove it."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -63,45 +63,47 @@ async def test_deploy_and_remove_single_unit(
     )
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=1,
         units_statuses={APP_NAME: [GeneralStatuses.ACTIVE_IDLE.value]},
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == 1
+    assert len(juju.status().apps[APP_NAME].units) == 1
 
-    c_writes = ContinuousWrites(ops_test, APP_NAME)
+    c_writes = ContinuousWrites(juju, APP_NAME)
     try:
         await c_writes.start()
         await assert_continuous_writes_increasing(c_writes)
-        await assert_continuous_writes_consistency(ops_test, c_writes, [APP_NAME])
+        await assert_continuous_writes_consistency(juju, c_writes, [APP_NAME])
 
     finally:
         # Now, clean up
         await c_writes.stop()
-        await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-        await ops_test.model.remove_application(TLS_CERTIFICATES_APP_NAME, block_until_done=True)
+        juju.remove_application(APP_NAME, destroy_storage=True)
+        juju.remove_application(TLS_CERTIFICATES_APP_NAME)
+        juju.wait(
+            lambda status: APP_NAME not in status.apps
+            and TLS_CERTIFICATES_APP_NAME not in status.apps
+        )
 
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy(
-    charm, series, ops_test: OpsTest, substrate, charm_resources
+    charm, series, juju: jubilant.Juju, substrate, charm_resources
 ) -> None:
     """Build and deploy a couple of OpenSearch units."""
     model_config = MODEL_CONFIG
     model_config["update-status-hook-interval"] = "1m"
 
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -111,121 +113,119 @@ async def test_build_and_deploy(
         resources=charm_resources,
     )
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
         apps_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
         units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == DEFAULT_NUM_UNITS
+    assert len(juju.status().apps[APP_NAME].units) == DEFAULT_NUM_UNITS
 
 
 @pytest.mark.abort_on_fail
-async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
+async def test_actions_get_admin_password(juju: jubilant.Juju, substrate) -> None:
     """Test the retrieval of admin secrets."""
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
 
     # 1. run the action prior to finishing the config of TLS
-    result = await run_action(ops_test, leader_id, "get-password")
+    result = await run_action(juju, leader_id, "get-password")
     assert result.status == "failed"
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
     )
 
-    leader_ip = await get_leader_unit_ip(ops_test)
+    leader_ip = await get_leader_unit_ip(juju)
     test_url = f"https://{leader_ip}:9200/"
 
     # 2. run the action after finishing the config of TLS
-    result = await get_secrets(ops_test)
+    result = await get_secrets(juju)
     assert result.get("username") == "admin"
     assert result.get("password")
     assert result.get("ca-chain")
 
     # parse_output fields non-null + make http request success
-    http_resp_code = await http_request(ops_test, "GET", test_url, resp_status_code=True)
+    http_resp_code = await http_request(juju, "GET", test_url, resp_status_code=True)
     assert http_resp_code == 200
 
     # 3. test retrieving password from non-supported user
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "non-existent"})
+    result = await run_action(juju, leader_id, "get-password", {"username": "non-existent"})
     assert result.status == "failed"
 
 
 @pytest.mark.abort_on_fail
-async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
+async def test_actions_rotate_admin_password(juju: jubilant.Juju) -> None:
     """Test the rotation and change of admin password."""
-    leader_ip = await get_leader_unit_ip(ops_test)
+    leader_ip = await get_leader_unit_ip(juju)
     test_url = f"https://{leader_ip}:9200/"
 
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
     non_leader_id = [
-        unit_id for unit_id in get_application_unit_ids(ops_test) if unit_id != leader_id
+        unit_id for unit_id in get_application_unit_ids(juju) if unit_id != leader_id
     ][0]
 
     # 1. run the action on a non_leader unit.
-    result = await run_action(ops_test, non_leader_id, "set-password")
+    result = await run_action(juju, non_leader_id, "set-password")
     assert result.status == "failed"
 
     # 2. run the action with the wrong username
-    result = await run_action(ops_test, leader_id, "set-password", {"username": "wrong-user"})
+    result = await run_action(juju, leader_id, "set-password", {"username": "wrong-user"})
     assert result.status == "failed"
 
     # 3. change password and verify the new password works and old password not
-    password0 = (await get_secrets(ops_test, leader_id))["password"]
-    result = await run_action(ops_test, leader_id, "set-password", {"password": "new_pwd"})
+    password0 = (await get_secrets(juju, leader_id))["password"]
+    result = await run_action(juju, leader_id, "set-password", {"password": "new_pwd"})
     password1 = result.response.get("admin-password")
     assert password1
-    assert password1 == (await get_secrets(ops_test, leader_id))["password"]
+    assert password1 == (await get_secrets(juju, leader_id))["password"]
 
-    http_resp_code = await http_request(ops_test, "GET", test_url, resp_status_code=True)
+    http_resp_code = await http_request(juju, "GET", test_url, resp_status_code=True)
     assert http_resp_code == 200
 
     http_resp_code = await http_request(
-        ops_test, "GET", test_url, resp_status_code=True, user_password=password0
+        juju, "GET", test_url, resp_status_code=True, user_password=password0
     )
     assert http_resp_code == 401
 
     # 4. change password with auto-generated one
-    result = await run_action(ops_test, leader_id, "set-password")
+    result = await run_action(juju, leader_id, "set-password")
     password2 = result.response.get("admin-password")
     assert password2
 
-    http_resp_code = await http_request(ops_test, "GET", test_url, resp_status_code=True)
+    http_resp_code = await http_request(juju, "GET", test_url, resp_status_code=True)
     assert http_resp_code == 200
 
     http_resp_code = await http_request(
-        ops_test, "GET", test_url, resp_status_code=True, user_password=password1
+        juju, "GET", test_url, resp_status_code=True, user_password=password1
     )
     assert http_resp_code == 401
 
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("user", [("monitor"), ("kibanaserver")])
-async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> None:
+async def test_actions_rotate_system_user_password(juju: jubilant.Juju, user) -> None:
     """Test the rotation and change of admin password."""
-    leader_ip = await get_leader_unit_ip(ops_test)
+    leader_ip = await get_leader_unit_ip(juju)
     test_url = f"https://{leader_ip}:9200/"
 
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
 
     # run the action w/o password parameter
-    password0 = (await get_secrets(ops_test, leader_id, user))["password"]
-    result = await run_action(ops_test, leader_id, "set-password", {"username": user})
+    password0 = (await get_secrets(juju, leader_id, user))["password"]
+    result = await run_action(juju, leader_id, "set-password", {"username": user})
     password1 = result.response.get(f"{user}-password")
     assert password1 != password0
 
     # 1. change password with auto-generated one
     http_resp_code = await http_request(
-        ops_test,
+        juju,
         "GET",
         test_url,
         resp_status_code=True,
@@ -235,7 +235,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
     assert http_resp_code == 200
 
     http_resp_code = await http_request(
-        ops_test,
+        juju,
         "GET",
         test_url,
         resp_status_code=True,
@@ -245,16 +245,16 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
     assert http_resp_code == 401
 
     # 2. change password and verify the new password works and old password not
-    password0 = (await get_secrets(ops_test, leader_id, user))["password"]
+    password0 = (await get_secrets(juju, leader_id, user))["password"]
     result = await run_action(
-        ops_test, leader_id, "set-password", {"username": user, "password": "new_pwd"}
+        juju, leader_id, "set-password", {"username": user, "password": "new_pwd"}
     )
     password1 = result.response.get(f"{user}-password")
     assert password1
-    assert password1 == (await get_secrets(ops_test, leader_id, user))["password"]
+    assert password1 == (await get_secrets(juju, leader_id, user))["password"]
 
     http_resp_code = await http_request(
-        ops_test,
+        juju,
         "GET",
         test_url,
         resp_status_code=True,
@@ -264,7 +264,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
     assert http_resp_code == 200
 
     http_resp_code = await http_request(
-        ops_test,
+        juju,
         "GET",
         test_url,
         resp_status_code=True,
@@ -276,9 +276,9 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
-async def test_check_pinned_revision(ops_test: OpsTest) -> None:
+async def test_check_pinned_revision(juju: jubilant.Juju) -> None:
     """Test check the pinned revision."""
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
 
     installed_info = yaml.safe_load(
         subprocess.check_output(
@@ -303,15 +303,15 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
+async def test_check_workload_version(juju: jubilant.Juju, substrate) -> None:
     """Test to check if the workload_version file is updated."""
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
 
     command = [
         "juju",
         "ssh",
         "-m",
-        ops_test.model.info.name,
+        juju.model,
         f"{APP_NAME}/{leader_id}",
         "--",
         "sudo",
@@ -324,7 +324,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
             "juju",
             "ssh",
             "-m",
-            ops_test.model.info.name,
+            juju.model,
             "--container",
             "opensearch",
             f"{APP_NAME}/{leader_id}",
@@ -357,11 +357,11 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_all_units_have_internal_users_synced(
-    ops_test: OpsTest, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrate
 ) -> None:
     """Compare the internal_users.yaml of all units."""
     # Get the leader's version of internal_users.yml
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_id = await get_leader_unit_id(juju)
     leader_name = f"{APP_NAME}/{leader_id}"
 
     filename = (
@@ -370,23 +370,23 @@ async def test_all_units_have_internal_users_synced(
         else "/var/snap/opensearch/current/etc/opensearch/opensearch-security/internal_users.yml"
     )
 
-    leader_conf = get_conf_as_dict(ops_test, leader_name, filename, substrate)
+    leader_conf = get_conf_as_dict(juju, leader_name, filename, substrate)
 
     # Check on all units if they have the same
-    for unit in ops_test.model.applications[APP_NAME].units:
-        unit_conf = get_conf_as_dict(ops_test, unit.name, filename, substrate)
+    for unit_name in juju.status().apps[APP_NAME].units:
+        unit_conf = get_conf_as_dict(juju, unit_name, filename, substrate)
         assert leader_conf == unit_conf
 
 
 @pytest.mark.abort_on_fail
-async def test_add_users_and_calling_update_status(ops_test: OpsTest) -> None:
+async def test_add_users_and_calling_update_status(juju: jubilant.Juju) -> None:
     """Add users and call update status."""
-    leader_id = await get_leader_unit_id(ops_test)
-    leader_ip = await get_leader_unit_ip(ops_test)
+    leader_id = await get_leader_unit_id(juju)
+    leader_ip = await get_leader_unit_ip(juju)
     test_url = f"https://{leader_ip}:9200/_plugins/_security/api/internalusers/my_user"
 
     http_resp_code = await http_request(
-        ops_test,
+        juju,
         "PUT",
         test_url,
         resp_status_code=True,
@@ -395,7 +395,7 @@ async def test_add_users_and_calling_update_status(ops_test: OpsTest) -> None:
     assert http_resp_code >= 200 and http_resp_code < 300
 
     cmd = '"export JUJU_DISPATCH_PATH=hooks/update-status; ./dispatch"'
-    exec_cmd = f"juju exec -u opensearch/{leader_id} -m {ops_test.model.name} -- {cmd}"
+    exec_cmd = f"juju exec -u opensearch/{leader_id} -m {juju.model} -- {cmd}"
     try:
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
@@ -408,5 +408,5 @@ async def test_add_users_and_calling_update_status(ops_test: OpsTest) -> None:
             f"stderr = {e.stderr}.",
         )
     await asyncio.sleep(300)
-    http_resp_code = await http_request(ops_test, "GET", test_url, resp_status_code=True)
+    http_resp_code = await http_request(juju, "GET", test_url, resp_status_code=True)
     assert http_resp_code >= 200 and http_resp_code < 300

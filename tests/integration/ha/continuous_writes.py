@@ -10,10 +10,10 @@ from multiprocessing import Event, Process, Queue, log_to_stderr
 from types import SimpleNamespace
 from typing import Optional
 
+import jubilant
 import opensearchpy
 from opensearchpy import OpenSearch, TransportError
 from opensearchpy.helpers import BulkIndexError, bulk
-from pytest_operator.plugin import OpsTest
 from tenacity import (
     RetryError,
     Retrying,
@@ -45,8 +45,8 @@ class ContinuousWrites:
     LAST_WRITTEN_VAL_PATH = "last_written_value"
     CERT_PATH = "/tmp/ca_chain.cert"
 
-    def __init__(self, ops_test: OpsTest, app: str, initial_count: int = 0):
-        self._ops_test = ops_test
+    def __init__(self, juju: jubilant.Juju, app: str, initial_count: int = 0):
+        self._juju = juju
         self._app = app
         self._is_stopped = True
         self._event = None
@@ -85,7 +85,7 @@ class ContinuousWrites:
         password = await self._secrets()
         self._queue.put(
             SimpleNamespace(
-                hosts=await get_application_unit_ips(self._ops_test, app=self._app),
+                hosts=await get_application_unit_ips(self._juju, app=self._app),
                 password=password,
             )
         )
@@ -225,7 +225,7 @@ class ContinuousWrites:
 
     async def _secrets(self) -> str:
         """Fetch secrets and return the password."""
-        secrets = await get_secrets(self._ops_test, app=self._app)
+        secrets = await get_secrets(self._juju, app=self._app)
         with open(ContinuousWrites.CERT_PATH, "w") as chain:
             chain.write(secrets["ca-chain"])
 
@@ -233,7 +233,7 @@ class ContinuousWrites:
 
     async def _client(self, unit_ip: Optional[str] = None):
         """Build an opensearch client."""
-        hosts = await get_application_unit_ips(self._ops_test, app=self._app)
+        hosts = await get_application_unit_ips(self._juju, app=self._app)
         if unit_ip:
             hosts = [unit_ip]
 

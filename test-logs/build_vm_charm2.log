@@ -1,0 +1,1124 @@
+clearing out libs for charm
+copying over libs from single kernel charm
+Building charm tests/charms/opensearch_test_charm
+
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm/opensearch_single_kernel ~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /home/ubuntu/opensearch-single-kernel-library/tests/charms/opensearch_test_charm/opensearch_single_kernel/.git/
+~/opensearch-single-kernel-library/tests/charms/opensearch_test_charm ~/opensearch-single-kernel-library
+
+Updating dependencies
+Resolving dependencies...
+
+No dependencies to install or update
+
+Writing lock file
+Resolving dependencies...
+Starting charmcraft, version 4.3.0
+Logging execution to '/home/ubuntu/.local/state/charmcraft/log/charmcraft-20260708-181958.931230.log'
+Launching managed ubuntu 22.04 instance...
+Creating new instance from remote
+Creating new base instance from remote
+Creating new instance from base instance
+Starting instance
+Starting charmcraft, version 4.3.0
+Logging execution to '/tmp/charmcraft.log'
+Initializing lifecycle
+Installing build-packages
+Pulling poetry-deps
+Pulling charm-poetry
+Pulling files
+Building poetry-deps
+:: + PIP_BREAK_SYSTEM_PACKAGES=true
+:: + python3 -m pip install --user --upgrade pip==24.3.1
+:: Collecting pip==24.3.1
+::   Downloading pip-24.3.1-py3-none-any.whl (1.8 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 8.1 MB/s eta 0:00:00
+:: Installing collected packages: pip
+::   WARNING: The scripts pip, pip3 and pip3.10 are installed in '/root/.local/bin' which is not on PATH.
+::   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+:: Successfully installed pip-24.3.1
+:: WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+:: + curl --proto =https --tlsv1.2 -LsSf https://github.com/astral-sh/uv/releases/download/0.5.15/uv-installer.sh
+:: + sh
+:: downloading uv 0.5.15 x86_64-unknown-linux-gnu
+:: no checksums to verify
+:: installing to /root/.local/bin
+::   uv
+::   uvx
+:: everything's installed!
+::
+:: To add $HOME/.local/bin to your PATH, either restart your shell or run:
+::
+::     source $HOME/.local/bin/env (sh, bash, zsh)
+::     source $HOME/.local/bin/env.fish (fish)
+:: + /root/.local/bin/uv python find '>=3.9'
+:: /usr/bin/python3
+:: + /root/.local/bin/uv tool install --no-python-downloads --python '>=3.9' poetry==2.0.0 --with poetry-plugin-export==1.8.0
+:: Resolved 43 packages in 388ms
+:: Prepared 43 packages in 515ms
+:: Installed 43 packages in 103ms
+::  + backports-tarfile==1.2.0
+::  + build==1.5.0
+::  + cachecontrol==0.14.4
+::  + certifi==2026.6.17
+::  + cffi==2.1.0
+::  + charset-normalizer==3.4.9
+::  + cleo==2.1.0
+::  + crashtest==0.4.1
+::  + cryptography==49.0.0
+::  + distlib==0.4.3
+::  + dulwich==0.22.8
+::  + fastjsonschema==2.21.2
+::  + filelock==3.29.7
+::  + idna==3.18
+::  + importlib-metadata==9.0.0
+::  + installer==0.7.0
+::  + jaraco-classes==3.4.0
+::  + jaraco-context==6.1.2
+::  + jaraco-functools==4.5.0
+::  + jeepney==0.9.0
+::  + keyring==25.7.0
+::  + more-itertools==11.1.0
+::  + msgpack==1.2.1
+::  + packaging==26.2
+::  + pkginfo==1.12.1.2
+::  + platformdirs==4.10.0
+::  + poetry==2.0.0
+::  + poetry-core==2.0.0
+::  + poetry-plugin-export==1.8.0
+::  + pycparser==3.0
+::  + pyproject-hooks==1.2.0
+::  + rapidfuzz==3.14.5
+::  + requests==2.34.2
+::  + requests-toolbelt==1.0.0
+::  + secretstorage==3.5.0
+::  + shellingham==1.5.4
+::  + tomli==2.4.1
+::  + tomlkit==0.15.0
+::  + trove-classifiers==2026.6.1.19
+::  + typing-extensions==4.16.0
+::  + urllib3==2.7.0
+::  + virtualenv==20.39.1
+::  + zipp==4.1.0
+:: Installed 1 executable: poetry
+:: warning: `/root/.local/bin` is not on your PATH. To use installed tools, add the directory to your PATH.
+:: + ln -sf /root/.local/bin/poetry /usr/local/bin/poetry
+Skipping pull for poetry-deps (already ran)
+Skipping build for poetry-deps (already ran)
+Staging poetry-deps (required to build 'charm-poetry')
+Building charm-poetry
+:: + [[ ubuntu@22.04:amd64 == ubuntu@20.04:* ]]
+:: + [[ ubuntu@22.04:amd64 == ubuntu@22.04:* ]]
+:: + snap install rustup --classic
+:: rustup 1.29.0 from Canonical** installed
+:: + rustup --version
+:: info: This is the version for the rustup toolchain manager, not the rustc compiler.
+:: rustup 1.29.0 (28d1352db 2026-03-05)
+:: info: no `rustc` is currently active
+:: + rustup set profile minimal
+:: info: profile set to minimal
+:: + rustup default 1.92.0
+:: info: syncing channel updates for 1.92.0-x86_64-unknown-linux-gnu
+:: info: latest update on 2025-12-11 for version 1.92.0 (ded5c06cf 2025-12-08)
+:: info: downloading 3 components
+:: info: default toolchain set to 1.92.0-x86_64-unknown-linux-gnu
+::
+::   1.92.0-x86_64-unknown-linux-gnu installed - rustc 1.92.0 (ded5c06cf 2025-12-08)
+::
+:: + echo 'setuptools-scm<10.0.0'
+:: + craftctl default
+:: + python3 -m venv --without-pip /root/parts/charm-poetry/install/venv
+:: + PARTS_PYTHON_VENV_INTERP_PATH=/root/parts/charm-poetry/install/venv/bin/python3
+:: + poetry export --format=requirements.txt --output=/root/parts/charm-poetry/build/requirements.txt --with-credentials --only main,charm-libs --without-hashes
+:: +++ which python3
+:: ++ readlink -f /usr/bin/python3
+:: + /usr/bin/python3.10 -m pip --python=/root/parts/charm-poetry/install/venv/bin/python3 install --no-deps --no-binary=:all: --requirement=/root/parts/charm-poetry/build/requirements.txt
+:: Processing ./opensearch_single_kernel (from -r /root/parts/charm-poetry/build/requirements.txt (line 44))
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting annotated-types==0.7.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 1))
+::   Downloading annotated_types-0.7.0.tar.gz (16 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting anyio==4.14.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 2))
+::   Downloading anyio-4.14.1.tar.gz (254 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting attrs==25.3.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 3))
+::   Downloading attrs-25.3.0.tar.gz (812 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 812.0/812.0 kB 62.1 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting azure-core==1.39.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 4))
+::   Downloading azure_core-1.39.0.tar.gz (367 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting azure-storage-blob==12.28.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 5))
+::   Downloading azure_storage_blob-12.28.0.tar.gz (604 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 604.2/604.2 kB 50.8 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting bcrypt==4.3.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 6))
+::   Downloading bcrypt-4.3.0.tar.gz (25 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting boto3==1.38.36 (from -r /root/parts/charm-poetry/build/requirements.txt (line 7))
+::   Downloading boto3-1.38.36.tar.gz (111 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting botocore==1.38.36 (from -r /root/parts/charm-poetry/build/requirements.txt (line 8))
+::   Downloading botocore-1.38.36.tar.gz (14.0 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14.0/14.0 MB 21.3 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting certifi==2025.1.31 (from -r /root/parts/charm-poetry/build/requirements.txt (line 9))
+::   Downloading certifi-2025.1.31.tar.gz (167 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting cffi==1.17.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 10))
+::   Downloading cffi-1.17.1.tar.gz (516 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting cfgv==3.5.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 11))
+::   Downloading cfgv-3.5.0.tar.gz (7.3 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting charmlibs-pathops==1.2.0.post0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 12))
+::   Downloading charmlibs_pathops-1.2.0.post0.tar.gz (21 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting charset-normalizer==3.4.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 13))
+::   Downloading charset_normalizer-3.4.1.tar.gz (123 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting cosl==1.9.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 14))
+::   Downloading cosl-1.9.2.tar.gz (150 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: still running...
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting cryptography==45.0.4 (from -r /root/parts/charm-poetry/build/requirements.txt (line 15))
+::   Downloading cryptography-45.0.4.tar.gz (744 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 744.9/744.9 kB 71.0 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting data-platform-helpers==0.1.7 (from -r /root/parts/charm-poetry/build/requirements.txt (line 16))
+::   Downloading data_platform_helpers-0.1.7.tar.gz (17 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting distlib==0.4.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 17))
+::   Downloading distlib-0.4.0.tar.gz (614 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 614.6/614.6 kB 54.7 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting dnspython==2.8.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 18))
+::   Downloading dnspython-2.8.0.tar.gz (368 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting email-validator==2.3.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 19))
+::   Downloading email_validator-2.3.0.tar.gz (51 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting exceptiongroup==1.3.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 20))
+::   Downloading exceptiongroup-1.3.1.tar.gz (30 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting filelock==3.20.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 21))
+::   Downloading filelock-3.20.0.tar.gz (18 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-api-core==2.30.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 22))
+::   Downloading google_api_core-2.30.2.tar.gz (176 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-auth==2.49.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 23))
+::   Downloading google_auth-2.49.1.tar.gz (333 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-cloud-core==2.5.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 24))
+::   Downloading google_cloud_core-2.5.1.tar.gz (36 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-cloud-storage==2.19.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 25))
+::   Downloading google_cloud_storage-2.19.0.tar.gz (5.5 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.5/5.5 MB 36.2 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-crc32c==1.8.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 26))
+::   Downloading google_crc32c-1.8.0.tar.gz (14 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting google-resumable-media==2.8.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 27))
+::   Downloading google_resumable_media-2.8.2.tar.gz (2.2 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 38.6 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting googleapis-common-protos==1.74.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 28))
+::   Downloading googleapis_common_protos-1.74.0.tar.gz (151 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting h11==0.16.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 29))
+::   Downloading h11-0.16.0.tar.gz (101 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting httpcore==1.0.9 (from -r /root/parts/charm-poetry/build/requirements.txt (line 30))
+::   Downloading httpcore-1.0.9.tar.gz (85 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting httpx==0.28.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 31))
+::   Downloading httpx-0.28.1.tar.gz (141 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting identify==2.6.15 (from -r /root/parts/charm-poetry/build/requirements.txt (line 32))
+::   Downloading identify-2.6.15.tar.gz (99 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting idna==3.10 (from -r /root/parts/charm-poetry/build/requirements.txt (line 33))
+::   Downloading idna-3.10.tar.gz (190 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting importlib-metadata==8.7.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 34))
+::   Downloading importlib_metadata-8.7.0.tar.gz (56 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting isodate==0.7.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 35))
+::   Downloading isodate-0.7.2.tar.gz (29 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting jmespath==1.0.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 36))
+::   Downloading jmespath-1.0.1.tar.gz (25 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting jsonschema-specifications==2024.10.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 37))
+::   Downloading jsonschema_specifications-2024.10.1.tar.gz (15 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting jsonschema==4.24.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 38))
+::   Downloading jsonschema-4.24.0.tar.gz (353 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting lightkube-models==1.35.0.8 (from -r /root/parts/charm-poetry/build/requirements.txt (line 39))
+::   Downloading lightkube_models-1.35.0.8.tar.gz (244 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting lightkube==0.17.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 40))
+::   Downloading lightkube-0.17.2.tar.gz (46 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting markdown-it-py==4.0.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 41))
+::   Downloading markdown_it_py-4.0.0.tar.gz (73 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting mdurl==0.1.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 42))
+::   Downloading mdurl-0.1.2.tar.gz (8.7 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting nodeenv==1.9.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 43))
+::   Downloading nodeenv-1.9.1.tar.gz (47 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting opentelemetry-api==1.38.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 45))
+::   Downloading opentelemetry_api-1.38.0.tar.gz (65 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting ops==3.5.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 46))
+::   Downloading ops-3.5.2.tar.gz (578 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 578.2/578.2 kB 45.9 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting overrides==7.7.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 47))
+::   Downloading overrides-7.7.0.tar.gz (22 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting platformdirs==4.3.7 (from -r /root/parts/charm-poetry/build/requirements.txt (line 48))
+::   Downloading platformdirs-4.3.7.tar.gz (21 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting poetry-core==1.9.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 49))
+::   Downloading poetry_core-1.9.1.tar.gz (337 kB)
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pre-commit==4.4.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 50))
+::   Downloading pre_commit-4.4.0.tar.gz (197 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting proto-plus==1.27.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 51))
+::   Downloading proto_plus-1.27.2.tar.gz (57 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting protobuf==7.34.1 (from -r /root/parts/charm-poetry/build/requirements.txt (line 52))
+::   Downloading protobuf-7.34.1.tar.gz (454 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pyasn1-modules==0.4.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 53))
+::   Downloading pyasn1_modules-0.4.2.tar.gz (307 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pyasn1==0.6.3 (from -r /root/parts/charm-poetry/build/requirements.txt (line 54))
+::   Downloading pyasn1-0.6.3.tar.gz (148 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pycparser==2.22 (from -r /root/parts/charm-poetry/build/requirements.txt (line 55))
+::   Downloading pycparser-2.22.tar.gz (172 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pydantic-core==2.33.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 56))
+::   Downloading pydantic_core-2.33.2.tar.gz (435 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pydantic==2.11.10 (from -r /root/parts/charm-poetry/build/requirements.txt (line 57))
+::   Downloading pydantic-2.11.10.tar.gz (788 kB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 788.5/788.5 kB 66.0 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pygments==2.19.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 58))
+::   Downloading pygments-2.19.2.tar.gz (5.0 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.0/5.0 MB 85.4 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting python-dateutil==2.9.0.post0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 59))
+::   Downloading python-dateutil-2.9.0.post0.tar.gz (342 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting pyyaml==6.0.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 60))
+::   Downloading pyyaml-6.0.2.tar.gz (130 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting referencing==0.36.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 61))
+::   Downloading referencing-0.36.2.tar.gz (74 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting requests==2.32.4 (from -r /root/parts/charm-poetry/build/requirements.txt (line 62))
+::   Downloading requests-2.32.4.tar.gz (135 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting rich==14.3.3 (from -r /root/parts/charm-poetry/build/requirements.txt (line 63))
+::   Downloading rich-14.3.3.tar.gz (230 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting rpds-py==0.24.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 64))
+::   Downloading rpds_py-0.24.0.tar.gz (26 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting ruamel-yaml-clib==0.2.12 (from -r /root/parts/charm-poetry/build/requirements.txt (line 65))
+::   Downloading ruamel.yaml.clib-0.2.12.tar.gz (225 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting ruamel-yaml==0.18.14 (from -r /root/parts/charm-poetry/build/requirements.txt (line 66))
+::   Downloading ruamel.yaml-0.18.14.tar.gz (145 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting s3transfer==0.13.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 67))
+::   Downloading s3transfer-0.13.0.tar.gz (150 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting shortuuid==1.0.13 (from -r /root/parts/charm-poetry/build/requirements.txt (line 68))
+::   Downloading shortuuid-1.0.13.tar.gz (9.7 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting six==1.17.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 69))
+::   Downloading six-1.17.0.tar.gz (34 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting tenacity==9.1.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 70))
+::   Downloading tenacity-9.1.2.tar.gz (48 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting typing-extensions==4.13.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 71))
+::   Downloading typing_extensions-4.13.2.tar.gz (106 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting typing-inspection==0.4.2 (from -r /root/parts/charm-poetry/build/requirements.txt (line 72))
+::   Downloading typing_inspection-0.4.2.tar.gz (75 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting urllib3==2.4.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 73))
+::   Downloading urllib3-2.4.0.tar.gz (390 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting virtualenv==20.35.4 (from -r /root/parts/charm-poetry/build/requirements.txt (line 74))
+::   Downloading virtualenv-20.35.4.tar.gz (6.0 MB)
+::      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.0/6.0 MB 34.9 MB/s eta 0:00:00
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting websocket-client==1.8.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 75))
+::   Downloading websocket_client-1.8.0.tar.gz (54 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Collecting zipp==3.23.0 (from -r /root/parts/charm-poetry/build/requirements.txt (line 76))
+::   Downloading zipp-3.23.0.tar.gz (25 kB)
+::   Installing build dependencies: started
+::   Installing build dependencies: finished with status 'done'
+::   Getting requirements to build wheel: started
+::   Getting requirements to build wheel: finished with status 'done'
+::   Preparing metadata (pyproject.toml): started
+::   Preparing metadata (pyproject.toml): finished with status 'done'
+:: Building wheels for collected packages: annotated-types, anyio, attrs, azure-core, azure-storage-blob, bcrypt, boto3, botocore, certifi, cffi, cfgv, charmlibs-pathops, charset-normalizer, cosl, cryptography, data-platform-helpers, distlib, dnspython, email-validator, exceptiongroup, filelock, google-api-core, google-auth, google-cloud-core, google-cloud-storage, google-crc32c, google-resumable-media, googleapis-common-protos, h11, httpcore, httpx, identify, idna, importlib-metadata, isodate, jmespath, jsonschema-specifications, jsonschema, lightkube-models, lightkube, markdown-it-py, mdurl, nodeenv, opentelemetry-api, ops, overrides, platformdirs, poetry-core, pre-commit, proto-plus, protobuf, pyasn1-modules, pyasn1, pycparser, pydantic-core, pydantic, pygments, python-dateutil, pyyaml, referencing, requests, rich, rpds-py, ruamel-yaml-clib, ruamel-yaml, s3transfer, shortuuid, six, tenacity, typing-extensions, typing-inspection, urllib3, virtualenv, websocket-client, zipp, opensearch-charms-single-kernel
+::   Building wheel for annotated-types (pyproject.toml): started
+::   Building wheel for annotated-types (pyproject.toml): finished with status 'done'
+::   Created wheel for annotated-types: filename=annotated_types-0.7.0-py3-none-any.whl size=13644 sha256=bf545ea9406e4387b2d96f3ad14bb0b7cdea97bb147950d352e52ec506382132
+::   Stored in directory: /root/.cache/pip/wheels/f8/8b/00/2062052364778af91ecb9465e91e73a0b2183cd4bf2b44d92f
+::   Building wheel for anyio (pyproject.toml): started
+::   Building wheel for anyio (pyproject.toml): finished with status 'done'
+::   Created wheel for anyio: filename=anyio-4.14.1-py3-none-any.whl size=123506 sha256=56d30fef67fd25107d338a3383f311f58103c31952cab89de74ce9f25a2076c3
+::   Stored in directory: /root/.cache/pip/wheels/7e/7a/de/4490d82d08e0865aaddf53aa60f459327e4118e6c9a4679406
+::   Building wheel for attrs (pyproject.toml): started
+::   Building wheel for attrs (pyproject.toml): finished with status 'done'
+::   Created wheel for attrs: filename=attrs-25.3.0-py3-none-any.whl size=63815 sha256=629a3fee930036bd29ba7be9ca868793b61422d0bcb5da18dee5b7c005cfb8ae
+::   Stored in directory: /root/.cache/pip/wheels/81/c3/9f/290e714d33afd01e85cc8fa34713e5ec4b3f34ba06add5600d
+::   Building wheel for azure-core (pyproject.toml): started
+::   Building wheel for azure-core (pyproject.toml): finished with status 'done'
+::   Created wheel for azure-core: filename=azure_core-1.39.0-py3-none-any.whl size=218316 sha256=8bc266a1d796f8f092c4459465d6f9d10546c009339d10f9696bd75ae657503e
+::   Stored in directory: /root/.cache/pip/wheels/73/7d/93/db7d94eb3d6386b2b0360162bcc128eca9d13b418cd773a883
+::   Building wheel for azure-storage-blob (pyproject.toml): started
+::   Building wheel for azure-storage-blob (pyproject.toml): finished with status 'done'
+::   Created wheel for azure-storage-blob: filename=azure_storage_blob-12.28.0-py3-none-any.whl size=431498 sha256=e874719c4a5862b3767edbbd4713a55ca9cbae5f5183ebc2522ce01b2fa78fbd
+::   Stored in directory: /root/.cache/pip/wheels/59/4a/52/5e1decb0671350b34304d8fe2c0ee036e8cf5a2e22bac30685
+::   Building wheel for bcrypt (pyproject.toml): started
+::   Building wheel for bcrypt (pyproject.toml): finished with status 'done'
+::   Created wheel for bcrypt: filename=bcrypt-4.3.0-cp310-cp310-linux_x86_64.whl size=270500 sha256=758eb52217d5dba2305647068d01083063fab2c5fa9b331c50d65677f177eecc
+::   Stored in directory: /root/.cache/pip/wheels/2b/60/9f/9b8235c25ac769cd1290d82847a45363e41329c53fbb83902c
+::   Building wheel for boto3 (pyproject.toml): started
+::   Building wheel for boto3 (pyproject.toml): finished with status 'done'
+::   Created wheel for boto3: filename=boto3-1.38.36-py3-none-any.whl size=140038 sha256=738bb216b56283f6c4414e6220b056684392e9e0d5594bea505251d18b05e1ff
+::   Stored in directory: /root/.cache/pip/wheels/65/eb/c4/9a3ccd3159832a5e7bff7bcda05f99350f8a5162653229b636
+::   Building wheel for botocore (pyproject.toml): started
+::   Building wheel for botocore (pyproject.toml): finished with status 'done'
+::   Created wheel for botocore: filename=botocore-1.38.36-py3-none-any.whl size=13589960 sha256=c4b8fcdb1d6c971219eae2a387917ebd072965782eb79734e3e713b9125427fd
+::   Stored in directory: /root/.cache/pip/wheels/d7/32/d2/46e0319242b78fa45ae0b09260310a05fbb967469709a50439
+::   Building wheel for certifi (pyproject.toml): started
+::   Building wheel for certifi (pyproject.toml): finished with status 'done'
+::   Created wheel for certifi: filename=certifi-2025.1.31-py3-none-any.whl size=166427 sha256=0a05b4543ab8db362323320f687accda18f4271ce5330b0aba84eb0b5c6dae51
+::   Stored in directory: /root/.cache/pip/wheels/e1/c8/e6/5793ece7b1b72706f7f4c3eeaab18ae6fda6caa3c1a7e42708
+::   Building wheel for cffi (pyproject.toml): started
+::   Building wheel for cffi (pyproject.toml): finished with status 'done'
+::   Created wheel for cffi: filename=cffi-1.17.1-cp310-cp310-linux_x86_64.whl size=385739 sha256=3af2ba35ba7bd521741d6a3fcef1475b576ffc1d247f7ab2bb16c2d3b17c4348
+::   Stored in directory: /root/.cache/pip/wheels/bc/a5/58/01b23d798fc327c213f34c4e4572a0ceeb6f1034459a453ee6
+::   Building wheel for cfgv (pyproject.toml): started
+::   Building wheel for cfgv (pyproject.toml): finished with status 'done'
+::   Created wheel for cfgv: filename=cfgv-3.5.0-py2.py3-none-any.whl size=7481 sha256=e5304969b1b5240e44132720c94694c2a235dcfd086f8a9a7cb8e177c510dc4d
+::   Stored in directory: /root/.cache/pip/wheels/77/9e/65/1a78932ef1f8a73745c3c7e602b2de0ebfaa9edfae5f3f653b
+::   Building wheel for charmlibs-pathops (pyproject.toml): started
+::   Building wheel for charmlibs-pathops (pyproject.toml): finished with status 'done'
+::   Created wheel for charmlibs-pathops: filename=charmlibs_pathops-1.2.0.post0-py3-none-any.whl size=27071 sha256=8bb0ad38d8abbe8b21ab8302afa968580a58023f36f9bce274e3e0a087978371
+::   Stored in directory: /root/.cache/pip/wheels/0a/e0/1b/2ce07fc4bbc26657b1ea956c9a68397971812e9ca2c6412c31
+::   Building wheel for charset-normalizer (pyproject.toml): started
+::   Building wheel for charset-normalizer (pyproject.toml): finished with status 'done'
+::   Created wheel for charset-normalizer: filename=charset_normalizer-3.4.1-py3-none-any.whl size=49804 sha256=d1f3f4ca5a1ed998fcf92fd87bbd105ed15bcd888a46196bf0106ff92eff1dae
+::   Stored in directory: /root/.cache/pip/wheels/e1/56/2d/6eabfe85105129c474d27661de8b2537a0db47f3f53ad350f5
+::   Building wheel for cosl (pyproject.toml): started
+::   Building wheel for cosl (pyproject.toml): finished with status 'done'
+::   Created wheel for cosl: filename=cosl-1.9.2-py3-none-any.whl size=38347 sha256=d663f61d8b0c7250b11bfaa3c057716e1c104c43f9b9e3deb54cb5ac6d824606
+::   Stored in directory: /root/.cache/pip/wheels/8d/4d/27/646abdfa0aaef8813dc5fc8d9f2b0e47f9e6351ee53bc7827c
+::   Building wheel for cryptography (pyproject.toml): started
+::   Building wheel for cryptography (pyproject.toml): finished with status 'done'
+::   Created wheel for cryptography: filename=cryptography-45.0.4-cp310-abi3-linux_x86_64.whl size=2253146 sha256=c61365b2f99b788f158816fe2da8e9f1022a14356bdeeb783adb2598d50f28eb
+::   Stored in directory: /root/.cache/pip/wheels/0b/4a/78/00ebadad085e14dae5b7e5fc4bcf5026708a61cf400fd8ac27
+::   Building wheel for data-platform-helpers (pyproject.toml): started
+::   Building wheel for data-platform-helpers (pyproject.toml): finished with status 'done'
+::   Created wheel for data-platform-helpers: filename=data_platform_helpers-0.1.7-py3-none-any.whl size=22530 sha256=b3624ca1c39de450f7544213729744d63d7be13e10cdec44634394b971d1d4a4
+::   Stored in directory: /root/.cache/pip/wheels/28/88/e2/67874ce004dca46595491c24e679a39f6e8267c586086a4990
+::   Building wheel for distlib (pyproject.toml): started
+::   Building wheel for distlib (pyproject.toml): finished with status 'done'
+::   Created wheel for distlib: filename=distlib-0.4.0-py2.py3-none-any.whl size=469084 sha256=20fe20706306a70f3aad14ecc130e4bc363ba37980118b68c0c21945156f7e1f
+::   Stored in directory: /root/.cache/pip/wheels/8e/69/c2/8831c3cb071ab1dcef98029c1cdfb291104598fe600f55448e
+::   Building wheel for dnspython (pyproject.toml): started
+::   Building wheel for dnspython (pyproject.toml): finished with status 'done'
+::   Created wheel for dnspython: filename=dnspython-2.8.0-py3-none-any.whl size=331093 sha256=5a0232cc50ad614f19212874b58086d35329eb2753688dbe1fa5355861315e1f
+::   Stored in directory: /root/.cache/pip/wheels/34/df/32/d718e7cf5efdc3d46d0ee6da75f12e09b3f15174d4f49439dc
+::   Building wheel for email-validator (pyproject.toml): started
+::   Building wheel for email-validator (pyproject.toml): finished with status 'done'
+::   Created wheel for email-validator: filename=email_validator-2.3.0-py3-none-any.whl size=35601 sha256=a3943d2b7111cbb646bff2da724d2e724393eb143c56857d1ecfc6809529881d
+::   Stored in directory: /root/.cache/pip/wheels/d4/c5/13/5c53682c184ef58da5081ca6462b8ed461609c534af50d1110
+::   Building wheel for exceptiongroup (pyproject.toml): started
+::   Building wheel for exceptiongroup (pyproject.toml): finished with status 'done'
+::   Created wheel for exceptiongroup: filename=exceptiongroup-1.3.1-py3-none-any.whl size=16740 sha256=fc7a82aa6122269dd76cfe2b599c7e98276ad4461fefc32e2697371ded5c0484
+::   Stored in directory: /root/.cache/pip/wheels/43/43/7c/75bb576253f657dd5f586de98dec83efaae839a2419d3adc91
+::   Building wheel for filelock (pyproject.toml): started
+::   Building wheel for filelock (pyproject.toml): finished with status 'done'
+::   Created wheel for filelock: filename=filelock-3.20.0-py3-none-any.whl size=16053 sha256=729276710bea002a1e44f210a125336a3599726414adbcddb546b08979d17b4a
+::   Stored in directory: /root/.cache/pip/wheels/86/5a/e7/1ce9d7587008e297fd940debd0965dba9daf0780220c720832
+::   Building wheel for google-api-core (pyproject.toml): started
+::   Building wheel for google-api-core (pyproject.toml): finished with status 'done'
+::   Created wheel for google-api-core: filename=google_api_core-2.30.2-py3-none-any.whl size=173235 sha256=90fec8873a2dd445d2ef9c39b0c4c41418ca86d0f28fefd6752d400908ccab7d
+::   Stored in directory: /root/.cache/pip/wheels/a8/5f/99/da0a216927c4d13c59b9466da3d677d9e23879e6a6a6f1c5a2
+::   Building wheel for google-auth (pyproject.toml): started
+::   Building wheel for google-auth (pyproject.toml): finished with status 'done'
+::   Created wheel for google-auth: filename=google_auth-2.49.1-py3-none-any.whl size=240736 sha256=4e64a7f89007269b09537a26ff78100195fe6a1d625094bf0484bda4430c19b9
+::   Stored in directory: /root/.cache/pip/wheels/04/74/17/47edb2c00b1d6a0dbd568adc3868002cc07d20bb1268e16c75
+::   Building wheel for google-cloud-core (pyproject.toml): started
+::   Building wheel for google-cloud-core (pyproject.toml): finished with status 'done'
+::   Created wheel for google-cloud-core: filename=google_cloud_core-2.5.1-py3-none-any.whl size=29452 sha256=7e004857572c23cfd05899125f9eb4c592ab3fcd384bcd6a1a45c5c6cadb44f6
+::   Stored in directory: /root/.cache/pip/wheels/ad/35/ca/b31edcdf0196aebd243371d07f5c75be75d60582f65cc29a46
+::   Building wheel for google-cloud-storage (pyproject.toml): started
+::   Building wheel for google-cloud-storage (pyproject.toml): finished with status 'done'
+::   Created wheel for google-cloud-storage: filename=google_cloud_storage-2.19.0-py2.py3-none-any.whl size=131883 sha256=c9068aa6eb2ef53edfebb79b08f8068eae6bf00cad33f84dfcb1a2b191b624b7
+::   Stored in directory: /root/.cache/pip/wheels/bd/60/8b/2140a661624e8f2b28454a2fdbadb77cfd409c204fe82e220f
+::   Building wheel for google-crc32c (pyproject.toml): started
+::   Building wheel for google-crc32c (pyproject.toml): finished with status 'done'
+::   Created wheel for google-crc32c: filename=google_crc32c-1.8.0-py3-none-any.whl size=13801 sha256=67a7845b1b2afc668f3bf254367fd733afc362de19350e866c65fb8e451142dc
+::   Stored in directory: /root/.cache/pip/wheels/da/a1/42/828f95429225b4ad625192be89332b50a62c5daa6ceb6eff16
+::   Building wheel for google-resumable-media (pyproject.toml): started
+::   Building wheel for google-resumable-media (pyproject.toml): finished with status 'done'
+::   Created wheel for google-resumable-media: filename=google_resumable_media-2.8.2-py3-none-any.whl size=81508 sha256=759846f113155e6641844cdc17455002d61e1fdeb4e2a278b620b8b45d8d99ef
+::   Stored in directory: /root/.cache/pip/wheels/16/a5/e6/5c247a0ea0c5919dd2bbb6c283f29e22f3616939ce1cad30fe
+::   Building wheel for googleapis-common-protos (pyproject.toml): started
+::   Building wheel for googleapis-common-protos (pyproject.toml): finished with status 'done'
+::   Created wheel for googleapis-common-protos: filename=googleapis_common_protos-1.74.0-py3-none-any.whl size=300742 sha256=6f9f6d3b4699b47cdcb2468c9c3a43b0766fac47fb27c5c8bea90cd6256703dc
+::   Stored in directory: /root/.cache/pip/wheels/2b/55/48/bd72af449e9dcfb189e3a3cdd411dae5093cbc74454ffe1385
+::   Building wheel for h11 (pyproject.toml): started
+::   Building wheel for h11 (pyproject.toml): finished with status 'done'
+::   Created wheel for h11: filename=h11-0.16.0-py3-none-any.whl size=37514 sha256=aae9df160a561ef2c3728dd8159dffaf039e0ba39ed0720b2881d3f881fd09bf
+::   Stored in directory: /root/.cache/pip/wheels/ef/07/1a/2dd22086468dc576ab0aeb6aedf8c2dad540cd84c911e46201
+::   Building wheel for httpcore (pyproject.toml): started
+::   Building wheel for httpcore (pyproject.toml): finished with status 'done'
+::   Created wheel for httpcore: filename=httpcore-1.0.9-py3-none-any.whl size=78783 sha256=ad74df9c9c699fb650c3937759973cccd1775178c81101f990a916de06da3635
+::   Stored in directory: /root/.cache/pip/wheels/b3/f2/5c/044b84febb345fbb0c34c02185356edc4c7e067b1bc75cb920
+::   Building wheel for httpx (pyproject.toml): started
+::   Building wheel for httpx (pyproject.toml): finished with status 'done'
+::   Created wheel for httpx: filename=httpx-0.28.1-py3-none-any.whl size=73529 sha256=108df443e421a9e3fffbfcc3b1e7e1e5463c3f4311d9b89f0d19c6580a2bc233
+::   Stored in directory: /root/.cache/pip/wheels/1a/e8/45/f1b18c750ffcc97adee8206924558c38370248e7171d3c7de4
+::   Building wheel for identify (pyproject.toml): started
+::   Building wheel for identify (pyproject.toml): finished with status 'done'
+::   Created wheel for identify: filename=identify-2.6.15-py2.py3-none-any.whl size=99215 sha256=d21195e7ed2b93880129928f7f056f31ab8e21870e4ab9eaeab32e7c55138962
+::   Stored in directory: /root/.cache/pip/wheels/9b/e7/09/787c6d322074bb760b19b114d750b9a0cf8569fd2fffa9206e
+::   Building wheel for idna (pyproject.toml): started
+::   Building wheel for idna (pyproject.toml): finished with status 'done'
+::   Created wheel for idna: filename=idna-3.10-py3-none-any.whl size=70489 sha256=4280b2053b11c26390caff6747d09f3de138b267c9a310ad6f4eaf0507d60ca0
+::   Stored in directory: /root/.cache/pip/wheels/f2/6c/2e/5d0bb31b57b8a7607439af7378abecfb59cc7f52694edf0bed
+::   Building wheel for importlib-metadata (pyproject.toml): started
+::   Building wheel for importlib-metadata (pyproject.toml): finished with status 'done'
+::   Created wheel for importlib-metadata: filename=importlib_metadata-8.7.0-py3-none-any.whl size=27655 sha256=ce45b8a6df5a4326cbabfee9bd3e91609add4322bf46b95929bee0b111f759e6
+::   Stored in directory: /root/.cache/pip/wheels/f9/cf/90/beeaab488b6b3b39fdd585108059055598f2159fde97a0e507
+::   Building wheel for isodate (pyproject.toml): started
+::   Building wheel for isodate (pyproject.toml): finished with status 'done'
+::   Created wheel for isodate: filename=isodate-0.7.2-py3-none-any.whl size=22442 sha256=bebd4f6d6018cb1a0f1a81bfd3c10a189a4e105cc85bf732ac73c3f5bb153db1
+::   Stored in directory: /root/.cache/pip/wheels/79/7d/b2/da9be5dcfbf0b664bfa0ebc947c9f4ec43031fb5fe95124f12
+::   Building wheel for jmespath (pyproject.toml): started
+::   Building wheel for jmespath (pyproject.toml): finished with status 'done'
+::   Created wheel for jmespath: filename=jmespath-1.0.1-py3-none-any.whl size=20338 sha256=a2399eb0ede97eb06aaaed212adacac84ef7dd3a25c91194ae77eb43653faad7
+::   Stored in directory: /root/.cache/pip/wheels/36/d1/da/ada5bf3c41969d21a4ed7a97dbeb8a89dbabde9b13aaaac2af
+::   Building wheel for jsonschema-specifications (pyproject.toml): started
+::   Building wheel for jsonschema-specifications (pyproject.toml): finished with status 'done'
+::   Created wheel for jsonschema-specifications: filename=jsonschema_specifications-2024.10.1-py3-none-any.whl size=18458 sha256=abab8dfa983d93c33806d30716fbe94db2d1522dc4d72ba16624004a829ae9db
+::   Stored in directory: /root/.cache/pip/wheels/cc/f5/f1/f2380c0478763b4b0cc9607c6f4b88bd69b0a7facffc115f47
+::   Building wheel for jsonschema (pyproject.toml): started
+::   Building wheel for jsonschema (pyproject.toml): finished with status 'done'
+::   Created wheel for jsonschema: filename=jsonschema-4.24.0-py3-none-any.whl size=88707 sha256=8dce95b1a52b3c7d21e4a09d9f9ee97418af652867100fb450a85a9dd4ddcab3
+::   Stored in directory: /root/.cache/pip/wheels/67/92/61/546938bc80aa8eb6d8039d2b5b4fab2a09a77301ce31793d00
+::   Building wheel for lightkube-models (pyproject.toml): started
+::   Building wheel for lightkube-models (pyproject.toml): finished with status 'done'
+::   Created wheel for lightkube-models: filename=lightkube_models-1.35.0.8-py3-none-any.whl size=305780 sha256=1b0f0a8c07a5a42433f2c97ce74b38c869c9ead8d2d8a145d0a12d1e52211644
+::   Stored in directory: /root/.cache/pip/wheels/6a/5d/79/c2ee7164076ff254051542b134dd337dc75a0e7a3881d830e3
+::   Building wheel for lightkube (pyproject.toml): started
+::   Building wheel for lightkube (pyproject.toml): finished with status 'done'
+::   Created wheel for lightkube: filename=lightkube-0.17.2-py3-none-any.whl size=40115 sha256=2545ace32a7a1a3125dff4de8aebb33bc357a5324e1f590b358c325a9b877a6e
+::   Stored in directory: /root/.cache/pip/wheels/72/20/8e/4189223c7cd762fe335eed6d9464c529f9e57782c5de21f5a3
+::   Building wheel for markdown-it-py (pyproject.toml): started
+::   Building wheel for markdown-it-py (pyproject.toml): finished with status 'done'
+::   Created wheel for markdown-it-py: filename=markdown_it_py-4.0.0-py3-none-any.whl size=87321 sha256=87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147
+::   Stored in directory: /root/.cache/pip/wheels/7d/87/88/919eedac8c9660f54e39ed01c34a6e7da40a4492c21e5728bf
+::   Building wheel for mdurl (pyproject.toml): started
+::   Building wheel for mdurl (pyproject.toml): finished with status 'done'
+::   Created wheel for mdurl: filename=mdurl-0.1.2-py3-none-any.whl size=10023 sha256=e09a93faf10973b4df4d9bb682dec5068ea51e1a11807dec2cdc21122f6d2f09
+::   Stored in directory: /root/.cache/pip/wheels/22/3c/b6/9650083e39c4f1a903eb1277b96ba90650f89320de690b791f
+::   Building wheel for nodeenv (pyproject.toml): started
+::   Building wheel for nodeenv (pyproject.toml): finished with status 'done'
+::   Created wheel for nodeenv: filename=nodeenv-1.9.1-py2.py3-none-any.whl size=22417 sha256=356c66fd8a8cb22e21d8dbd4fd0329c781de778ccdc8ca39c1241b36a63f83af
+::   Stored in directory: /root/.cache/pip/wheels/64/85/ad/45ff9c4db4554e1842f2731420b476d76c03bba44739d34c6b
+::   Building wheel for opentelemetry-api (pyproject.toml): started
+::   Building wheel for opentelemetry-api (pyproject.toml): finished with status 'done'
+::   Created wheel for opentelemetry-api: filename=opentelemetry_api-1.38.0-py3-none-any.whl size=65944 sha256=88af32048f28e4e0676a240ab75cb5cfa7b7cec52fa574f8a113fb6799b63be3
+::   Stored in directory: /root/.cache/pip/wheels/72/ff/96/f87a9dfb46f444b8a9856cda13c7533d34b86f1531c0a2a543
+::   Building wheel for ops (pyproject.toml): started
+::   Building wheel for ops (pyproject.toml): finished with status 'done'
+::   Created wheel for ops: filename=ops-3.5.2-py3-none-any.whl size=211688 sha256=2412614c37af462cd139969635a6090ceeebdfa93c587f701ed56862f4f87465
+::   Stored in directory: /root/.cache/pip/wheels/be/9e/5b/8e43356511bbb95238d70f48ce5ce80dd27a35278afc8f2b1d
+::   Building wheel for overrides (pyproject.toml): started
+::   Building wheel for overrides (pyproject.toml): finished with status 'done'
+::   Created wheel for overrides: filename=overrides-7.7.0-py3-none-any.whl size=17919 sha256=871cffb54f6dcfe854fec827868cad51f6c4dee351d247a7a22dd12d5ab00fc4
+::   Stored in directory: /root/.cache/pip/wheels/d1/a6/e8/077639b895d6a3420fb37cf5dbb505ead4251caadccd123ab7
+::   Building wheel for platformdirs (pyproject.toml): started
+::   Building wheel for platformdirs (pyproject.toml): finished with status 'done'
+::   Created wheel for platformdirs: filename=platformdirs-4.3.7-py3-none-any.whl size=18553 sha256=5075bb40020a7511279972c2cd2659c125dc5a2b181d4767ab7f687489008544
+::   Stored in directory: /root/.cache/pip/wheels/1b/f0/68/4c1bee700760d12527aab512adde85d05c8c01ad548beeeb67
+::   Building wheel for poetry-core (pyproject.toml): started
+::   Building wheel for poetry-core (pyproject.toml): finished with status 'done'
+::   Created wheel for poetry-core: filename=poetry_core-1.9.1-py3-none-any.whl size=309472 sha256=6f45dd3598e0de8d9b0367360253d4c5d4d0110c8f5c71120a14f0e0f116c1a0
+::   Stored in directory: /root/.cache/pip/wheels/30/93/9b/49c5cac390e5c6d347592c5a6251c021ef6884627c1a316d99
+::   Building wheel for pre-commit (pyproject.toml): started
+::   Building wheel for pre-commit (pyproject.toml): finished with status 'done'
+::   Created wheel for pre-commit: filename=pre_commit-4.4.0-py2.py3-none-any.whl size=225296 sha256=f5d25fef9a81180e5c7affbf487ceca93f454f187332e14515b777d8e98a96d9
+::   Stored in directory: /root/.cache/pip/wheels/6b/4c/a5/4cb1a9fa7fe6ebaf70162d0490df3d5f49ae50fa661a8870be
+::   Building wheel for proto-plus (pyproject.toml): started
+::   Building wheel for proto-plus (pyproject.toml): finished with status 'done'
+::   Created wheel for proto-plus: filename=proto_plus-1.27.2-py3-none-any.whl size=50451 sha256=5bb6816b5fc736101dfc5b8547678072339dde88a12740e42a4848429c94d3f9
+::   Stored in directory: /root/.cache/pip/wheels/e1/d3/e5/c4abf82d1808416f4d477b35c78d15deee4e606b8dc0201d76
+::   Building wheel for protobuf (pyproject.toml): started
+::   Building wheel for protobuf (pyproject.toml): finished with status 'done'
+::   Created wheel for protobuf: filename=protobuf-7.34.1-cp310-cp310-linux_x86_64.whl size=1192473 sha256=56269522f8c9dea6c86adc4a285d14674589c645416360a8cdf601b2cba4dbb5
+::   Stored in directory: /root/.cache/pip/wheels/e3/54/64/47d628fae41c6315e9810f4ef51ea5b00951491847693ada85
+::   Building wheel for pyasn1-modules (pyproject.toml): started
+::   Building wheel for pyasn1-modules (pyproject.toml): finished with status 'done'
+::   Created wheel for pyasn1-modules: filename=pyasn1_modules-0.4.2-py3-none-any.whl size=181258 sha256=3fb01beef1bbffb6af86b5aa6fdad0b1a3b0960823d12e136d2d05913860a3b3
+::   Stored in directory: /root/.cache/pip/wheels/61/d5/c1/c587d41481a72afd9c64115bac65ff7d4fbe27d2827e0ce64a
+::   Building wheel for pyasn1 (pyproject.toml): started
+::   Building wheel for pyasn1 (pyproject.toml): finished with status 'done'
+::   Created wheel for pyasn1: filename=pyasn1-0.6.3-py3-none-any.whl size=83996 sha256=e34dbdf0f813b7d151ef5877e4f29efd9b45062ed436526544ad4ab11b2f9ee7
+::   Stored in directory: /root/.cache/pip/wheels/59/37/90/dcb71483c957d3c087192ed687d3cd45b5f47e2da062ec2f2b
+::   Building wheel for pycparser (pyproject.toml): started
+::   Building wheel for pycparser (pyproject.toml): finished with status 'done'
+::   Created wheel for pycparser: filename=pycparser-2.22-py3-none-any.whl size=117639 sha256=fe5943809be789bdc68b25cbaa66ce0e92881a57d85c692b8b527410dc93d20c
+::   Stored in directory: /root/.cache/pip/wheels/12/34/0d/9db43d8cef7d04f68c93e8e92ebb822a08f86f5bc9a503fdf9
+::   Building wheel for pydantic-core (pyproject.toml): started
+::   Building wheel for pydantic-core (pyproject.toml): still running...
+::   Building wheel for pydantic-core (pyproject.toml): finished with status 'done'
+::   Created wheel for pydantic-core: filename=pydantic_core-2.33.2-cp310-cp310-linux_x86_64.whl size=2115719 sha256=f23cd715a632f3eea7af8cc55d68ef9cb0b370c3a7289a8ee5ee5bd68790395b
+::   Stored in directory: /root/.cache/pip/wheels/fd/c7/ca/bc187a8f00e58379fbf4de049d93b076a5d86f8be944e7893c
+::   Building wheel for pydantic (pyproject.toml): started
+::   Building wheel for pydantic (pyproject.toml): finished with status 'done'
+::   Created wheel for pydantic: filename=pydantic-2.11.10-py3-none-any.whl size=444821 sha256=598de7f86180c8138eb7affea6047eec47fbeb0efef26c2ed9c08fef42ee508b
+::   Stored in directory: /root/.cache/pip/wheels/ea/53/77/85380498f071903e3dd5e5523de04d9b3ba4ce27daf33cbca6
+::   Building wheel for pygments (pyproject.toml): started
+::   Building wheel for pygments (pyproject.toml): finished with status 'done'
+::   Created wheel for pygments: filename=pygments-2.19.2-py3-none-any.whl size=1225217 sha256=e5907eba33a5d4fa22e197d365b1562e4bb1d0091534f0386163249293a8185c
+::   Stored in directory: /root/.cache/pip/wheels/c7/ea/ee/a037f3b50475dcbcd116a832e75aacbe908815872455d9d108
+::   Building wheel for python-dateutil (pyproject.toml): started
+::   Building wheel for python-dateutil (pyproject.toml): finished with status 'done'
+::   Created wheel for python-dateutil: filename=python_dateutil-2.9.0.post0-py2.py3-none-any.whl size=229932 sha256=9bc4fb25b58c470fd66f180138d50767fb6112a34cdee4cb4ff6b82b695e4d8b
+::   Stored in directory: /root/.cache/pip/wheels/66/5a/ae/9b65b4a4fd5534cc3cb720cfb5432cb3731f88a4c3128dd1bd
+::   Building wheel for pyyaml (pyproject.toml): started
+::   Building wheel for pyyaml (pyproject.toml): finished with status 'done'
+::   Created wheel for pyyaml: filename=pyyaml-6.0.2-cp310-cp310-linux_x86_64.whl size=45458 sha256=ea49f8d43294012270549d5774f112c8e3c96853cf6a376d79b131b4067b5d78
+::   Stored in directory: /root/.cache/pip/wheels/92/98/bd/e8cdef76a754cb8d04e8d08c82b1e06df63e77faf387b18dd3
+::   Building wheel for referencing (pyproject.toml): started
+::   Building wheel for referencing (pyproject.toml): finished with status 'done'
+::   Created wheel for referencing: filename=referencing-0.36.2-py3-none-any.whl size=26776 sha256=34ecc10856429123eb0a1045fe25287f42182585d769c6b603934e7fe191a3d0
+::   Stored in directory: /root/.cache/pip/wheels/43/a0/ce/18745169104608e6d16c0877393126b0b2b65b04133176eaf0
+::   Building wheel for requests (pyproject.toml): started
+::   Building wheel for requests (pyproject.toml): finished with status 'done'
+::   Created wheel for requests: filename=requests-2.32.4-py3-none-any.whl size=65069 sha256=0e621beabb73ae66a53f1b61f7eae929790c4ef837c646992f7a27fbdfdf6128
+::   Stored in directory: /root/.cache/pip/wheels/6a/31/4b/5c933f9c78f4f5f9be2a50d58eaa3ea4d5a8a4c54ef0eb48e0
+::   Building wheel for rich (pyproject.toml): started
+::   Building wheel for rich (pyproject.toml): finished with status 'done'
+::   Created wheel for rich: filename=rich-14.3.3-py3-none-any.whl size=310459 sha256=88871ba46148d833b980d47f22f87f7e7ef454efe777dab7f6b34051e9418658
+::   Stored in directory: /root/.cache/pip/wheels/92/03/05/22d82481fb6a8d6c1bae1604a3c314ab100018d179871eb4f0
+::   Building wheel for rpds-py (pyproject.toml): started
+::   Building wheel for rpds-py (pyproject.toml): finished with status 'done'
+::   Created wheel for rpds-py: filename=rpds_py-0.24.0-cp310-cp310-linux_x86_64.whl size=393344 sha256=d3d106e631331693d3d3b4c89f588ec50a214d5c5c9737973a01eed1aae8a3c2
+::   Stored in directory: /root/.cache/pip/wheels/36/6b/80/d1e0517be45963e0d9974de201ad0774efc207f0ebb101c3b8
+::   Building wheel for ruamel-yaml-clib (pyproject.toml): started
+::   Building wheel for ruamel-yaml-clib (pyproject.toml): finished with status 'done'
+::   Created wheel for ruamel-yaml-clib: filename=ruamel_yaml_clib-0.2.12-cp310-cp310-linux_x86_64.whl size=640451 sha256=7e1dc1445444aded73e53ce40cad0a762227c2395a74c8f618032ef6c9417c8c
+::   Stored in directory: /root/.cache/pip/wheels/9c/8e/79/897fbc37723890c2377a05530ab21242aaab11ce36cc02da85
+::   Building wheel for ruamel-yaml (pyproject.toml): started
+::   Building wheel for ruamel-yaml (pyproject.toml): finished with status 'done'
+::   Created wheel for ruamel-yaml: filename=ruamel_yaml-0.18.14-py3-none-any.whl size=118632 sha256=0d2a069f05fa95085ee57ac60fc64800883386a48768fbd79f8ef5925e34c8e7
+::   Stored in directory: /root/.cache/pip/wheels/3a/9a/9e/8c58aa43b7bac342918d33e1998dee3574a8af68461c26fad8
+::   Building wheel for s3transfer (pyproject.toml): started
+::   Building wheel for s3transfer (pyproject.toml): finished with status 'done'
+::   Created wheel for s3transfer: filename=s3transfer-0.13.0-py3-none-any.whl size=85256 sha256=e768522323940394f6b8aa1dc560c78509d73be69623077652b08171de2385b9
+::   Stored in directory: /root/.cache/pip/wheels/3d/67/b4/46f908d774a909ae9c6a87a96cdf61c8aecbc6da968acb731c
+::   Building wheel for shortuuid (pyproject.toml): started
+::   Building wheel for shortuuid (pyproject.toml): finished with status 'done'
+::   Created wheel for shortuuid: filename=shortuuid-1.0.13-py3-none-any.whl size=9710 sha256=4c09eac6e37f393ba2874474abe95eeff71b6b4b9a5068370d65db68ee5fd319
+::   Stored in directory: /root/.cache/pip/wheels/49/fa/99/652fc06de56f0ed10d4571bfc5ab000897e28bebf9e88a6e5c
+::   Building wheel for six (pyproject.toml): started
+::   Building wheel for six (pyproject.toml): finished with status 'done'
+::   Created wheel for six: filename=six-1.17.0-py2.py3-none-any.whl size=11130 sha256=d0654fbec8802bea335579a5ca59d2d146de90f3cf1ccb6321c0ce459eb4a64d
+::   Stored in directory: /root/.cache/pip/wheels/cc/81/c3/cc797ec0fd33665206170688250dba1503d7c5ffbcc2149a71
+::   Building wheel for tenacity (pyproject.toml): started
+::   Building wheel for tenacity (pyproject.toml): finished with status 'done'
+::   Created wheel for tenacity: filename=tenacity-9.1.2-py3-none-any.whl size=28248 sha256=4caaf76c7781ca215e3c874c026402f7b1a613143b193a92425686726bcb6cc8
+::   Stored in directory: /root/.cache/pip/wheels/d0/e8/99/fedb044aaff62d657bc45a8f18a33c9afdb821ebc3a3c19644
+::   Building wheel for typing-extensions (pyproject.toml): started
+::   Building wheel for typing-extensions (pyproject.toml): finished with status 'done'
+::   Created wheel for typing-extensions: filename=typing_extensions-4.13.2-py3-none-any.whl size=45806 sha256=a439e7c04b49fec3e5d3e2beaa21755cadbbdc391694e28ccdd36ca4a1408f8c
+::   Stored in directory: /root/.cache/pip/wheels/4a/e0/94/9aaf4353347dcc079cb481605c543fd9a1c294094523ce721f
+::   Building wheel for typing-inspection (pyproject.toml): started
+::   Building wheel for typing-inspection (pyproject.toml): finished with status 'done'
+::   Created wheel for typing-inspection: filename=typing_inspection-0.4.2-py3-none-any.whl size=14610 sha256=cb44f08981528a4022cbd2f15700c2af06ca79ea2833cc572652b722af86ff52
+::   Stored in directory: /root/.cache/pip/wheels/71/78/c9/ee524c38a2c077d26eca97292fecc3edeab526e7bc3d90b325
+::   Building wheel for urllib3 (pyproject.toml): started
+::   Building wheel for urllib3 (pyproject.toml): finished with status 'done'
+::   Created wheel for urllib3: filename=urllib3-2.4.0-py3-none-any.whl size=128733 sha256=4298e87833e3aa25c62a783bdc93f25133675c3952f167d43a988b2ab4cee0a4
+::   Stored in directory: /root/.cache/pip/wheels/0b/f9/a7/d147a4bd2903bdfa1a99be9876f09dc459ff46b573e67ab0de
+::   Building wheel for virtualenv (pyproject.toml): started
+::   Building wheel for virtualenv (pyproject.toml): finished with status 'done'
+::   Created wheel for virtualenv: filename=virtualenv-20.35.4-py3-none-any.whl size=6005094 sha256=eb1e175a3969fe174a05faa2d1a98c0c2b5ce13fca928ac904cdb9a4bd8a794a
+::   Stored in directory: /root/.cache/pip/wheels/33/34/c7/fd99b3964f78456deb3ecc5bd831fcc15e54587f6d002c13a6
+::   Building wheel for websocket-client (pyproject.toml): started
+::   Building wheel for websocket-client (pyproject.toml): finished with status 'done'
+::   Created wheel for websocket-client: filename=websocket_client-1.8.0-py3-none-any.whl size=58927 sha256=a7b2ea27a0912a22fc26374e124e2f5d60236b2048cc65393346cf85c66b8adc
+::   Stored in directory: /root/.cache/pip/wheels/f1/20/0f/84b29b8b989a78312c2bcacde09b3b356e515863e441716dab
+::   Building wheel for zipp (pyproject.toml): started
+::   Building wheel for zipp (pyproject.toml): finished with status 'done'
+::   Created wheel for zipp: filename=zipp-3.23.0-py3-none-any.whl size=10274 sha256=cc872695829f539cdf759beb383958d54dfefcc49ed5b3c824b9d21807ff2043
+::   Stored in directory: /root/.cache/pip/wheels/5f/f1/b6/8a2e14965b1549602ce38eabb37d5ebb9e3115d361e3020618
+::   Building wheel for opensearch-charms-single-kernel (pyproject.toml): started
+::   Building wheel for opensearch-charms-single-kernel (pyproject.toml): finished with status 'done'
+::   Created wheel for opensearch-charms-single-kernel: filename=opensearch_charms_single_kernel-0.0.6-py3-none-any.whl size=405807 sha256=f820396cc5d6bd163a61b582d6ceb30cc4cd5bc7b768f84d25afb44fd1ba5afa
+::   Stored in directory: /tmp/pip-ephem-wheel-cache-0cmmvcjg/wheels/8c/72/09/7313d06525bd9a36ab399702b4a0161b9263710ce1e1228e1c
+:: Successfully built annotated-types anyio attrs azure-core azure-storage-blob bcrypt boto3 botocore certifi cffi cfgv charmlibs-pathops charset-normalizer cosl cryptography data-platform-helpers distlib dnspython email-validator exceptiongroup filelock google-api-core google-auth google-cloud-core google-cloud-storage google-crc32c google-resumable-media googleapis-common-protos h11 httpcore httpx identify idna importlib-metadata isodate jmespath jsonschema-specifications jsonschema lightkube-models lightkube markdown-it-py mdurl nodeenv opentelemetry-api ops overrides platformdirs poetry-core pre-commit proto-plus protobuf pyasn1-modules pyasn1 pycparser pydantic-core pydantic pygments python-dateutil pyyaml referencing requests rich rpds-py ruamel-yaml-clib ruamel-yaml s3transfer shortuuid six tenacity typing-extensions typing-inspection urllib3 virtualenv websocket-client zipp opensearch-charms-single-kernel
+:: Installing collected packages: lightkube, distlib, zipp, websocket-client, virtualenv, urllib3, typing-inspection, typing-extensions, tenacity, six, shortuuid, s3transfer, ruamel-yaml-clib, ruamel-yaml, rpds-py, rich, requests, referencing, pyyaml, python-dateutil, pygments, pydantic-core, pydantic, pycparser, pyasn1-modules, pyasn1, protobuf, proto-plus, pre-commit, poetry-core, platformdirs, overrides, ops, opentelemetry-api, opensearch-charms-single-kernel, nodeenv, mdurl, markdown-it-py, lightkube-models, jsonschema-specifications, jsonschema, jmespath, isodate, importlib-metadata, idna, identify, httpx, httpcore, h11, googleapis-common-protos, google-resumable-media, google-crc32c, google-cloud-storage, google-cloud-core, google-auth, google-api-core, filelock, exceptiongroup, email-validator, dnspython, data-platform-helpers, cryptography, cosl, charset-normalizer, charmlibs-pathops, cfgv, cffi, certifi, botocore, boto3, bcrypt, azure-storage-blob, azure-core, attrs, anyio, annotated-types
+:: Successfully installed annotated-types-0.7.0 anyio-4.14.1 attrs-25.3.0 azure-core-1.39.0 azure-storage-blob-12.28.0 bcrypt-4.3.0 boto3-1.38.36 botocore-1.38.36 certifi-2025.1.31 cffi-1.17.1 cfgv-3.5.0 charmlibs-pathops-1.2.0.post0 charset-normalizer-3.4.1 cosl-1.9.2 cryptography-45.0.4 data-platform-helpers-0.1.7 distlib-0.4.0 dnspython-2.8.0 email-validator-2.3.0 exceptiongroup-1.3.1 filelock-3.20.0 google-api-core-2.30.2 google-auth-2.49.1 google-cloud-core-2.5.1 google-cloud-storage-2.19.0 google-crc32c-1.8.0 google-resumable-media-2.8.2 googleapis-common-protos-1.74.0 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 identify-2.6.15 idna-3.10 importlib-metadata-8.7.0 isodate-0.7.2 jmespath-1.0.1 jsonschema-4.24.0 jsonschema-specifications-2024.10.1 lightkube-0.17.2 lightkube-models-1.35.0.8 markdown-it-py-4.0.0 mdurl-0.1.2 nodeenv-1.9.1 opensearch-charms-single-kernel-0.0.6 opentelemetry-api-1.38.0 ops-3.5.2 overrides-7.7.0 platformdirs-4.3.7 poetry-core-1.9.1 pre-commit-4.4.0 proto-plus-1.27.2 protobuf-7.34.1 pyasn1-0.6.3 pyasn1-modules-0.4.2 pycparser-2.22 pydantic-2.11.10 pydantic-core-2.33.2 pygments-2.19.2 python-dateutil-2.9.0.post0 pyyaml-6.0.2 referencing-0.36.2 requests-2.32.4 rich-14.3.3 rpds-py-0.24.0 ruamel-yaml-0.18.14 ruamel-yaml-clib-0.2.12 s3transfer-0.13.0 shortuuid-1.0.13 six-1.17.0 tenacity-9.1.2 typing-extensions-4.13.2 typing-inspection-0.4.2 urllib3-2.4.0 virtualenv-20.35.4 websocket-client-1.8.0 zipp-3.23.0
+:: +++ which python3
+:: ++ readlink -f /usr/bin/python3
+:: + /usr/bin/python3.10 -m pip --python=/root/parts/charm-poetry/install/venv/bin/python3 check
+:: No broken requirements found.
+:: + cp --archive --recursive --reflink=auto /root/parts/charm-poetry/build/src /root/parts/charm-poetry/install
+:: ++ set +o
+:: ++ grep errexit
+:: + opts_state='set +o errexit'
+:: + set +e
+:: + install_dir=/root/parts/charm-poetry/install/usr/bin
+:: + stage_dir=/root/stage/usr/bin
+:: +++ readlink -f /root/parts/charm-poetry/install/venv/bin/python3
+:: ++ basename /usr/bin/python3.10
+:: + basename=python3.10
+:: + echo Looking for a Python interpreter called '"python3.10"' in the payload...
+:: Looking for a Python interpreter called "python3.10" in the payload...
+:: ++ find /root/parts/charm-poetry/install/usr/bin /root/stage/usr/bin -type f -executable -name python3.10 -print -quit
+:: ++ true
+:: + payload_python=
+:: + '[' -n '' ']'
+:: + echo 'Python interpreter not found in payload.'
+:: Python interpreter not found in payload.
+:: +++ which python3
+:: ++ readlink -f /usr/bin/python3
+:: + symlink_target=/usr/bin/python3.10
+:: + '[' -z /usr/bin/python3.10 ']'
+:: + eval 'set +o errexit'
+:: ++ set +o errexit
+:: + echo Removing python symlinks in /root/parts/charm-poetry/install/venv/bin
+:: Removing python symlinks in /root/parts/charm-poetry/install/venv/bin
+:: + rm /root/parts/charm-poetry/install/venv/bin/python /root/parts/charm-poetry/install/venv/bin/python3 /root/parts/charm-poetry/install/venv/bin/python3.10
+:: + shopt -s extglob
+:: + rm -rf /root/parts/charm-poetry/install/venv/bin/Activate.ps1 /root/parts/charm-poetry/install/venv/bin/__pycache__ /root/parts/charm-poetry/install/venv/bin/activate.csh /root/parts/charm-poetry/install/venv/bin/activate.fish /root/parts/charm-poetry/install/venv/bin/email_validator /root/parts/charm-poetry/install/venv/bin/httpx /root/parts/charm-poetry/install/venv/bin/identify-cli /root/parts/charm-poetry/install/venv/bin/jp.py /root/parts/charm-poetry/install/venv/bin/jsonschema /root/parts/charm-poetry/install/venv/bin/markdown-it /root/parts/charm-poetry/install/venv/bin/nodeenv /root/parts/charm-poetry/install/venv/bin/normalizer /root/parts/charm-poetry/install/venv/bin/pre-commit /root/parts/charm-poetry/install/venv/bin/pygmentize /root/parts/charm-poetry/install/venv/bin/shortuuid /root/parts/charm-poetry/install/venv/bin/virtualenv /root/parts/charm-poetry/install/venv/bin/wsdump
+:: + shopt -u extglob
+:: + sed -i 's#^VIRTUAL_ENV=.*$#VIRTUAL_ENV="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." \&> /dev/null \&\& pwd )"#' /root/parts/charm-poetry/install/venv/bin/activate
+:: + '[' -L /root/parts/charm-poetry/install/venv/lib64 ']'
+:: + rm -f /root/parts/charm-poetry/install/venv/lib64
+:: + cp requirements.txt /root/parts/charm-poetry/install/requirements.txt
+Building files
+:: + cp --archive --link --no-dereference . /root/parts/files/install
+Skipping stage for poetry-deps (already ran)
+Staging charm-poetry
+Staging files
+Priming poetry-deps
+Priming charm-poetry
+Creating dispatch file
+Priming files
+Packing...
+Packing charm opensearch_ubuntu@22.04-amd64.charm
+Packed opensearch_ubuntu@22.04-amd64.charm
+removing copied files from single kernel charm.
+~/opensearch-single-kernel-library

@@ -8,6 +8,7 @@ import logging
 import subprocess
 import time
 
+import jubilant
 from pytest_operator.plugin import OpsTest
 from tenacity import (
     RetryError,
@@ -174,12 +175,12 @@ async def get_shards_by_state(ops_test: OpsTest, unit_ip: str) -> dict[str, list
     stop=stop_after_attempt(25),
 )
 async def get_shards_by_index(
-    ops_test: OpsTest, unit_ip: str, index_name: str, app: str = APP_NAME
+    juju: jubilant.Juju, unit_ip: str, index_name: str, app: str = APP_NAME
 ) -> list[Shard]:
     """Returns the list of shards and their location in cluster for an index.
 
     Args:
-        ops_test: The ops test framework instance.
+        juju: The jubilant Juju instance.
         unit_ip: The ip of the OpenSearch unit.
         index_name: the name of the index.
         app: The name of the application.
@@ -188,7 +189,7 @@ async def get_shards_by_index(
         List of shards.
     """
     response = await http_request(
-        ops_test, "GET", f"https://{unit_ip}:9200/{index_name}/_search_shards", app=app
+        juju, "GET", f"https://{unit_ip}:9200/{index_name}/_search_shards", app=app
     )
 
     nodes = response["nodes"]
@@ -222,7 +223,7 @@ async def assert_continuous_writes_increasing(
 
 
 async def assert_continuous_writes_consistency(
-    ops_test: OpsTest, c_writes: ContinuousWrites, apps: list[str]
+    juju: jubilant.Juju, c_writes: ContinuousWrites, apps: list[str]
 ) -> None:
     """Continuous writes checks."""
     result = await c_writes.stop()
@@ -230,13 +231,13 @@ async def assert_continuous_writes_consistency(
     assert result.max_stored_id == result.count - 1
     assert result.max_stored_id == result.last_expected_id
 
-    unit_ip = await get_leader_unit_ip(ops_test, apps[0])
+    unit_ip = await get_leader_unit_ip(juju, apps[0])
 
     # fetch unit ips by unit id by application
-    apps_units_ips = {app: await get_application_unit_ids_ips(ops_test, app) for app in apps}
+    apps_units_ips = {app: await get_application_unit_ids_ips(juju, app) for app in apps}
 
     # investigate the data in each shard, primaries and their respective replicas
-    shards = await get_shards_by_index(ops_test, unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(juju, unit_ip, ContinuousWrites.INDEX_NAME)
     shards_by_id = {}
     for shard in shards:
         shards_by_id.setdefault(shard.num, []).append(shard)

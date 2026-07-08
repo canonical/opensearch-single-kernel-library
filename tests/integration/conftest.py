@@ -4,9 +4,9 @@ import os
 from logging import getLogger
 from pathlib import Path
 
+import jubilant
 import pytest
 import yaml
-from pytest_operator.plugin import OpsTest
 
 from tests.helpers import Substrate
 
@@ -100,12 +100,31 @@ def charm_resources(substrate: Substrate) -> dict[str, str]:
     return {"opensearch-image": upstream}
 
 
+@pytest.fixture(scope="module")
+def juju(request) -> jubilant.Juju:
+    """Return a jubilant Juju instance bound to the test model.
+
+    The model name is taken from the ``--model`` option (registered by pytest-operator and used
+    by the spread tasks, e.g. ``--model testing``). If no model is provided, a temporary model is
+    created and destroyed around the test module.
+    """
+    model = request.config.getoption("--model", default=None)
+    if model:
+        instance = jubilant.Juju(model=model)
+        instance.wait_timeout = 20 * 60
+        yield instance
+    else:
+        with jubilant.temp_model() as instance:
+            instance.wait_timeout = 20 * 60
+            yield instance
+
+
 @pytest.fixture(autouse=True)
-async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate):
+def deploy_client_charm(juju: jubilant.Juju, substrate: Substrate):
     """Deploy the client charm."""
-    if substrate == "k8s" and CLIENT_CHARM not in ops_test.model.applications:
-        await ops_test.model.deploy(
+    if substrate == "k8s" and CLIENT_CHARM not in juju.status().apps:
+        juju.deploy(
             "./tests/charms/dummy-client-charm/dummy-client-charm_amd64.charm",
             CLIENT_CHARM,
         )
-        await ops_test.model.wait_for_idle(apps=[CLIENT_CHARM])
+        juju.wait(lambda status: jubilant.all_active(status, CLIENT_CHARM))

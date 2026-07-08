@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /home/ubuntu/.cache/pypoetry/virtualenvs/opensearch-charms-single-kernel-C0NIuQcE-py3.12/bin/python
+cachedir: .pytest_cache
+rootdir: /home/ubuntu/opensearch-single-kernel-library
+configfile: pyproject.toml
+plugins: anyio-4.13.0, operator-0.42.1, allure-pytest-2.16.0, asyncio-0.21.2, playwright-0.8.0, base-url-2.1.0, mock-3.15.1, allure-pytest-default-results-0.1.4, microceph-0.1.0
+asyncio: mode=Mode.AUTO
+collecting ... collected 10 items
+
+tests/integration/test_charm.py::test_deploy_and_remove_single_unit SKIPPED
+tests/integration/test_charm.py::test_build_and_deploy SKIPPED (Skip...)
+tests/integration/test_charm.py::test_actions_get_admin_password FAILED
+tests/integration/test_charm.py::test_actions_rotate_admin_password PASSED
+tests/integration/test_charm.py::test_actions_rotate_system_user_password[monitor] PASSED
+tests/integration/test_charm.py::test_actions_rotate_system_user_password[kibanaserver] PASSED
+tests/integration/test_charm.py::test_check_pinned_revision PASSED
+tests/integration/test_charm.py::test_check_workload_version PASSED
+tests/integration/test_charm.py::test_all_units_have_internal_users_synced PASSED
+tests/integration/test_charm.py::test_add_users_and_calling_update_status /var/lib/juju/agents/unit-opensearch-1/charm/venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:263: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+PASSED
+
+=================================== FAILURES ===================================
+_______________________ test_actions_get_admin_password ________________________
+tests/integration/test_charm.py:132: in test_actions_get_admin_password
+    assert result.status == "failed"
+E   AssertionError: assert 'completed' == 'failed'
+E     
+E     - failed
+E     + completed
+------------------------------ Captured log call -------------------------------
+INFO     jubilant:_juju.py:551 cli: juju status --model testing --format json
+INFO     jubilant:_juju.py:551 cli: juju status --model testing --format json
+INFO     jubilant:_juju.py:551 cli: juju run --model testing --format json opensearch/1 get-password --params /home/ubuntu/snap/juju/common/tmpgj1puti8
+=========================== short test summary info ============================
+FAILED tests/integration/test_charm.py::test_actions_get_admin_password - Ass...
+============== 1 failed, 7 passed, 2 skipped in 834.44s (0:13:54) ==============
