@@ -542,18 +542,72 @@ async def assert_start_and_check_continuous_writes(
     await writer.clear()
 
 
+async def _snapshot_repository_name(ops_test: OpsTest, unit_ip: str, app: str = APP_NAME) -> str:
+    """Return the name of the (single) configured snapshot repository."""
+    repos = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_snapshot", app=app)
+    # only one backup integrator is related per test scenario, so there is one repository
+    return next(iter(repos))
+
+
+async def wait_for_backup_terminal_state(
+    ops_test: OpsTest, leader_id: int, backup_id: str, app: str = APP_NAME
+) -> str:
+    """Wait until the given backup leaves 'in_progress' and return its terminal state.
+
+    Terminal states are 'success', 'partial' and 'failed'.
+    """
+    for attempt in Retrying(stop=stop_after_attempt(8), wait=wait_fixed(15)):
+        with attempt:
+            backups = await list_backups(ops_test, leader_id, app=app)
+            state = str(backups.get(backup_id, {}).get("state", "")).lower()
+            logger.debug(f"Backup {backup_id} state: {state}")
+            if not state or state == "in_progress":
+                raise Exception(f"Backup {backup_id} not in a terminal state yet (state: {state})")
+            return state
+
+    raise AssertionError(f"Backup {backup_id} never reached a terminal state")
+
+
 async def create_backup(
     ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
 ) -> str:
-    """Runs the backup of the cluster."""
-    action = await run_action(ops_test, leader_id, "create-backup", app=app)
-    logger.debug(f"create-backup output: {action}")
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
-    assert action.status == "completed"
-    st = str(action.response.get("status", ""))
-    assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
-    assert action.response.get("backup-id"), "backup-id is missing in response"
-    return action.response["backup-id"]
+    """Runs the backup of the cluster, retrying until a full (SUCCESS) snapshot is produced.
+
+    The backup is taken with wait_for_completion=false while continuous writes are ongoing, so a
+    shard can occasionally miss the snapshot and it settles in the terminal 'partial' state. A
+    'partial' snapshot cannot be restored ("wasn't fully snapshotted - cannot restore"), so if
+    that happens we delete it and take a fresh backup until one lands 'success'. This leaves
+    exactly one snapshot per successful call, preserving backup-count expectations.
+    """
+    for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5)):
+        with attempt:
+            action = await run_action(ops_test, leader_id, "create-backup", app=app)
+            logger.debug(f"create-backup output: {action}")
+            await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+            assert action.status == "completed"
+            st = str(action.response.get("status", ""))
+            assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
+            backup_id = action.response.get("backup-id")
+            assert backup_id, "backup-id is missing in response"
+
+            state = await wait_for_backup_terminal_state(ops_test, leader_id, backup_id, app=app)
+            if state == "success":
+                return backup_id
+
+            # 'partial'/'failed' snapshots cannot be restored: drop this one and retry.
+            logger.warning(
+                f"Backup {backup_id} finished in state '{state}'; deleting it and retrying."
+            )
+            repo = await _snapshot_repository_name(ops_test, unit_ip, app=app)
+            await http_request(
+                ops_test,
+                "DELETE",
+                f"https://{unit_ip}:9200/_snapshot/{repo}/{backup_id}",
+                app=app,
+            )
+            raise Exception(f"Backup {backup_id} was not fully snapshotted (state: {state})")
+
+    raise AssertionError("create_backup exhausted retries without producing a SUCCESS snapshot")
 
 
 async def restore(
@@ -569,7 +623,9 @@ async def restore(
     return action.status == "completed"
 
 
-async def list_backups(ops_test: OpsTest, leader_id: int, app: str = APP_NAME) -> dict[str, str]:
+async def list_backups(
+    ops_test: OpsTest, leader_id: int, app: str = APP_NAME
+) -> dict[str, dict[str, str]]:
     action = await run_action(
         ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
     )
