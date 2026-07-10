@@ -6,9 +6,9 @@ import logging
 import socket
 import subprocess
 
+import jubilant
 import pytest
 import yaml
-from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import (
     APP_NAME,
@@ -16,7 +16,11 @@ from tests.integration.conftest import (
     IDLE_PERIOD,
     MODEL_CONFIG,
 )
-from tests.integration.helpers import get_application_unit_ids, wait_until
+from tests.integration.helpers import (
+    _series_to_base,
+    get_application_unit_ids,
+    wait_until,
+)
 from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
@@ -27,7 +31,7 @@ DEFAULT_NUM_UNITS = 3
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series, lxd_spaces) -> None:
+async def test_build_and_deploy(juju: jubilant.Juju, charm, series, lxd_spaces) -> None:
     """Build and deploy OpenSearch.
 
     For this test, we will misconfigure space bindings and see if the charm still
@@ -35,42 +39,43 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, lxd_spaces) ->
 
     More information: gh:canonical/opensearch-operator#334
     """
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     # Create a deployment that binds to the wrong space.
     # That should trigger #334.
-    await ops_test.model.deploy(
+    juju.deploy(
         charm,
+        app=APP_NAME,
         num_units=DEFAULT_NUM_UNITS,
-        series=series,
-        constraints="spaces=alpha,client,cluster,backup",
+        base=_series_to_base(series),
+        constraints={"spaces": "alpha,client,cluster,backup"},
         bind={"": "cluster"},
         config=CONFIG_OPTS,
     )
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
+    juju.deploy(
         TLS_CERTIFICATES_APP_NAME,
         channel=TLS_STABLE_CHANNEL,
-        constraints="spaces=alpha,client,cluster,backup",
+        constraints={"spaces": "alpha,client,cluster,backup"},
         bind={"": "cluster"},
         config=config,
     )
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=DEFAULT_NUM_UNITS,
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == DEFAULT_NUM_UNITS
+    assert len(juju.status().apps[APP_NAME].units) == DEFAULT_NUM_UNITS
 
 
 @pytest.mark.abort_on_fail
-async def test_check_opensearch_transport(ops_test: OpsTest) -> None:
+async def test_check_opensearch_transport(juju: jubilant.Juju) -> None:
     """Test which IP will be assigned to transport bind in the end."""
-    ids = get_application_unit_ids(ops_test, APP_NAME)
+    ids = get_application_unit_ids(juju, APP_NAME)
     # Build the dict containing each id - opensearch-peers' ingress IP
     ids_to_addr = {}
     for id in ids:

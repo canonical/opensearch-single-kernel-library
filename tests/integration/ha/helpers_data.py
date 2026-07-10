@@ -9,7 +9,7 @@ import logging
 from random import randint
 from typing import Any, Dict, List, Optional
 
-from pytest_operator.plugin import OpsTest
+import jubilant
 from tenacity import Retrying, retry, stop_after_attempt, wait_fixed, wait_random
 
 from tests.helpers import Substrate
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
     stop=stop_after_attempt(15),
 )
 async def create_dummy_indexes(
-    ops_test: OpsTest, app: str, unit_ip: str, max_r_shards: int, count: int = 5
+    juju: jubilant.Juju, app: str, unit_ip: str, max_r_shards: int, count: int = 5
 ) -> None:
     """Create indexes."""
     for index_id in range(count):
@@ -40,7 +40,7 @@ async def create_dummy_indexes(
             f"Creating: index_{index_id} -- number_of_shards: {p_shards} -- number_of_replicas: {r_shards}"
         )
         await http_request(
-            ops_test,
+            juju,
             "PUT",
             f"https://{unit_ip}:9200/index_{index_id}",
             {
@@ -57,7 +57,7 @@ async def create_dummy_indexes(
     stop=stop_after_attempt(15),
 )
 async def update_dummy_indexes(
-    ops_test: OpsTest, app: str, unit_ip: str, max_r_shards: int, count: int = 5
+    juju: jubilant.Juju, app: str, unit_ip: str, max_r_shards: int, count: int = 5
 ) -> None:
     """Update the replication factors of dummy indexes."""
     for index_id in range(count):
@@ -68,7 +68,7 @@ async def update_dummy_indexes(
         )
 
         await http_request(
-            ops_test,
+            juju,
             "PUT",
             f"https://{unit_ip}:9200/index_{index_id}/_settings",
             {"index": {"number_of_replicas": r_shards}},
@@ -80,11 +80,13 @@ async def update_dummy_indexes(
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count: int = 5) -> None:
+async def delete_dummy_indexes(
+    juju: jubilant.Juju, app: str, unit_ip: str, count: int = 5
+) -> None:
     """Delete dummy indexes."""
     for index_id in range(count):
         await http_request(
-            ops_test,
+            juju,
             "DELETE",
             f"https://{unit_ip}:9200/index_{index_id}",
             app=app,
@@ -96,26 +98,24 @@ async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count:
     stop=stop_after_attempt(15),
 )
 async def create_dummy_docs(
-    ops_test: OpsTest, app: str, unit_ip: str, count: int = 5, substrate: Substrate = "vm"
+    juju: jubilant.Juju, app: str, unit_ip: str, count: int = 5, substrate: Substrate = "vm"
 ) -> None:
     """Store documents in the dummy indexes."""
     if substrate == "k8s":
-        admin_secrets = await get_secrets(ops_test, app=app)
-        k8s_unit = await _find_k8s_unit_for_endpoint(
-            ops_test, f"https://{unit_ip}:9200/_bulk", app
-        )
+        admin_secrets = await get_secrets(juju, app=app)
+        k8s_unit = await _find_k8s_unit_for_endpoint(juju, f"https://{unit_ip}:9200/_bulk", app)
         if not k8s_unit:
             raise RuntimeError(
                 f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
             )
         logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
         action = await run_action(
-            ops_test,
+            juju,
             app=CLIENT_CHARM,
             action_name="create-dummy-docs",
             params={
                 "count": count,
-                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "host": _k8s_unit_fqdn(juju, app, k8s_unit),
                 "username": "admin",
                 "password": admin_secrets["password"],
                 "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
@@ -138,7 +138,7 @@ async def create_dummy_docs(
                 f'"Store_Id": "{randint(1, 250)}"}}\n'
             )
 
-    await http_request(ops_test, "PUT", f"https://{unit_ip}:9200/_bulk", payload=all_docs, app=app)
+    await http_request(juju, "PUT", f"https://{unit_ip}:9200/_bulk", payload=all_docs, app=app)
 
 
 @retry(
@@ -146,7 +146,7 @@ async def create_dummy_docs(
     stop=stop_after_attempt(15),
 )
 async def create_index(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     index_name: str,
@@ -167,7 +167,7 @@ async def create_index(
     if extra_mappings:
         content["mappings"] = extra_mappings
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"https://{unit_ip}:9200/{index_name}",
         content,
@@ -179,10 +179,10 @@ async def create_index(
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def bulk_insert(ops_test: OpsTest, app: str, unit_ip: str, payload: str) -> None:
+async def bulk_insert(juju: jubilant.Juju, app: str, unit_ip: str, payload: str) -> None:
     """Insert a set of docs in a single bulk request."""
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"https://{unit_ip}:9200/_bulk",
         payload=payload,
@@ -195,7 +195,7 @@ async def bulk_insert(ops_test: OpsTest, app: str, unit_ip: str, payload: str) -
     stop=stop_after_attempt(15),
 )
 async def bulk_insert_generated(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     index_names: list[str],
@@ -204,21 +204,21 @@ async def bulk_insert_generated(
 ) -> None:
     """Generate docs near OpenSearch and insert them through the bulk endpoint."""
     endpoint = f"https://{unit_ip}:9200/_bulk"
-    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(juju, endpoint, app)
     if k8s_unit:
-        admin_secrets = await get_secrets(ops_test, app=app)
+        admin_secrets = await get_secrets(juju, app=app)
         logger.info(
             f"Creating generated bulk docs through {CLIENT_CHARM} action on unit {k8s_unit.name}"
         )
         action = await run_action(
-            ops_test,
+            juju,
             app=CLIENT_CHARM,
             action_name="bulk-insert",
             params={
                 "index-names": json.dumps(index_names),
                 "docs-count": docs_count,
                 "blob-size": blob_size,
-                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "host": _k8s_unit_fqdn(juju, app, k8s_unit),
                 "username": "admin",
                 "password": admin_secrets["password"],
                 "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
@@ -239,7 +239,7 @@ async def bulk_insert_generated(
         return
 
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         endpoint,
         payload=_generated_bulk_body(index_names, docs_count, blob_size),
@@ -263,7 +263,7 @@ def _generated_bulk_body(index_names: list[str], docs_count: int, blob_size: int
     stop=stop_after_attempt(15),
 )
 async def index_doc(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     index_name: str,
@@ -276,15 +276,13 @@ async def index_doc(
         doc = default_doc(index_name, doc_id)
 
     await http_request(
-        ops_test, "PUT", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", payload=doc, app=app
+        juju, "PUT", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", payload=doc, app=app
     )
 
     # a refresh makes the indexed data available for search, runs by default every 30 sec,
     # but we can manually trigger it like below
     if refresh:
-        await http_request(
-            ops_test, "POST", f"https://{unit_ip}:9200/{index_name}/_refresh", app=app
-        )
+        await http_request(juju, "POST", f"https://{unit_ip}:9200/{index_name}/_refresh", app=app)
 
 
 @retry(
@@ -292,11 +290,11 @@ async def index_doc(
     stop=stop_after_attempt(15),
 )
 async def get_doc(
-    ops_test: OpsTest, app: str, unit_ip: str, index_name: str, doc_id: int
+    juju: jubilant.Juju, app: str, unit_ip: str, index_name: str, doc_id: int
 ) -> Dict[str, Any]:
     """Fetch a document by id."""
     return await http_request(
-        ops_test, "GET", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", app=app
+        juju, "GET", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", app=app
     )
 
 
@@ -305,11 +303,11 @@ async def get_doc(
     stop=stop_after_attempt(15),
 )
 async def delete_doc(
-    ops_test: OpsTest, app: str, unit_ip: str, index_name: str, doc_id: int
+    juju: jubilant.Juju, app: str, unit_ip: str, index_name: str, doc_id: int
 ) -> None:
     """Delete a document by id."""
     await http_request(
-        ops_test,
+        juju,
         "DELETE",
         f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}",
         app=app,
@@ -320,10 +318,10 @@ async def delete_doc(
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def delete_index(ops_test: OpsTest, app: str, unit_ip: str, index_name: str) -> None:
+async def delete_index(juju: jubilant.Juju, app: str, unit_ip: str, index_name: str) -> None:
     """Delete an index."""
     await http_request(
-        ops_test,
+        juju,
         "DELETE",
         f"https://{unit_ip}:9200/{index_name}/",
         app=app,
@@ -336,7 +334,7 @@ def default_doc(index_name: str, doc_id: int) -> Dict[str, Any]:
 
 
 async def search(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     index_name: str,
@@ -352,12 +350,12 @@ async def search(
         stop=stop_after_attempt(retries), wait=wait_fixed(wait=5) + wait_random(0, 5)
     ):
         with attempt:  # Raises RetryError if failed after "retries"
-            resp = await http_request(ops_test, "GET", endpoint, payload=query, app=app)
+            resp = await http_request(juju, "GET", endpoint, payload=query, app=app)
             return resp["hits"]["hits"]
 
 
 async def index_docs_count(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     index_name: str,
@@ -370,10 +368,10 @@ async def index_docs_count(
     ):
         with attempt:  # Raises RetryError if failed after "retries"
             # We need to refresh and then count the docs
-            resp = await http_request(ops_test, "POST", endpoint + "_refresh", app=app)
+            resp = await http_request(juju, "POST", endpoint + "_refresh", app=app)
             logger.debug(f"Index refresh response: {resp}")
 
-            resp = await http_request(ops_test, "GET", endpoint + "_count", app=app)
+            resp = await http_request(juju, "GET", endpoint + "_count", app=app)
             logger.debug(f"Index count response: {resp['count']}")
             if isinstance(resp["count"], int):
                 return resp["count"]

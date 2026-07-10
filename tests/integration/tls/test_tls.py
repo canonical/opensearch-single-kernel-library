@@ -6,8 +6,8 @@ import logging
 import subprocess
 import time
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import (
@@ -50,13 +50,13 @@ SECRET_EXPIRY_WAIT_TIME = SECRET_EXPIRY_TIME + 60
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy_active(
-    ops_test: OpsTest, charm, series, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -68,93 +68,89 @@ async def test_build_and_deploy_active(
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    await wait_until(juju, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=len(UNIT_IDS),
     )
-    assert len(ops_test.model.applications[APP_NAME].units) == len(UNIT_IDS)
+    assert len(juju.status().apps[APP_NAME].units) == len(UNIT_IDS)
 
 
 @pytest.mark.abort_on_fail
-async def test_security_index_initialised(ops_test: OpsTest) -> None:
+async def test_security_index_initialised(juju: jubilant.Juju) -> None:
     """Test that the security index is well initialised."""
     # Wait for the leader unit to initialize the security index.
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
-    assert await check_security_index_initialised(ops_test, leader_unit_ip)
+    leader_unit_ip = await get_leader_unit_ip(juju)
+    assert await check_security_index_initialised(juju, leader_unit_ip)
 
 
 @pytest.mark.abort_on_fail
-async def test_tls_configured(ops_test: OpsTest) -> None:
+async def test_tls_configured(juju: jubilant.Juju) -> None:
     """Test that TLS is enabled when relating to the TLS Certificates Operator."""
-    for unit_name, unit_ip in (await get_application_unit_ips_names(ops_test)).items():
-        assert await check_unit_tls_configured(ops_test, unit_ip, unit_name)
+    for unit_name, unit_ip in (await get_application_unit_ips_names(juju)).items():
+        assert await check_unit_tls_configured(juju, unit_ip, unit_name)
 
 
 @pytest.mark.abort_on_fail
-async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
+async def test_cluster_formation_after_tls(juju: jubilant.Juju) -> None:
     """Test that the cluster formation is successful after TLS setup."""
-    unit_names = get_application_unit_names(ops_test)
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    unit_names = get_application_unit_names(juju)
+    leader_unit_ip = await get_leader_unit_ip(juju)
 
-    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names)
+    assert await check_cluster_formation_successful(juju, leader_unit_ip, unit_names)
 
 
 @pytest.mark.abort_on_fail
-async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
+async def test_tls_renewal(juju: jubilant.Juju, substrate) -> None:
     """Test that renewed TLS certificates are reloaded immediately without restarting."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
-    leader_id = await get_leader_unit_id(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
+    leader_id = await get_leader_unit_id(juju)
     non_leader_id = [
-        unit_id for unit_id in get_application_unit_ids(ops_test) if unit_id != leader_id
+        unit_id for unit_id in get_application_unit_ids(juju) if unit_id != leader_id
     ][0]
-    units = await get_application_unit_ids_ips(ops_test, APP_NAME)
+    units = await get_application_unit_ids_ips(juju, APP_NAME)
 
     # test against the leader unit for unit-transport cert
-    current_certs = await get_loaded_tls_certificates(ops_test, leader_unit_ip)
-    await run_action(
-        ops_test, leader_id, "set-tls-private-key", params={"category": "unit-transport"}
-    )
+    current_certs = await get_loaded_tls_certificates(juju, leader_unit_ip)
+    await run_action(juju, leader_id, "set-tls-private-key", params={"category": "unit-transport"})
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=len(UNIT_IDS),
         idle_period=10,
         timeout=90,
     )
 
-    updated_certs = await get_loaded_tls_certificates(ops_test, leader_unit_ip)
+    updated_certs = await get_loaded_tls_certificates(juju, leader_unit_ip)
     assert (
         updated_certs["transport_certificates_list"][0]["not_before"]
         > current_certs["transport_certificates_list"][0]["not_before"]
     )
 
     # test against a random non-leader unit for unit-http cert
-    current_certs = await get_loaded_tls_certificates(ops_test, units[non_leader_id])
+    current_certs = await get_loaded_tls_certificates(juju, units[non_leader_id])
     await run_action(
-        ops_test,
+        juju,
         non_leader_id,
         action_name="set-tls-private-key",
         params={"category": "unit-http"},
     )
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=len(UNIT_IDS),
         idle_period=10,
         timeout=90,
     )
 
-    updated_certs = await get_loaded_tls_certificates(ops_test, units[non_leader_id])
+    updated_certs = await get_loaded_tls_certificates(juju, units[non_leader_id])
     assert (
         updated_certs["http_certificates_list"][0]["not_before"]
         > current_certs["http_certificates_list"][0]["not_before"]
@@ -163,31 +159,32 @@ async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_tls_expiration(
-    ops_test: OpsTest, charm, series, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, substrate, charm_resources
 ) -> None:
     """Test that expiring TLS certificates are renewed."""
     # before we can run this test, need to clean up and deploy with different config
-    if APP_NAME in ops_test.model.applications:
+    if APP_NAME in juju.status().apps:
         logger.info(f"Removing application {APP_NAME}")
-        await ops_test.model.remove_application(APP_NAME, block_until_done=True)
-    if TLS_CERTIFICATES_APP_NAME in ops_test.model.applications:
+        juju.remove_application(APP_NAME, destroy_storage=True)
+    if TLS_CERTIFICATES_APP_NAME in juju.status().apps:
         logger.info(f"Removing application {TLS_CERTIFICATES_APP_NAME}")
-        await ops_test.model.remove_application(TLS_CERTIFICATES_APP_NAME, block_until_done=True)
+        juju.remove_application(TLS_CERTIFICATES_APP_NAME, destroy_storage=True)
+    juju.wait(
+        lambda status: APP_NAME not in status.apps and TLS_CERTIFICATES_APP_NAME not in status.apps
+    )
 
     # Deploy TLS Certificates operator
     logger.info("Deploying TLS Certificates operator")
     config = {"ca-common-name": "CN_CA", "certificate-validity": "1"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    await wait_until(juju, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Deploy Opensearch operator
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     logger.info("Deploying OpenSearch")
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -198,7 +195,7 @@ async def test_tls_expiration(
     )
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         apps_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
         units_statuses={APP_NAME: [TlsStatuses.TLS_RELATION_MISSING.value]},
@@ -207,7 +204,7 @@ async def test_tls_expiration(
 
     # Change the expiry time of the secret carrying the certificate to 3 minutes for testing
     logger.info("Changing the expiry time of the secret carrying the certificate to 3 minutes")
-    unit_id = get_application_unit_ids(ops_test, APP_NAME)[0]
+    unit_id = get_application_unit_ids(juju, APP_NAME)[0]
     search_expression = "expire=self._get_next_secret_expiry_time\\(certificate\\)"
     replace_expression = f"expire=timedelta\\(seconds={SECRET_EXPIRY_TIME}\\)"
     python_version = "python3.12" if series == "noble" else "python3.10"
@@ -223,23 +220,23 @@ async def test_tls_expiration(
 
     # Relate OpenSearch to TLS and wait until all is settled
     logger.info("Integrating OpenSearch with TLS Certificates operator")
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=1,
     )
 
     # wait for the unit to be ready and API's available
     logger.info("Test cluster health")
-    unit_ip = await get_leader_unit_ip(ops_test)
-    cluster_health_resp = await cluster_health(ops_test, unit_ip, wait_for_green_first=True)
+    unit_ip = await get_leader_unit_ip(juju)
+    cluster_health_resp = await cluster_health(juju, unit_ip, wait_for_green_first=True)
     assert cluster_health_resp["status"] == "green"
 
     # now start with the actual test
     # first get the currently used certs
-    current_certs = await get_loaded_tls_certificates(ops_test, unit_ip)
+    current_certs = await get_loaded_tls_certificates(juju, unit_ip)
 
     # now wait for the expiration period to pass by (and a bit longer for things to settle)
     # we can't use `wait_until` here because the unit might not be idle in the meantime
@@ -250,11 +247,11 @@ async def test_tls_expiration(
     time.sleep(SECRET_EXPIRY_WAIT_TIME)
 
     logger.info("Test cluster health after certificate expiry")
-    cluster_health_resp = await cluster_health(ops_test, unit_ip, wait_for_green_first=True)
+    cluster_health_resp = await cluster_health(juju, unit_ip, wait_for_green_first=True)
     assert cluster_health_resp["status"] == "green"
 
     # now compare the current certificates against the earlier ones and see if they were updated
-    updated_certs = await get_loaded_tls_certificates(ops_test, unit_ip)
+    updated_certs = await get_loaded_tls_certificates(juju, unit_ip)
     logger.info("Comparing certificates before and after expiry")
     logger.info(f"Certs: {current_certs}, {updated_certs}")
     assert (

@@ -2,13 +2,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import asyncio
 import logging
 import time
 
+import jubilant
 import pytest
 from data_platform_helpers.advanced_statuses import StatusObject
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
@@ -18,6 +17,7 @@ from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.ha.helpers import all_nodes
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
+    _series_to_base,
     get_leader_unit_ip,
     wait_until,
 )
@@ -48,46 +48,41 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(juju: jubilant.Juju, charm, series) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=MAIN_APP,
-            num_units=1,
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=FAILOVER_APP,
-            num_units=1,
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
-            | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=DATA_APP,
-            num_units=2,
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
-            | CONFIG_OPTS,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    juju.deploy(
+        charm,
+        app=MAIN_APP,
+        num_units=1,
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+    )
+    juju.deploy(
+        charm,
+        app=FAILOVER_APP,
+        num_units=1,
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
+        | CONFIG_OPTS,
+    )
+    juju.deploy(
+        charm,
+        app=DATA_APP,
+        num_units=2,
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"} | CONFIG_OPTS,
     )
 
     # wait until the TLS operator is ready
     await wait_until(
-        ops_test,
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME],
         wait_for_exact_units={TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
@@ -95,11 +90,11 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        juju.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     # confirm all apps are blocked because NO TLS relation established
     await wait_until(
-        ops_test,
+        juju,
         apps=list(APP_UNITS.keys()),
         apps_statuses={
             MAIN_APP: [
@@ -124,42 +119,42 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_correct_startup_after_integration(ops_test: OpsTest) -> None:
+async def test_correct_startup_after_integration(juju: jubilant.Juju) -> None:
     """After integrating the cluster manager with the data application, both should start up."""
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
     )
 
     # make sure data can be written
-    c_writes = ContinuousWrites(ops_test, app=DATA_APP)
+    c_writes = ContinuousWrites(juju, app=DATA_APP)
     await c_writes.start()
     time.sleep(30)
     await c_writes.stop()
     assert (await c_writes.count()) > 0, "Continuous writes did not increase"
 
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
-    nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=MAIN_APP)
+    nodes = await all_nodes(juju, leader_unit_ip, app=MAIN_APP)
     assert len(nodes) == 3, f"Wrong node count. Expecting 3 online nodes, found: {len(nodes)}."
 
 
 @pytest.mark.abort_on_fail
-async def test_integrate_failover(ops_test: OpsTest) -> None:
+async def test_integrate_failover(juju: jubilant.Juju) -> None:
     """After integrating the failover app to the others, all should be started and fine."""
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
     )
 
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
-    nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=MAIN_APP)
+    nodes = await all_nodes(juju, leader_unit_ip, app=MAIN_APP)
     assert len(nodes) == 4, f"Wrong node count. Expecting 4 online nodes, found: {len(nodes)}."

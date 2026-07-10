@@ -7,10 +7,9 @@ import asyncio
 import base64
 import json
 import logging
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
-from juju.model import Model
-from juju.unit import Unit
+import jubilant
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
@@ -18,9 +17,6 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     generate_certificate,
     generate_private_key,
 )
-
-if TYPE_CHECKING:
-    from juju.action import Action
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +71,10 @@ class CSR(NamedTuple):
 class ManualTLSAgent:
     """An agent that processes certificate signing requests from the TLS operator."""
 
-    def __init__(self, tls_unit: Unit) -> None:
+    def __init__(self, juju: jubilant.Juju, unit_name: str) -> None:
         """Initialise the agent."""
-        self.tls_unit = tls_unit
+        self._juju = juju
+        self._unit_name = unit_name
         self.ca_key = generate_private_key()
         self.ca = generate_ca(self.ca_key, "CN_CA")
         self.csr_queue: list[CSR] = []
@@ -92,15 +89,11 @@ class ManualTLSAgent:
 
         """
         logging.info("Getting outstanding certificate requests")
-        action = await self.tls_unit.run_action("get-outstanding-certificate-requests")
-        action: Action = await action.wait()
-        if action.status != "completed":
-            message = action.safe_data.get(
-                "message",
-                "Failed to get outstanding certificate requests",
-            )
+        task = self._juju.run(self._unit_name, "get-outstanding-certificate-requests")
+        if task.status != "completed":
+            message = task.message or "Failed to get outstanding certificate requests"
             raise GetOutstandingCertificateRequestsError(message)
-        csrs = json.loads(action.results["result"])
+        csrs = json.loads(task.results["result"])
         self.csr_queue = [CSR.from_dict(csr) for csr in csrs]
 
     @retry(
@@ -147,19 +140,14 @@ class ManualTLSAgent:
         )
         logger.info("Generated certificate for %s", csr.unit_name)
         # Send the certificate back to the charm
-        action = await self.tls_unit.run_action(
-            "provide-certificate",
-            relation_id=csr.relation_id,
-            **{
-                "certificate": base64.b64encode(certificate).decode(),
-                "ca-certificate": base64.b64encode(self.ca).decode(),
-                "certificate-signing-request": base64.b64encode(
-                    csr.csr,
-                ).decode(),
-            },
-        )
-        action = await action.wait()
-        if action.status != "completed":
+        params = {
+            "relation_id": csr.relation_id,
+            "certificate": base64.b64encode(certificate).decode(),
+            "ca-certificate": base64.b64encode(self.ca).decode(),
+            "certificate-signing-request": base64.b64encode(csr.csr).decode(),
+        }
+        task = self._juju.run(self._unit_name, "provide-certificate", params)
+        if task.status != "completed":
             message = f"Failed to provide certificate for {csr.unit_name}"
             logging.error(message)
             raise ProvidingCertificateFailedError(message)
@@ -175,12 +163,11 @@ class ManualTLSAgent:
 async def main() -> None:
     """Run the ManualTLSAgent."""
     logging.info("Starting ManualTLSAgent")
-    model = Model()
-    await model.connect()
+    juju = jubilant.Juju()
 
-    tls_unit = model.applications[MANUAL_TLS_CERTIFICATES_APP_NAME].units[0]
+    unit_name = next(iter(juju.status().apps[MANUAL_TLS_CERTIFICATES_APP_NAME].units))
 
-    agent = ManualTLSAgent(tls_unit)
+    agent = ManualTLSAgent(juju, unit_name)
 
     while True:
         await agent.wait_for_csrs_in_queue()

@@ -4,8 +4,8 @@
 
 import logging
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 
@@ -14,7 +14,7 @@ from ..ha.helpers import (
     assert_continuous_writes_consistency,
     assert_continuous_writes_increasing,
 )
-from ..helpers import APP_NAME, app_name, set_watermark, wait_until
+from ..helpers import APP_NAME, _series_to_base, app_name, set_watermark, wait_until
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     PROFILES_REVISION,
@@ -45,31 +45,29 @@ charm = None
 #######################################################################
 
 
-async def _build_env(ops_test: OpsTest, version: str, series) -> None:
+async def _build_env(juju: jubilant.Juju, version: str, series) -> None:
     """Deploy OpenSearch cluster from a given revision."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     revision = VERSION_TO_REVISION[version][series]
-    await ops_test.model.deploy(
+    juju.deploy(
         OPENSEARCH_ORIGINAL_CHARM_NAME,
-        application_name=APP_NAME,
+        app=APP_NAME,
         num_units=3,
         channel=OPENSEARCH_CHANNEL,
         revision=revision,
-        series=series,
+        base=_series_to_base(series),
         config=CONFIG_OPTS if revision > PROFILES_REVISION else {},
     )
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
         timeout=1400,
         wait_for_exact_units={
@@ -78,7 +76,7 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
         idle_period=60,
     )
 
-    await set_watermark(ops_test, APP_NAME)
+    await set_watermark(juju, APP_NAME)
 
 
 #######################################################################
@@ -91,9 +89,9 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_latest_from_channel(ops_test: OpsTest, series) -> None:
+async def test_deploy_latest_from_channel(juju: jubilant.Juju, series) -> None:
     """Deploy OpenSearch."""
-    await _build_env(ops_test, VERSION_N_MINUS_2, series)
+    await _build_env(juju, VERSION_N_MINUS_2, series)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
@@ -101,33 +99,33 @@ async def test_deploy_latest_from_channel(ops_test: OpsTest, series) -> None:
 @pytest.mark.skip("Can't upgrade between earlier versions")
 # TODO: re-enable after two versions available
 async def test_upgrade_to_n_minus_1(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, series
+    juju: jubilant.Juju, c_writes: ContinuousWrites, c_writes_runner, series
 ) -> None:
     """Test upgrade from upstream (n-2) to currently n-1 built version."""
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
     revision = VERSION_TO_REVISION[VERSION_N_MINUS_1][series]
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_2)
-    await assert_upgrade_to_revision(ops_test, app=app, revision=revision)
-    await assert_version_units(ops_test, app, VERSION_N_MINUS_1)
+    await assert_version_units(juju, app, VERSION_N_MINUS_2)
+    await assert_upgrade_to_revision(juju, app=app, revision=revision)
+    await assert_version_units(juju, app, VERSION_N_MINUS_1)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
-    await assert_continuous_writes_consistency(ops_test, c_writes, [app])
+    await assert_continuous_writes_consistency(juju, c_writes, [app])
 
 
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 async def test_upgrade_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, charm
+    juju: jubilant.Juju, c_writes: ContinuousWrites, c_writes_runner, charm
 ) -> None:
     """Test upgrade from n-1 to currently locally built version."""
-    app = (await app_name(ops_test)) or APP_NAME
-    await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-    await assert_version_units(ops_test, app, VERSION_N)
+    app = (await app_name(juju)) or APP_NAME
+    await assert_upgrade_to_local(juju, app=app, charm=charm)
+    await assert_version_units(juju, app, VERSION_N)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
-    await assert_continuous_writes_consistency(ops_test, c_writes, [app])
+    await assert_continuous_writes_consistency(juju, c_writes, [app])
 
 
 ##################################################################################
@@ -143,34 +141,34 @@ async def test_upgrade_to_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_from_version(ops_test: OpsTest, version, series) -> None:
+async def test_deploy_from_version(juju: jubilant.Juju, version, series) -> None:
     """Deploy OpenSearch."""
-    await _build_env(ops_test, version, series)
+    await _build_env(juju, version, series)
 
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip("Rollbacks not supported")
 # TODO re-enable after rollbacks best effort support is added
-async def test_upgrade_rollback_from_local(ops_test: OpsTest, version, charm, series) -> None:
+async def test_upgrade_rollback_from_local(juju: jubilant.Juju, version, charm, series) -> None:
     """Test upgrade and rollback to each version available."""
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
     revision = VERSION_TO_REVISION[version][series]
-    await assert_version_units(ops_test, app, version)
-    await assert_rollback_to_revision(ops_test, app=app, charm=charm, revision=revision)
-    await assert_version_units(ops_test, app, version)
+    await assert_version_units(juju, app, version)
+    await assert_rollback_to_revision(juju, app=app, charm=charm, revision=revision)
+    await assert_version_units(juju, app, version)
 
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 async def test_upgrade_from_version_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm
+    juju: jubilant.Juju, c_writes: ContinuousWrites, c_writes_runner, version, charm
 ) -> None:
     """Test upgrade from usptream to currently locally built version."""
-    app = (await app_name(ops_test)) or APP_NAME
-    await assert_upgrade_to_local(ops_test, app=app, charm=charm)
-    await assert_version_units(ops_test, app, VERSION_N)
+    app = (await app_name(juju)) or APP_NAME
+    await assert_upgrade_to_local(juju, app=app, charm=charm)
+    await assert_version_units(juju, app, VERSION_N)
 
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
-    await assert_continuous_writes_consistency(ops_test, c_writes, [app])
+    await assert_continuous_writes_consistency(juju, c_writes, [app])

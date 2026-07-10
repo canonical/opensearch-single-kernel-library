@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 from logging import getLogger
 
+import jubilant
 import urllib3
 from kubernetes import client, config, stream
 from kubernetes.client.rest import ApiException
@@ -465,10 +466,10 @@ def instance_ip(model: str, instance: str) -> str:
 
 
 async def k8s_all_processes_down(
-    ops_test, app: str, db_process: str = OPENSEARCH_PROCESS_PATTERN
+    juju, app: str, db_process: str = OPENSEARCH_PROCESS_PATTERN
 ) -> bool:
     """Check if the OpenSearch process is down on every k8s unit."""
-    for unit_id in get_application_unit_ids(ops_test, app):
+    for unit_id in get_application_unit_ids(juju, app):
         unit_name = f"{app}/{unit_id}"
         get_pid_cmd = [
             "ssh",
@@ -479,13 +480,13 @@ async def k8s_all_processes_down(
             "-f",
             db_process,
         ]
-        return_code, opensearch_pid, stderr = await ops_test.juju(*get_pid_cmd, check=False)
-        if return_code not in (0, 1):
+        try:
+            opensearch_pid = juju.cli(*get_pid_cmd)
+        except jubilant.CLIError as e:
             logger.error(
-                "Failed to check OpenSearch process on unit %s: rc=%s, stderr=%s",
+                "Failed to check OpenSearch process on unit %s: %s",
                 unit_name,
-                return_code,
-                stderr,
+                e,
             )
             return False
         if opensearch_pid.strip():

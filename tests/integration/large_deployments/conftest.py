@@ -6,9 +6,8 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import jubilant
 import pytest
-from juju.model import Model
-from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import MODEL_CONFIG
 
@@ -17,25 +16,49 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(scope="module")
 async def failover_model(
-    ops_test: OpsTest,
-) -> AsyncGenerator[Model, Any]:
+    juju: jubilant.Juju,
+) -> AsyncGenerator[jubilant.Juju, Any]:
     # deploy the failover model
-    failover_model = await ops_test.track_model("failover", keep=ops_test.ModelKeep.IF_EXISTS)
-    await failover_model.set_config(MODEL_CONFIG)
-    logger.info(f"Created model {failover_model.name}")
-    yield failover_model
+    model_name = f"{juju.model}-failover"
+    created = False
+    try:
+        juju.add_model(model_name)
+        created = True
+    except jubilant.CLIError:
+        logger.info(f"Model {model_name} already exists")
 
-    await ops_test.forget_model(alias="failover", timeout=5 * 60, allow_failure=True)
+    failover_juju = jubilant.Juju(model=model_name)
+    failover_juju.model_config(MODEL_CONFIG)
+    logger.info(f"Created model {model_name}")
+    yield failover_juju
+
+    if created:
+        try:
+            juju.destroy_model(model_name, destroy_storage=True, force=True)
+        except jubilant.CLIError:
+            pass
 
 
 @pytest.fixture(scope="module")
 async def data_model(
-    ops_test: OpsTest,
-) -> AsyncGenerator[Model, Any]:
+    juju: jubilant.Juju,
+) -> AsyncGenerator[jubilant.Juju, Any]:
     # deploy the data model
-    data_model = await ops_test.track_model("data", keep=ops_test.ModelKeep.IF_EXISTS)
-    await data_model.set_config(MODEL_CONFIG)
-    logger.info(f"Created model {data_model.name}")
-    yield data_model
+    model_name = f"{juju.model}-data"
+    created = False
+    try:
+        juju.add_model(model_name)
+        created = True
+    except jubilant.CLIError:
+        logger.info(f"Model {model_name} already exists")
 
-    await ops_test.forget_model(alias="data", timeout=5 * 60, allow_failure=True)
+    data_juju = jubilant.Juju(model=model_name)
+    data_juju.model_config(MODEL_CONFIG)
+    logger.info(f"Created model {model_name}")
+    yield data_juju
+
+    if created:
+        try:
+            juju.destroy_model(model_name, destroy_storage=True, force=True)
+        except jubilant.CLIError:
+            pass

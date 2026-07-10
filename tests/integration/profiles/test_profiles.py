@@ -2,11 +2,10 @@
 # See LICENSE file for licensing details.
 
 
-import asyncio
 import logging
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 from requests import request
 
 from opensearch_single_kernel.common.constants import (
@@ -26,6 +25,7 @@ from tests.integration.helpers import (
     deploy_opensearch,
     get_cloud_type,
     get_leader_unit_ip,
+    get_secrets,
     wait_until,
 )
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
@@ -43,16 +43,11 @@ MEMORY_NOT_ENOUGH_STATUS = format_status(
 )
 
 
-async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str = APP_NAME):
+async def check_heap_size(juju: jubilant.Juju, heap_size_in_gb: int, app_name: str = APP_NAME):
     """A dummy test to make pytest happy when all other tests are skipped."""
-    os_app = ops_test.model.applications[app_name]
-    unit = os_app.units[0]
-    unit_ip = await get_leader_unit_ip(ops_test, app=app_name)
+    unit_ip = await get_leader_unit_ip(juju, app=app_name)
 
-    action = await unit.run_action("get-password")
-    action = await action.wait()
-    assert action.status == "completed", f"Action failed: {action.error_message}"
-    secrets = action.results
+    secrets = await get_secrets(juju, app=app_name)
     assert secrets is not None
     password = secrets.get("password")
     assert password is not None, "Password should not be None"
@@ -79,38 +74,34 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
 
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(
-    ops_test: OpsTest, charm, series, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
-        deploy_opensearch(
-            ops_test,
-            charm,
-            substrate,
-            APP_NAME,
-            1,
-            series=series,
-            constraints="mem=8G",
-            config={"profile": "production"},
-            resources=charm_resources,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        APP_NAME,
+        1,
+        series=series,
+        constraints="mem=8G",
+        config={"profile": "production"},
+        resources=charm_resources,
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
 
 @pytest.mark.abort_on_fail
-async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
+async def test_wait_blocked_cluster_topology(juju: jubilant.Juju) -> None:
     """Wait for blocked cluster with cluster topology error."""
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         units_statuses={APP_NAME: [THREE_CM_THREE_DATA_STATUS]},
         wait_for_exact_units=1,
@@ -118,33 +109,32 @@ async def test_wait_blocked_cluster_topology(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_scale_to_active(ops_test: OpsTest) -> None:
+async def test_scale_to_active(juju: jubilant.Juju) -> None:
     """Scale the OpenSearch cluster to the active state."""
-    os_app = ops_test.model.applications[APP_NAME]
-    await os_app.add_units(count=2)
+    juju.add_unit(APP_NAME, num_units=2)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=3,
     )
 
-    await check_heap_size(ops_test, 4)
+    await check_heap_size(juju, 4)
 
 
 @pytest.mark.abort_on_fail
 async def test_insufficient_memory(
-    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+    juju: jubilant.Juju, charm: str, series: str, substrate, charm_resources
 ) -> None:
     """Test insufficient memory scenario."""
-    cloud_name = await get_cloud_type(ops_test)
+    cloud_name = await get_cloud_type(juju)
     if cloud_name not in {"kubernetes", "lxd"}:
         pytest.skip("This test is only applicable for Kubernetes and LXD cloud types")
 
-    if APP_NAME in ops_test.model.applications:
-        await ops_test.model.remove_application(APP_NAME, block_until_done=True)
+    if APP_NAME in juju.status().apps:
+        juju.remove_application(APP_NAME)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -154,12 +144,12 @@ async def test_insufficient_memory(
         config={"profile": "production"},
         resources=charm_resources,
     )
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     # we do not wait for idle in this wait because the 3 units will keep trying
     # to acquire the lock but it will always be given to leader who cannot start
     # because it is blocked and deferring
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         units_statuses={APP_NAME: [MEMORY_NOT_ENOUGH_STATUS]},
         wait_for_exact_units=3,
@@ -168,14 +158,14 @@ async def test_insufficient_memory(
 
 @pytest.mark.abort_on_fail
 async def test_testing_profile(
-    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+    juju: jubilant.Juju, charm: str, series: str, substrate, charm_resources
 ) -> None:
     """Test testing profile"""
-    if APP_NAME in ops_test.model.applications:
-        await ops_test.model.remove_application(APP_NAME, block_until_done=True)
+    if APP_NAME in juju.status().apps:
+        juju.remove_application(APP_NAME)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -184,22 +174,21 @@ async def test_testing_profile(
         config={"profile": "testing"},
         resources=charm_resources,
     )
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         wait_for_exact_units=1,
     )
-    await check_heap_size(ops_test, 1)
+    await check_heap_size(juju, 1)
 
 
 @pytest.mark.abort_on_fail
-async def test_config_changed_to_production(ops_test: OpsTest) -> None:
+async def test_config_changed_to_production(juju: jubilant.Juju) -> None:
     """Switch to production profile and expect blocked."""
-    os_app = ops_test.model.applications[APP_NAME]
-    await os_app.set_config({"profile": "production"})
+    juju.config(APP_NAME, {"profile": "production"})
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         units_statuses={APP_NAME: [THREE_CM_THREE_DATA_STATUS]},
         wait_for_exact_units=1,
@@ -210,13 +199,13 @@ async def test_config_changed_to_production(ops_test: OpsTest) -> None:
 # TODO add when LD is on for K8S
 @pytest.mark.skip(reason="Skipping large deployment")
 async def test_large_deployment_cluster(
-    ops_test: OpsTest, charm: str, series: str, substrate, charm_resources
+    juju: jubilant.Juju, charm: str, series: str, substrate, charm_resources
 ) -> None:
     """Test large deployment cluster scenario."""
-    if APP_NAME in ops_test.model.applications:
-        await ops_test.model.remove_application(APP_NAME, block_until_done=True)
+    if APP_NAME in juju.status().apps:
+        juju.remove_application(APP_NAME)
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         "main",
@@ -227,7 +216,7 @@ async def test_large_deployment_cluster(
         resources=charm_resources,
     )
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         "data",
@@ -245,15 +234,13 @@ async def test_large_deployment_cluster(
 
     # integrate TLS to all applications
     for app in ["main", "data"]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        juju.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     # create the peer-cluster-relation
-    await ops_test.model.integrate(
-        f"data:{PEER_CLUSTER_RELATION}", f"main:{PEER_CLUSTER_ORCHESTRATOR_RELATION}"
-    )
+    juju.integrate(f"data:{PEER_CLUSTER_RELATION}", f"main:{PEER_CLUSTER_ORCHESTRATOR_RELATION}")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=["main", "data"],
         units_statuses={
             "main": [ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value],
@@ -262,11 +249,10 @@ async def test_large_deployment_cluster(
         wait_for_exact_units={"main": 1, "data": 1},
     )
 
-    main_app = ops_test.model.applications["main"]
-    await main_app.add_units(count=2)
+    juju.add_unit("main", num_units=2)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=["main", "data"],
         units_statuses={
             "main": [
@@ -277,8 +263,7 @@ async def test_large_deployment_cluster(
         },
         wait_for_exact_units={"main": 3, "data": 1},
     )
-    data_app = ops_test.model.applications["data"]
-    await data_app.add_units(count=2)
-    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
+    juju.add_unit("data", num_units=2)
+    await wait_until(juju, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
 
-    await check_heap_size(ops_test, 4, app_name="main")
+    await check_heap_size(juju, 4, app_name="main")

@@ -8,8 +8,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
+import yaml
 
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.helpers_data import (
@@ -24,6 +25,7 @@ from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
     CosBlockedStatus,
     EmptyBlockedStatus,
+    _series_to_base,
     app_name,
     get_application_unit_ids_ips,
     get_leader_unit_id,
@@ -89,7 +91,7 @@ TEXT_EMBEDDING_MODEL = {
 
 
 async def _wait_for_units(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     deployment_type: str,
     wait_for_cos: bool = False,
 ) -> None:
@@ -99,7 +101,7 @@ async def _wait_for_units(
     """
     if deployment_type == "small_deployment":
         await wait_until(
-            ops_test,
+            juju,
             apps=[APP_NAME],
             timeout=1800,
             wait_for_exact_units={APP_NAME: 3},
@@ -107,7 +109,7 @@ async def _wait_for_units(
         )
         if wait_for_cos:
             await wait_until(
-                ops_test,
+                juju,
                 apps=[COS_APP_NAME],
                 apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
                 units_statuses={COS_APP_NAME: [EmptyBlockedStatus, CosBlockedStatus]},
@@ -116,7 +118,7 @@ async def _wait_for_units(
             )
         return
     await wait_until(
-        ops_test,
+        juju,
         apps=[
             TLS_CERTIFICATES_APP_NAME,
             MAIN_ORCHESTRATOR_NAME,
@@ -134,7 +136,7 @@ async def _wait_for_units(
     )
     if wait_for_cos:
         await wait_until(
-            ops_test,
+            juju,
             apps=[COS_APP_NAME],
             apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
             units_statuses={COS_APP_NAME: [EmptyBlockedStatus, CosBlockedStatus]},
@@ -143,28 +145,32 @@ async def _wait_for_units(
         )
 
 
-def _get_relation_id(model, endpoint1: str, endpoint2: str) -> int:
+def _get_relation_id(juju: jubilant.Juju, endpoint1: str, endpoint2: str) -> int:
     """Return relation id for endpoints like 'app:relation'."""
     app1, rel1 = endpoint1.split(":")
     app2, rel2 = endpoint2.split(":")
-    for rel in model.relations:
-        eps = {(e.application_name, e.name) for e in rel.endpoints}
-        if (app1, rel1) in eps and (app2, rel2) in eps:
-            return rel.id
+    unit_name = next(iter(juju.status().apps[app1].units))
+    raw_data = juju.cli("show-unit", unit_name)
+    data = yaml.safe_load(raw_data)
+    for rel_info in data[unit_name].get("relation-info", []):
+        if rel_info.get("endpoint") == rel1:
+            related = rel_info.get("related-units", {})
+            if any(u.startswith(f"{app2}/") for u in related):
+                return int(rel_info["relation-id"])
     raise RuntimeError(f"Relation not found between {endpoint1} and {endpoint2}")
 
 
-async def _notifications_list_configs(ops_test: OpsTest, base_url: str) -> dict[str, Any]:
+async def _notifications_list_configs(juju: jubilant.Juju, base_url: str) -> dict[str, Any]:
     """Fetch all notification configs from the OpenSearch Notifications plugin API.
 
     Args:
-        ops_test: OpsTest test harness.
+        juju: The jubilant Juju instance.
         base_url: OpenSearch base URL (e.g. https://ip:9200).
 
     Returns:
         Response body from GET /_plugins/_notifications/configs.
     """
-    return await http_request(ops_test, "GET", f"{base_url}/_plugins/_notifications/configs")
+    return await http_request(juju, "GET", f"{base_url}/_plugins/_notifications/configs")
 
 
 def _cfg_name(item: dict) -> str | None:
@@ -214,7 +220,7 @@ def _find_config_by_name(configs_resp: Any, name: str) -> dict | None:
 
 
 async def _wait_until_config_present(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     base_url: str,
     config_name: str,
     timeout: int = 180,
@@ -223,7 +229,7 @@ async def _wait_until_config_present(
     """Poll until a notifications config with the given name appears.
 
     Args:
-        ops_test: Pytest plugin for Juju ops_test.
+        juju: The jubilant Juju instance.
         base_url: OpenSearch base URL (e.g. https://<ip>:9200).
         config_name: Name of the config to wait for.
         timeout: Maximum seconds to wait.
@@ -237,14 +243,14 @@ async def _wait_until_config_present(
     """
     async with asyncio.timeout(timeout):
         while True:
-            resp = await _notifications_list_configs(ops_test, base_url)
+            resp = await _notifications_list_configs(juju, base_url)
             if cfg := _find_config_by_name(resp, config_name):
                 return cfg
             await asyncio.sleep(poll)
 
 
 async def _wait_until_config_absent(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     base_url: str,
     config_name: str,
     timeout: int = 180,
@@ -253,7 +259,7 @@ async def _wait_until_config_absent(
     """Poll until a notifications config with the given name is no longer listed.
 
     Args:
-        ops_test: Pytest plugin for Juju ops_test.
+        juju: The jubilant Juju instance.
         base_url: OpenSearch base URL (e.g. https://<ip>:9200).
         config_name: Name of the config to wait for removal.
         timeout: Maximum seconds to wait.
@@ -264,7 +270,7 @@ async def _wait_until_config_absent(
     """
     async with asyncio.timeout(timeout):
         while True:
-            resp = await _notifications_list_configs(ops_test, base_url)
+            resp = await _notifications_list_configs(juju, base_url)
             if _find_config_by_name(resp, config_name) is None:
                 return
             await asyncio.sleep(poll)
@@ -274,10 +280,10 @@ async def _wait_until_config_absent(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy_small_deployment(
-    ops_test: OpsTest, charm, series, deploy_type: str, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, deploy_type: str, substrate, charm_resources
 ) -> None:
     """Build and deploy an OpenSearch cluster."""
-    if await app_name(ops_test):
+    if await app_name(juju):
         return
 
     model_conf = MODEL_CONFIG.copy()
@@ -286,42 +292,38 @@ async def test_build_and_deploy_small_deployment(
     # If this value is changed, then update the sleep accordingly at:
     #  test_prometheus_exporter_disabled_by_cos_relation_gone
     model_conf["update-status-hook-interval"] = "1m"
-    await ops_test.model.set_config(model_conf)
+    juju.model_config(model_conf)
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await asyncio.gather(
-        ops_test.model.deploy(
-            charm,
-            application_name=APP_NAME,
-            num_units=3,
-            series=series,
-            constraints="mem=8G",
-            config={"profile": "production"},
-            resources=charm_resources,
-        ),
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
+    juju.deploy(
+        charm,
+        app=APP_NAME,
+        num_units=3,
+        base=_series_to_base(series) if substrate != "k8s" else None,
+        constraints={"mem": "8G"},
+        config={"profile": "production"},
+        resources=charm_resources,
     )
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
-    await _wait_for_units(ops_test, deploy_type)
-    assert len(ops_test.model.applications[APP_NAME].units) == 3
+    await _wait_for_units(juju, deploy_type)
+    assert len(juju.status().apps[APP_NAME].units) == 3
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str):
+async def test_prometheus_exporter_enabled_by_default(juju: jubilant.Juju, deploy_type: str):
     """Test that Prometheus Exporter is running before the relation is there.
 
     Test only on small deployments scenario, as this is a more functional check to the plugin.
     """
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
-    response = await http_request(ops_test, "get", endpoint, app=APP_NAME, json_resp=False)
+    response = await http_request(juju, "get", endpoint, app=APP_NAME, json_resp=False)
 
     response_str = response.content.decode("utf-8")
     assert response_str.count("opensearch_") > 500
@@ -333,29 +335,29 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
-    ops_test, series, deploy_type: str
+    juju: jubilant.Juju, series, deploy_type: str
 ):
-    await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series)
-    await ops_test.model.integrate(APP_NAME, COS_APP_NAME)
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    juju.deploy(COS_APP_NAME, channel=COS_CHANNEL, base=_series_to_base(series))
+    juju.integrate(APP_NAME, COS_APP_NAME)
+    await _wait_for_units(juju, deploy_type, wait_for_cos=True)
 
     # Check that the correct settings were successfully communicated to grafana-agent
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
+    cos_leader_id = await get_leader_unit_id(juju, COS_APP_NAME)
     cos_leader_name = f"{COS_APP_NAME}/{cos_leader_id}"
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
+    leader_id = await get_leader_unit_id(juju, APP_NAME)
     leader_name = f"{APP_NAME}/{leader_id}"
     relation_data = await get_unit_relation_data(
-        ops_test, cos_leader_name, leader_name, COS_RELATION_NAME, "config"
+        juju, cos_leader_name, leader_name, COS_RELATION_NAME, "config"
     )
     if not isinstance(relation_data, dict):
         relation_data = json.loads(relation_data)
     relation_data = relation_data["metrics_scrape_jobs"][0]
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(juju, "opensearch:app:monitor-password")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
     assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
 
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
+    admin_secret = await get_secret_by_label(juju, "opensearch:app:app-admin")
     assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
     assert relation_data["scheme"] == "https"
 
@@ -366,10 +368,10 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
 @pytest.mark.skip_if_deployed
 @pytest.mark.skip_if_substrate("k8s")
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, deploy_type: str
+    juju: jubilant.Juju, charm, series, deploy_type: str
 ) -> None:
     """Build and deploy a large deployment for OpenSearch."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
 
@@ -389,69 +391,64 @@ async def test_large_deployment_build_and_deploy(
         "roles": "data.hot,ml",
     }
 
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=MAIN_ORCHESTRATOR_NAME,
-            num_units=1,
-            series=series,
-            config=main_orchestrator_conf | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=FAILOVER_ORCHESTRATOR_NAME,
-            num_units=2,
-            series=series,
-            config=failover_orchestrator_conf | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=APP_NAME,
-            num_units=1,
-            series=series,
-            config=data_hot_conf | CONFIG_OPTS,
-        ),
+    base = _series_to_base(series)
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config)
+    juju.deploy(
+        charm,
+        app=MAIN_ORCHESTRATOR_NAME,
+        num_units=1,
+        base=base,
+        config=main_orchestrator_conf | CONFIG_OPTS,
+    )
+    juju.deploy(
+        charm,
+        app=FAILOVER_ORCHESTRATOR_NAME,
+        num_units=2,
+        base=base,
+        config=failover_orchestrator_conf | CONFIG_OPTS,
+    )
+    juju.deploy(
+        charm,
+        app=APP_NAME,
+        num_units=1,
+        base=base,
+        config=data_hot_conf | CONFIG_OPTS,
     )
 
     # Large deployment setup
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
-    await ops_test.model.integrate(
-        "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
-    )
+    juju.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
+    juju.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
+    juju.integrate("failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
 
     # TLS setup
-    await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(MAIN_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
-    await _wait_for_units(ops_test, deploy_type)
-    await set_watermark(ops_test, APP_NAME)
+    await _wait_for_units(juju, deploy_type)
+    await set_watermark(juju, APP_NAME)
 
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_large_deployment_prometheus_exporter_cos_relation(
-    ops_test, series, deploy_type: str
+    juju: jubilant.Juju, series, deploy_type: str
 ):
     # Check that the correct settings were successfully communicated to grafana-agent
-    (await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series),)
-    await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, COS_APP_NAME)
-    await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, COS_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, COS_APP_NAME)
+    juju.deploy(COS_APP_NAME, channel=COS_CHANNEL, base=_series_to_base(series))
+    juju.integrate(FAILOVER_ORCHESTRATOR_NAME, COS_APP_NAME)
+    juju.integrate(MAIN_ORCHESTRATOR_NAME, COS_APP_NAME)
+    juju.integrate(APP_NAME, COS_APP_NAME)
 
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    await _wait_for_units(juju, deploy_type, wait_for_cos=True)
 
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
+    leader_id = await get_leader_unit_id(juju, APP_NAME)
     leader_name = f"{APP_NAME}/{leader_id}"
 
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
+    cos_leader_id = await get_leader_unit_id(juju, COS_APP_NAME)
     relation_data = await get_unit_relation_data(
-        ops_test,
+        juju,
         f"{COS_APP_NAME}/{cos_leader_id}",
         leader_name,
         COS_RELATION_NAME,
@@ -460,27 +457,29 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
     if not isinstance(relation_data, dict):
         relation_data = json.loads(relation_data)
     relation_data = relation_data["metrics_scrape_jobs"][0]
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(juju, "opensearch:app:monitor-password")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
     assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
 
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
+    admin_secret = await get_secret_by_label(juju, "opensearch:app:app-admin")
     assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
     assert relation_data["scheme"] == "https"
 
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy_type: str):
+async def test_monitoring_user_fetch_prometheus_data(
+    juju: jubilant.Juju, substrate, deploy_type: str
+):
     if substrate == "k8s" and deploy_type == "large_deployment":
         pytest.skip("Large deployment is not yet supported on k8s substrate.")
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+    secret = await get_secret_by_label(juju, "opensearch:app:monitor-password")
     response = await http_request(
-        ops_test,
+        juju,
         "get",
         endpoint,
         app=APP_NAME,
@@ -497,35 +496,31 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
-async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
+async def test_prometheus_monitor_user_password_change(juju: jubilant.Juju, deploy_type: str):
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
 
-    leader_id = await get_leader_unit_id(ops_test, app)
-    result1 = await run_action(
-        ops_test, leader_id, "set-password", {"username": "monitor"}, app=app
-    )
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    leader_id = await get_leader_unit_id(juju, app)
+    result1 = await run_action(juju, leader_id, "set-password", {"username": "monitor"}, app=app)
+    await _wait_for_units(juju, deploy_type, wait_for_cos=True)
 
     new_password = result1.response.get("monitor-password")
     # Now, we compare the change in the action above with the opensearch's nodes.
     # In large deployments, that will mean checking if the change on main orchestrator
     # was sent down to the opensearch (data node) cluster.
-    result2 = await run_action(
-        ops_test, leader_id, "get-password", {"username": "monitor"}, app=app
-    )
+    result2 = await run_action(juju, leader_id, "get-password", {"username": "monitor"}, app=app)
     assert result2.response.get("password") == new_password
 
     # Relation data is updated
     # In both large and small deployments, we want to check if the relation data is updated
     # on the data node: "opensearch"
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
+    leader_id = await get_leader_unit_id(juju, APP_NAME)
     leader_name = f"{APP_NAME}/{leader_id}"
 
     # We're not sure which grafana-agent is sitting with APP_NAME in large deployments
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
+    cos_leader_id = await get_leader_unit_id(juju, COS_APP_NAME)
     relation_data = await get_unit_relation_data(
-        ops_test,
+        juju,
         f"{COS_APP_NAME}/{cos_leader_id}",
         leader_name,
         COS_RELATION_NAME,
@@ -541,18 +536,18 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_search_with_hnsw_faiss(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_knn_search_with_hnsw_faiss(juju: jubilant.Juju, deploy_type: str) -> None:
     """Uploads data and runs a query search against the FAISS KNNEngine."""
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
 
-    units = await get_application_unit_ids_ips(ops_test, app=app)
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    units = await get_application_unit_ids_ips(juju, app=app)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=app)
 
     # create index with r_shards = nodes - 1
     index_name = "test_search_with_hnsw_faiss"
     vector_name = "test_search_with_hnsw_faiss_vector"
     await create_index(
-        ops_test,
+        juju,
         app,
         leader_unit_ip,
         index_name,
@@ -577,29 +572,29 @@ async def test_knn_search_with_hnsw_faiss(ops_test: OpsTest, deploy_type: str) -
         index_name, vector_name, docs_count=100, dimensions=4, has_result=True
     )
     # Insert data in bulk
-    await bulk_insert(ops_test, app, leader_unit_ip, payload)
+    await bulk_insert(juju, app, leader_unit_ip, payload)
     query = {
         "size": 2,
         "query": {"knn": {vector_name: {"vector": payload_list[0], "k": 2}}},
     }
-    docs = await search(ops_test, app, leader_unit_ip, index_name, query, retries=30)
+    docs = await search(juju, app, leader_unit_ip, index_name, query, retries=30)
     assert len(docs) == 2
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_knn_search_with_hnsw_nmslib(juju: jubilant.Juju, deploy_type: str) -> None:
     """Uploads data and runs a query search against the NMSLIB KNNEngine."""
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
 
-    units = await get_application_unit_ids_ips(ops_test, app=app)
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    units = await get_application_unit_ids_ips(juju, app=app)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=app)
 
     # create index with r_shards = nodes - 1
     index_name = "test_search_with_hnsw_nmslib"
     vector_name = "test_search_with_hnsw_nmslib_vector"
     await create_index(
-        ops_test,
+        juju,
         app,
         leader_unit_ip,
         index_name,
@@ -624,18 +619,18 @@ async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) 
         index_name, vector_name, docs_count=100, dimensions=4, has_result=True
     )
     # Insert data in bulk
-    await bulk_insert(ops_test, app, leader_unit_ip, payload)
+    await bulk_insert(juju, app, leader_unit_ip, payload)
     query = {
         "size": 2,
         "query": {"knn": {vector_name: {"vector": payload_list[0], "k": 2}}},
     }
-    docs = await search(ops_test, app, leader_unit_ip, index_name, query, retries=30)
+    docs = await search(juju, app, leader_unit_ip, index_name, query, retries=30)
     assert len(docs) == 2
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrate) -> None:
+async def test_knn_training_search(juju: jubilant.Juju, deploy_type: str, substrate) -> None:
     """Tests the entire cycle of KNN plugin.
 
     1) Enters data and trains a model in "test_end_to_end_with_ivf_faiss_training"
@@ -644,10 +639,10 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     4) Disables KNN plugin: the search must fail
     5) Re-enables the plugin: search must succeed and return two vectors.
     """
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
 
-    units = await get_application_unit_ids_ips(ops_test, app=app)
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    units = await get_application_unit_ids_ips(juju, app=app)
+    leader_unit_ip = await get_leader_unit_ip(juju, app=app)
     # Get since when each unit has been active
 
     # create index with r_shards = nodes - 1
@@ -656,11 +651,11 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     model_name = "test_end_to_end_with_ivf_faiss_model"
     logger.info("Creating index and bulk inserting data for KNN training...")
     await create_index_and_bulk_insert(
-        ops_test, app, leader_unit_ip, index_name, len(units) - 1, vector_name, substrate=substrate
+        juju, app, leader_unit_ip, index_name, len(units) - 1, vector_name, substrate=substrate
     )
     logger.info("Starting KNN training...")
     await run_knn_training(
-        ops_test,
+        juju,
         app,
         leader_unit_ip,
         model_name,
@@ -679,13 +674,13 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     logger.info("KNN training started.")
     # wait for training to finish -> fails with an exception otherwise
     assert await is_knn_training_complete(
-        ops_test, app, leader_unit_ip, model_name
+        juju, app, leader_unit_ip, model_name
     ), "KNN training did not complete."
 
     logger.info("Creating target index and bulk inserting data for KNN search...")
     # Creates the target index, to use the model
     payload_list = await create_index_and_bulk_insert(
-        ops_test,
+        juju,
         app,
         leader_unit_ip,
         "test_end_to_end_with_ivf_faiss_target",
@@ -701,7 +696,7 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     }
     logger.info("Running KNN search with trained model...")
     docs = await search(
-        ops_test,
+        juju,
         app,
         leader_unit_ip,
         "test_end_to_end_with_ivf_faiss_target",
@@ -714,27 +709,27 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
-async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_reports_scheduler(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards
-    await ops_test.model.deploy(
+    juju.deploy(
         DASHBOARDS_APP_NAME,
         channel="2/edge",
     )
-    await ops_test.model.integrate(DASHBOARDS_APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(DASHBOARDS_APP_NAME, APP_NAME)
-    await ops_test.model.wait_for_idle(
+    juju.integrate(DASHBOARDS_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(DASHBOARDS_APP_NAME, APP_NAME)
+    await wait_until(
+        juju,
         apps=[DASHBOARDS_APP_NAME, APP_NAME],
-        status="active",
     )
-    dashboards_leader_unit_ip = await get_leader_unit_ip(ops_test, app=DASHBOARDS_APP_NAME)
+    dashboards_leader_unit_ip = await get_leader_unit_ip(juju, app=DASHBOARDS_APP_NAME)
     dashboards_base_url = f"https://{dashboards_leader_unit_ip}:5601"
 
     # download sample data
     sample_data = "ecommerce"
     logger.info(f"Downloading sample {sample_data} data...")
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{dashboards_base_url}/api/sample_data/{sample_data}",
         extra_headers={"osd-xsrf": "true"},
@@ -744,7 +739,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
 
     logger.info("Finding a dashboard..")
     response = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"{dashboards_base_url}/api/saved_objects/_find?type=dashboard&search_fields=title&search={sample_data}",
     )
@@ -776,7 +771,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
         }
     }
 
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # set job interval to 1m (min value)
@@ -788,7 +783,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     }
 
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"{base_url}/_cluster/settings",
         settings,
@@ -796,7 +791,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     endpoint = f"{base_url}/_plugins/_reports"
 
     logger.info("Creating report definition...")
-    response = await http_request(ops_test, "POST", f"{endpoint}/definition", payload)
+    response = await http_request(juju, "POST", f"{endpoint}/definition", payload)
 
     logger.info(f"Report definition response: {response}")
     report_definition_id = response["reportDefinitionId"]
@@ -806,42 +801,42 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
 
     logger.info("Poll for report instance creation")
     await poll_until(
-        ops_test,
+        juju,
         f"{endpoint}/instances",
         lambda instances: instances.get("totalHits") > 0,
         timeout=60 * 3,
     )
 
     # fetch report instance
-    response = await http_request(ops_test, "GET", f"{endpoint}/instances")
+    response = await http_request(juju, "GET", f"{endpoint}/instances")
     logger.info(f"Instances {response}")
     assert report_definition_id in [
         instance["reportDefinitionDetails"]["id"] for instance in response["reportInstanceList"]
     ], "Could not find report instance from report definition"
 
     # delete report definition
-    await http_request(ops_test, "DELETE", f"{endpoint}/definition/{report_definition_id}")
+    await http_request(juju, "DELETE", f"{endpoint}/definition/{report_definition_id}")
 
     # delete sample data
-    await http_request(ops_test, "DELETE", f"{dashboards_base_url}/api/sample_data/{sample_data}")
+    await http_request(juju, "DELETE", f"{dashboards_base_url}/api/sample_data/{sample_data}")
 
     # remove dashboards application
-    await ops_test.model.remove_application(DASHBOARDS_APP_NAME, block_until_done=True)
+    juju.remove_application(DASHBOARDS_APP_NAME)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_sql_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the SQL plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # create index
-    await create_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
+    await create_index(juju, APP_NAME, leader_unit_ip, TEST_INDEX)
 
     # insert test docs
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
-    await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
+    await bulk_insert(juju, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
+    await http_request(juju, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
     # select target doc
     target = TEST_DOCS[-1]
@@ -851,7 +846,7 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     # create query
     query = {"query": f"SELECT id, passage_text FROM {TEST_INDEX} WHERE id = '{target_id}'"}
     endpoint = f"https://{leader_unit_ip}:9200/_plugins/_sql"
-    response = await http_request(ops_test, "POST", endpoint, query)
+    response = await http_request(juju, "POST", endpoint, query)
     logger.info(f"SQL query response: {response}")
     assert response.get("size") == 1, "Unexpected SQL result"
     assert response.get("datarows")[0][-1] == target_text, "Unexpected SQL result"
@@ -859,15 +854,15 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_ism_and_job_scheduler_plugins(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the ISM and job scheduler plugins are enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # ISM jobs run every 5m by default with jitter, so make this test's
     # scheduler timing explicit before waiting for the rollover.
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"{base_url}/_cluster/settings",
         {
@@ -885,7 +880,7 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
         f"{index_alias}-000002"  # after rollover the new index will have the number incremented
     )
     await create_index(
-        ops_test,
+        juju,
         APP_NAME,
         leader_unit_ip,
         initial_index,
@@ -894,7 +889,7 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
 
     # set alias
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"{base_url}/{initial_index}/_alias/{index_alias}",
         {"is_write_index": True},
@@ -915,18 +910,18 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
             ],
         }
     }
-    await http_request(ops_test, "PUT", f"{base_url}/_plugins/_ism/policies/{policy_id}", rollover)
+    await http_request(juju, "PUT", f"{base_url}/_plugins/_ism/policies/{policy_id}", rollover)
 
     # attach policy
     await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{base_url}/_plugins/_ism/add/{initial_index}",
         {"policy_id": policy_id},
     )
 
     # add doc to trigger rollover
-    await index_doc(ops_test, APP_NAME, leader_unit_ip, index_alias, 1)
+    await index_doc(juju, APP_NAME, leader_unit_ip, index_alias, 1)
 
     # wait for job interval time (1m) to pass for job scheduler to run policy checks
     logger.info("Waiting for job interval to pass before polling for index rollover...")
@@ -934,29 +929,29 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
 
     # poll if new index created (should trigger within 1m but can take longer)
     assert await poll_until(
-        ops_test,
+        juju,
         f"{base_url}/_alias/{index_alias}",
         lambda aliases: expected_end_index in aliases,
         timeout=60 * 3,
     ), "Index did not rollover before timeout"
 
     # delete indices
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, initial_index)
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, expected_end_index)
-    await http_request(ops_test, "DELETE", f"{base_url}/_plugins/_ism/policies/{policy_id}")
+    await delete_index(juju, APP_NAME, leader_unit_ip, initial_index)
+    await delete_index(juju, APP_NAME, leader_unit_ip, expected_end_index)
+    await http_request(juju, "DELETE", f"{base_url}/_plugins/_ism/policies/{policy_id}")
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_anomaly_detection(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the anomaly plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     detectors_url = f"{base_url}/_plugins/_anomaly_detection/detectors"
 
     anomaly_index = "anomaly-index"
     await create_index(
-        ops_test,
+        juju,
         APP_NAME,
         leader_unit_ip,
         anomaly_index,
@@ -974,8 +969,8 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
         value = anomaly if i == 200 else 10.0 + (i % 5)
         docs.append({"timestamp": timestamp, "value": value})
 
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(docs, anomaly_index))
-    await http_request(ops_test, "POST", f"{base_url}/{anomaly_index}/_refresh")
+    await bulk_insert(juju, APP_NAME, leader_unit_ip, bulk_encode(docs, anomaly_index))
+    await http_request(juju, "POST", f"{base_url}/{anomaly_index}/_refresh")
 
     # create detector
     detector = {
@@ -991,7 +986,7 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
         ],
         "detection_interval": {"period": {"interval": 1, "unit": "Minutes"}},
     }
-    response = await http_request(ops_test, "POST", detectors_url, detector)
+    response = await http_request(juju, "POST", detectors_url, detector)
     logger.info(f"Detector creation response {response}")
     detector_id = response.get("_id")
     assert detector_id, "Detector not created"
@@ -1000,7 +995,7 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
     start_time = int(start.timestamp() * 1000)
     end_time = int((start + timedelta(minutes=n)).timestamp() * 1000)
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{detectors_url}/{detector_id}/_start",
         {
@@ -1026,7 +1021,7 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
         }
     }
 
-    response = await http_request(ops_test, "POST", f"{detectors_url}/results/_search", payload)
+    response = await http_request(juju, "POST", f"{detectors_url}/results/_search", payload)
     logger.info(f"Anomaly results search response: {response}")
     assert response.get("hits", {}).get("total", {}).get("value", 0) > 0, "No anomalies found"
     assert (
@@ -1035,16 +1030,16 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
     ), "Unexpected anomaly result"
 
     # stop detector
-    await http_request(ops_test, "POST", f"{detectors_url}/{detector_id}/_stop")
-    await http_request(ops_test, "DELETE", f"{detectors_url}/{detector_id}")
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, anomaly_index)
+    await http_request(juju, "POST", f"{detectors_url}/{detector_id}/_stop")
+    await http_request(juju, "DELETE", f"{detectors_url}/{detector_id}")
+    await delete_index(juju, APP_NAME, leader_unit_ip, anomaly_index)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_async_search_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_async_search_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the async search plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_asynchronous_search"
 
@@ -1054,7 +1049,7 @@ async def test_async_search_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         "size": 1,
     }
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{endpoint}?index={TEST_INDEX}&wait_for_completion_timeout=0s&keep_on_completion=true",
         payload,
@@ -1066,7 +1061,7 @@ async def test_async_search_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     # poll until complete
     logger.info("Waiting for async search job to complete...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{endpoint}/{async_job_id}",
         lambda progress: progress.get("state") == "STORE_RESIDENT",
     ), "Async search did not complete before timeout"
@@ -1074,9 +1069,9 @@ async def test_async_search_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_alerting_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_alerting_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the alerting plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_alerting/monitors"
 
@@ -1103,13 +1098,13 @@ async def test_alerting_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         ],
     }
 
-    response = await http_request(ops_test, "POST", endpoint, payload)
+    response = await http_request(juju, "POST", endpoint, payload)
     monitor_id = response.get("_id")
     assert monitor_id, "Alerting monitor not created"
 
     logger.info(f"Executing alerting monitor {monitor_id}")
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{endpoint}/{monitor_id}/_execute",
         payload={"periodStart": "now-30m", "periodEnd": "now"},
@@ -1122,7 +1117,7 @@ async def test_alerting_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
     # check alerts
     response = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"{base_url}/_plugins/_alerting/monitors/alerts?monitorId={monitor_id}",
     )
@@ -1132,24 +1127,24 @@ async def test_alerting_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_query_insights_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_query_insights_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the query insights plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
-    response = await http_request(ops_test, "GET", f"{base_url}/_insights/top_queries")
+    response = await http_request(juju, "GET", f"{base_url}/_insights/top_queries")
     assert response.get("top_queries"), "No top queries returned"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_notifications_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the notifications plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     notifications_endpoint = f"{base_url}/_plugins/_notifications"
 
-    response = await http_request(ops_test, "GET", f"{notifications_endpoint}/features")
+    response = await http_request(juju, "GET", f"{notifications_endpoint}/features")
     assert response.get("allowed_config_type_list")
 
     # create channel
@@ -1162,7 +1157,7 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
         }
     }
     logger.info("Creating notification channel")
-    response = await http_request(ops_test, "POST", f"{notifications_endpoint}/configs", payload)
+    response = await http_request(juju, "POST", f"{notifications_endpoint}/configs", payload)
     channel_id = response.get("config_id")
     assert channel_id, "Notification channel not created"
     logger.info(f"Created: {channel_id}")
@@ -1170,7 +1165,7 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # attempt to send test notification
     logger.info(f"Attempting test notification to channel {channel_id} (attempt should fail)")
     response = await http_request(
-        ops_test, "GET", f"{notifications_endpoint}/feature/test/{channel_id}"
+        juju, "GET", f"{notifications_endpoint}/feature/test/{channel_id}"
     )
 
     logger.info(f"Notifications test response: {response}")
@@ -1181,9 +1176,9 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_ml_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_ml_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the ML plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # train and predict
@@ -1236,60 +1231,58 @@ async def test_ml_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     }
 
     response = await http_request(
-        ops_test, "POST", f"{base_url}/_plugins/_ml/_train_predict/kmeans", payload
+        juju, "POST", f"{base_url}/_plugins/_ml/_train_predict/kmeans", payload
     )
     assert response.get("status") == "COMPLETED", "ML run did not complete"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_observability_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_observability_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that PPL queries can be interpreted for the observability plugin."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # send PPL query
     payload = {"query": f"source = {TEST_INDEX}"}
-    response = await http_request(ops_test, "POST", f"{base_url}/_plugins/_ppl", payload)
+    response = await http_request(juju, "POST", f"{base_url}/_plugins/_ppl", payload)
     assert response.get("size") == len(TEST_DOCS)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_flow_framework_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_flow_framework_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the flow framework plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_flow_framework/workflow"
 
     # delete TEST_INDEX (the workflow will recreate it)
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
+    await delete_index(juju, APP_NAME, leader_unit_ip, TEST_INDEX)
 
     # register model group
     ml_endpoint = f"{base_url}/_plugins/_ml"
     payload = {"name": "test_group", "description": "Test model group"}
-    response = await http_request(
-        ops_test, "POST", f"{ml_endpoint}/model_groups/_register", payload
-    )
+    response = await http_request(juju, "POST", f"{ml_endpoint}/model_groups/_register", payload)
     model_group_id = response.get("model_group_id")
     assert model_group_id, "Model group not created"
 
     # register model
     payload = TEXT_EMBEDDING_MODEL | {"model_group_id": model_group_id}
-    response = await http_request(ops_test, "POST", f"{ml_endpoint}/models/_register", payload)
+    response = await http_request(juju, "POST", f"{ml_endpoint}/models/_register", payload)
     task_id = response.get("task_id")
     assert task_id, "Model registration task not created"
 
     # poll until model registered
     logger.info("Waiting for model registration to complete...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{ml_endpoint}/tasks/{task_id}",
         lambda status: status.get("state") == "COMPLETED",
     ), "ML model registration did not complete before timeout"
 
     # get model id
-    response = await http_request(ops_test, "GET", f"{ml_endpoint}/tasks/{task_id}")
+    response = await http_request(juju, "GET", f"{ml_endpoint}/tasks/{task_id}")
     model_id = response.get("model_id")
     assert model_id, "Model not created"
 
@@ -1301,37 +1294,33 @@ async def test_flow_framework_plugin(ops_test: OpsTest, deploy_type: str) -> Non
         "text_embedding.field_map.output.dimension": TEXT_EMBEDDING_OUTPUT_DIM,
     }
     response = await http_request(
-        ops_test, "POST", f"{endpoint}?use_case=semantic_search&provision=true", payload
+        juju, "POST", f"{endpoint}?use_case=semantic_search&provision=true", payload
     )
     workflow_id = response.get("workflow_id")
     assert workflow_id, "Workflow not created"
 
     logger.info("Waiting for flow framework workflow to complete...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{endpoint}/{workflow_id}/_status",
         lambda workflow: workflow.get("state") == "COMPLETED",
     )
 
     # check if index was created
-    resp_code = await http_request(
-        ops_test, "GET", f"{base_url}/{TEST_INDEX}", resp_status_code=True
-    )
+    resp_code = await http_request(juju, "GET", f"{base_url}/{TEST_INDEX}", resp_status_code=True)
     assert resp_code == 200, "Flow framework did not create index"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_neural_search_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the neural search plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # get model id used for ingesting documents to this index
     # ingest pipeline with id {INGEST_PIPELINE_ID} was created during flow framework test
-    response = await http_request(
-        ops_test, "GET", f"{base_url}/_ingest/pipeline/{INGEST_PIPELINE_ID}"
-    )
+    response = await http_request(juju, "GET", f"{base_url}/_ingest/pipeline/{INGEST_PIPELINE_ID}")
     processors = response.get(INGEST_PIPELINE_ID).get("processors", [])
     assert len(processors) > 0
     model_id = processors[0].get("text_embedding").get("model_id")
@@ -1339,7 +1328,7 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
 
     # deploy model
     response = await http_request(
-        ops_test, "POST", f"{base_url}/_plugins/_ml/models/{model_id}/_deploy"
+        juju, "POST", f"{base_url}/_plugins/_ml/models/{model_id}/_deploy"
     )
     task_id = response.get("task_id")
     assert task_id, "Model deployment task not created"
@@ -1347,34 +1336,34 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # poll until model deployment complete
     logger.info("Waiting for model deployment to complete...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{base_url}/_plugins/_ml/tasks/{task_id}",
         lambda status: status.get("state") == "COMPLETED",
         timeout=300,  # 5m
     )
 
     # insert docs
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
-    await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
+    await bulk_insert(juju, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
+    await http_request(juju, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
     # run neural search
     payload = {
         "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
     }
-    response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
+    response = await http_request(juju, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
     assert len(response.get("hits", {}).get("hits", [])) > 0, "Neural search did not yield results"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_ltr_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the learning-to-rank plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_ltr/_featureset"
 
     # initialize default feature store
-    response = await http_request(ops_test, "PUT", f"{base_url}/_ltr")
+    response = await http_request(juju, "PUT", f"{base_url}/_ltr")
     assert response.get("acknowledged"), "LTR index not created"
 
     # create feature set
@@ -1392,7 +1381,7 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
             ]
         }
     }
-    response = await http_request(ops_test, "POST", f"{endpoint}/{featureset}", payload)
+    response = await http_request(juju, "POST", f"{endpoint}/{featureset}", payload)
     assert response.get("result") == "created", "Feature set not created"
 
     # create model using the featureset to score
@@ -1404,7 +1393,7 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         }
     }
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{base_url}/_ltr/_featureset/{featureset}/_createmodel",
         payload,
@@ -1423,19 +1412,19 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         ],
         "size": 1,
     }
-    response = await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_search", payload)
+    response = await http_request(juju, "POST", f"{base_url}/{TEST_INDEX}/_search", payload)
     logger.info(f"LTR search response: {response}")
     assert (
         len(response.get("hits", {}).get("hits", [])) == 1
     ), "Scoring with LTR did not yield a result"
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
+    await delete_index(juju, APP_NAME, leader_unit_ip, TEST_INDEX)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_security_analytics_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_security_analytics_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the security analytics plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_security_analytics"
 
@@ -1455,14 +1444,14 @@ detection:
   condition: select
 level: low"""
     response = await http_request(
-        ops_test, "POST", f"{endpoint}/rules?category=linux", payload=sigma_rule
+        juju, "POST", f"{endpoint}/rules?category=linux", payload=sigma_rule
     )
     rule_id = response.get("_id")
     assert rule_id, "Rule not created"
 
     log_index = "log-index"
     await create_index(
-        ops_test,
+        juju,
         APP_NAME,
         leader_unit_ip,
         log_index,
@@ -1489,7 +1478,7 @@ level: low"""
             }
         ],
     }
-    response = await http_request(ops_test, "POST", f"{endpoint}/detectors", payload)
+    response = await http_request(juju, "POST", f"{endpoint}/detectors", payload)
     logger.info(f"\nDetectors response: {response}")
     detector_id = response.get("_id")
     assert detector_id, "Security Analytics detector not created"
@@ -1499,8 +1488,8 @@ level: low"""
         {"name": "b", "activity": "very normal"},
         {"name": "c", "activity": "suspicious"},
     ]
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(docs, log_index))
-    await http_request(ops_test, "POST", f"{base_url}/{log_index}/_refresh")
+    await bulk_insert(juju, APP_NAME, leader_unit_ip, bulk_encode(docs, log_index))
+    await http_request(juju, "POST", f"{base_url}/{log_index}/_refresh")
 
     logger.info("Waiting for detector schedule period to pass...")
     await asyncio.sleep(60)
@@ -1508,34 +1497,34 @@ level: low"""
     # check for findings
     logger.info("Waiting for security analytics finding to be reported...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{endpoint}/findings/_search?detector_id={detector_id}",
         lambda findings: findings.get("total_findings") == 1,
         timeout=60 * 3,
     )
-    await http_request(ops_test, "DELETE", f"{endpoint}/detectors/{detector_id}")
-    await http_request(ops_test, "DELETE", f"{endpoint}/rules/{rule_id}?category=linux")
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, log_index)
+    await http_request(juju, "DELETE", f"{endpoint}/detectors/{detector_id}")
+    await http_request(juju, "DELETE", f"{endpoint}/rules/{rule_id}?category=linux")
+    await delete_index(juju, APP_NAME, leader_unit_ip, log_index)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_custom_codecs_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the custom codecs plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     # create index with zstd codec
     zstd = "zstd-index"
     default = "default-index"
     await create_index(
-        ops_test, APP_NAME, leader_unit_ip, zstd, extra_index_settings={"codec": "zstd"}
+        juju, APP_NAME, leader_unit_ip, zstd, extra_index_settings={"codec": "zstd"}
     )
-    await create_index(ops_test, APP_NAME, leader_unit_ip, default)
+    await create_index(juju, APP_NAME, leader_unit_ip, default)
 
     # insert same docs to indices with different codecs
     await bulk_insert_generated(
-        ops_test,
+        juju,
         APP_NAME,
         leader_unit_ip,
         [zstd, default],
@@ -1544,18 +1533,16 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     )
 
     # refresh so store size reflects indexed data
-    await http_request(ops_test, "POST", f"{base_url}/{zstd},{default}/_refresh")
+    await http_request(juju, "POST", f"{base_url}/{zstd},{default}/_refresh")
 
     # Force merge segments so compression is applied (zstd codec compresses during merges)
     await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{base_url}/{zstd},{default}/_forcemerge?max_num_segments=1&wait_for_completion=true",
     )
 
-    response = await http_request(
-        ops_test, "GET", f"{base_url}/{zstd}/_settings?flat_settings=true"
-    )
+    response = await http_request(juju, "GET", f"{base_url}/{zstd}/_settings?flat_settings=true")
     codec = response[zstd]["settings"]["index.codec"]
     assert codec == "zstd", f"Expected codec 'zstd' but found {codec}"
 
@@ -1568,7 +1555,7 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # 2. For very small datasets, fixed overhead (metadata, segment headers, minimum segment sizes)
     #    may dominate, making compressed and uncompressed sizes equal (e.g., 416 == 416).
     #    Fixed by using <= instead of < to allow equality for edge cases.
-    stats = await http_request(ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store")
+    stats = await http_request(juju, "GET", f"{base_url}/{zstd},{default}/_stats/store")
     zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
     default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
 
@@ -1579,15 +1566,15 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     assert (
         zstd_size <= default_size
     ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
-    await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
+    await delete_index(juju, APP_NAME, leader_unit_ip, zstd)
+    await delete_index(juju, APP_NAME, leader_unit_ip, default)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_geospatial_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the geospatial plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/geospatial/ip2geo/datasource"
 
@@ -1598,13 +1585,13 @@ async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         "endpoint": manifest_url,
         "update_interval_in_days": 3,
     }
-    success = await http_request(ops_test, "PUT", f"{endpoint}/{datasource}", payload)
+    success = await http_request(juju, "PUT", f"{endpoint}/{datasource}", payload)
     assert success, "Could not download Geospatial data source manifest"
 
     # wait for data source to download
     logger.info("Waiting for data to be available...")
     assert await poll_until(
-        ops_test,
+        juju,
         f"{endpoint}/{datasource}",
         lambda ds: ds["datasources"][0]["state"] == "AVAILABLE",
         timeout=60 * 5,
@@ -1613,12 +1600,12 @@ async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
     geo_pipeline = "geo-pipeline"
     payload = {"processors": [{"ip2geo": {"field": "ip", "datasource": datasource}}]}
-    await http_request(ops_test, "PUT", f"{base_url}/_ingest/pipeline/{geo_pipeline}", payload)
+    await http_request(juju, "PUT", f"{base_url}/_ingest/pipeline/{geo_pipeline}", payload)
 
     # get geo-enriched data
     payload = {"docs": [{"_index": "testindex1", "_id": "1", "_source": {"ip": "172.0.0.1"}}]}
     response = await http_request(
-        ops_test,
+        juju,
         "POST",
         f"{base_url}/_ingest/pipeline/{geo_pipeline}/_simulate",
         payload,
@@ -1633,9 +1620,9 @@ async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_skills_plugin(juju: jubilant.Juju, deploy_type: str) -> None:
     """Test that the skills plugin is enabled and functional."""
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_ml/agents"
 
@@ -1645,21 +1632,21 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         "type": "flow",
         "tools": [{"type": "CatIndexTool", "name": "list"}],
     }
-    response = await http_request(ops_test, "POST", f"{endpoint}/_register", payload)
+    response = await http_request(juju, "POST", f"{endpoint}/_register", payload)
     agent_id = response.get("agent_id")
     assert agent_id, "Flow agent not created"
 
     # run the agent
     payload = {"parameters": {"question": "How many indices do I have?"}}
 
-    response = await http_request(ops_test, "POST", f"{endpoint}/{agent_id}/_execute", payload)
+    response = await http_request(juju, "POST", f"{endpoint}/{agent_id}/_execute", payload)
     assert len(response.get("inference_results", [])) > 0, "Flow agent did not return any results"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_notifications(
-    ops_test: OpsTest, deploy_type: str
+    juju: jubilant.Juju, deploy_type: str
 ) -> None:
     """Ensure that relating smtp-integrator results in notifications email config objects:
 
@@ -1668,20 +1655,22 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     - Email group config
     """
     # ensure OpenSearch is up
-    await _wait_for_units(ops_test, deploy_type)
+    await _wait_for_units(juju, deploy_type)
 
     # deploy smtp-integrator
-    await ops_test.model.deploy(
+    juju.deploy(
         SMTP_INTEGRATOR_APP_NAME,
         channel=SMTP_INTEGRATOR_CHANNEL,
     )
-    await ops_test.model.wait_for_idle(
+    await wait_until(
+        juju,
         apps=[SMTP_INTEGRATOR_APP_NAME],
         timeout=20 * 60,
     )
 
     # dummy SMTP config
-    await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].set_config(
+    juju.config(
+        SMTP_INTEGRATOR_APP_NAME,
         {
             "host": "127.0.0.1",
             "port": "2525",
@@ -1691,18 +1680,18 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
             "auth_type": "plain",
             "smtp_sender": "no-reply@example.com",
             "recipients": "a@example.com,b@example.com",
-        }
+        },
     )
 
     # relate opensearch and smtp
-    await ops_test.model.integrate(f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp")
-    await _wait_for_units(ops_test, deploy_type)
+    juju.integrate(f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp")
+    await _wait_for_units(juju, deploy_type)
 
-    leader_unit_ip = await get_leader_unit_ip(ops_test)
+    leader_unit_ip = await get_leader_unit_ip(juju)
     base_url = f"https://{leader_unit_ip}:9200"
 
     relation_id = _get_relation_id(
-        ops_test.model,
+        juju,
         f"{APP_NAME}:smtp",
         f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
     )
@@ -1711,24 +1700,22 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     email_channel_cfg_name = f"smtp-{relation_id}_email-channel"
     email_group_cfg_name = f"smtp-{relation_id}_recipients"
 
-    sender_cfg = await _wait_until_config_present(ops_test, base_url, smtp_sender_cfg_name)
-    channel_cfg = await _wait_until_config_present(ops_test, base_url, email_channel_cfg_name)
-    group_cfg = await _wait_until_config_present(ops_test, base_url, email_group_cfg_name)
+    sender_cfg = await _wait_until_config_present(juju, base_url, smtp_sender_cfg_name)
+    channel_cfg = await _wait_until_config_present(juju, base_url, email_channel_cfg_name)
+    group_cfg = await _wait_until_config_present(juju, base_url, email_group_cfg_name)
 
     assert _cfg_name(sender_cfg) == smtp_sender_cfg_name
     assert _cfg_name(channel_cfg) == email_channel_cfg_name
     assert _cfg_name(group_cfg) == email_group_cfg_name
 
     # remove relation
-    main_app = ops_test.model.applications[APP_NAME]
-
-    await main_app.remove_relation(
+    juju.remove_relation(
         f"{APP_NAME}:smtp",
         f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
     )
-    await _wait_for_units(ops_test, deploy_type)
+    await _wait_for_units(juju, deploy_type)
 
     # now they should be deleted
-    await _wait_until_config_absent(ops_test, base_url, email_channel_cfg_name)
-    await _wait_until_config_absent(ops_test, base_url, email_group_cfg_name)
-    await _wait_until_config_absent(ops_test, base_url, smtp_sender_cfg_name)
+    await _wait_until_config_absent(juju, base_url, email_channel_cfg_name)
+    await _wait_until_config_absent(juju, base_url, email_group_cfg_name)
+    await _wait_until_config_absent(juju, base_url, smtp_sender_cfg_name)

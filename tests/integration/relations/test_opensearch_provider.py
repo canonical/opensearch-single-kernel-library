@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-import asyncio
 import json
 import logging
 import re
 import time
+from types import SimpleNamespace
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
 from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
@@ -19,6 +19,8 @@ from tests.integration.conftest import (
 )
 from tests.integration.helpers import (
     EmptyBlockedStatus,
+    _series_to_base,
+    deploy_opensearch,
     get_application_unit_ids,
     get_leader_unit_id,
     get_leader_unit_ip,
@@ -60,7 +62,7 @@ PROTECTED_INDICES = [
 
 @pytest.mark.abort_on_fail
 async def test_create_relation(
-    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate
+    juju: jubilant.Juju, application_charm, charm, series, charm_resources, substrate
 ):
     """Test basic functionality of relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
@@ -69,76 +71,75 @@ async def test_create_relation(
     new_model_conf["update-status-hook-interval"] = "1m"
 
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
 
-    await ops_test.model.set_config(new_model_conf)
-    await asyncio.gather(
-        ops_test.model.deploy(
-            application_charm,
-            application_name=CLIENT_APP_NAME,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=OPENSEARCH_APP_NAME,
-            num_units=NUM_UNITS,
-            series=series,
-            config=CONFIG_OPTS,
-            resources=charm_resources,
-        ),
+    juju.model_config(new_model_conf)
+    juju.deploy(application_charm, app=CLIENT_APP_NAME)
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        OPENSEARCH_APP_NAME,
+        NUM_UNITS,
+        series=series,
+        config=CONFIG_OPTS,
+        resources=charm_resources,
     )
     if substrate == "vm":
-        await ops_test.model.deploy(
+        juju.deploy(
             DASHBOARDS_APP_NAME,
-            application_name=DASHBOARDS_APP_NAME,
+            app=DASHBOARDS_APP_NAME,
             channel="2/edge",
-            series=SERIES,
+            base=_series_to_base(SERIES),
         )
-    await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.wait_for_idle(
-        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME], status="active", timeout=1600
+    juju.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await wait_until(
+        juju,
+        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
+        timeout=1600,
     )
 
     global client_relation
-    client_relation = await ops_test.model.integrate(
+    juju.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
     )
+    client_relation = _get_client_relation(juju, FIRST_RELATION_NAME)
 
     # This test shouldn't take so long
-    await ops_test.model.wait_for_idle(
+    await wait_until(
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         timeout=1600,
-        status="active",
     )
     if substrate == "vm":
-        await ops_test.model.wait_for_idle(
+        await wait_until(
+            juju,
             apps=[DASHBOARDS_APP_NAME],
             timeout=1600,
         )
 
 
-def _get_client_relation(ops_test, endpoint_name: str = FIRST_RELATION_NAME):
+def _get_client_relation(juju: jubilant.Juju, endpoint_name: str = FIRST_RELATION_NAME):
     """Helper function to retrieve the client relation from the model."""
-    for relation in ops_test.model.relations:
-        if {CLIENT_APP_NAME, OPENSEARCH_APP_NAME} == {
-            app.name for app in relation.applications
-        } and endpoint_name in {end.name for end in relation.endpoints}:
-            return relation
+    unit_info = juju.show_unit(f"{CLIENT_APP_NAME}/0")
+    for rel in unit_info.relation_info:
+        if rel.endpoint == endpoint_name:
+            return SimpleNamespace(id=rel.relation_id)
     raise Exception("Couldn't find client relation")
 
 
 @pytest.mark.abort_on_fail
-async def test_index_usage(ops_test: OpsTest):
+async def test_index_usage(juju: jubilant.Juju):
     """Check we can update and delete things.
 
     The client application authenticates using the cert provided in the index; if this is
     invalid for any reason, the test will fail, so this test implicitly verifies that TLS works.
     """
-    client_relation = _get_client_relation(ops_test)
+    client_relation = _get_client_relation(juju)
+    client_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
     await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         relation_name=FIRST_RELATION_NAME,
         relation_id=client_relation.id,
         method="PUT",
@@ -150,8 +151,8 @@ async def test_index_usage(ops_test: OpsTest):
 
     read_index_endpoint = "/albums/_search?q=Jazz"
     run_read_index = await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=client_relation.id,
@@ -167,9 +168,10 @@ async def test_index_usage(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_bulk_index_usage(ops_test: OpsTest):
+async def test_bulk_index_usage(juju: jubilant.Juju):
     """Check we can update and delete things using bulk api."""
-    client_relation = _get_client_relation(ops_test)
+    client_relation = _get_client_relation(juju)
+    client_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
 
     bulk_payload = """{ "index" : { "_index": "albums", "_id" : "2" } }
 {"artist": "Herbie Hancock", "genre": ["Jazz"],  "title": "Head Hunters"}
@@ -179,8 +181,8 @@ async def test_bulk_index_usage(ops_test: OpsTest):
 {"artist": "Liquid Tension Experiment", "genre": ["Prog", "Metal"],  "title": "Liquid Tension Experiment 2"}
 """
     await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         relation_name=FIRST_RELATION_NAME,
         relation_id=client_relation.id,
         method="POST",
@@ -190,8 +192,8 @@ async def test_bulk_index_usage(ops_test: OpsTest):
 
     read_index_endpoint = "/albums/_search?q=Jazz"
     run_bulk_read_index = await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=client_relation.id,
@@ -209,19 +211,20 @@ async def test_bulk_index_usage(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_version(ops_test: OpsTest):
+async def test_version(juju: jubilant.Juju):
     """Check version reported in the databag is consistent with the version on the charm."""
-    client_relation = _get_client_relation(ops_test)
+    client_relation = _get_client_relation(juju)
+    client_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
     run_version_request = await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         method="GET",
         endpoint="/",
         relation_id=client_relation.id,
         relation_name=FIRST_RELATION_NAME,
     )
     version = await get_application_relation_data(
-        ops_test, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "version"
+        juju, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "version"
     )
     logging.info(run_version_request)
     logging.info(version)
@@ -229,63 +232,62 @@ async def test_version(ops_test: OpsTest):
     assert version == results.get("version", {}).get("number"), results
 
 
-async def get_secret_data(ops_test, secret_uri):
+async def get_secret_data(juju: jubilant.Juju, secret_uri):
     secret_unique_id = secret_uri.split("/")[-1]
-    complete_command = f"show-secret {secret_uri} --reveal --format=json"
-    _, stdout, _ = await ops_test.juju(*complete_command.split())
+    stdout = juju.cli("show-secret", secret_uri, "--reveal", "--format=json")
     return json.loads(stdout)[secret_unique_id]["content"]["Data"]
 
 
 # TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
-async def test_dashboard_relation(ops_test: OpsTest):
+async def test_dashboard_relation(juju: jubilant.Juju):
     """Test we can create relations with admin permissions."""
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
-    dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
+    juju.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
+    wait_for_relation_joined_between(juju, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=ALL_APPS,
         idle_period=70,
     )
 
     # On this request, kibanaserver user with its own password should be exposed
     secret_uri = await get_application_relation_data(
-        ops_test, f"{DASHBOARDS_APP_NAME}/0", DASHBOARDS_RELATION_NAME, "secret-user"
+        juju, f"{DASHBOARDS_APP_NAME}/0", DASHBOARDS_RELATION_NAME, "secret-user"
     )
-    relation_user_data = await get_secret_data(ops_test, secret_uri)
+    relation_user_data = await get_secret_data(juju, secret_uri)
     relation_user_name = relation_user_data.get("username")
     relation_user_pwd = relation_user_data.get("password")
 
     assert relation_user_name == "kibanaserver"
 
-    leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    leader_id = await get_leader_unit_id(juju)
+    result = await run_action(juju, leader_id, "get-password", {"username": "kibanaserver"})
     assert relation_user_pwd == result.response.get("password")
 
 
 # TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
-async def test_dashboard_relation_password_change(ops_test: OpsTest):
+async def test_dashboard_relation_password_change(juju: jubilant.Juju):
     """Test we can create relations with admin permissions."""
     # Changing Opensearch kibanaserver password
-    leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    leader_id = await get_leader_unit_id(juju)
+    result = await run_action(juju, leader_id, "get-password", {"username": "kibanaserver"})
     orig_pwd = result.response.get("password")
-    result = await run_action(ops_test, leader_id, "set-password", {"username": "kibanaserver"})
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(juju, leader_id, "set-password", {"username": "kibanaserver"})
+    result = await run_action(juju, leader_id, "get-password", {"username": "kibanaserver"})
     new_pwd = result.response.get("password")
     assert orig_pwd != new_pwd
 
     # Checking if password also changed for the relation
     secret_uri = await get_application_relation_data(
-        ops_test, f"{DASHBOARDS_APP_NAME}/0", DASHBOARDS_RELATION_NAME, "secret-user"
+        juju, f"{DASHBOARDS_APP_NAME}/0", DASHBOARDS_RELATION_NAME, "secret-user"
     )
-    relation_user_data = await get_secret_data(ops_test, secret_uri)
+    relation_user_data = await get_secret_data(juju, secret_uri)
     relation_user_name = relation_user_data.get("username")
     relation_user_pwd = relation_user_data.get("password")
 
@@ -293,12 +295,12 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
     assert relation_user_pwd == new_pwd
 
     # Double-checking
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(juju, leader_id, "get-password", {"username": "kibanaserver"})
     assert relation_user_pwd == result.response.get("password")
 
 
 @pytest.mark.abort_on_fail
-async def test_scaling(ops_test: OpsTest, substrate):
+async def test_scaling(juju: jubilant.Juju, substrate):
     """Test that scaling correctly updates endpoints in databag.
 
     scale_application also contains a wait_for_idle check, including checking for active status.
@@ -306,12 +308,10 @@ async def test_scaling(ops_test: OpsTest, substrate):
     """
 
     async def rel_endpoints(app_name: str, rel_name: str) -> str:
-        return await get_application_relation_data(
-            ops_test, f"{app_name}/0", rel_name, "endpoints"
-        )
+        return await get_application_relation_data(juju, f"{app_name}/0", rel_name, "endpoints")
 
     async def _is_number_of_endpoints_valid(client_app: str, rel: str) -> bool:
-        units = get_application_unit_ids(ops_test, OPENSEARCH_APP_NAME)
+        units = get_application_unit_ids(juju, OPENSEARCH_APP_NAME)
         endpoints = await rel_endpoints(client_app, rel)
         return len(units) == len(endpoints.split(","))
 
@@ -320,21 +320,19 @@ async def test_scaling(ops_test: OpsTest, substrate):
         CLIENT_APP_NAME, FIRST_RELATION_NAME
     ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
     # Test scale down
-    opensearch_unit_ids = get_application_unit_ids(ops_test, OPENSEARCH_APP_NAME)
+    opensearch_unit_ids = get_application_unit_ids(juju, OPENSEARCH_APP_NAME)
     if substrate == "k8s":
-        await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=-1)
+        juju.remove_unit(OPENSEARCH_APP_NAME, num_units=1)
     else:
-        await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
-            f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
-        )
+        juju.remove_unit(f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}")
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1},
         idle_period=70,
@@ -344,9 +342,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
     ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
 
     # test scale back up again
-    await ops_test.model.applications[OPENSEARCH_APP_NAME].add_unit(count=1)
+    juju.add_unit(OPENSEARCH_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids)},
         idle_period=50,  # slightly less than update-status-interval period
@@ -359,40 +357,33 @@ async def test_scaling(ops_test: OpsTest, substrate):
 
 
 @pytest.mark.abort_on_fail
-async def test_multiple_relations(ops_test: OpsTest, application_charm, substrate):
+async def test_multiple_relations(juju: jubilant.Juju, application_charm, substrate):
     """Test that two different applications can connect to the database."""
     # scale-down for CI
     logger.info("Removing 1 unit for CI and sleep a minute..")
-    opensearch_unit_ids = get_application_unit_ids(ops_test, app=OPENSEARCH_APP_NAME)
+    opensearch_unit_ids = get_application_unit_ids(juju, app=OPENSEARCH_APP_NAME)
     if substrate == "k8s":
-        await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=-1)
+        juju.remove_unit(OPENSEARCH_APP_NAME, num_units=1)
     else:
-        await ops_test.model.applications[OPENSEARCH_APP_NAME].destroy_unit(
-            f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
-        )
+        juju.remove_unit(f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}")
 
     # sleep a minute to ease the load on machine
     time.sleep(60)
 
     # Deploy secondary application.
     logger.info(f"Deploying 1 unit of {SECONDARY_CLIENT_APP_NAME}")
-    await ops_test.model.deploy(
-        application_charm,
-        num_units=1,
-        application_name=SECONDARY_CLIENT_APP_NAME,
-    )
+    juju.deploy(application_charm, app=SECONDARY_CLIENT_APP_NAME, num_units=1)
 
     # Relate the new application and wait for them to exchange connection data.
     logger.info(
         f"Adding relation {SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME} with {OPENSEARCH_APP_NAME}"
     )
-    second_client_relation = await ops_test.model.integrate(
-        f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}", OPENSEARCH_APP_NAME
-    )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME)
+    juju.integrate(f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}", OPENSEARCH_APP_NAME)
+    second_client_relation = _get_client_relation(juju, SECOND_RELATION_NAME)
+    wait_for_relation_joined_between(juju, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[
             OPENSEARCH_APP_NAME,
             CLIENT_APP_NAME,
@@ -412,11 +403,11 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm, substrat
     # Test that the permissions are respected between relations by running the same request as
     # before, but expecting it to fail. SECOND_RELATION_NAME doesn't contain permissions for the
     # `albums` index, so we are expecting a 403 forbidden error.
-    unit = ops_test.model.applications[SECONDARY_CLIENT_APP_NAME].units[0]
+    unit = next(iter(juju.status().apps[SECONDARY_CLIENT_APP_NAME].units))
     read_index_endpoint = "/albums/_search?q=Jazz"
     run_read_index = await run_request(
-        ops_test,
-        unit_name=unit.name,
+        juju,
+        unit_name=unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=second_client_relation.id,
@@ -429,14 +420,13 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm, substrat
 
 
 @pytest.mark.abort_on_fail
-async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
+async def test_multiple_relations_accessing_same_index(juju: jubilant.Juju):
     """Test that two different applications can connect to the database."""
     # Relate the new application and wait for them to exchange connection data.
-    second_app_first_client_relation = await ops_test.model.integrate(
-        f"{SECONDARY_CLIENT_APP_NAME}:{FIRST_RELATION_NAME}", OPENSEARCH_APP_NAME
-    )
+    juju.integrate(f"{SECONDARY_CLIENT_APP_NAME}:{FIRST_RELATION_NAME}", OPENSEARCH_APP_NAME)
+    second_app_first_client_relation = _get_client_relation(juju, FIRST_RELATION_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME],
         idle_period=70,
     )
@@ -444,11 +434,11 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
     # Test that different applications can access the same index if they present it in their
     # relation databag. FIRST_RELATION_NAME contains `albums` in its databag, so we should be able
     # to query that index if we want.
-    unit = ops_test.model.applications[SECONDARY_CLIENT_APP_NAME].units[0]
+    unit = next(iter(juju.status().apps[SECONDARY_CLIENT_APP_NAME].units))
     read_index_endpoint = "/albums/_search?q=Jazz"
     run_bulk_read_index = await run_request(
-        ops_test,
-        unit_name=unit.name,
+        juju,
+        unit_name=unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=second_app_first_client_relation.id,
@@ -463,25 +453,25 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_admin_relation(ops_test: OpsTest):
+async def test_admin_relation(juju: jubilant.Juju):
     """Test we can create relations with admin permissions."""
     # Add an admin relation and wait for them to exchange data
     global admin_relation
-    admin_relation = await ops_test.model.integrate(
-        f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}", OPENSEARCH_APP_NAME
-    )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
+    juju.integrate(f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}", OPENSEARCH_APP_NAME)
+    admin_relation = _get_client_relation(juju, ADMIN_RELATION_NAME)
+    wait_for_relation_joined_between(juju, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
     # Verify we can access whatever data we like as admin
     read_index_endpoint = "/albums/_search?q=Jazz"
+    client_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
     run_bulk_read_index = await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=admin_relation.id,
@@ -497,7 +487,7 @@ async def test_admin_relation(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_admin_permissions(ops_test: OpsTest):
+async def test_admin_permissions(juju: jubilant.Juju):
     """Test admin permissions behave the way we want.
 
     admin-only actions include:
@@ -511,12 +501,12 @@ async def test_admin_permissions(ops_test: OpsTest):
     - verify neither admin nor default users can access user api
       - otherwise create client-default-role
     """
-    test_unit = ops_test.model.applications[CLIENT_APP_NAME].units[0]
+    test_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
     # Verify admin can't access security API
     security_api_endpoint = "/_plugins/_security/api/internalusers"
     run_dump_users = await run_request(
-        ops_test,
-        unit_name=test_unit.name,
+        juju,
+        unit_name=test_unit,
         endpoint=security_api_endpoint,
         method="GET",
         relation_id=admin_relation.id,
@@ -528,16 +518,16 @@ async def test_admin_permissions(ops_test: OpsTest):
 
     # verify admin can't delete users
     secret_uri = await get_application_relation_data(
-        ops_test, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
+        juju, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
     )
 
-    first_relation_user_data = await get_secret_data(ops_test, secret_uri)
+    first_relation_user_data = await get_secret_data(juju, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
     first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
     run_delete_users = await run_request(
-        ops_test,
-        unit_name=test_unit.name,
+        juju,
+        unit_name=test_unit,
         endpoint=first_relation_user_endpoint,
         method="DELETE",
         relation_id=admin_relation.id,
@@ -551,8 +541,8 @@ async def test_admin_permissions(ops_test: OpsTest):
     for protected_index in PROTECTED_INDICES:
         protected_index_endpoint = f"/{protected_index}"
         run_remove_distro = await run_request(
-            ops_test,
-            unit_name=test_unit.name,
+            juju,
+            unit_name=test_unit,
             endpoint=protected_index_endpoint,
             method="DELETE",
             relation_id=admin_relation.id,
@@ -564,20 +554,20 @@ async def test_admin_permissions(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_normal_user_permissions(ops_test: OpsTest):
+async def test_normal_user_permissions(juju: jubilant.Juju):
     """Test normal user permissions behave the way we want.
 
     verify that:
     - we can't remove .opendistro_security index
     - verify neither admin nor default users can access user api
     """
-    test_unit = ops_test.model.applications[CLIENT_APP_NAME].units[0]
+    test_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
 
     # Verify normal users can't access security API
     security_api_endpoint = "/_plugins/_security/api/internalusers"
     run_dump_users = await run_request(
-        ops_test,
-        unit_name=test_unit.name,
+        juju,
+        unit_name=test_unit,
         endpoint=security_api_endpoint,
         method="GET",
         relation_id=client_relation.id,
@@ -589,15 +579,15 @@ async def test_normal_user_permissions(ops_test: OpsTest):
 
     # verify normal users can't delete users
     secret_uri = await get_application_relation_data(
-        ops_test, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
+        juju, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
     )
-    first_relation_user_data = await get_secret_data(ops_test, secret_uri)
+    first_relation_user_data = await get_secret_data(juju, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
     first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
     run_delete_users = await run_request(
-        ops_test,
-        unit_name=test_unit.name,
+        juju,
+        unit_name=test_unit,
         endpoint=first_relation_user_endpoint,
         method="DELETE",
         relation_id=client_relation.id,
@@ -611,8 +601,8 @@ async def test_normal_user_permissions(ops_test: OpsTest):
     for protected_index in PROTECTED_INDICES:
         protected_index_endpoint = f"/{protected_index}"
         run_remove_index = await run_request(
-            ops_test,
-            unit_name=test_unit.name,
+            juju,
+            unit_name=test_unit,
             endpoint=protected_index_endpoint,
             method="DELETE",
             relation_id=client_relation.id,
@@ -624,36 +614,34 @@ async def test_normal_user_permissions(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_relation_broken(ops_test: OpsTest):
+async def test_relation_broken(juju: jubilant.Juju):
     """Test that the user is removed when the relation is broken."""
     # Retrieve the relation user.
     secret_uri = await get_application_relation_data(
-        ops_test, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
+        juju, f"{CLIENT_APP_NAME}/0", FIRST_RELATION_NAME, "secret-user"
     )
 
-    client_app_user_data = await get_secret_data(ops_test, secret_uri)
+    client_app_user_data = await get_secret_data(juju, secret_uri)
     relation_user = client_app_user_data.get("username")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
         idle_period=70,
     )
 
     # Break the relation.
-    await asyncio.gather(
-        ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
-            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
-            f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
-        ),
-        ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
-            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
-            f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
-        ),
+    juju.remove_relation(
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
+    )
+    juju.remove_relation(
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
     )
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[
             OPENSEARCH_APP_NAME,
             TLS_CERTIFICATES_APP_NAME,
@@ -669,9 +657,9 @@ async def test_relation_broken(ops_test: OpsTest):
         idle_period=70,
     )
 
-    leader_ip = await get_leader_unit_ip(ops_test)
+    leader_ip = await get_leader_unit_ip(juju)
     users = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/internalusers/",
         verify=False,
@@ -682,15 +670,16 @@ async def test_relation_broken(ops_test: OpsTest):
 
 
 @pytest.mark.abort_on_fail
-async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
+async def test_data_persists_on_relation_rejoin(juju: jubilant.Juju):
     """Verify that if we recreate a relation, we can access the same index."""
-    client_relation = await ops_test.model.integrate(
+    juju.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
+    client_relation = _get_client_relation(juju, FIRST_RELATION_NAME)
+    wait_for_relation_joined_between(juju, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[
             OPENSEARCH_APP_NAME,
             TLS_CERTIFICATES_APP_NAME,
@@ -701,9 +690,10 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     )
 
     read_index_endpoint = "/albums/_search?q=Jazz"
+    client_unit = next(iter(juju.status().apps[CLIENT_APP_NAME].units))
     run_bulk_read_index = await run_request(
-        ops_test,
-        unit_name=ops_test.model.applications[CLIENT_APP_NAME].units[0].name,
+        juju,
+        unit_name=client_unit,
         endpoint=read_index_endpoint,
         method="GET",
         relation_id=client_relation.id,

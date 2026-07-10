@@ -8,8 +8,8 @@ import subprocess
 import time
 from typing import Optional
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
@@ -64,7 +64,7 @@ def testing_config_if_supported(revision: int) -> dict[str, str]:
 
 
 def refresh(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app_name: str,
     *,
     revision: Optional[int] = None,
@@ -75,13 +75,13 @@ def refresh(
 ) -> None:
     # due to: https://github.com/juju/python-libjuju/issues/1057
     # the following call does not work:
-    # application = ops_test.model.applications[APP_NAME]
+    # application = juju.status().apps[APP_NAME]
     # await application.refresh(
     #     revision=rev,
     # )
 
     # Point to the right model, as we are calling the juju cli directly
-    args = [f"--model={ops_test.model.info.name}"]
+    args = [f"--model={juju.model}"]
     if revision:
         args.append(f"--revision={revision}")
     if switch:
@@ -126,12 +126,12 @@ def get_version_on_unit(unit: str, model: str):
     return match.group(1) if match else None
 
 
-async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str):
+async def assert_version_units(juju: jubilant.Juju, app: str, expected_version: str):
     """Ensures all units in given app are running expected OpenSearch version"""
     logger.info("Ensuring units in '%s' running version %s", app, expected_version)
 
-    units = [f"{app}/{unit.id}" for unit in await get_application_units(ops_test, app)]
-    versions = [get_version_on_unit(unit, ops_test.model.info.name) for unit in units]
+    units = [f"{app}/{unit.id}" for unit in await get_application_units(juju, app)]
+    versions = [get_version_on_unit(unit, juju.model) for unit in units]
     assert all(
         version == expected_version for version in versions
     ), f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
@@ -139,31 +139,32 @@ async def assert_version_units(ops_test: OpsTest, app: str, expected_version: st
 
 
 async def assert_upgrade_to_revision(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     revision: int,
     config: dict[str, str] = {},
 ):
     """Upgrades app to revision"""
-    units = await get_application_units(ops_test, app)
+    units = await get_application_units(juju, app)
     leader_id = [u.id for u in units if u.is_leader][0]
 
     # run pre-upgrade-check action on leader
-    action = await run_action(ops_test, leader_id, "pre-upgrade-check", app=app)
+    action = await run_action(juju, leader_id, "pre-upgrade-check", app=app)
     logger.info("pre-upgrade-check: %s", action)
     assert action.status == "completed"
 
-    async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
+    juju.model_config({"update-status-hook-interval": FAST_INTERVAL})
+    try:
         logger.info("Refreshing '%s' to revision %s", app, revision)
         refresh(
-            ops_test,
+            juju,
             app,
             revision=revision,
             config=testing_config_if_supported(revision) | config,
         )
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             apps_statuses={app: [EmptyBlockedStatus]},
             wait_for_exact_units={
@@ -174,37 +175,40 @@ async def assert_upgrade_to_revision(
         )
 
         # run resume-upgrade action on leader
-        action = await run_action(ops_test, leader_id, "resume-upgrade", app=app)
+        action = await run_action(juju, leader_id, "resume-upgrade", app=app)
         logger.info("resume-upgrade: %s", action)
         assert action.status == "completed"
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             timeout=TIMEOUT,
             idle_period=IDLE_PERIOD,
         )
         logger.info("Upgrade of '%s' completed", app)
+    finally:
+        juju.model_config({"update-status-hook-interval": "5m"})
 
 
 async def assert_upgrade_to_local(
-    ops_test: OpsTest, app: str, charm: str, config: dict[str, str] = {}
+    juju: jubilant.Juju, app: str, charm: str, config: dict[str, str] = {}
 ):
     """Upgrades to local charm"""
-    units = await get_application_units(ops_test, app)
+    units = await get_application_units(juju, app)
     leader_id = [u.id for u in units if u.is_leader][0]
 
     # run pre-upgrade-check action on leader
-    action = await run_action(ops_test, leader_id, "pre-upgrade-check", app=app)
+    action = await run_action(juju, leader_id, "pre-upgrade-check", app=app)
     logger.info("pre-upgrade-check: %s", action)
     assert action.status == "completed"
 
-    async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
+    juju.model_config({"update-status-hook-interval": FAST_INTERVAL})
+    try:
         logger.info("Refreshing '%s' local charm", app)
-        refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
+        refresh(juju, app, path=charm, config=CONFIG_OPTS | config)
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             apps_statuses={app: [EmptyBlockedStatus]},
             wait_for_exact_units={
@@ -215,50 +219,53 @@ async def assert_upgrade_to_local(
         )
 
         # run resume-upgrade action on leader
-        action = await run_action(ops_test, leader_id, "resume-upgrade", app=app)
+        action = await run_action(juju, leader_id, "resume-upgrade", app=app)
         logger.info("resume-upgrade: %s", action)
         assert action.status == "completed"
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             timeout=TIMEOUT,
             idle_period=IDLE_PERIOD,
         )
         logger.info("Upgrade of '%s' completed", app)
+    finally:
+        juju.model_config({"update-status-hook-interval": "5m"})
 
 
 async def assert_rollback_to_revision(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     charm: str,
     revision: int,
     config: dict[str, str] = {},
 ):
     """Upgrades to local charm and rolls back to revision mid-upgrade"""
-    units = await get_application_units(ops_test, app)
+    units = await get_application_units(juju, app)
     highest_unit_id = sorted([unit.id for unit in units])[-1]
     leader_id = [unit.id for unit in units if unit.is_leader][0]
     leader_ip = [unit.ip for unit in units if unit.id == leader_id][0]
     nodes = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{leader_ip}:9200/_cat/nodes?format=json",
     )
     cluster_size = len(nodes)
 
     # run pre-upgrade-check action on leader
-    action = await run_action(ops_test, leader_id, "pre-upgrade-check", app=app)
+    action = await run_action(juju, leader_id, "pre-upgrade-check", app=app)
     logger.info("pre-upgrade-check: %s", action)
     assert action.status == "completed"
 
     n_units = len(units)
-    async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
+    juju.model_config({"update-status-hook-interval": FAST_INTERVAL})
+    try:
         logger.info("Refreshing '%s' to local charm", app)
-        refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
+        refresh(juju, app, path=charm, config=CONFIG_OPTS | config)
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             apps_statuses={app: [EmptyBlockedStatus]},
             wait_for_exact_units={
@@ -270,7 +277,7 @@ async def assert_rollback_to_revision(
 
         # switch to store charm
         refresh(
-            ops_test,
+            juju,
             app,
             switch=OPENSEARCH_CHARM,
             channel=OPENSEARCH_CHANNEL,
@@ -281,7 +288,7 @@ async def assert_rollback_to_revision(
         # roll back to revision
         logger.info("Rolling back '%s' to revision: %s", app, revision)
         refresh(
-            ops_test,
+            juju,
             app,
             revision=revision,
             config=testing_config_if_supported(revision) | config,
@@ -290,7 +297,7 @@ async def assert_rollback_to_revision(
         logger.info("Waiting for rolled back unit to attempt restart...")
 
         await wait_until_condition_on_units(
-            ops_test,
+            juju,
             app=app,
             condition=lambda units: any(
                 GeneralStatuses.WAITING_TO_START.value.message
@@ -303,10 +310,10 @@ async def assert_rollback_to_revision(
             timeout=300,
         )
 
-        await recover_from_rollback(ops_test, app, expected_cluster_size=cluster_size)
+        await recover_from_rollback(juju, app, expected_cluster_size=cluster_size)
 
         await wait_until(
-            ops_test,
+            juju,
             apps=[app],
             wait_for_exact_units={
                 app: n_units,
@@ -315,11 +322,13 @@ async def assert_rollback_to_revision(
             idle_period=IDLE_PERIOD,
         )
         logger.info("Recovery from rollback of '%s' completed", app)
+    finally:
+        juju.model_config({"update-status-hook-interval": "5m"})
 
 
-async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_size: int):
+async def recover_from_rollback(juju: jubilant.Juju, app: str, expected_cluster_size: int):
     """Recover from refreshing back mid-upgrade"""
-    units = await get_application_units(ops_test, app)
+    units = await get_application_units(juju, app)
     rolled_back_unit_id = sorted([unit.id for unit in units])[-1]
     # make calls to any unit which is not the rolled back unit
     unit_ip = [unit.ip for unit in units if unit.id != rolled_back_unit_id][0]
@@ -328,7 +337,7 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
     # re-enable allocation
     logger.info("Re-enabling cluster routing allocation")
     await http_request(
-        ops_test,
+        juju,
         "PUT",
         f"https://{unit_ip}:9200/_cluster/settings",
         payload={"persistent": {"cluster.routing.allocation.enable": "all"}},
@@ -337,12 +346,12 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
     time.sleep(5)
 
     # get health
-    cluster_health_resp = await cluster_health(ops_test, unit_ip)
+    cluster_health_resp = await cluster_health(juju, unit_ip)
     logger.info("Cluster health response: %s", cluster_health_resp["status"])
     if cluster_health_resp["status"] == "red":
         # identify problematic index
         shards = await http_request(
-            ops_test,
+            juju,
             "GET",
             f"https://{unit_ip}:9200/_cat/shards?format=json&h=index,shard,state,unassigned.reason",
         )
@@ -359,33 +368,32 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
         logger.info("Unassigned indices: %s", indices)
         for index in indices:
             await http_request(
-                ops_test,
+                juju,
                 "DELETE",
                 f"https://{unit_ip}:9200/{index}",
             )
 
-        cluster_health_resp = await cluster_health(ops_test, unit_ip)
+        cluster_health_resp = await cluster_health(juju, unit_ip)
         logger.info(
             "Cluster health response after removing indices: %s", cluster_health_resp["status"]
         )
     # add unit
     logger.info("Adding new unit")
-    await ops_test.model.applications[app].add_unit(count=1)
+    juju.add_unit(app, num_units=1)
 
     # destroy rolled back unit
     logger.info("Destroying unit '%s/%s'", app, rolled_back_unit_id)
-    await ops_test.model.destroy_unit(
-        f"{app}/{rolled_back_unit_id}", destroy_storage=True, force=True
-    )
-    await ops_test.model.block_until(
-        lambda: len(ops_test.model.applications[app].units) == len(units), timeout=300
+    juju.remove_unit(f"{app}/{rolled_back_unit_id}", destroy_storage=True, force=True)
+    juju.wait(
+        lambda status: len(status.apps[app].units) == len(units),
+        timeout=300,
     )
 
-    remaining_units = await get_application_units(ops_test, app)
+    remaining_units = await get_application_units(juju, app)
     new_unit_id = sorted([unit.id for unit in remaining_units])[-1]
     logger.info("Waiting for new unit '%s/%s'...", app, new_unit_id)
     await wait_until_condition_on_units(
-        ops_test,
+        juju,
         app=app,
         condition=lambda units: any(
             LockStatuses.REQUEST_LOCK_ON_START.value.message
@@ -400,7 +408,7 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
     # check if lock with departed unit
     logger.info("Rolled back OpenSearch node: %s", rolled_back_node)
     lock_doc = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/.charm_node_lock/_doc/0",
     )
@@ -410,13 +418,13 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
         if node_with_lock == rolled_back_node:
             logger.info("Deleting lock document")
             await http_request(
-                ops_test,
+                juju,
                 "DELETE",
                 f"https://{unit_ip}:9200/.charm_node_lock/_doc/0?refresh=true",
             )
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=len(remaining_units),
         timeout=TIMEOUT,
@@ -425,7 +433,7 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
 
     # verify node joined cluster
     nodes = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_cat/nodes?format=json",
     )

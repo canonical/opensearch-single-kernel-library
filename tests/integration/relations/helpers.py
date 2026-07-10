@@ -5,8 +5,8 @@ import logging
 import socket
 from typing import Optional
 
+import jubilant
 import yaml
-from pytest_operator.plugin import OpsTest
 from tenacity import (
     RetryError,
     Retrying,
@@ -18,9 +18,11 @@ from tenacity import (
 
 from tests.integration.helpers import run_action
 
+logger = logging.getLogger(__name__)
+
 
 async def get_application_relation_data(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     unit_name: str,
     relation_name: str,
     key: str,
@@ -29,7 +31,7 @@ async def get_application_relation_data(
     """Get relation data for an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         unit_name: The name of the unit
         relation_name: name of the relation to get connection data from
         key: key of data to be retrieved
@@ -44,7 +46,7 @@ async def get_application_relation_data(
             or if there is no data for the particular relation endpoint
             and/or alias.
     """
-    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
+    raw_data = juju.cli("show-unit", unit_name)
     if not raw_data:
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)
@@ -61,7 +63,7 @@ async def get_application_relation_data(
 
 
 async def get_unit_relation_data(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     unit_name: str,
     target_unit_name: str,
     relation_name: str,
@@ -71,7 +73,7 @@ async def get_unit_relation_data(
     """Get relation data for an application.
 
     Args:
-        ops_test: The ops test framework instance
+        juju: The jubilant Juju instance
         unit_name: The name of the unit
         relation_name: name of the relation to get connection data from
         key: key of data to be retrieved
@@ -86,7 +88,7 @@ async def get_unit_relation_data(
             or if there is no data for the particular relation endpoint
             and/or alias.
     """
-    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
+    raw_data = juju.cli("show-unit", unit_name)
     if not raw_data:
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)
@@ -112,35 +114,40 @@ async def get_unit_relation_data(
 
 
 def wait_for_relation_joined_between(
-    ops_test: OpsTest, endpoint_one: str, endpoint_two: str
+    juju: jubilant.Juju, endpoint_one: str, endpoint_two: str
 ) -> None:
     """Wait for relation to be created before checking if it's waiting or idle.
 
     Args:
-        ops_test: running OpsTest instance
-        endpoint_one: one endpoint of the relation. Doesn't matter if it's provider or requirer.
-        endpoint_two: the other endpoint of the relation.
+        juju: running jubilant Juju instance
+        endpoint_one: one application of the relation. Doesn't matter if it's provider or requirer.
+        endpoint_two: the other application of the relation.
     """
     try:
         for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
             with attempt:
-                if new_relation_joined(ops_test, endpoint_one, endpoint_two):
+                if new_relation_joined(juju, endpoint_one, endpoint_two):
                     break
     except RetryError:
         assert False, "New relation failed to join after 3 minutes."
 
 
-def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str) -> bool:
-    for rel in ops_test.model.relations:
-        endpoints = [endpoint.name for endpoint in rel.endpoints]
-        if endpoint_one in endpoints and endpoint_two in endpoints:
-            return True
+def new_relation_joined(juju: jubilant.Juju, endpoint_one: str, endpoint_two: str) -> bool:
+    status = juju.status()
+    for app_name, app_status in status.apps.items():
+        for _ep_name, rels in app_status.relations.items():
+            for rel in rels:
+                related = rel.related_app
+                if (app_name == endpoint_one and related == endpoint_two) or (
+                    app_name == endpoint_two and related == endpoint_one
+                ):
+                    return True
     return False
 
 
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
 async def run_request(
-    ops_test,
+    juju: jubilant.Juju,
     unit_name: str,
     relation_name: str,
     relation_id: int,
@@ -159,7 +166,7 @@ async def run_request(
     if payload:
         params["payload"] = payload
     result = await run_action(
-        ops_test,
+        juju,
         unit_id=int(unit_name.split("/")[-1]),
         action_name="run-request",
         params=params,

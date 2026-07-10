@@ -1,26 +1,22 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import asyncio
 import json
 import logging
-from asyncio import gather
 from pathlib import Path
 
+import jubilant
 import pytest
 import requests
-from juju.client.client import Action
-from juju.model import Model
 from oauth_tools import (
     deploy_identity_bundle,
 )
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import (
     OAuthStatuses,
 )
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS
-from tests.integration.helpers import get_leader_unit_ip, wait_until
+from tests.integration.helpers import deploy_opensearch, get_leader_unit_ip, wait_until
 
 pytest_plugins = ["oauth_tools.fixtures"]
 
@@ -49,36 +45,37 @@ logger = logging.getLogger(__name__)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy(
-    ops_test: OpsTest, charm, series, ops_test_microk8s: OpsTest, charm_resources, substrate
+    juju: jubilant.Juju,
+    charm,
+    series,
+    ops_test_microk8s: jubilant.Juju,
+    charm_resources,
+    substrate,
 ):
     """Deploy OpenSearch, data integrator and identity platform (K8s) simultaneously."""
-    k8s_ops = ops_test_microk8s if substrate == "vm" else ops_test
-    await gather(
-        ops_test.model.deploy(
-            charm,
-            application_name=APP_NAME,
-            num_units=2,
-            series=series,
-            config=CONFIG_OPTS,
-            resources=charm_resources,
-        ),
-        ops_test.model.deploy(
-            DATA_INTEGRATOR_NAME,
-            config=DATA_INTEGRATOR_CONFIG,
-        ),
+    k8s_ops = ops_test_microk8s if substrate == "vm" else juju
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        APP_NAME,
+        2,
+        series=series,
+        config=CONFIG_OPTS,
+        resources=charm_resources,
     )
+    juju.deploy(DATA_INTEGRATOR_NAME, config=DATA_INTEGRATOR_CONFIG)
+    # TODO: oauth_tools.deploy_identity_bundle still expects OpsTest; update when
+    # the library adds jubilant support.
     await deploy_identity_bundle(
         ops_test=k8s_ops,
         bundle_url="./tests/integration/bundle-iam.yaml",
     )
-    await gather(
-        ops_test.model.wait_for_idle(timeout=1000),
-        k8s_ops.model.wait_for_idle(timeout=1000),
-    )
+    await wait_until(juju, apps=[APP_NAME], timeout=1000)
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model, substrate):
+async def test_setup_relations(juju: jubilant.Juju, microk8s_model: jubilant.Juju, substrate):
     """Establish all the required relations.
 
     Connects OpenSearch, data integrator and identity platform (cross-model).
@@ -86,72 +83,62 @@ async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model, substra
     if substrate == "k8s":
         # if we're on k8s, we already have identity platform deployed in the same model,
         # so we just relate to it
-        await ops_test.model.integrate(f"{APP_NAME}:certificates", "self-signed-certificates")
-        await ops_test.model.integrate(f"{APP_NAME}:oauth", "hydra")
+        juju.integrate(f"{APP_NAME}:certificates", "self-signed-certificates")
+        juju.integrate(f"{APP_NAME}:oauth", "hydra")
     else:
-        await microk8s_model.create_offer(
-            "certificates", "certificates", "self-signed-certificates"
+        microk8s_model.offer(
+            "self-signed-certificates", endpoint="certificates", name="certificates"
         )
-        await ops_test.model.consume(f"admin/{microk8s_model.name}.certificates")
-        await ops_test.model.integrate("opensearch:certificates", "certificates")
+        juju.consume(f"admin/{microk8s_model.model}.certificates")
+        juju.integrate("opensearch:certificates", "certificates")
 
-        await microk8s_model.create_offer("oauth", "oauth", "hydra")
-        await ops_test.model.consume(f"admin/{microk8s_model.name}.oauth")
-        await ops_test.model.integrate("opensearch:oauth", "oauth")
+        microk8s_model.offer("hydra", endpoint="oauth", name="oauth")
+        juju.consume(f"admin/{microk8s_model.model}.oauth")
+        juju.integrate("opensearch:oauth", "oauth")
 
-    await ops_test.model.integrate(
-        "opensearch:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch"
-    )
+    juju.integrate("opensearch:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch")
 
     # Require identity platform to be active so OAuth setup can succeed
-    await gather(
-        ops_test.model.wait_for_idle(apps=[APP_NAME, DATA_INTEGRATOR_NAME], status="active"),
-        # we can get a blocked status on kratos-external-idp-integrator
-        # but setup can still proceed, so we don't check for active status on microk8s model
-        microk8s_model.wait_for_idle(timeout=1200),
-    )
+    await wait_until(juju, apps=[APP_NAME, DATA_INTEGRATOR_NAME])
+    # we can get a blocked status on kratos-external-idp-integrator
+    # but setup can still proceed, so we don't check for active status on microk8s model
+    if substrate == "vm":
+        await wait_until(microk8s_model, apps=["hydra"], timeout=1200)
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_oauth(ops_test: OpsTest, microk8s_model: Model):
+async def test_setup_oauth(juju: jubilant.Juju, microk8s_model: jubilant.Juju):
     """Configure new OAuth client on Hydra (identity platform).
 
     Also, acquire corresponding access token for the further testing.
     """
     # Ensure Hydra is active before running the action
-    await microk8s_model.wait_for_idle(apps=["hydra"], status="active", timeout=300)
+    await wait_until(microk8s_model, apps=["hydra"], timeout=300)
 
-    action: Action = (
-        await microk8s_model.applications["hydra"]
-        .units[0]
-        .run_action(
-            "create-oauth-client",
-            **{
-                "scope": ["openid", "profile", "email", "phone", "offline"],
-                "grant-types": ["client_credentials"],
-                "audience": ["opensearch"],
-            },
-        )
+    hydra_unit = next(iter(microk8s_model.status().apps["hydra"].units))
+    task = microk8s_model.run(
+        hydra_unit,
+        "create-oauth-client",
+        {
+            "scope": ["openid", "profile", "email", "phone", "offline"],
+            "grant-types": ["client_credentials"],
+            "audience": ["opensearch"],
+        },
     )
-    await action.wait()
     global oauth_client_id
-    oauth_client_id = action.results.get("client-id")
-    oauth_client_secret = action.results.get("client-secret")
+    oauth_client_id = task.results.get("client-id")
+    oauth_client_secret = task.results.get("client-secret")
     if not (oauth_client_id and oauth_client_secret):
         msg = (
             "failed to retrieve oauth client id and secret from hydra; "
-            f"action status={getattr(action, 'status', 'unknown')}, "
-            f"results={action.results}"
+            f"action status={task.status}, "
+            f"results={task.results}"
         )
         raise AssertionError(msg)
 
-    action = (
-        await microk8s_model.applications["traefik-public"]
-        .units[0]
-        .run_action("show-proxied-endpoints")
-    )
-    await action.wait()
-    result = json.loads(action.results.get("proxied-endpoints", "{}"))
+    traefik_unit = next(iter(microk8s_model.status().apps["traefik-public"].units))
+    task = microk8s_model.run(traefik_unit, "show-proxied-endpoints")
+    result = json.loads(task.results.get("proxied-endpoints", "{}"))
     hydra_url = result.get("hydra", {}).get("url")
     assert hydra_url, "failed to retrieve hydra url from traefik"
 
@@ -180,7 +167,7 @@ async def test_setup_oauth(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access(juju: jubilant.Juju, microk8s_model: jubilant.Juju):
     """Check access to the OpenSearch with an access token, acquired earlier.
 
     Ensure that roles mapping works correctly by elevating user
@@ -194,28 +181,24 @@ async def test_oauth_access(ops_test: OpsTest, microk8s_model: Model):
         oauth_client_id = oauth_info.get("client_id")
 
     global opensearch_address
-    opensearch_address = await get_leader_unit_ip(ops_test, "opensearch")
+    opensearch_address = await get_leader_unit_ip(juju, "opensearch")
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
         opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
     )
     assert result.json().get("status") == 403, "no permissions error expected"
 
-    action = (
-        await ops_test.model.applications[DATA_INTEGRATOR_NAME]
-        .units[0]
-        .run_action("get-credentials")
-    )
-    await action.wait()
-    data_integrator_user = action.results.get("opensearch", {}).get("username")
+    di_unit = next(iter(juju.status().apps[DATA_INTEGRATOR_NAME].units))
+    task = juju.run(di_unit, "get-credentials")
+    data_integrator_user = task.results.get("opensearch", {}).get("username")
     assert data_integrator_user, "failed to retrieve data integrator user"
 
     global original_opensearch_config
-    original_opensearch_config = await ops_test.model.applications["opensearch"].get_config()
-    config_with_roles = original_opensearch_config.copy()
+    original_opensearch_config = juju.config("opensearch")
+    config_with_roles = dict(original_opensearch_config)
     config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
-    await ops_test.model.applications["opensearch"].set_config(config_with_roles)
-    await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active")
+    juju.config("opensearch", config_with_roles)
+    await wait_until(juju, apps=[APP_NAME])
 
     result = requests.get(
         opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
@@ -224,45 +207,41 @@ async def test_oauth_access(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_second_client(ops_test: OpsTest, microk8s_model: Model):
+async def test_deploy_second_client(juju: jubilant.Juju, microk8s_model: jubilant.Juju):
     """Deploy and configure second data integrator."""
-    await ops_test.model.deploy(
+    juju.deploy(
         DATA_INTEGRATOR_NAME,
-        application_name=SECOND_DATA_INTEGRATOR_NAME,
+        app=SECOND_DATA_INTEGRATOR_NAME,
         config=SECOND_DATA_INTEGRATOR_CONFIG,
     )
-    await ops_test.model.wait_for_idle()
-    await ops_test.model.integrate(SECOND_DATA_INTEGRATOR_NAME, "opensearch")
-    await ops_test.model.wait_for_idle()
+    await wait_until(juju, apps=[SECOND_DATA_INTEGRATOR_NAME])
+    juju.integrate(SECOND_DATA_INTEGRATOR_NAME, "opensearch")
+    await wait_until(juju, apps=[SECOND_DATA_INTEGRATOR_NAME, "opensearch"])
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_second_client(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access_second_client(juju: jubilant.Juju, microk8s_model: jubilant.Juju):
     """Change roles mapping from first data integrator user to second one.
 
     Ensure, that admin permissions from the first one is removed, while role
     from the second one is added.
     """
-    action = (
-        await ops_test.model.applications[SECOND_DATA_INTEGRATOR_NAME]
-        .units[0]
-        .run_action("get-credentials")
-    )
-    await action.wait()
-    second_data_integrator_user = action.results.get("opensearch", {}).get("username")
+    di_unit = next(iter(juju.status().apps[SECOND_DATA_INTEGRATOR_NAME].units))
+    task = juju.run(di_unit, "get-credentials")
+    second_data_integrator_user = task.results.get("opensearch", {}).get("username")
     assert second_data_integrator_user, "failed to retrieve second data integrator user"
 
     oauth_info = json.loads(Path("oauth_info.json").read_text())
     oauth_access_token = oauth_info.get("access_token")
     oauth_client_id = oauth_info.get("client_id")
 
-    original_opensearch_config = await ops_test.model.applications["opensearch"].get_config()
-    config_with_roles = original_opensearch_config.copy()
+    original_opensearch_config = juju.config("opensearch")
+    config_with_roles = dict(original_opensearch_config)
     config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: second_data_integrator_user})
-    await ops_test.model.applications["opensearch"].set_config(config_with_roles)
-    await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active")
+    juju.config("opensearch", config_with_roles)
+    await wait_until(juju, apps=[APP_NAME])
 
-    opensearch_address = await get_leader_unit_ip(ops_test, "opensearch")
+    opensearch_address = await get_leader_unit_ip(juju, "opensearch")
     # Ensure first data integrator admin role is removed
     result = requests.get(
         f"https://{opensearch_address}:9200/_cat/indices",
@@ -289,10 +268,10 @@ async def test_oauth_access_second_client(ops_test: OpsTest, microk8s_model: Mod
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_cleanup(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access_cleanup(juju: jubilant.Juju, microk8s_model: jubilant.Juju):
     """Ensure that all of the oauth clients permissions are removed with clean roles mapping."""
-    await ops_test.model.applications["opensearch"].set_config(original_opensearch_config)
-    await ops_test.model.wait_for_idle(apps=["opensearch"], status="active")
+    juju.config("opensearch", original_opensearch_config, reset="roles_mapping")
+    await wait_until(juju, apps=["opensearch"])
 
     result = requests.get(
         f"https://{opensearch_address}:9200/_plugins/_security/authinfo",
@@ -305,56 +284,63 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, microk8s_model: Model):
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_setup_large_cluster(
+    juju: jubilant.Juju, charm, series, microk8s_model: jubilant.Juju, substrate
+):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
-    await ops_test.model.remove_application("opensearch", block_until_done=True)
-    await ops_test.model.remove_application(SECOND_DATA_INTEGRATOR_NAME, block_until_done=True)
+    juju.remove_application("opensearch")
+    juju.remove_application(SECOND_DATA_INTEGRATOR_NAME)
+    juju.wait(
+        lambda status: "opensearch" not in status.apps
+        and SECOND_DATA_INTEGRATOR_NAME not in status.apps
+    )
 
     logger.info("Create large deployment cluster of Opensearch")
-    await asyncio.gather(
-        ops_test.model.deploy(
-            charm,
-            application_name=MAIN_APP,
-            num_units=APP_UNITS[MAIN_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=FAILOVER_APP,
-            num_units=APP_UNITS[FAILOVER_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
-            | CONFIG_OPTS,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=DATA_APP,
-            num_units=APP_UNITS[DATA_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
-            | CONFIG_OPTS,
-        ),
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        MAIN_APP,
+        APP_UNITS[MAIN_APP],
+        series=series,
+        config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+    )
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        FAILOVER_APP,
+        APP_UNITS[FAILOVER_APP],
+        series=series,
+        config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
+        | CONFIG_OPTS,
+    )
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        DATA_APP,
+        APP_UNITS[DATA_APP],
+        series=series,
+        config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"} | CONFIG_OPTS,
     )
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, "certificates")
+        juju.integrate(app, "certificates")
 
     # integrate large deployment cluster
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
 
     # integrate with Data integrator
-    await ops_test.model.integrate(
-        f"{DATA_APP}:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch"
-    )
+    juju.integrate(f"{DATA_APP}:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch")
 
     # Let Juju settle while the cluster forms TLS + security index + peer orchestration
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_INTEGRATOR_NAME],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
@@ -362,12 +348,14 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_mo
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_oauth_relation_restricted(
+    juju: jubilant.Juju, charm, series, microk8s_model: jubilant.Juju
+):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
-    await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
+    juju.integrate(f"{DATA_APP}:oauth", "oauth")
     await wait_until(
-        ops_test,
+        juju,
         apps=[DATA_APP],
         apps_statuses={
             DATA_APP: [OAuthStatuses.OAUTH_RELATION_INVALID.value],
@@ -376,7 +364,7 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
     )
 
     logger.info("Verifying access is not possible")
-    opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
+    opensearch_address = await get_leader_unit_ip(juju, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
         opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
@@ -385,11 +373,10 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
     logger.info("Access with OAuth Token failed as expected")
 
     logger.info(f"Remove relation with {DATA_APP}")
-    remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
-    await ops_test.juju(*remove_relation_cmd.split(), check=True)
+    juju.remove_relation(f"{DATA_APP}:oauth", "oauth")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[DATA_APP],
         wait_for_exact_units={DATA_APP: 3},
     )
@@ -397,32 +384,30 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_oauth_access_large_cluster(
+    juju: jubilant.Juju, charm, series, microk8s_model: jubilant.Juju
+):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
-    await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
+    juju.integrate(f"{MAIN_APP}:oauth", "oauth")
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 
-    action = (
-        await ops_test.model.applications[DATA_INTEGRATOR_NAME]
-        .units[0]
-        .run_action("get-credentials")
-    )
-    await action.wait()
-    data_integrator_user = action.results.get("opensearch", {}).get("username")
+    di_unit = next(iter(juju.status().apps[DATA_INTEGRATOR_NAME].units))
+    task = juju.run(di_unit, "get-credentials")
+    data_integrator_user = task.results.get("opensearch", {}).get("username")
     assert data_integrator_user, "failed to retrieve data integrator user"
 
-    original_opensearch_config = await ops_test.model.applications[DATA_APP].get_config()
-    config_with_roles = original_opensearch_config.copy()
+    original_opensearch_config = juju.config(DATA_APP)
+    config_with_roles = dict(original_opensearch_config)
     config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
-    await ops_test.model.applications[DATA_APP].set_config(config_with_roles)
-    await ops_test.model.wait_for_idle(status="active")
+    juju.config(DATA_APP, config_with_roles)
+    await wait_until(juju, apps=[MAIN_APP, DATA_APP, FAILOVER_APP])
 
-    opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
+    opensearch_address = await get_leader_unit_ip(juju, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
         opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False

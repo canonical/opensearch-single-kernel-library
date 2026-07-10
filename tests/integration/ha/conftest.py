@@ -13,8 +13,8 @@ from typing import Any
 
 import boto3
 import botocore
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
 from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
@@ -46,32 +46,32 @@ RESTART_DELAY = 360
 
 
 @pytest.fixture(scope="function")
-async def reset_restart_delay(ops_test: OpsTest, substrate: Substrate):
+async def reset_restart_delay(juju: jubilant.Juju, substrate: Substrate):
     """Resets service file delay on all units."""
     yield
-    app = (await app_name(ops_test)) or APP_NAME
-    for unit_id in get_application_unit_ids(ops_test, app):
+    app = (await app_name(juju)) or APP_NAME
+    for unit_id in get_application_unit_ids(juju, app):
         if substrate == "k8s":
             pebble_patch_restart_delay(
-                ops_test.model_name,
+                juju.model,
                 f"{app}/{unit_id}",
                 None,
                 ensure_replan=True,
             )
         else:
-            await update_restart_delay(ops_test, app, unit_id, ORIGINAL_RESTART_DELAY)
+            await update_restart_delay(juju, app, unit_id, ORIGINAL_RESTART_DELAY)
 
 
 @pytest.fixture(scope="function")
-async def c_writes(ops_test: OpsTest):
+async def c_writes(juju: jubilant.Juju):
     """Creates instance of the ContinuousWrites."""
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
     logger.debug(f"Creating ContinuousWrites instance for app with name {app}")
-    return ContinuousWrites(ops_test, app)
+    return ContinuousWrites(juju, app)
 
 
 @pytest.fixture(scope="function")
-async def c_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites):
+async def c_writes_runner(c_writes: ContinuousWrites):
     """Starts continuous write operations and clears writes at the end of the test."""
     await c_writes.start()
     yield
@@ -80,7 +80,7 @@ async def c_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites):
 
 
 @pytest.fixture(scope="function")
-async def c_0_repl_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites):
+async def c_0_repl_writes_runner(c_writes: ContinuousWrites):
     """Starts continuous write operations and clears writes at the end of the test."""
     await c_writes.start(repl_mode=ReplicationMode.WITH_AT_LEAST_0_REPL)
     yield
@@ -89,7 +89,7 @@ async def c_0_repl_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites):
 
 
 @pytest.fixture(scope="function")
-async def c_balanced_writes_runner(ops_test: OpsTest, c_writes: ContinuousWrites):
+async def c_balanced_writes_runner(c_writes: ContinuousWrites):
     """Same as previous runner, but starts continuous writes on cluster wide replicated index."""
     await c_writes.start(repl_mode=ReplicationMode.WITH_AT_LEAST_1_REPL)
     yield
@@ -266,13 +266,11 @@ def s3_bucket(microceph_credentials, microceph_config) -> None:
 
 
 @pytest.fixture(scope="module")
-def chaos_mesh(ops_test, substrate: Substrate) -> Generator[None, Any, Any]:
-    assert (
-        ops_test.model
-    ), "Juju model is not set. Ensure that the test is running with a Juju model."
+def chaos_mesh(juju: jubilant.Juju, substrate: Substrate) -> Generator[None, Any, Any]:
+    assert juju.model, "Juju model is not set. Ensure that the test is running with a Juju model."
     if substrate == "k8s":
-        deploy_chaos_mesh(ops_test.model_name)
+        deploy_chaos_mesh(juju.model)
         yield
-        destroy_chaos_mesh(ops_test.model_name)
+        destroy_chaos_mesh(juju.model)
     else:
         yield

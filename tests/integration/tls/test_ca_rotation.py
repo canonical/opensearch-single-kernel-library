@@ -5,9 +5,9 @@
 import asyncio
 import logging
 
+import jubilant
 import pytest
 import requests
-from pytest_operator.plugin import OpsTest
 
 from tests.integration.conftest import (
     APP_NAME,
@@ -58,13 +58,13 @@ ALL_DEPLOYMENTS = list(ALL_GROUPS.values())
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy_active(
-    ops_test: OpsTest, charm, series, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, substrate, charm_resources
 ) -> None:
     """Build and deploy one unit of OpenSearch."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
     await deploy_opensearch(
-        ops_test,
+        juju,
         charm,
         substrate,
         APP_NAME,
@@ -76,15 +76,13 @@ async def test_build_and_deploy_active(
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-    )
-    await wait_until(ops_test, apps=[TLS_CERTIFICATES_APP_NAME])
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    await wait_until(juju, apps=[TLS_CERTIFICATES_APP_NAME])
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[APP_NAME],
         timeout=1800,
         wait_for_exact_units=len(UNIT_IDS),
@@ -96,61 +94,63 @@ async def test_build_and_deploy_active(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_large_deployment(
-    ops_test: OpsTest, charm, series, substrate, charm_resources
+    juju: jubilant.Juju, charm, series, substrate, charm_resources
 ) -> None:
     """Setup a large deployments cluster."""
-    os_deploy_kwargs = {"resources": charm_resources} if substrate == "k8s" else {}
     # deploy new cluster
-    await asyncio.gather(
-        ops_test.model.deploy(
-            charm,
-            application_name=MAIN_APP,
-            num_units=3,
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
-            **os_deploy_kwargs,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=FAILOVER_APP,
-            num_units=1,
-            series=series,
-            config={
-                "cluster_name": CLUSTER_NAME,
-                "init_hold": True,
-                "roles": "cluster_manager,data",
-            }
-            | CONFIG_OPTS,
-            **os_deploy_kwargs,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=DATA_APP,
-            num_units=1,
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
-            | CONFIG_OPTS,
-            **os_deploy_kwargs,
-        ),
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME,
-            channel=TLS_STABLE_CHANNEL,
-            config={"ca-common-name": "CN_CA"},
-        ),
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        MAIN_APP,
+        3,
+        series=series,
+        config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
+        resources=charm_resources,
+    )
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        FAILOVER_APP,
+        1,
+        series=series,
+        config={
+            "cluster_name": CLUSTER_NAME,
+            "init_hold": True,
+            "roles": "cluster_manager,data",
+        }
+        | CONFIG_OPTS,
+        resources=charm_resources,
+    )
+    await deploy_opensearch(
+        juju,
+        charm,
+        substrate,
+        DATA_APP,
+        1,
+        series=series,
+        config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"} | CONFIG_OPTS,
+        resources=charm_resources,
+    )
+    juju.deploy(
+        TLS_CERTIFICATES_APP_NAME,
+        channel=TLS_STABLE_CHANNEL,
+        config={"ca-common-name": "CN_CA"},
     )
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        juju.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     # create the peer-cluster-relation
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    juju.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
 
     # wait for the cluster to fully form
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
@@ -159,7 +159,7 @@ async def test_build_large_deployment(
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None:
+async def test_rollout_new_ca(juju: jubilant.Juju, deploy_type, substrate) -> None:
     """Repeat the CA rotation test for the large deployment."""
     if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
         pytest.skip("Large deployments are not supported on k8s.")
@@ -168,7 +168,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         app = APP_NAME
     else:
         app = DATA_APP
-    c_writes = ContinuousWrites(ops_test, app)
+    c_writes = ContinuousWrites(juju, app)
     try:
         await c_writes.start()
 
@@ -177,13 +177,13 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
 
         # trigger a rollout of the new CA by changing the config on TLS Provider side
         new_config = {"ca-common-name": "NEW_CA"}
-        await ops_test.model.applications[TLS_CERTIFICATES_APP_NAME].set_config(new_config)
+        juju.config(TLS_CERTIFICATES_APP_NAME, new_config)
 
         start_count = await c_writes.count()
 
         if deploy_type == SMALL_DEPLOYMENT:
             await wait_until(
-                ops_test,
+                juju,
                 apps=[APP_NAME],
                 wait_for_exact_units=len(UNIT_IDS),
                 timeout=2400,
@@ -191,7 +191,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
             )
         else:
             await wait_until(
-                ops_test,
+                juju,
                 apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
                 wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
                 timeout=2400,
@@ -212,9 +212,9 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         assert final_count > start_count, "Writes have not continued during CA rotation"
 
         # using the SSL API requires authentication with app-admin cert and key
-        leader_unit_ip = await get_leader_unit_ip(ops_test, app)
+        leader_unit_ip = await get_leader_unit_ip(juju, app)
         url = f"https://{leader_unit_ip}:9200/_plugins/_security/api/ssl/certs"
-        admin_secret = await get_secret_by_label(ops_test, f"{app}:app:app-admin")
+        admin_secret = await get_secret_by_label(juju, f"{app}:app:app-admin")
 
         with open("admin.cert", "w") as cert:
             cert.write(admin_secret["cert"])

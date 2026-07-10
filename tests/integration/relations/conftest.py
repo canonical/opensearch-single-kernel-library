@@ -2,49 +2,35 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import asyncio
-from asyncio import sleep
-from typing import Any, AsyncGenerator
+import os
 
+import jubilant
 import pytest
-from juju.controller import Controller
-from juju.model import Model
-from pytest_operator.plugin import OpsTest
 
 MICROK8S_CLOUD_NAME = "uk8s"
 
 
 @pytest.fixture(scope="module")
-async def ops_test_microk8s(
-    request, tmp_path_factory, ops_test: OpsTest, substrate
-) -> AsyncGenerator[OpsTest, Any]:
-    """Create second OpsTest object, that is connected to the MicroK8s cloud.
+async def ops_test_microk8s(juju: jubilant.Juju, substrate) -> jubilant.Juju:
+    """Create a jubilant.Juju instance connected to the MicroK8s cloud.
 
     Automatically creates and destroys (unless keep models parameter is used)
     corresponding Juju model. MicroK8s and uk8s cloud are set up by spread prepare
     for OAuth tests.
 
     Returns:
-        OpsTest object with MicroK8s connection and Juju model.
+        jubilant.Juju object with MicroK8s connection and Juju model.
     """
     if substrate == "k8s":
-        yield ops_test
+        yield juju
         return
 
-    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
-    request.config.option.controller = ops_test.controller_name
-    request.config.option.cloud = MICROK8S_CLOUD_NAME
-    request.config.option.model = model_name
-    request.config.option.model_alias = model_name
-    ops_res = OpsTest(request, tmp_path_factory)
-    await ops_res._setup_model()
-    yield ops_res
-    if not ops_test.keep_model:
-        await ops_res.forget_model(alias=model_name)
-        await ops_res._controller.destroy_model(model_name, destroy_storage=True, force=True)
-        while model_name in await ops_res._controller.list_models():
-            await sleep(5)
-    await ops_res._cleanup_models()
+    model_name = f"{juju.model}-{MICROK8S_CLOUD_NAME}"
+    k8s_juju = jubilant.Juju()
+    k8s_juju.add_model(model_name, cloud=MICROK8S_CLOUD_NAME)
+    yield k8s_juju
+    if not os.environ.get("KEEP_MODELS"):
+        k8s_juju.destroy_model(model_name, destroy_storage=True, force=True)
 
 
 @pytest.fixture(scope="module")
@@ -54,31 +40,12 @@ async def application_charm() -> str:
 
 
 @pytest.fixture(scope="module")
-async def microk8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
+async def microk8s_model(ops_test_microk8s: jubilant.Juju, substrate) -> jubilant.Juju:
     """Create new Juju model on the connected MicroK8s cloud.
 
     Automatically destroys that model unless keep models parameter is used.
 
     Returns:
-        Connected Juju model.
+        Connected jubilant.Juju instance.
     """
-    if substrate == "k8s":
-        assert ops_test.model is not None, "OpsTest model is not connected"
-        yield ops_test.model
-        return
-    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
-    controller = Controller()
-    await controller.connect()
-    if model_name in await controller.list_models():
-        model = await controller.get_model(model_name)
-    else:
-        model = await controller.add_model(model_name, cloud_name=MICROK8S_CLOUD_NAME)
-
-    yield model
-
-    await model.disconnect()
-    if not ops_test.keep_model:
-        await controller.destroy_model(model_name, destroy_storage=True, force=True)
-        while model_name in await controller.list_models():
-            await asyncio.sleep(5)
-    await controller.disconnect()
+    yield ops_test_microk8s

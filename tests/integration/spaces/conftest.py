@@ -6,8 +6,8 @@ import logging
 import os
 import subprocess
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +91,16 @@ def lxd():
 
 
 @pytest.fixture(scope="module")
-async def lxd_spaces(ops_test: OpsTest):
+async def lxd_spaces(juju: jubilant.Juju):
     subprocess.run(
         [
             "juju",
             "reload-spaces",
         ],
     )
-    await ops_test.model.add_space("client", cidrs=["10.0.0.0/24"])
-    await ops_test.model.add_space("cluster", cidrs=["10.10.10.0/24"])
-    await ops_test.model.add_space("backup", cidrs=["10.20.20.0/24"])
+    juju.cli("add-space", "client", "--cidr", "10.0.0.0/24")
+    juju.cli("add-space", "cluster", "--cidr", "10.10.10.0/24")
+    juju.cli("add-space", "backup", "--cidr", "10.20.20.0/24")
 
 
 @pytest.hookimpl()

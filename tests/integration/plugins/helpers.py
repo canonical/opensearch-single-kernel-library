@@ -10,7 +10,7 @@ import logging
 import random
 from typing import Any, Callable, Dict, List, Optional
 
-from pytest_operator.plugin import OpsTest
+import jubilant
 from tenacity import (
     RetryError,
     Retrying,
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 async def k8s_generate_bulk_training_data(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     index_name: str,
     vector_name: str,
     docs_count: int = 100,
@@ -47,15 +47,15 @@ async def k8s_generate_bulk_training_data(
     unit_ip: str = "",
     app: str = "",
 ) -> list[float]:
-    admin_secrets = await get_secrets(ops_test, app=app)
-    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, f"https://{unit_ip}:9200/_bulk", app)
+    admin_secrets = await get_secrets(juju, app=app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(juju, f"https://{unit_ip}:9200/_bulk", app)
     if not k8s_unit:
         raise RuntimeError(
             f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
         )
     logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
     action = await run_action(
-        ops_test,
+        juju,
         app=CLIENT_CHARM,
         action_name="generate-bulk-training-data",
         params={
@@ -64,7 +64,7 @@ async def k8s_generate_bulk_training_data(
             "docs-count": docs_count,
             "dimensions": dimensions,
             "has-result": has_result,
-            "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+            "host": _k8s_unit_fqdn(juju, app, k8s_unit),
             "username": "admin",
             "password": admin_secrets["password"],
             "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
@@ -109,7 +109,7 @@ def generate_bulk_training_data(
     stop=stop_after_attempt(15),
 )
 async def run_knn_training(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     model_name: str,
@@ -117,11 +117,11 @@ async def run_knn_training(
 ) -> Optional[List[Dict[str, Any]]]:
     """Sets models."""
     endpoint = f"https://{unit_ip}:9200/_plugins/_knn/models/{model_name}/_train"
-    return await http_request(ops_test, "POST", endpoint, payload=payload, app=app)
+    return await http_request(juju, "POST", endpoint, payload=payload, app=app)
 
 
 async def is_knn_training_complete(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     unit_ip: str,
     model_name: str,
@@ -131,7 +131,7 @@ async def is_knn_training_complete(
     try:
         for attempt in Retrying(stop=stop_after_attempt(15), wait=wait_fixed(wait=5)):
             with attempt:
-                resp = await http_request(ops_test, "GET", endpoint, app=app)
+                resp = await http_request(juju, "GET", endpoint, app=app)
                 if "created" not in resp.get("state", ""):
                     raise Exception
                 return True
@@ -140,7 +140,7 @@ async def is_knn_training_complete(
 
 
 async def create_index_and_bulk_insert(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
     endpoint: str,
     index_name: str,
@@ -171,7 +171,7 @@ async def create_index_and_bulk_insert(
         extra_index_settings = {}
 
     await create_index(
-        ops_test,
+        juju,
         app,
         endpoint,
         index_name,
@@ -181,7 +181,7 @@ async def create_index_and_bulk_insert(
     )
     if substrate == "k8s":
         vector = await k8s_generate_bulk_training_data(
-            ops_test=ops_test,
+            juju=juju,
             index_name=index_name,
             vector_name=vector_name,
             docs_count=1000,
@@ -196,7 +196,7 @@ async def create_index_and_bulk_insert(
         index_name, vector_name, docs_count=1000, dimensions=4, has_result=True
     )
     # Insert data in bulk
-    await bulk_insert(ops_test, app, endpoint, payload)
+    await bulk_insert(juju, app, endpoint, payload)
     return payload_list[0]
 
 
@@ -211,7 +211,7 @@ def bulk_encode(docs: List[Dict[str, Any]], index_name: str) -> str:
 
 
 async def poll_until(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     endpoint: str,
     condition: Callable,
     timeout: int = 60,
@@ -224,7 +224,7 @@ async def poll_until(
             stop=stop_after_delay(timeout), wait=wait_fixed(wait=interval), reraise=True
         ):
             with attempt:
-                response = await http_request(ops_test, "GET", endpoint)
+                response = await http_request(juju, "GET", endpoint)
                 if condition(response):
                     logger.info(f"Done. Condition met: {response}")
                     return True

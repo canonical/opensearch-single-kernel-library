@@ -28,9 +28,9 @@ from datetime import datetime
 from typing import Dict
 
 import boto3
+import jubilant
 import pytest
 from azure.storage.blob import BlobServiceClient
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import (
     AZURE_REPOSITORY,
@@ -59,6 +59,7 @@ from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
     EmptyBlockedStatus,
+    _series_to_base,
     app_name,
     get_application_units,
     get_leader_unit_id,
@@ -243,7 +244,7 @@ def remove_backups(  # noqa C901
 
 
 async def _configure_s3_for_aws(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     config: Dict[str, str],
     credentials: Dict[str, str],
 ) -> None:
@@ -254,22 +255,22 @@ async def _configure_s3_for_aws(
         "path": config["path"],
         "region": config.get("region", "") or "",
     }
-    await ops_test.model.applications[S3_INTEGRATOR].set_config(base_cfg)
-    s3_integrator_id = (await get_application_units(ops_test, S3_INTEGRATOR))[
+    juju.config(S3_INTEGRATOR, base_cfg)
+    s3_integrator_id = (await get_application_units(juju, S3_INTEGRATOR))[
         0
     ].id  # We redeploy s3-integrator once, so we may have anything >=0 as id
     await run_action(
-        ops_test,
+        juju,
         s3_integrator_id,
         "sync-s3-credentials",
         params=credentials,
         app=S3_INTEGRATOR,
     )
-    await ops_test.model.wait_for_idle(apps=[S3_INTEGRATOR], timeout=TIMEOUT)
+    await wait_until(juju, apps=[S3_INTEGRATOR], timeout=TIMEOUT)
 
 
 async def _configure_s3_for_microceph(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     config: Dict[str, str],
     credentials: Dict[str, str],
 ) -> None:
@@ -281,22 +282,22 @@ async def _configure_s3_for_microceph(
         "region": config.get("region", "") or "",
         "tls-ca-chain": config.get("tls-ca-chain"),
     }
-    await ops_test.model.applications[S3_INTEGRATOR].set_config(base_cfg)
-    s3_integrator_id = (await get_application_units(ops_test, S3_INTEGRATOR))[
+    juju.config(S3_INTEGRATOR, base_cfg)
+    s3_integrator_id = (await get_application_units(juju, S3_INTEGRATOR))[
         0
     ].id  # We redeploy s3-integrator once, so we may have anything >=0 as id
     await run_action(
-        ops_test,
+        juju,
         s3_integrator_id,
         "sync-s3-credentials",
         params=credentials,
         app=S3_INTEGRATOR,
     )
-    await ops_test.model.wait_for_idle(apps=[S3_INTEGRATOR], timeout=TIMEOUT)
+    await wait_until(juju, apps=[S3_INTEGRATOR], timeout=TIMEOUT)
 
 
 async def _configure_azure(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     config: Dict[str, str],
     credentials: Dict[str, str],
 ) -> None:
@@ -305,7 +306,7 @@ async def _configure_azure(
     # Creates a new secret for each test
     local_label = "".join(random.choice(string.ascii_letters) for _ in range(10))
     credentials_secret_uri = await add_juju_secret(
-        ops_test,
+        juju,
         AZURE_INTEGRATOR,
         local_label,
         {"secret-key": credentials["secret-key"]},
@@ -323,13 +324,13 @@ async def _configure_azure(
     )
     # apply new configuration options
     logger.info("Setting up configuration for azure-storage-integrator charm...")
-    await ops_test.model.applications[AZURE_INTEGRATOR].set_config(full_cfg)
+    juju.config(AZURE_INTEGRATOR, full_cfg)
 
-    await ops_test.model.wait_for_idle(apps=[AZURE_INTEGRATOR], timeout=TIMEOUT)
+    await wait_until(juju, apps=[AZURE_INTEGRATOR], timeout=TIMEOUT)
 
 
 async def _configure_gcs(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     config: Dict[str, str],
     credentials: Dict[str, str],
 ) -> None:
@@ -337,7 +338,7 @@ async def _configure_gcs(
     logger.info("Adding Juju secret for GCS service account JSON")
     local_label = "".join(random.choice(string.ascii_letters) for _ in range(10))
     credentials_secret_uri = await add_juju_secret(
-        ops_test,
+        juju,
         GCS_INTEGRATOR,
         local_label,
         {"secret-key": credentials["secret-key"]},
@@ -348,18 +349,26 @@ async def _configure_gcs(
     full_cfg.update({"credentials": credentials_secret_uri})
 
     logger.info("Setting up configuration for gcs-integrator charm...")
-    await ops_test.model.applications[GCS_INTEGRATOR].set_config(full_cfg)
-    await ops_test.model.wait_for_idle(apps=[GCS_INTEGRATOR], timeout=TIMEOUT)
+    juju.config(GCS_INTEGRATOR, full_cfg)
+    await wait_until(juju, apps=[GCS_INTEGRATOR], timeout=TIMEOUT)
 
 
-def _is_related_with(ops_test: OpsTest, app_name: str, target_app_name: str) -> bool:
+def _is_related_with(juju: jubilant.Juju, app_name: str, target_app_name: str) -> bool:
     """Check if app_name has a relation with target_app_name."""
-    app = ops_test.model.applications.get(app_name)
-    for relation in app.relations:
-        for endpoint in relation.endpoints:
-            if endpoint.application_name == target_app_name:
-                logger.info("%s and %s already integrated", app_name, target_app_name)
-                return True
+    app_status = juju.status().apps.get(app_name)
+    if app_status is None:
+        return False
+    for related_app in app_status.subordinate_to:
+        if related_app == target_app_name:
+            logger.info("%s and %s already integrated", app_name, target_app_name)
+            return True
+    # Also check if the target app is listed in any relation
+    for rel_app_name, rel_app_status in juju.status().apps.items():
+        if rel_app_name == app_name:
+            for rel_key in rel_app_status.relations:
+                if target_app_name in rel_key:
+                    logger.info("%s and %s already integrated", app_name, target_app_name)
+                    return True
     logger.info("%s and %s are not integrated yet", app_name, target_app_name)
     return False
 
@@ -368,13 +377,13 @@ def _is_related_with(ops_test: OpsTest, app_name: str, target_app_name: str) -> 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_small_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
+    juju: jubilant.Juju, charm, series, charm_resources, cloud_name: str, deploy_type: str
 ) -> None:
     """Build and deploy an HA cluster of OpenSearch and corresponding S3/Azure integration."""
-    if await app_name(ops_test):
+    if await app_name(juju):
         return
 
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
 
@@ -388,39 +397,35 @@ async def test_small_deployment_build_and_deploy(
         backup_integrator = S3_INTEGRATOR
         backup_integrator_channel = S3_INTEGRATOR_CHANNEL
 
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
-        ops_test.model.deploy(backup_integrator, channel=backup_integrator_channel),
-        ops_test.model.deploy(
-            charm,
-            application_name=APP_NAME,
-            num_units=3,
-            series=series,
-            config=CONFIG_OPTS,
-            resources=charm_resources,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    juju.deploy(backup_integrator, channel=backup_integrator_channel)
+    juju.deploy(
+        charm,
+        app=APP_NAME,
+        num_units=3,
+        base=_series_to_base(series),
+        config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.wait_for_idle(
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await wait_until(
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-        status="active",
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )
     # Credentials not set yet, this will move the opensearch to blocked state
     # Credentials are set per test scenario
-    await ops_test.model.integrate(APP_NAME, backup_integrator)
+    juju.integrate(APP_NAME, backup_integrator)
 
 
 @pytest.mark.parametrize("cloud_name,deploy_type", LARGE_DEPLOYMENTS_ALL_CLOUDS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
+    juju: jubilant.Juju, charm, series, charm_resources, cloud_name: str, deploy_type: str
 ) -> None:
     """Build and deploy a large cluster (main/failover orchestrators + data.hot node).
 
@@ -432,10 +437,10 @@ async def test_large_deployment_build_and_deploy(
     The data node is selected to adopt the "APP_NAME" value because it is the node which
     ContinuousWrites will later target its writes to.
     """
-    if await app_name(ops_test):
+    if await app_name(juju):
         return
 
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
 
@@ -465,52 +470,46 @@ async def test_large_deployment_build_and_deploy(
         backup_integrator = S3_INTEGRATOR
         backup_integrator_channel = S3_INTEGRATOR_CHANNEL
 
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
-        ),
-        ops_test.model.deploy(backup_integrator, channel=backup_integrator_channel),
-        ops_test.model.deploy(
-            charm,
-            application_name="main",
-            num_units=1,
-            series=series,
-            config=main_orchestrator_conf | CONFIG_OPTS,
-            resources=charm_resources,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name="failover",
-            num_units=2,
-            series=series,
-            config=failover_orchestrator_conf | CONFIG_OPTS,
-            resources=charm_resources,
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=APP_NAME,
-            num_units=1,
-            series=series,
-            config=data_hot_conf | CONFIG_OPTS,
-            resources=charm_resources,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config)
+    juju.deploy(backup_integrator, channel=backup_integrator_channel)
+    juju.deploy(
+        charm,
+        app="main",
+        num_units=1,
+        base=_series_to_base(series),
+        config=main_orchestrator_conf | CONFIG_OPTS,
+        resources=charm_resources,
+    )
+    juju.deploy(
+        charm,
+        app="failover",
+        num_units=2,
+        base=_series_to_base(series),
+        config=failover_orchestrator_conf | CONFIG_OPTS,
+        resources=charm_resources,
+    )
+    juju.deploy(
+        charm,
+        app=APP_NAME,
+        num_units=1,
+        base=_series_to_base(series),
+        config=data_hot_conf | CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Large deployment setup
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
-    await ops_test.model.integrate(
-        "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
-    )
+    juju.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
+    juju.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
+    juju.integrate("failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
 
     # TLS setup
-    await ops_test.model.integrate("main", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate("failover", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate("main", TLS_CERTIFICATES_APP_NAME)
+    juju.integrate("failover", TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
     # Charms except s3-integrator should be active
     await wait_until(
-        ops_test,
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME, "main", "failover", APP_NAME],
         wait_for_exact_units={
             TLS_CERTIFICATES_APP_NAME: 1,
@@ -524,13 +523,13 @@ async def test_large_deployment_build_and_deploy(
 
     # Credentials not set yet, this will move the opensearch to blocked state
     # Credentials are set per test scenario
-    await ops_test.model.integrate("main", backup_integrator)
+    juju.integrate("main", backup_integrator)
 
 
 @pytest.mark.parametrize("cloud_name,deploy_type", LARGE_DEPLOYMENTS_ALL_CLOUDS)
 @pytest.mark.abort_on_fail
 async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_name: str,
     deploy_type: str,
     cloud_configs: Dict[str, Dict[str, str]],
@@ -541,24 +540,24 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     if cloud_name == "azure":
         backup_integrator = AZURE_INTEGRATOR
         backup_relation = AZURE_RELATION
-        await _ensure_only_azure_integrator_related(ops_test, "main")
+        await _ensure_only_azure_integrator_related(juju, "main")
     elif cloud_name == "gcs":
         backup_integrator = GCS_INTEGRATOR
         backup_relation = GCS_RELATION
-        await _ensure_only_gcs_integrator_related(ops_test, "main")
+        await _ensure_only_gcs_integrator_related(juju, "main")
     else:
         backup_integrator = S3_INTEGRATOR
         backup_relation = S3_RELATION
-        await _ensure_only_s3_integrator_related(ops_test, "main")
+        await _ensure_only_s3_integrator_related(juju, "main")
 
     # Ensure main has the backup relation
-    if not _is_related_with(ops_test, "main", backup_integrator):
-        await ops_test.model.integrate(f"main:{backup_relation}", backup_integrator)
+    if not _is_related_with(juju, "main", backup_integrator):
+        juju.integrate(f"main:{backup_relation}", backup_integrator)
     # Apply misconfiguration
     if cloud_name == "azure":
         bad_config = {"connection-protocol": "abfss", "container": "error", "path": "/"}
         bad_credentials = {"storage-account": "error", "secret-key": "error"}
-        await _configure_azure(ops_test=ops_test, config=bad_config, credentials=bad_credentials)
+        await _configure_azure(juju=juju, config=bad_config, credentials=bad_credentials)
         logger.info("Azure cloud is selected.")
     elif cloud_name == "gcs":
         bad_config = {"bucket": cloud_configs["gcs"]["bucket"], "path": BackupsPath}
@@ -575,7 +574,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
                 }
             )
         }
-        await _configure_gcs(ops_test=ops_test, config=bad_config, credentials=bad_credentials)
+        await _configure_gcs(juju=juju, config=bad_config, credentials=bad_credentials)
         logger.info("GCS cloud is selected.")
     elif cloud_name == "aws":
         bad_config = {
@@ -585,9 +584,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
             "region": "default",
         }
         bad_credentials = {"access-key": "error", "secret-key": "error"}
-        await _configure_s3_for_aws(
-            ops_test=ops_test, config=bad_config, credentials=bad_credentials
-        )
+        await _configure_s3_for_aws(juju=juju, config=bad_config, credentials=bad_credentials)
         logger.info("AWS cloud is selected.")
     else:
         cfg = cloud_configs["microceph"]
@@ -600,12 +597,12 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
         }
         bad_credentials = {"access-key": "error", "secret-key": "error"}
         await _configure_s3_for_microceph(
-            ops_test=ops_test,
+            juju=juju,
             config=bad_config,
             credentials=bad_credentials,
         )
     await wait_until(
-        ops_test,
+        juju,
         apps=["main"],
         apps_statuses={"main": [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
@@ -623,10 +620,10 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
         backup_relation = S3_RELATION
 
     # Now, relate failover cluster to backup-integrator and review the status
-    await ops_test.model.integrate(f"failover:{backup_relation}", backup_integrator)
-    await ops_test.model.integrate(f"{APP_NAME}:{backup_relation}", backup_integrator)
+    juju.integrate(f"failover:{backup_relation}", backup_integrator)
+    juju.integrate(f"{APP_NAME}:{backup_relation}", backup_integrator)
     await wait_until(
-        ops_test,
+        juju,
         apps=["failover", APP_NAME],
         apps_statuses={
             "failover": [SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value],
@@ -636,26 +633,20 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     )
 
     # Reverting should return it to normal
-    await ops_test.model.applications[APP_NAME].destroy_relation(
-        f"{APP_NAME}:{backup_relation}", backup_integrator, block_until_done=True
-    )
-    await ops_test.model.applications["failover"].destroy_relation(
-        f"failover:{backup_relation}", backup_integrator, block_until_done=True
-    )
+    juju.remove_relation(f"{APP_NAME}:{backup_relation}", backup_integrator)
+    juju.remove_relation(f"failover:{backup_relation}", backup_integrator)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=["main"],
         apps_statuses={"main": [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
     )
 
     try:
-        await ops_test.model.applications["main"].destroy_relation(
-            f"main:{backup_relation}", backup_integrator, block_until_done=True
-        )
+        juju.remove_relation(f"main:{backup_relation}", backup_integrator)
         await wait_until(
-            ops_test,
+            juju,
             apps=["main"],
             wait_for_exact_units=1,
             idle_period=IDLE_PERIOD,
@@ -668,7 +659,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
 @pytest.mark.parametrize("cloud_name,deploy_type", ALL_DEPLOYMENTS_ALL_CLOUDS)
 @pytest.mark.abort_on_fail
 async def test_create_backup_and_restore(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     c_writes: ContinuousWrites,
     c_writes_runner,
     cloud_configs: Dict[str, Dict[str, str]],
@@ -677,36 +668,36 @@ async def test_create_backup_and_restore(
     deploy_type: str,
 ) -> None:
     """Create a backup while writes are ongoing, then verify restore."""
-    app = (await app_name(ops_test) or APP_NAME) if deploy_type == "small" else "main"
+    app = (await app_name(juju) or APP_NAME) if deploy_type == "small" else "main"
     apps = [app] if deploy_type == "small" else [app, APP_NAME]
 
     logger.info(f"Ensuring only correct backup integrator is related for {cloud_name}")
     if cloud_name == "azure":
-        await _ensure_only_azure_integrator_related(ops_test, app)
+        await _ensure_only_azure_integrator_related(juju, app)
     elif cloud_name == "gcs":
-        await _ensure_only_gcs_integrator_related(ops_test, app)
+        await _ensure_only_gcs_integrator_related(juju, app)
     else:
-        await _ensure_only_s3_integrator_related(ops_test, app)
+        await _ensure_only_s3_integrator_related(juju, app)
 
-    leader_id = await get_leader_unit_id(ops_test, app=app)
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    leader_id = await get_leader_unit_id(juju, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     config = cloud_configs[cloud_name]
 
     logger.info(f"Syncing credentials for {cloud_name}")
     if cloud_name == "azure":
-        await _configure_azure(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_azure(juju, config, cloud_credentials[cloud_name])
     elif cloud_name == "gcs":
-        await _configure_gcs(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_gcs(juju, config, cloud_credentials[cloud_name])
     elif cloud_name == "aws":
-        await _configure_s3_for_aws(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_s3_for_aws(juju, config, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_s3_for_microceph(juju, config, cloud_credentials[cloud_name])
 
     await wait_until(
-        ops_test,
+        juju,
         apps=apps,
         idle_period=IDLE_PERIOD,
-        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
+        wait_for_exact_units={ap: len(juju.status().apps[ap].units) for ap in apps},
     )
 
     date_before_backup = datetime.utcnow()
@@ -716,27 +707,25 @@ async def test_create_backup_and_restore(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
+            backup_id := await create_backup(juju, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
     )
     # continuous writes checks
     await assert_continuous_writes_increasing(c_writes)
-    await assert_continuous_writes_consistency(ops_test, c_writes, apps)
-    await assert_restore_indices_and_compare_consistency(
-        ops_test, app, leader_id, unit_ip, backup_id
-    )
+    await assert_continuous_writes_consistency(juju, c_writes, apps)
+    await assert_restore_indices_and_compare_consistency(juju, app, leader_id, unit_ip, backup_id)
     global cwrites_backup_doc_count
     cwrites_backup_doc_count[backup_id] = await index_docs_count(
-        ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
+        juju, app, unit_ip, ContinuousWrites.INDEX_NAME
     )
 
 
 @pytest.mark.parametrize("cloud_name,deploy_type", ALL_DEPLOYMENTS_ALL_CLOUDS)
 @pytest.mark.abort_on_fail
 async def test_remove_and_readd_backup_relation(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     c_writes: ContinuousWrites,
     c_writes_runner,
     cloud_configs: Dict[str, Dict[str, str]],
@@ -745,11 +734,11 @@ async def test_remove_and_readd_backup_relation(
     deploy_type: str,
 ) -> None:
     """Remove and re-add the backup relation, then ensure backup/restore still works."""
-    app = (await app_name(ops_test) or APP_NAME) if deploy_type == "small" else "main"
+    app = (await app_name(juju) or APP_NAME) if deploy_type == "small" else "main"
     apps = [app] if deploy_type == "small" else [app, APP_NAME]
 
-    leader_id: int = await get_leader_unit_id(ops_test, app=app)
-    unit_ip: str = await get_leader_unit_ip(ops_test, app=app)
+    leader_id: int = await get_leader_unit_id(juju, app=app)
+    unit_ip: str = await get_leader_unit_ip(juju, app=app)
 
     if cloud_name == "azure":
         backup_integrator = AZURE_INTEGRATOR
@@ -763,40 +752,36 @@ async def test_remove_and_readd_backup_relation(
 
     logger.info("Remove backup relation")
     # Remove relation
-    await ops_test.model.applications[app].destroy_relation(
-        f"{app}:{backup_relation}", backup_integrator, block_until_done=True
-    )
+    juju.remove_relation(f"{app}:{backup_relation}", backup_integrator)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=apps,
-        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
+        wait_for_exact_units={ap: len(juju.status().apps[ap].units) for ap in apps},
         idle_period=IDLE_PERIOD,
         timeout=1400,
     )
     logger.info("Re-add backup credentials relation")
-    await ops_test.model.integrate(app, backup_integrator)
+    juju.integrate(app, backup_integrator)
     logger.info("Waiting for app status to be active.")
     await wait_until(
-        ops_test,
+        juju,
         apps=apps,
         idle_period=IDLE_PERIOD,
-        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
+        wait_for_exact_units={ap: len(juju.status().apps[ap].units) for ap in apps},
         timeout=1400,
     )
 
     logger.info(f"Syncing credentials for {cloud_name}")
     if cloud_name == "azure":
-        await _configure_azure(ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name])
+        await _configure_azure(juju, cloud_configs[cloud_name], cloud_credentials[cloud_name])
     elif cloud_name == "gcs":
-        await _configure_gcs(ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name])
+        await _configure_gcs(juju, cloud_configs[cloud_name], cloud_credentials[cloud_name])
     elif cloud_name == "aws":
-        await _configure_s3_for_aws(
-            ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name]
-        )
+        await _configure_s3_for_aws(juju, cloud_configs[cloud_name], cloud_credentials[cloud_name])
     else:
         await _configure_s3_for_microceph(
-            ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name]
+            juju, cloud_configs[cloud_name], cloud_credentials[cloud_name]
         )
 
     date_before_backup = datetime.utcnow()
@@ -806,27 +791,25 @@ async def test_remove_and_readd_backup_relation(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
+            backup_id := await create_backup(juju, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
     )
 
     await assert_continuous_writes_increasing(c_writes)
-    await assert_continuous_writes_consistency(ops_test, c_writes, apps)
-    await assert_restore_indices_and_compare_consistency(
-        ops_test, app, leader_id, unit_ip, backup_id
-    )
+    await assert_continuous_writes_consistency(juju, c_writes, apps)
+    await assert_restore_indices_and_compare_consistency(juju, app, leader_id, unit_ip, backup_id)
     global cwrites_backup_doc_count
     cwrites_backup_doc_count[backup_id] = await index_docs_count(
-        ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
+        juju, app, unit_ip, ContinuousWrites.INDEX_NAME
     )
 
 
 @pytest.mark.parametrize("cloud_name,deploy_type", SMALL_DEPLOYMENTS_ALL_CLOUDS)
 @pytest.mark.abort_on_fail
 async def test_restore_to_new_cluster(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     charm,
     series,
     cloud_configs: Dict[str, Dict[str, str]],
@@ -843,7 +826,7 @@ async def test_restore_to_new_cluster(
     1) At each backup restored, check our track of doc count vs. current index count
     2) Try to write to that new index.
     """
-    app = (await app_name(ops_test) or APP_NAME) if deploy_type == "small" else "main"
+    app = (await app_name(juju) or APP_NAME) if deploy_type == "small" else "main"
     if cloud_name == "azure":
         backup_integrator = AZURE_INTEGRATOR
         backup_integrator_channel = AZURE_INTEGRATOR_CHANNEL
@@ -855,65 +838,64 @@ async def test_restore_to_new_cluster(
         backup_integrator_channel = S3_INTEGRATOR_CHANNEL
 
     logging.info("Destroying the application")
-    await asyncio.gather(
-        ops_test.model.remove_application(backup_integrator, block_until_done=True),
-        ops_test.model.remove_application(app, block_until_done=True),
-        ops_test.model.remove_application(TLS_CERTIFICATES_APP_NAME, block_until_done=True),
+    juju.remove_application(backup_integrator, destroy_storage=True)
+    juju.remove_application(app, destroy_storage=True)
+    juju.remove_application(TLS_CERTIFICATES_APP_NAME, destroy_storage=True)
+    juju.wait(
+        lambda status: backup_integrator not in status.apps
+        and app not in status.apps
+        and TLS_CERTIFICATES_APP_NAME not in status.apps
     )
 
     logging.info("Deploying a new cluster")
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
 
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
-        ops_test.model.deploy(backup_integrator, channel=backup_integrator_channel),
-        ops_test.model.deploy(
-            charm,
-            num_units=3,
-            series=series,
-            config=CONFIG_OPTS,
-            application_name=app,
-            resources=charm_resources,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    juju.deploy(backup_integrator, channel=backup_integrator_channel)
+    juju.deploy(
+        charm,
+        app=app,
+        num_units=3,
+        base=_series_to_base(series),
+        config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.wait_for_idle(
+    juju.integrate(app, TLS_CERTIFICATES_APP_NAME)
+    await wait_until(
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME, app],
-        status="active",
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )
     # Credentials not set yet, this will move the opensearch to blocked state
     # Credentials are set per test scenario
-    await ops_test.model.integrate(app, backup_integrator)
+    juju.integrate(app, backup_integrator)
 
-    leader_id = await get_leader_unit_id(ops_test, app=app)
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    leader_id = await get_leader_unit_id(juju, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     config_cloud = cloud_configs[cloud_name]
 
     logger.info(f"Syncing credentials for {cloud_name}")
     if cloud_name == "azure":
-        await _configure_azure(ops_test, config_cloud, cloud_credentials[cloud_name])
+        await _configure_azure(juju, config_cloud, cloud_credentials[cloud_name])
     elif cloud_name == "gcs":
-        await _configure_gcs(ops_test, config_cloud, cloud_credentials[cloud_name])
+        await _configure_gcs(juju, config_cloud, cloud_credentials[cloud_name])
     elif cloud_name == "aws":
-        await _configure_s3_for_aws(ops_test, config_cloud, cloud_credentials[cloud_name])
+        await _configure_s3_for_aws(juju, config_cloud, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(ops_test, config_cloud, cloud_credentials[cloud_name])
+        await _configure_s3_for_microceph(juju, config_cloud, cloud_credentials[cloud_name])
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
-        wait_for_exact_units=len(ops_test.model.applications[app].units),
+        wait_for_exact_units=len(juju.status().apps[app].units),
         idle_period=IDLE_PERIOD,
     )
-    backups = await list_backups(ops_test, leader_id, app=app)
+    backups = await list_backups(juju, leader_id, app=app)
 
     global cwrites_backup_doc_count
     # We are expecting 2x backups available
@@ -921,18 +903,18 @@ async def test_restore_to_new_cluster(
     assert len(cwrites_backup_doc_count) == 2
     count = 0
     for backup_id in backups.keys():
-        assert await restore(ops_test, backup_id, unit_ip, leader_id, app=app)
-        count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
+        assert await restore(juju, backup_id, unit_ip, leader_id, app=app)
+        count = await index_docs_count(juju, app, unit_ip, ContinuousWrites.INDEX_NAME)
 
         # Ensure we have the same doc count as we had on the original cluster
         assert count == cwrites_backup_doc_count[backup_id]
 
         # restart the continuous writes and check the cluster is still accessible post restore
-        await assert_start_and_check_continuous_writes(ops_test, unit_ip, app)
+        await assert_start_and_check_continuous_writes(juju, unit_ip, app)
 
     # take a fresh backup while writing on the new cluster
     logger.info("Final stage: backup+restore with active writes")
-    writer: ContinuousWrites = ContinuousWrites(ops_test, app)
+    writer: ContinuousWrites = ContinuousWrites(juju, app)
 
     # store the global cwrites object
     global global_cwrites
@@ -947,7 +929,7 @@ async def test_restore_to_new_cluster(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
+            backup_id := await create_backup(juju, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
@@ -955,12 +937,10 @@ async def test_restore_to_new_cluster(
 
     # continuous writes checks
     await assert_continuous_writes_increasing(writer)
-    await assert_continuous_writes_consistency(ops_test, writer, [app])
+    await assert_continuous_writes_consistency(juju, writer, [app])
     # This assert assures we have taken a new backup, after the last restore from the original
     # cluster. That means the index is writable.
-    await assert_restore_indices_and_compare_consistency(
-        ops_test, app, leader_id, unit_ip, backup_id
-    )
+    await assert_restore_indices_and_compare_consistency(juju, app, leader_id, unit_ip, backup_id)
     # Clear the writer manually, as we are not using the conftest c_writes_runner to do so
     await writer.clear()
 
@@ -973,67 +953,61 @@ async def test_restore_to_new_cluster(
 # -------------------------------------------------------------------------------------------
 
 
-async def _drop_s3_relation_if_any(ops_test: OpsTest, app: str) -> None:
+async def _drop_s3_relation_if_any(juju: jubilant.Juju, app: str) -> None:
     """If app is related to S3_INTEGRATOR via S3_RELATION, drop that relation."""
-    if S3_INTEGRATOR not in ops_test.model.applications:
+    if S3_INTEGRATOR not in juju.status().apps:
         return
-    if not _is_related_with(ops_test, app, S3_INTEGRATOR):
+    if not _is_related_with(juju, app, S3_INTEGRATOR):
         return
 
     app_endpoint = f"{app}:{S3_RELATION}"
     s3_endpoint = f"{S3_INTEGRATOR}:{S3_RELATION}"
 
-    await ops_test.model.applications[app].destroy_relation(
-        f"{app}:{S3_RELATION}", S3_INTEGRATOR, block_until_done=True
-    )
+    juju.remove_relation(f"{app}:{S3_RELATION}", S3_INTEGRATOR)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
-        wait_for_exact_units=len(ops_test.model.applications[app].units),
+        wait_for_exact_units=len(juju.status().apps[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
     )
     logger.info("Dropped S3 relation %s -> %s.", app_endpoint, s3_endpoint)
 
 
-async def _drop_azure_relation_if_any(ops_test: OpsTest, app: str) -> None:
+async def _drop_azure_relation_if_any(juju: jubilant.Juju, app: str) -> None:
     """If app is related to AZURE_INTEGRATOR via AZURE_RELATION, drop that relation."""
-    if AZURE_INTEGRATOR not in ops_test.model.applications:
+    if AZURE_INTEGRATOR not in juju.status().apps:
         return
 
-    if not _is_related_with(ops_test, app, AZURE_INTEGRATOR):
+    if not _is_related_with(juju, app, AZURE_INTEGRATOR):
         return
 
     app_endpoint = f"{app}:{AZURE_RELATION}"
     azure_endpoint = f"{AZURE_INTEGRATOR}:{AZURE_RELATION}"
-    await ops_test.model.applications[app].destroy_relation(
-        f"{app}:{AZURE_RELATION}", AZURE_INTEGRATOR, block_until_done=True
-    )
+    juju.remove_relation(f"{app}:{AZURE_RELATION}", AZURE_INTEGRATOR)
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
-        wait_for_exact_units=len(ops_test.model.applications[app].units),
+        wait_for_exact_units=len(juju.status().apps[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
     )
     logger.info("Dropped Azure relation %s -> %s.", app_endpoint, azure_endpoint)
 
 
-async def _drop_gcs_relation_if_any(ops_test: OpsTest, app: str) -> None:
+async def _drop_gcs_relation_if_any(juju: jubilant.Juju, app: str) -> None:
     """If app is related to GCS_INTEGRATOR via GCS_RELATION, drop that relation."""
-    if GCS_INTEGRATOR not in ops_test.model.applications:
+    if GCS_INTEGRATOR not in juju.status().apps:
         return
-    if not _is_related_with(ops_test, app, GCS_INTEGRATOR):
+    if not _is_related_with(juju, app, GCS_INTEGRATOR):
         return
 
-    await ops_test.model.applications[app].destroy_relation(
-        f"{app}:{GCS_RELATION}", GCS_INTEGRATOR, block_until_done=True
-    )
+    juju.remove_relation(f"{app}:{GCS_RELATION}", GCS_INTEGRATOR)
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
-        wait_for_exact_units=len(ops_test.model.applications[app].units),
+        wait_for_exact_units=len(juju.status().apps[app].units),
         idle_period=IDLE_PERIOD,
         timeout=TIMEOUT,
     )
@@ -1045,17 +1019,17 @@ async def _drop_gcs_relation_if_any(ops_test: OpsTest, app: str) -> None:
 
 
 async def _ensure_only_s3_integrator_related(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     app: str,
 ) -> None:
     """Ensure S3 integrator is deployed and related to app (Azure relation removed)."""
-    await _drop_azure_relation_if_any(ops_test, app)
-    await _drop_gcs_relation_if_any(ops_test, app)
+    await _drop_azure_relation_if_any(juju, app)
+    await _drop_gcs_relation_if_any(juju, app)
 
-    if S3_INTEGRATOR not in ops_test.model.applications:
-        await ops_test.model.deploy(S3_INTEGRATOR, channel=S3_INTEGRATOR_CHANNEL)
+    if S3_INTEGRATOR not in juju.status().apps:
+        juju.deploy(S3_INTEGRATOR, channel=S3_INTEGRATOR_CHANNEL)
         await wait_until(
-            ops_test,
+            juju,
             apps=[S3_INTEGRATOR],
             apps_statuses={S3_INTEGRATOR: [EmptyBlockedStatus]},
             units_statuses={S3_INTEGRATOR: [EmptyBlockedStatus]},
@@ -1065,24 +1039,24 @@ async def _ensure_only_s3_integrator_related(
         )
 
     # check if relation exists already
-    if _is_related_with(ops_test, app, S3_INTEGRATOR):
+    if _is_related_with(juju, app, S3_INTEGRATOR):
         return
 
     app_endpoint = f"{app}:{S3_RELATION}"
     s3_endpoint = f"{S3_INTEGRATOR}:{S3_RELATION}"
-    await ops_test.model.integrate(app, S3_INTEGRATOR)
+    juju.integrate(app, S3_INTEGRATOR)
     logger.info("Integrated %s <-> %s.", app_endpoint, s3_endpoint)
 
 
-async def _ensure_only_azure_integrator_related(ops_test: OpsTest, app: str) -> None:
+async def _ensure_only_azure_integrator_related(juju: jubilant.Juju, app: str) -> None:
     """Ensure Azure integrator is deployed and related to app (S3 relation removed)."""
-    await _drop_s3_relation_if_any(ops_test, app)
-    await _drop_gcs_relation_if_any(ops_test, app)
+    await _drop_s3_relation_if_any(juju, app)
+    await _drop_gcs_relation_if_any(juju, app)
 
-    if AZURE_INTEGRATOR not in ops_test.model.applications:
-        await ops_test.model.deploy(AZURE_INTEGRATOR, channel=AZURE_INTEGRATOR_CHANNEL)
+    if AZURE_INTEGRATOR not in juju.status().apps:
+        juju.deploy(AZURE_INTEGRATOR, channel=AZURE_INTEGRATOR_CHANNEL)
         await wait_until(
-            ops_test,
+            juju,
             apps=[AZURE_INTEGRATOR],
             apps_statuses={AZURE_INTEGRATOR: [EmptyBlockedStatus]},
             units_statuses={AZURE_INTEGRATOR: [EmptyBlockedStatus]},
@@ -1091,24 +1065,24 @@ async def _ensure_only_azure_integrator_related(ops_test: OpsTest, app: str) -> 
             timeout=1400,
         )
 
-    if _is_related_with(ops_test, app, AZURE_INTEGRATOR):
+    if _is_related_with(juju, app, AZURE_INTEGRATOR):
         return
 
     app_endpoint = f"{app}:{AZURE_RELATION}"
     azure_endpoint = f"{AZURE_INTEGRATOR}:{AZURE_RELATION}"
-    await ops_test.model.integrate(app, AZURE_INTEGRATOR)
+    juju.integrate(app, AZURE_INTEGRATOR)
     logger.info("Integrated %s <-> %s.", app_endpoint, azure_endpoint)
 
 
-async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> None:
+async def _ensure_only_gcs_integrator_related(juju: jubilant.Juju, app: str) -> None:
     """Ensure GCS integrator is deployed and related to app (S3/Azure relation removed)."""
-    await _drop_s3_relation_if_any(ops_test, app)
-    await _drop_azure_relation_if_any(ops_test, app)
+    await _drop_s3_relation_if_any(juju, app)
+    await _drop_azure_relation_if_any(juju, app)
 
-    if GCS_INTEGRATOR not in ops_test.model.applications:
-        await ops_test.model.deploy(GCS_INTEGRATOR, channel=GCS_INTEGRATOR_CHANNEL)
+    if GCS_INTEGRATOR not in juju.status().apps:
+        juju.deploy(GCS_INTEGRATOR, channel=GCS_INTEGRATOR_CHANNEL)
         await wait_until(
-            ops_test,
+            juju,
             apps=[GCS_INTEGRATOR],
             apps_statuses={GCS_INTEGRATOR: [EmptyBlockedStatus]},
             units_statuses={GCS_INTEGRATOR: [EmptyBlockedStatus]},
@@ -1117,10 +1091,10 @@ async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> No
             timeout=1400,
         )
 
-    if _is_related_with(ops_test, app, GCS_INTEGRATOR):
+    if _is_related_with(juju, app, GCS_INTEGRATOR):
         return
 
-    await ops_test.model.integrate(app, GCS_INTEGRATOR)
+    juju.integrate(app, GCS_INTEGRATOR)
     logger.info(
         "Integrated %s <-> %s.",
         f"{app}:{GCS_RELATION}",
@@ -1135,33 +1109,29 @@ async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> No
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_deploy_and_test_status(
-    ops_test: OpsTest, charm, series, charm_resources
+    juju: jubilant.Juju, charm, series, charm_resources
 ) -> None:
     """Deploy HA cluster + s3-integrator (credentials set per scenario later)."""
-    if await app_name(ops_test):
+    if await app_name(juju):
         return
 
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        ),
-        ops_test.model.deploy(
-            charm,
-            num_units=3,
-            series=series,
-            config=CONFIG_OPTS,
-            application_name=APP_NAME,
-            resources=charm_resources,
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config)
+    juju.deploy(
+        charm,
+        app=APP_NAME,
+        num_units=3,
+        base=_series_to_base(series),
+        config=CONFIG_OPTS,
+        resources=charm_resources,
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    juju.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await wait_until(
-        ops_test,
+        juju,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
         idle_period=IDLE_PERIOD,
         wait_for_exact_units={
@@ -1175,16 +1145,16 @@ async def test_build_deploy_and_test_status(
 @pytest.mark.group(id=ALL_MICROCEPH_GROUP)
 @pytest.mark.group(id=ALL_AWS_GROUP)
 @pytest.mark.abort_on_fail
-async def test_repo_missing_message(ops_test: OpsTest) -> None:
+async def test_repo_missing_message(juju: jubilant.Juju) -> None:
     """Validate the repository missing message format from OpenSearch.
 
     We use the message format to monitor the cluster status. We need to know if this
     message pattern changed between releases of OpenSearch.
     """
-    app: str = (await app_name(ops_test)) or APP_NAME
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    app: str = (await app_name(juju)) or APP_NAME
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     resp = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}",
         json_resp=True,
@@ -1197,7 +1167,7 @@ async def test_repo_missing_message(ops_test: OpsTest) -> None:
 @pytest.mark.group(id=ALL_AWS_GROUP)
 @pytest.mark.abort_on_fail
 async def test_wrong_aws_credentials(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
 ) -> None:
@@ -1208,24 +1178,24 @@ async def test_wrong_aws_credentials(
     else:
         pytest.skip("AWS config/credentials not available for S3 integrator tests.")
 
-    app = (await app_name(ops_test)) or APP_NAME
-    await _ensure_only_s3_integrator_related(ops_test, app)
+    app = (await app_name(juju)) or APP_NAME
+    await _ensure_only_s3_integrator_related(juju, app)
 
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     good_config = cloud_configs[provider]
     bad_credentials = {"access-key": "error", "secret-key": "error"}
 
-    await _configure_s3_for_aws(ops_test, good_config, bad_credentials)
+    await _configure_s3_for_aws(juju, good_config, bad_credentials)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad credentials.")
 
     resp = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}/_all",
         json_resp=True,
@@ -1246,9 +1216,9 @@ async def test_wrong_aws_credentials(
 
     # revert back to normal state
     good_credentials = cloud_credentials[provider]
-    await _configure_s3_for_aws(ops_test, good_config, good_credentials)
+    await _configure_s3_for_aws(juju, good_config, good_credentials)
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1257,7 +1227,7 @@ async def test_wrong_aws_credentials(
         "Opensearch all apps and units become active after providing valid S3 credentials."
     )
     resp_ok = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}",
         json_resp=True,
@@ -1271,7 +1241,7 @@ async def test_wrong_aws_credentials(
 @pytest.mark.group(id=ALL_MICROCEPH_GROUP)
 @pytest.mark.abort_on_fail
 async def test_wrong_microceph_credentials(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
 ) -> None:
@@ -1282,24 +1252,24 @@ async def test_wrong_microceph_credentials(
     else:
         pytest.skip("Microceph config/credentials not available for S3 integrator tests.")
 
-    app = (await app_name(ops_test)) or APP_NAME
-    await _ensure_only_s3_integrator_related(ops_test, app)
+    app = (await app_name(juju)) or APP_NAME
+    await _ensure_only_s3_integrator_related(juju, app)
 
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     good_config = cloud_configs[provider]
     bad_credentials = {"access-key": "error", "secret-key": "error"}
 
-    await _configure_s3_for_microceph(ops_test, good_config, bad_credentials)
+    await _configure_s3_for_microceph(juju, good_config, bad_credentials)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad credentials.")
 
     resp = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}/_all",
         json_resp=True,
@@ -1320,9 +1290,9 @@ async def test_wrong_microceph_credentials(
 
     # revert back to normal state
     good_credentials = cloud_credentials[provider]
-    await _configure_s3_for_microceph(ops_test, good_config, good_credentials)
+    await _configure_s3_for_microceph(juju, good_config, good_credentials)
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1331,7 +1301,7 @@ async def test_wrong_microceph_credentials(
         "Opensearch all apps and units become active after providing valid S3 credentials."
     )
     resp_ok = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}",
         json_resp=True,
@@ -1345,7 +1315,7 @@ async def test_wrong_microceph_credentials(
 @pytest.mark.group(id=ALL_MICROCEPH_GROUP)
 @pytest.mark.abort_on_fail
 async def test_wrong_microceph_ca_blocked(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
 ) -> None:
@@ -1355,19 +1325,19 @@ async def test_wrong_microceph_ca_blocked(
     if "tls-ca-chain" not in cloud_configs["microceph"]:
         pytest.skip("No custom CA chain available in test config (microceph not set up).")
 
-    app = (await app_name(ops_test)) or APP_NAME
-    await _ensure_only_s3_integrator_related(ops_test, app)
+    app = (await app_name(juju)) or APP_NAME
+    await _ensure_only_s3_integrator_related(juju, app)
     good_cfg = cloud_configs["microceph"]
     good_creds = cloud_credentials["microceph"]
 
     await _configure_s3_for_microceph(
-        ops_test,
+        juju,
         good_cfg,
         good_creds,
     )
     logger.info("Configured S3 with correct credentials and config.")
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1379,26 +1349,26 @@ async def test_wrong_microceph_ca_blocked(
     )
 
     await _configure_s3_for_microceph(
-        ops_test,
+        juju,
         bad_cfg,
         good_creds,
     )
     logger.info("Configured S3 with wrong CA")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
     )
     logger.info("Opensearch 1 app is blocked because of S3 bad CA.")
     # With bad CA, repository verification usually fails.
     # it can be 500 (repo check error) or 404 (repo never created yet).
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
     # restore the correct CA and ensure we recover to active.
-    await _configure_s3_for_microceph(ops_test, good_cfg, good_creds)
+    await _configure_s3_for_microceph(juju, good_cfg, good_creds)
     logger.info("Configured S3 with valid CA.")
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1406,7 +1376,7 @@ async def test_wrong_microceph_ca_blocked(
     logger.info("Opensearch all apps and units become active after providing valid S3 CA.")
     # check if repo endpoint is reachable now (200 if created, 404 if not yet).
     resp_ok = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{S3_REPOSITORY}",
         json_resp=True,
@@ -1423,7 +1393,7 @@ async def test_wrong_microceph_ca_blocked(
 @pytest.mark.group(id=ALL_AZURE_GROUP)
 @pytest.mark.abort_on_fail
 async def test_wrong_azure_credentials(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
 ) -> None:
@@ -1431,11 +1401,11 @@ async def test_wrong_azure_credentials(
     if "azure" not in cloud_configs or "azure" not in cloud_credentials:
         pytest.skip("Azure config/credentials not available for Azure integrator tests.")
 
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
 
-    await _ensure_only_azure_integrator_related(ops_test, app)
+    await _ensure_only_azure_integrator_related(juju, app)
 
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
 
     good_cfg = cloud_configs["azure"]
     good_creds = cloud_credentials["azure"]
@@ -1445,11 +1415,11 @@ async def test_wrong_azure_credentials(
     bad_creds["secret-key"] = "invalid-secret-key"
 
     # Apply bad credentials
-    await _configure_azure(ops_test, good_cfg, bad_creds)
+    await _configure_azure(juju, good_cfg, bad_creds)
 
     # Charm should eventually report blocked
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
@@ -1458,7 +1428,7 @@ async def test_wrong_azure_credentials(
     # Depending on timing, repo may be missing or failing verification.
     try:
         resp = await http_request(
-            ops_test,
+            juju,
             "GET",
             f"https://{unit_ip}:9200/_snapshot/{AZURE_REPOSITORY}/_all",
             json_resp=True,
@@ -1469,9 +1439,9 @@ async def test_wrong_azure_credentials(
         logger.info("Snapshot request failed with bad Azure credentials (expected).")
 
     # Restore correct credentials
-    await _configure_azure(ops_test, good_cfg, good_creds)
+    await _configure_azure(juju, good_cfg, good_creds)
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1481,7 +1451,7 @@ async def test_wrong_azure_credentials(
     )
     # Check that the repository endpoint is reachable
     resp_ok = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{AZURE_REPOSITORY}",
         json_resp=True,
@@ -1498,7 +1468,7 @@ async def test_wrong_azure_credentials(
 @pytest.mark.group(id=ALL_GCS_GROUP)
 @pytest.mark.abort_on_fail
 async def test_wrong_gcs_credentials(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
 ) -> None:
@@ -1506,11 +1476,11 @@ async def test_wrong_gcs_credentials(
     if "gcs" not in cloud_configs or "gcs" not in cloud_credentials:
         pytest.skip("GCS config/credentials not available for GCS integrator tests.")
 
-    app = (await app_name(ops_test)) or APP_NAME
+    app = (await app_name(juju)) or APP_NAME
 
     # ensure only GCS integrator is related
-    await _ensure_only_gcs_integrator_related(ops_test, app)
-    unit_ip = await get_leader_unit_ip(ops_test, app=app)
+    await _ensure_only_gcs_integrator_related(juju, app)
+    unit_ip = await get_leader_unit_ip(juju, app=app)
 
     good_cfg = cloud_configs["gcs"]
     good_creds = cloud_credentials["gcs"]
@@ -1520,11 +1490,11 @@ async def test_wrong_gcs_credentials(
     bad_creds["secret-key"] = "invalid-json"
 
     # apply bad credentials
-    await _configure_gcs(ops_test, good_cfg, bad_creds)
+    await _configure_gcs(juju, good_cfg, bad_creds)
 
     # charm should report blocked
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         apps_statuses={app: [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]},
         idle_period=IDLE_PERIOD,
@@ -1532,11 +1502,11 @@ async def test_wrong_gcs_credentials(
     logger.info("Opensearch app is blocked because of invalid GCS credentials.")
 
     # restore correct credentials
-    await _configure_gcs(ops_test, good_cfg, good_creds)
+    await _configure_gcs(juju, good_cfg, good_creds)
 
     # should recover to active
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
@@ -1544,7 +1514,7 @@ async def test_wrong_gcs_credentials(
     logger.info("Opensearch recovered after providing valid GCS credentials.")
     # check that the repository endpoint is reachable (via OpenSearch API)
     resp_ok = await http_request(
-        ops_test,
+        juju,
         "GET",
         f"https://{unit_ip}:9200/_snapshot/{GCS_REPOSITORY}",
         json_resp=True,
@@ -1569,18 +1539,18 @@ async def test_wrong_gcs_credentials(
 )
 @pytest.mark.abort_on_fail
 async def test_change_config_and_backup_restore(
-    ops_test: OpsTest,
+    juju: jubilant.Juju,
     cloud_configs: Dict[str, Dict[str, str]],
     cloud_credentials: Dict[str, Dict[str, str]],
     force_clear_cwrites_index,
     cloud_name: str,
 ) -> None:
     """Cycle through each S3-like cloud config and perform backup and restore."""
-    app: str = (await app_name(ops_test)) or APP_NAME
-    await _ensure_only_s3_integrator_related(ops_test, app)
+    app: str = (await app_name(juju)) or APP_NAME
+    await _ensure_only_s3_integrator_related(juju, app)
 
-    unit_ip: str = await get_leader_unit_ip(ops_test, app=app)
-    leader_id: int = await get_leader_unit_id(ops_test, app=app)
+    unit_ip: str = await get_leader_unit_ip(juju, app=app)
+    leader_id: int = await get_leader_unit_id(juju, app=app)
 
     initial_count: int = 0
     logger.info(f"Starting test for cloud: {cloud_name}")
@@ -1589,7 +1559,7 @@ async def test_change_config_and_backup_restore(
     )
     # Start the ContinuousWrites here instead of bringing as a fixture because we want to do
     # it for every cloud config we have and we have to stop it before restore, right down.
-    writer: ContinuousWrites = ContinuousWrites(ops_test, app, initial_count=initial_count)
+    writer: ContinuousWrites = ContinuousWrites(juju, app, initial_count=initial_count)
 
     # store the global cwrites object
     global global_cwrites
@@ -1601,13 +1571,13 @@ async def test_change_config_and_backup_restore(
     logger.info(f"Syncing credentials for {cloud_name}")
     config: Dict[str, str] = cloud_configs[cloud_name]
     if cloud_name == "aws":
-        await _configure_s3_for_aws(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_s3_for_aws(juju, config, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(ops_test, config, cloud_credentials[cloud_name])
+        await _configure_s3_for_microceph(juju, config, cloud_credentials[cloud_name])
     await wait_until(
-        ops_test,
+        juju,
         apps=[app],
-        wait_for_exact_units=len(ops_test.model.applications[app].units),
+        wait_for_exact_units=len(juju.status().apps[app].units),
         idle_period=IDLE_PERIOD,
     )
 
@@ -1619,7 +1589,7 @@ async def test_change_config_and_backup_restore(
     assert (
         datetime.strptime(
             backup_id := await create_backup(
-                ops_test,
+                juju,
                 leader_id,
                 unit_ip=unit_ip,
             ),
@@ -1630,9 +1600,7 @@ async def test_change_config_and_backup_restore(
 
     # continuous writes checks
     await assert_continuous_writes_increasing(writer)
-    await assert_continuous_writes_consistency(ops_test, writer, [app])
-    await assert_restore_indices_and_compare_consistency(
-        ops_test, app, leader_id, unit_ip, backup_id
-    )
+    await assert_continuous_writes_consistency(juju, writer, [app])
+    await assert_restore_indices_and_compare_consistency(juju, app, leader_id, unit_ip, backup_id)
     # Clear the writer manually, as we are not using the conftest c_writes_runner to do so
     await writer.clear()

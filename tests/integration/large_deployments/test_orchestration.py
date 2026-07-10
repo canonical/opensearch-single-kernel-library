@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-import asyncio
 import json
 import logging
 
+import jubilant
 import pytest
 from data_platform_helpers.advanced_statuses import StatusObject
-from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION
 from opensearch_single_kernel.common.statuses import (
@@ -17,6 +16,7 @@ from opensearch_single_kernel.common.statuses import (
 from opensearch_single_kernel.core.models import PeerClusterOrchestrators
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.helpers import (
+    _series_to_base,
     wait_until,
 )
 from tests.integration.relations.helpers import get_application_relation_data
@@ -44,82 +44,71 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(juju: jubilant.Juju, charm, series) -> None:
     """Build and deploy one unit of OpenSearch."""
-    await ops_test.model.set_config(MODEL_CONFIG)
+    juju.model_config(MODEL_CONFIG)
 
-    await ops_test.model.create_storage_pool("local", "lxd", "volume-type=standard")
+    juju.cli("create-storage-pool", "local", "lxd", "volume-type=standard")
 
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
-    await asyncio.gather(
-        ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=MAIN_APP,
-            num_units=APP_UNITS[MAIN_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=FAILOVER_APP,
-            num_units=APP_UNITS[FAILOVER_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
-            | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=DATA_APP,
-            num_units=APP_UNITS[DATA_APP],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
-            | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
-        ),
-        ops_test.model.deploy(
-            charm,
-            application_name=DATA_APP_TWO,
-            num_units=APP_UNITS[DATA_APP_TWO],
-            series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
-            | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
-        ),
+    juju.deploy(TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config)
+    juju.deploy(
+        charm,
+        app=MAIN_APP,
+        num_units=APP_UNITS[MAIN_APP],
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
+        storage={"opensearch-data": "local,128G,1"},
+    )
+    juju.deploy(
+        charm,
+        app=FAILOVER_APP,
+        num_units=APP_UNITS[FAILOVER_APP],
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
+        | CONFIG_OPTS,
+        storage={"opensearch-data": "local,128G,1"},
+    )
+    juju.deploy(
+        charm,
+        app=DATA_APP,
+        num_units=APP_UNITS[DATA_APP],
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True} | CONFIG_OPTS,
+        storage={"opensearch-data": "local,128G,1"},
+    )
+    juju.deploy(
+        charm,
+        app=DATA_APP_TWO,
+        num_units=APP_UNITS[DATA_APP_TWO],
+        base=_series_to_base(series),
+        config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True} | CONFIG_OPTS,
+        storage={"opensearch-data": "local,128G,1"},
     )
     for app in APP_UNITS:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        juju.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     for app in [FAILOVER_APP, DATA_APP, DATA_APP_TWO]:
-        await ops_test.model.integrate(
-            f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster"
-        )
+        juju.integrate(f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster")
 
     for app in [DATA_APP, DATA_APP_TWO]:
-        await ops_test.model.integrate(
-            f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster"
-        )
+        juju.integrate(f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO, TLS_CERTIFICATES_APP_NAME],
         wait_for_exact_units=1,
     )
 
 
 @pytest.mark.abort_on_fail
-async def test_check_orchestrators_in_rel_data(ops_test: OpsTest) -> None:
+async def test_check_orchestrators_in_rel_data(juju: jubilant.Juju) -> None:
     """Test that the orchestrators are correctly set."""
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
+    unit_name = next(iter(juju.status().apps[DATA_APP].units.keys()))
     orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
+        juju,
+        unit_name=unit_name,
         relation_name=PEER_RELATION,
         key="orchestrators",
     )
@@ -134,28 +123,22 @@ async def test_check_orchestrators_in_rel_data(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_demotion_through_relation_removal(ops_test: OpsTest) -> None:
+async def test_demotion_through_relation_removal(juju: jubilant.Juju) -> None:
     """Test that removing the main orchestrator relations demotes it and promotes the failover."""
-    main_app = ops_test.model.applications[MAIN_APP]
-    assert main_app is not None
-
     for app in [FAILOVER_APP, DATA_APP, DATA_APP_TWO]:
-        await main_app.remove_relation(
-            f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster"
-        )
+        juju.remove_relation(f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
         wait_for_exact_units=1,
     )
 
     # check that failover was promoted to main orchestrator
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
+    unit_name = next(iter(juju.status().apps[DATA_APP].units.keys()))
     orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
+        juju,
+        unit_name=unit_name,
         relation_name=PEER_RELATION,
         key="orchestrators",
     )
@@ -170,28 +153,23 @@ async def test_demotion_through_relation_removal(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_failover_election_after_restoring_integration(ops_test: OpsTest) -> None:
+async def test_failover_election_after_restoring_integration(juju: jubilant.Juju) -> None:
     """Test that the failover orchestrator is correctly elected after re-adding relations."""
-    await ops_test.model.integrate(
-        f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{MAIN_APP}:peer-cluster"
-    )
+    juju.integrate(f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{MAIN_APP}:peer-cluster")
     for app in [DATA_APP, DATA_APP_TWO]:
-        await ops_test.model.integrate(
-            f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster"
-        )
+        juju.integrate(f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
         wait_for_exact_units=1,
     )
 
     # check that main app is now elected failover orchestrator
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
+    unit_name = next(iter(juju.status().apps[DATA_APP].units.keys()))
     orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
+        juju,
+        unit_name=unit_name,
         relation_name=PEER_RELATION,
         key="orchestrators",
     )
@@ -206,31 +184,31 @@ async def test_failover_election_after_restoring_integration(ops_test: OpsTest) 
 
 
 @pytest.mark.abort_on_fail
-async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
+async def test_scale_promoted_main_to_0_then_up(juju: jubilant.Juju) -> None:
     """Test scaling main orchestrator to 0 and back to 1 unit."""
     # Main orchestrator is the failover app at this point
-    failover_app = ops_test.model.applications[FAILOVER_APP]
-    assert failover_app is not None
+    status = juju.status()
+    failover_unit_name = next(iter(status.apps[FAILOVER_APP].units.keys()))
 
-    storages = await ops_test.model.list_storage()
     failover_app_storages = [
-        s["storage-tag"] for s in storages if failover_app.units[0].tag in s["attachments"]
+        storage_id
+        for storage_id, storage_info in status.storage.storage.items()
+        if storage_info.attachments and failover_unit_name in storage_info.attachments.units
     ]
     logger.info(f"Failover app storages: {failover_app_storages}")
-    await failover_app.destroy_unit(failover_app.units[0].name)
+    juju.remove_unit(failover_unit_name)
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
         wait_for_exact_units=1,
     )
 
     # check that main app is now elected main orchestrator and that failover is None
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
+    unit_name = next(iter(juju.status().apps[DATA_APP].units.keys()))
     orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
+        juju,
+        unit_name=unit_name,
         relation_name=PEER_RELATION,
         key="orchestrators",
     )
@@ -244,9 +222,9 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     ), "Failover app is supposed to be None since there is no failover orchestrator"
 
     # scale back to 1 unit
-    await failover_app.add_unit(attach_storage=failover_app_storages)
+    juju.add_unit(FAILOVER_APP, attach_storage=failover_app_storages)
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
         apps_statuses={
             MAIN_APP: [PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value],
@@ -260,24 +238,20 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
         },
     )
 
-    await failover_app.remove_relation(
-        f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{MAIN_APP}:peer-cluster"
-    )
+    juju.remove_relation(f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{MAIN_APP}:peer-cluster")
 
-    await ops_test.model.integrate(
-        f"{MAIN_APP}:peer-cluster-orchestrator", f"{FAILOVER_APP}:peer-cluster"
-    )
+    juju.integrate(f"{MAIN_APP}:peer-cluster-orchestrator", f"{FAILOVER_APP}:peer-cluster")
 
     await wait_until(
-        ops_test,
+        juju,
         apps=[MAIN_APP, DATA_APP, DATA_APP_TWO],
         wait_for_exact_units=1,
     )
 
     # check that main app is still elected main orchestrator and that failover is the failover app
     orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
+        juju,
+        unit_name=unit_name,
         relation_name=PEER_RELATION,
         key="orchestrators",
     )
