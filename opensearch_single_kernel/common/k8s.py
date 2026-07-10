@@ -19,8 +19,8 @@ from opensearch_single_kernel.common.exceptions import (
 )
 
 # default logging from lightkube httpx requests is very noisy
-logging.getLogger("lightkube").disabled = True
-logging.getLogger("lightkube.core.client").disabled = True
+logging.getLogger("lightkube").setLevel(logging.WARNING)
+logging.getLogger("lightkube.core.client").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -70,11 +70,6 @@ class K8sClient:
                 f"Run `juju trust {self.app_name} --scope=cluster`. Needed for in-place refreshes"
             )
             raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.app_name)
-
-    def on_deployed_without_trust(self) -> None:
-        """Blocks the application and returns a specific error message."""
-        logger.error("Kubernetes application needs `juju trust`")
-        raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.app_name)
 
     def set_partition(self, value: int) -> None:
         """Sets the partition value."""

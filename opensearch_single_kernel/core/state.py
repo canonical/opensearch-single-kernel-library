@@ -1270,3 +1270,7 @@ class ClusterState(Object):
             secret_key=self.secrets.get(Scope.APP, "s3-secret-key"),
             s3_tls_ca_chain=self.secrets.get(Scope.APP, "s3-tls-ca-chain"),
         )
+
+    def is_highest_ordinal_unit(self) -> bool:
+        """Check if the current unit is the highest ordinal unit in the application."""
+        return self.server_upgrade.unit.name == self.sorted_upgrades_units[0].unit.name

@@ -208,14 +208,25 @@ class UpgradesManagerBase(BaseManager):
 
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
-    def get_version_before_override(self) -> poetry_version.Version | None:
+    def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""
         if self.workload.is_service_started():
             logger.debug("Service is started. The override version can not be run unless we stop.")
             return None
 
-        # Removed the stray ':' after 'version' to accurately match the CLI output
+        # Regex to match the version to be overridden
         regex = r"last written by OpenSearch version \[([0-9]+\.[0-9]+\.[0-9]+)\]"
+        # Exact error message when the version is already overridden
+        already_overridden_error = "so there is no need to override the version checks"
+
+        def check_output_for_version(output: str) -> poetry_version.Version | None:
+            """Check the output for the version to be overridden."""
+            version = re.search(regex, str(output))
+            if version:
+                return poetry_version.Version.parse(version.group(1))
+            return None
+
+        output = ""
 
         try:
             if self.state.substrate == Substrates.K8S:
@@ -230,6 +241,7 @@ class UpgradesManagerBase(BaseManager):
             if isinstance(output, str):
                 output = output.strip()
 
+            return check_output_for_version(str(output))
         except OpenSearchCmdError as e:
             # If the workload runner raises an exception upon the tool exiting/aborting,
             # the output containing the version string is often trapped inside
@@ -240,12 +252,17 @@ class UpgradesManagerBase(BaseManager):
                 # On K8s the output is stderr so we get both stdout and stderr from pebble
                 output = str(e.err)
 
-        version = re.search(regex, str(output))
+            if version := check_output_for_version(str(output)):
+                return version
 
-        if version:
-            return poetry_version.Version.parse(version.group(1))
+            # Check if the error message indicates that the version is already overridden
+            if already_overridden_error in str(output):
+                logger.debug("Version is already overridden. No need to override again.")
+                return None
 
-        return None
+            # If neither condition is met, re-raise the exception
+            logger.error(f"Unexpected error running override-version. Output: {output}")
+            raise e
 
     def override_version(self) -> None:
         """Override the version on disk to allow rollback to proceed."""
@@ -289,26 +306,42 @@ class UpgradesManagerBase(BaseManager):
 
         return disk_matrix
 
-    @property
-    def is_rollback(self) -> bool:
-        """Whether this upgrade is a rollback"""
-        # Basically We call it a rollback if:
+    def should_check_rollback(self) -> bool:
+        """Should we check if rollback is possible"""
+        # Basically We check if it is a rollback if:
         # 1. We are in the highest numbered unit (i.e. the first unit to upgrade)
         # 2. We are in the middle of an upgrade (i.e. not all units have upgraded)
         # 3. The upgrade is compatible (i.e It is not a downgrade)
-        # 4. The version in databag match the version in file
-        # 5. We have still not overridden the version on disk
-        logger.debug(
-            f"{self.state.server_upgrade.unit.name=} {self.state.sorted_upgrades_units[0].unit.name=} {self.in_progress=} {self.is_compatible=} {self.state.application_upgrade.versions.workload_parsed=} {self.current_versions.workload_parsed=} {self.get_version_before_override()=}"
-        )
+        # 4. The version in application databag match the version in file
         return (
-            self.state.server_upgrade.unit.name == self.state.sorted_upgrades_units[0].unit.name
-            and self.in_progress
+            self.in_progress
+            and self.state.server_upgrade.unit.name
+            == self.state.sorted_upgrades_units[0].unit.name
             and self.is_compatible
             and self.state.application_upgrade.versions.workload_parsed
             == self.current_versions.workload_parsed
-            and self.get_version_before_override() is not None
         )
+
+    @property
+    def is_rollback(self) -> bool:
+        """Whether this upgrade is a rollback"""
+        # First source of truth is the result of override-version command.
+        # If it raises an error, we check in the databag.
+        # The reason for this is that the databag can be out of sync because
+        # of errors in the upgrade process
+        if not self.should_check_rollback():
+            return False
+
+        logger.debug("Checking if it is a rollback")
+        try:
+            version_before_override = self.get_version_before_override()
+            return version_before_override is not None
+        except OpenSearchCmdError as e:
+            logger.debug(f"Failed to get version before override: {e}")
+            logger.debug("Reverting to check rollback based on databag in unit state")
+            if unit_databag := self.state.server_upgrade.workload_version_parsed:
+                return unit_databag > self.current_versions.workload_parsed
+            return False
 
     @property
     def can_rollback(self) -> bool:
@@ -316,10 +349,19 @@ class UpgradesManagerBase(BaseManager):
         if not self.state.application_upgrade.versions:
             return False
 
-        version_before_override = self.get_version_before_override()
+        if not self.should_check_rollback():
+            return False
+        try:
+            version_before_override = self.get_version_before_override()
+        except OpenSearchCmdError as e:
+            logger.debug(f"Failed to get version before override: {e}")
+            logger.debug("Reverting to check rollback based on databag in unit state")
+            version_before_override = self.state.server_upgrade.workload_version_parsed
+
         if not version_before_override:
             logger.debug("Version before override not found")
             return False
+
         version_on_disk = self.current_versions.workload_parsed
         compatibility_matrix = self.reconcile_compatibility_matrix()
 

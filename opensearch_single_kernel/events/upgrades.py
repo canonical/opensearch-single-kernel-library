@@ -94,9 +94,9 @@ class UpgradesEventsHandler(Object):
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
             self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-            self.charm.state.server_upgrade.workload_version = (
-                self.charm.upgrades_manager.current_versions.workload
-            )
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
+        )
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
             return
@@ -573,4 +573,12 @@ class UpgradesEventsHandler(Object):
             logger.debug("Cannot start OpenSearch after upgrade, cluster not ready")
             event.defer()
             return
+
+        # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
+        )
+        logger.debug(
+            f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
+        )
         self.charm.start_opensearch_event.emit(ignore_lock=True, after_upgrade=True)
