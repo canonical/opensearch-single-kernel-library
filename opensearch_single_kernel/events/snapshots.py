@@ -505,7 +505,7 @@ class SnapshotsEventsHandler(Object):
         """Handler for the restore action."""
         snapshot_id = event.params.get("backup-id")
 
-        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
+        if error_message := self._action_missing_pre_requisites():
             logger.warning("Pre-requisites not met for restoring backup: %s", error_message)
             event.fail(error_message)
             return

@@ -687,7 +687,8 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
-        self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+        if self.charm.unit.is_leader():
+            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
@@ -1246,7 +1247,8 @@ class OpenSearchEventsHandler(Object):
         # remove show_status directive which is applied below
         if show_status_only_once:
             logger.debug("We are removing show status directive from cluster manager.")
-            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+            if self.charm.unit.is_leader():
+                self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         logger.debug(
             "We are applying status from deployment desc: %s", deployment_desc.state.message

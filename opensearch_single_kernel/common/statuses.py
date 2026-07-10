@@ -220,7 +220,7 @@ class PeerClusterErrorDataStatuses(Enum):
         status="waiting", message="Admin user not fully configured {message_suffix}."
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
-        status="blocked", message="TLS not fully configured {message_suffix}."
+        status="waiting", message="TLS not fully configured {message_suffix}."
     )
     SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
         status="waiting", message="Security index not initialized {message_suffix}."
