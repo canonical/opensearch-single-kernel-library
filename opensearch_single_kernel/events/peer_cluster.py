@@ -25,7 +25,6 @@ from opensearch_single_kernel.common.constants import (
     Directive,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchCmdError,
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -97,8 +96,6 @@ class PeerClusterEventsHandler(Object):
     ):
         """Handle peer cluster orchestrator relation changed event."""
         logger.debug("Peer cluster orchestrator relation changed: %s", event)
-        if deployment_desc := self.charm.state.application.deployment_desc:
-            self.charm.opensearch_events.check_profile_requirements()
 
         if not self.charm.unit.is_leader():
             logger.debug("Node not a leader. Skipping refresh relation data")
@@ -116,7 +113,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Node not a provider. Skipping refresh relation data")
             return
 
-        if not deployment_desc:
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
@@ -265,19 +262,35 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.charm.opensearch_events.check_profile_requirements()
-        except OpenSearchCmdError as e:
-            logger.warning(f"Error checking profile requirements: {e}. Deferring event.")
-            event.defer()
-            return
-
         if not self.charm.unit.is_leader():
             return
 
         if (
             len(event.relation.units) == 0
         ):  # ensure not a deferred event from a departed orchestrator
+            return
+
+        if not (data := event.relation.data.get(event.app)):
+            logger.debug("No data found in relation.")
+            return
+
+        logger.debug(
+            "PeerClusterRelationChanged from provider %s data: %s", event.relation.app.name, data
+        )
+        # fetch the trigger of this event
+        trigger = data.get("trigger")
+
+        # reject before mutating any state if this relation is trying to claim a
+        # main/failover role already held by a different relation.
+        # get_statuses will set CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER for it.
+        if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
+            trigger, event.relation.id
+        ):
+            logger.warning(
+                "Ignoring conflicting orchestrator relation %s for trigger %s",
+                event.relation.id,
+                trigger,
+            )
             return
 
         # register in the 'main/failover'-CMs the number of planned units of the current app
@@ -295,16 +308,6 @@ class PeerClusterEventsHandler(Object):
                 rel_id=event.relation.id,
                 value=(self.charm.state.application.orchestrators.main_app is not None),
             )
-
-        if not (data := event.relation.data.get(event.app)):
-            logger.debug("No data found in relation.")
-            return
-
-        logger.debug(
-            "PeerClusterRelationChanged from provider %s data: %s", event.relation.app.name, data
-        )
-        # fetch the trigger of this event
-        trigger = data.get("trigger")
 
         # Get orchestrators from remote peer cluster
         remote_peer_cluster = self.charm.state.peer_cluster_by_relation_id(
@@ -545,7 +548,7 @@ class PeerClusterEventsHandler(Object):
         except ValueError:
             return
 
-        if not self.charm.opensearch_events.check_profile_requirements():
+        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         self.charm.config_manager._update_jvm_heap_size(

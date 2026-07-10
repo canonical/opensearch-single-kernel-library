@@ -44,11 +44,14 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, charm_resources, substrate
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    await ops_test.model.create_storage_pool("local", "lxd", "volume-type=standard")
+    if substrate == "vm":
+        await ops_test.model.create_storage_pool("local", "lxd", "volume-type=standard")
 
     # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
@@ -61,35 +64,39 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=MAIN_APP,
             num_units=APP_UNITS[MAIN_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
+            storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
         ),
         ops_test.model.deploy(
             charm,
             application_name=FAILOVER_APP,
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
             | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
+            storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
         ),
         ops_test.model.deploy(
             charm,
             application_name=DATA_APP,
             num_units=APP_UNITS[DATA_APP],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
             | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
+            storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
         ),
         ops_test.model.deploy(
             charm,
             application_name=DATA_APP_TWO,
             num_units=APP_UNITS[DATA_APP_TWO],
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
             | CONFIG_OPTS,
-            storage={"opensearch-data": "local,128G,1"},
+            storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
         ),
     )
     for app in APP_UNITS:
@@ -206,6 +213,7 @@ async def test_failover_election_after_restoring_integration(ops_test: OpsTest) 
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")  # k8s does not support storage reuse
 async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     """Test scaling main orchestrator to 0 and back to 1 unit."""
     # Main orchestrator is the failover app at this point

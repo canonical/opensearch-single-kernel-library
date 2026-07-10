@@ -161,9 +161,6 @@ async def test_build_large_deployment(
 @pytest.mark.abort_on_fail
 async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None:
     """Repeat the CA rotation test for the large deployment."""
-    if substrate == "k8s" and deploy_type == LARGE_DEPLOYMENT:
-        pytest.skip("Large deployments are not supported on k8s.")
-
     if deploy_type == SMALL_DEPLOYMENT:
         app = APP_NAME
     else:
@@ -175,11 +172,12 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         with open(ContinuousWrites.CERT_PATH, "r") as f:
             orig_cert = f.read()
 
+        # Capture the baseline BEFORE triggering the rotation.
+        start_count = await c_writes.count()
+
         # trigger a rollout of the new CA by changing the config on TLS Provider side
         new_config = {"ca-common-name": "NEW_CA"}
         await ops_test.model.applications[TLS_CERTIFICATES_APP_NAME].set_config(new_config)
-
-        start_count = await c_writes.count()
 
         if deploy_type == SMALL_DEPLOYMENT:
             await wait_until(

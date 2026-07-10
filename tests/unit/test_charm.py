@@ -159,7 +159,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
     )
     check_profile_requirements = mocker.patch(
-        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.check_profile_requirements"
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements"
     )
     unit_allowed_to_start = mocker.patch(
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler.unit_allowed_to_start"

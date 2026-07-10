@@ -152,6 +152,14 @@ class PeerClusterManager(BaseManager):
                 trigger,
                 remote_orchestrators,
             )
+            # If this relation previously held the opposite role, clear that stale entry.
+            # Without this, a relation switching from trigger=main to trigger=failover
+            # (or vice versa) leaves both main_* and failover_* pointing to the same app,
+            # causing is_failover_promoted() to fire a false positive and wipe failover state.
+            opposite = "failover" if trigger == "main" else "main"
+            if local_orchestrators.get(f"{opposite}_rel_id") == relation_id:
+                local_orchestrators[f"{opposite}_rel_id"] = -1
+                local_orchestrators[f"{opposite}_app"] = None
             local_orchestrators.update(
                 {
                     f"{trigger}_rel_id": relation_id,

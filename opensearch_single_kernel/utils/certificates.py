@@ -186,16 +186,38 @@ def store_ca_chain(  # noqa: C901
 
         # rename existing alias to old-<alias>-<i> if requested
         if keep_previous:
+            changealias_cmd = (
+                f"{workload.keytool_cmd} -changealias "
+                f"-alias {internal_alias} -destalias {old_internal_alias} "
+                f"-keystore {store_path} -storetype PKCS12"
+            )
+            store_args = f"-storepass {store_pwd}"
             try:
-                workload.run_cmd(
-                    f"{workload.keytool_cmd} -changealias "
-                    f"-alias {internal_alias} -destalias {old_internal_alias} "
-                    f"-keystore {store_path} -storetype PKCS12",
-                    f"-storepass {store_pwd}",
-                )
+                workload.run_cmd(changealias_cmd, store_args)
             except OpenSearchCmdError as e:
                 msg = (e.out or "") + (e.err or "")
-                if ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
+                if "already exists" in msg:
+                    # A previous rotation left a stale old-<alias>-<i> behind (it never
+                    # finalized). Drop it and retry, otherwise every future rotation is
+                    # permanently blocked on this keystore.
+                    try:
+                        workload.run_cmd(
+                            f"{workload.keytool_cmd} -delete -alias {old_internal_alias} "
+                            f"-keystore {store_path} -storetype PKCS12",
+                            store_args,
+                        )
+                        workload.run_cmd(changealias_cmd, store_args)
+                    except OpenSearchCmdError as retry_err:
+                        logger.error(
+                            "Failed to rename existing alias: %s",
+                            (retry_err.out or "") + (retry_err.err or ""),
+                        )
+                        return False
+                elif ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
+                    logger.error(
+                        "Failed to rename existing alias: %s",
+                        msg,
+                    )
                     return False
 
         # import the cert
@@ -208,20 +230,42 @@ def store_ca_chain(  # noqa: C901
                 errors="replace",
                 delete=True,
             ) as tmp_path:
+                import_cmd = (
+                    f"{workload.keytool_cmd} -importcert -noprompt "
+                    f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12"
+                )
+                import_args = f"-storepass {store_pwd}"
                 try:
-                    workload.run_cmd(
-                        f"{workload.keytool_cmd} -importcert -noprompt "
-                        f"-alias {internal_alias} -keystore {store_path} -file {tmp_path} -storetype PKCS12",
-                        f"-storepass {store_pwd}",
-                    )
+                    workload.run_cmd(import_cmd, import_args)
                 except OpenSearchCmdError as e:
-                    logger.error(
-                        "Failed to import cert for alias %s into %s: %s",
-                        internal_alias,
-                        store_path,
-                        (e.out or "") + (e.err or ""),
-                    )
-                    return False
+                    msg = (e.out or "") + (e.err or "")
+                    if "already exists" in msg:
+                        # Without keep_previous the alias is not renamed first, so a recovery
+                        # re-run (e.g. K8s keystore restore) finds it already present. Replace it
+                        # in place instead of failing, otherwise the restore path deadlocks.
+                        try:
+                            workload.run_cmd(
+                                f"{workload.keytool_cmd} -delete -alias {internal_alias} "
+                                f"-keystore {store_path} -storetype PKCS12",
+                                import_args,
+                            )
+                            workload.run_cmd(import_cmd, import_args)
+                        except OpenSearchCmdError as retry_err:
+                            logger.error(
+                                "Failed to re-import cert for alias %s into %s: %s",
+                                internal_alias,
+                                store_path,
+                                (retry_err.out or "") + (retry_err.err or ""),
+                            )
+                            return False
+                    else:
+                        logger.error(
+                            "Failed to import cert for alias %s into %s: %s",
+                            internal_alias,
+                            store_path,
+                            msg,
+                        )
+                        return False
         except (OSError, OpenSearchFileOperationError) as e:
             # tmp file creation issues
             logger.error("Failed to create temporary file for CA import: %s", e)
