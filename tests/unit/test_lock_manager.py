@@ -77,7 +77,7 @@ def test_node_lock_no_online_hosts_leader_acquire_lock_via_databag(
     assert not harness.charm.lock_manager.acquire()
 
     assert (
-        harness.get_relation_data(lock_rel_id, harness.charm.unit.name)["lock_requested"] == "True"
+        harness.get_relation_data(lock_rel_id, harness.charm.unit.name)["lock-requested"] == "True"
     )
 
     # A new event introduces a new Juju context ID.
