@@ -732,6 +732,8 @@ class OpenSearchEventsHandler(Object):
                 "unit",
                 self.charm.cluster_manager.name,
             )
+            # Needed for non-leader units
+            event.defer()
             return
         # We are requesting start of openSearch
 
@@ -969,6 +971,16 @@ class OpenSearchEventsHandler(Object):
             self.charm.unit.is_leader()
             and self.charm.cluster_manager.should_initialise_security_index()
         ):
+            # In large deployment we need at least one CM up and running to
+            # initialize the security index
+            if not self.charm.peer_cluster_manager.is_cm_up():
+                logger.warning(
+                    "Waiting for a cluster manager node to initialize the security index. \
+Deferring event."
+                )
+                event.defer()
+                return
+
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
                 "unit",
@@ -1326,7 +1338,7 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.cluster_manager.no_blocking_directives(deployment_desc):
             return False
         try:
-            self.charm.cluster_manager.get_nodes(False)
+            self.charm.cluster_manager.get_nodes(use_localhost=False)
         except OpenSearchHttpError:
             return False
 
