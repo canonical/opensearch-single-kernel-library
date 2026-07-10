@@ -953,6 +953,9 @@ async def test_restore_to_new_cluster(
         > date_before_backup
     )
 
+    backups = await list_backups(ops_test, leader_id, app=app)
+    logger.warning(f"Backups available after final backup: {backups}")
+
     # continuous writes checks
     await assert_continuous_writes_increasing(writer)
     await assert_continuous_writes_consistency(ops_test, writer, [app])
