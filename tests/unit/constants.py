@@ -4,7 +4,6 @@
 
 """Constants used across the unit tests."""
 
-
 _S3_PEM = """-----BEGIN CERTIFICATE-----
 MIIDdTCCAl2gAwIBAgIUTestFakeCertForUnitTestsOnly1234567890
 -----END CERTIFICATE-----"""

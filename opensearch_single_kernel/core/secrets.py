@@ -6,6 +6,7 @@
 The idea is to keep some stuff here to be used in the state, but move the event handling
 to an event handler.
 """
+
 import logging
 from typing import TYPE_CHECKING, Any
 

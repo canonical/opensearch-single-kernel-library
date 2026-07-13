@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """State collection for lock relation."""
+
 import logging
 import os
 
