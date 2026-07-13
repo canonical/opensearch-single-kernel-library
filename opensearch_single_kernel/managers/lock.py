@@ -213,6 +213,7 @@ class LockManager(PeerLockManager):
                 raise OpenSearchLockError("Failed to acquire lock due to absence of online nodes")
             try:
                 unit_with_lock = self.opensearch_client.get_unit_with_lock(host, self.alt_hosts)
+                logger.debug("[Node lock] Unit with opensearch lock: %s", unit_with_lock)
             except OpenSearchHttpError:
                 logger.exception("Error checking which unit has OpenSearch lock")
                 # if the node lock cannot be acquired, fall back to peer databag lock

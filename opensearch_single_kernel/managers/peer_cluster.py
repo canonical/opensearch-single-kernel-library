@@ -152,6 +152,14 @@ class PeerClusterManager(BaseManager):
                 trigger,
                 remote_orchestrators,
             )
+            # If this relation previously held the opposite role, clear that stale entry.
+            # Without this, a relation switching from trigger=main to trigger=failover
+            # (or vice versa) leaves both main_* and failover_* pointing to the same app,
+            # causing is_failover_promoted() to fire a false positive and wipe failover state.
+            opposite = "failover" if trigger == "main" else "main"
+            if local_orchestrators.get(f"{opposite}_rel_id") == relation_id:
+                local_orchestrators[f"{opposite}_rel_id"] = -1
+                local_orchestrators[f"{opposite}_app"] = None
             local_orchestrators.update(
                 {
                     f"{trigger}_rel_id": relation_id,
@@ -428,6 +436,9 @@ class PeerClusterManager(BaseManager):
             scope, self.name, running_status_only=True
         ).root
 
+        if not self.state.application.deployment_desc:
+            return status_list
+
         if scope == "app":
             # Only if we are a requirer and we have some orchestrators
             orchestrators = self.state.application.orchestrators
@@ -446,11 +457,11 @@ class PeerClusterManager(BaseManager):
                     )
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 # check if there is an error
-                if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
-                    status_list.append(status)
+                if error_data := peer_cluster.error_data:
+                    status_list.append(error_data.get_status())
 
                 # requirer errors
-                if self.state.application.deployment_desc and (data := peer_cluster.data()):
+                if data := peer_cluster.data():
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
                         deployment_desc=self.state.application.deployment_desc,

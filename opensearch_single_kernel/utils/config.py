@@ -412,9 +412,6 @@ class YamlConfigSetter(ConfigSetter):
         if output_type in [OutputType.file, OutputType.all]:
             target_path = self.base_path / target_file
 
-            # ensure parent directory exists before writing
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
             # Necessary for K8s: ruamel.yaml.dump() requires a stream with write(), and the
             # path is inside the container so the charm cannot open() it. Dump to a buffer
             # in the charm, then write the content via the workload/path API.

@@ -216,15 +216,6 @@ class K8sWorkload(BaseWorkload):
     def _build_pebble_layer(self) -> Layer:
         """Build Pebble layer for OpenSearch service."""
         opensearch_cmd = (self.paths.bin / "opensearch").as_posix()
-        opensearch_home = self.paths.home.as_posix()
-        opensearch_conf = self.paths.conf.as_posix()
-        java_home = self.paths.jdk.as_posix()
-
-        # build PATH with Java bin, OpenSearch bin, and system paths
-        path_value = (
-            "%s/bin:/usr/share/opensearch/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            % java_home
-        )
 
         layer_dict = {
             "summary": "OpenSearch service layer",
@@ -239,12 +230,6 @@ class K8sWorkload(BaseWorkload):
                     "startup": "disabled",
                     "user": PEBBLE_SERVICE_USER,
                     "group": PEBBLE_SERVICE_GROUP,
-                    "environment": {
-                        "OPENSEARCH_HOME": opensearch_home,
-                        "OPENSEARCH_PATH_CONF": opensearch_conf,
-                        "JAVA_HOME": java_home,
-                        "PATH": path_value,
-                    },
                 }
             },
         }
@@ -309,9 +294,7 @@ class K8sWorkload(BaseWorkload):
                 file_path.unlink()
             except FileNotFoundError:
                 pass
-            except PebbleConnectionError as e:
-                logger.warning("Failed to delete temp file %s: %s", file_path, e)
-            except (PebbleError, ModelError, OSError, ValueError) as e:
+            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
                 logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
@@ -353,7 +336,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            if (service := self._get_service()) is None:
+            if not (service := self._get_service()):
                 return False
 
             if service.current == ServiceStatus.ACTIVE:
@@ -395,7 +378,7 @@ class K8sWorkload(BaseWorkload):
             if not self.container.can_connect():
                 return False
 
-            if (service := self._get_service()) is None:
+            if not (service := self._get_service()):
                 return False
 
             return service.current == ServiceStatus.ERROR
@@ -420,9 +403,7 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            if (
-                service := self._get_service()
-            ) is not None and service.current == ServiceStatus.ACTIVE:
+            if (service := self._get_service()) and service.current == ServiceStatus.ACTIVE:
                 logger.info("The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME)
                 return
 

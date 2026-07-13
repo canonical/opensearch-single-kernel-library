@@ -58,7 +58,7 @@ class ProfilesManager(BaseManager):
             True if the profile passed validation and all requirements.
         """
         try:
-            self.config_profile
+            self.get_config_profile()
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
@@ -131,10 +131,9 @@ class ProfilesManager(BaseManager):
     @property
     def profile(self) -> OpenSearchProfile:
         """Get the current profile."""
-        return self.state.server.profile or self.config_profile
+        return self.state.server.profile or self.get_config_profile()
 
-    @property
-    def config_profile(self) -> OpenSearchProfile:
+    def get_config_profile(self) -> OpenSearchProfile:
         """Get the current config profile."""
         return (
             ProductionProfile()
@@ -154,7 +153,7 @@ class ProfilesManager(BaseManager):
 
         if scope == "unit":
             try:
-                _ = self.config_profile
+                _ = self.get_config_profile()
             except ValueError:
                 return [ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value]
 

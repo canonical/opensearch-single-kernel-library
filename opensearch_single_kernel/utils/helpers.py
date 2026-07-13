@@ -123,7 +123,7 @@ def get_k8s_fqdn(name: str) -> str:
     return socket.getfqdn(name)
 
 
-def k8s_fqdn(unit_name: str) -> str:
+def k8s_fqdn(unit_name: str | None) -> str:
     """Return the canonical K8s seed host for a unit."""
     # Strip Juju short id / DNS suffix: "app-0.c67", FQDNs -> pod hostname prefix.
     pod_prefix = (unit_name or "").split(".", 1)[0]

@@ -836,6 +836,13 @@ class PeerClusterOrchestrators(Model):
         self.main_rel_id = self.failover_rel_id
         self.delete("failover")
 
+    def check_relation_conflict(self, trigger: str, relation_id: int) -> bool:
+        """Return whether the relation conflicts with an already connected orchestrator."""
+        data = self.to_dict()
+        return data.get(f"{trigger}_app") is not None and data.get(
+            f"{trigger}_rel_id", -1
+        ) not in [-1, relation_id]
+
 
 class PeerClusterApp(Model):
     """Model class for representing an application part of a large deployment."""

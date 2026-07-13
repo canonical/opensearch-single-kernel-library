@@ -284,7 +284,7 @@ def test_get_sans(harness, mocker, substrate):
             "sans_oid": ["1.2.3.4.5.5"],
             "sans_ip": [],
             "sans_dns": sorted(
-                [harness.charm.state.unit_name, "nebula", "localhost"]
+                [harness.charm.state.unit_name, "nebula"]
                 + ["opensearch-0.opensearch-endpoints.namespace.svc.cluster.local"]
             ),
         }

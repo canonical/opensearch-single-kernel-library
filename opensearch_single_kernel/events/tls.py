@@ -328,6 +328,14 @@ class TLSEventsHandler(Object):
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
+    def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Notify the charm that the relation is broken."""
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+
     def on_tls_conf_set(
         self,
         event: CertificateAvailableEvent,

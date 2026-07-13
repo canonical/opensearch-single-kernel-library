@@ -19,6 +19,7 @@ from tenacity import (
 )
 
 from opensearch_single_kernel.core.models import App, Node
+from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.helpers import (
@@ -318,20 +319,32 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
 
 
 async def send_kill_signal_to_process(
-    ops_test: OpsTest, app: str, unit_id: int, signal: str, opensearch_pid: int | None = None
-) -> int | None:
+    ops_test: OpsTest,
+    app: str,
+    unit_id: int,
+    signal: str,
+    opensearch_pid: str | None = None,
+    substrate: Substrate = "vm",
+) -> str | None:
     """Run kill with signal in specific unit."""
     unit_name = f"{app}/{unit_id}"
 
     bin_cmd = "exec" if juju_version_major() > 2 else "run"
     if opensearch_pid is None:
-        get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+        if substrate == "vm":
+            get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+        else:
+            get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200"
         _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
 
-    if not opensearch_pid.strip():
+    if not (opensearch_pid := opensearch_pid.strip()):
         raise Exception("Could not fetch PID for process listening on port 9200.")
 
-    kill_cmd = f"ssh {unit_name} -- sudo kill -{signal.upper()} {opensearch_pid}"
+    if substrate == "vm":
+        kill_cmd = f"ssh {unit_name} -- sudo kill -{signal.upper()} {opensearch_pid}"
+    else:
+        # use xargs to bypass error codes returned by kill
+        kill_cmd = f"ssh --container opensearch {unit_name} echo {opensearch_pid} | xargs -r kill -{signal.upper()}"
     return_code, stdout, stderr = await ops_test.juju(*kill_cmd.split(), check=False)
     if return_code != 0:
         raise Exception(f"{kill_cmd} failed -- rc: {return_code} - out: {stdout} - err: {stderr}")

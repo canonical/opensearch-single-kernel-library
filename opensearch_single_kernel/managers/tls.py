@@ -219,7 +219,7 @@ class TlsManager(BaseManager):
         # Base DNS names: how this unit can be addressed by clients and other nodes.
         # unit_name is the Juju unit, gethostname/getfqdn cover short and fully-qualified
         # hostnames used in configs or DNS.
-        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn, "localhost"}
+        dns = {self.state.unit_name, socket.gethostname(), self.state.fqdn}
         logger.info(f"This is the current DNS {dns}")
         # VM certificates must be reachable by the unit IP. On K8s, pod IPs are ephemeral
         # across pod recreation, so only stable DNS names should be included.
@@ -237,7 +237,7 @@ class TlsManager(BaseManager):
 
             if self.state.substrate == Substrates.VM:
                 ips.add(self.state.node_host)
-                if (public_ip := self.workload.get_host_public_ip()) is not None:
+                if public_ip := self.workload.get_host_public_ip():
                     ips.add(public_ip)
 
         # Enrich SANs via reverse DNS: add any hostnames that resolve to our IPs
@@ -255,8 +255,6 @@ class TlsManager(BaseManager):
             except (socket.herror, socket.gaierror):
                 continue
 
-        # empty strings would be invalid in SANs.
-        # Do not return IPs in SANs for K8s
         sans["sans_ip"] = (
             [ip for ip in ips if ip.strip()] if self.state.substrate == Substrates.VM else []
         )
@@ -543,9 +541,6 @@ class TlsManager(BaseManager):
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            # Note: cacerts.p12 is intentionally NOT checked here. It is the snapshot-gateway
-            # truststore (S3/GCS/Azure CA), managed by the snapshots manager and absent unless a
-            # backup backend with a custom CA is related. OpenSearch's own truststore is ca.p12.
             if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
                 return False
             if not self.workload.exists(certs_dir / "chain.pem"):
@@ -585,9 +580,7 @@ class TlsManager(BaseManager):
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             # create_store_pwd=False, passwords should already be in secrets
             # don't mutate secrets here.
-            # keep_previous=False: this is keystore recovery from secrets, not a rotation;
-            # preserving a "previous" CA here would create a spurious old-ca entry and kick
-            # off the CA-rotation routine (rolling restarts + cert renewal) on every reconcile.
+            # keep_previous=False: this is keystore recovery from secrets, not a rotation.
             self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False)
 
         # recreate PKCS12 stores for all cert types we might need on startup.
@@ -680,10 +673,10 @@ class TlsManager(BaseManager):
         logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
         try:
             self.remove_old_ca()
+            return self.update_request_ca_bundle()
         except OpenSearchFileOperationError as e:
             logger.error("Error removing old CA during rotation finalization: %s", e)
             return False
-        return self.update_request_ca_bundle()
 
     def get_unit_certificates(self) -> dict[CertType, str]:
         """Retrieve the list of certificates for this unit."""
@@ -759,9 +752,9 @@ class TlsManager(BaseManager):
         """Add new CA cert to trust store.
 
         keep_previous renames the current CA to old-ca before importing the new one, which is
-        the behaviour required for a genuine CA rotation. Callers that merely rebuild the
+        the behaviour required for a CA rotation. Callers that just rebuild the
         keystore from secrets (e.g. K8s pod-restart recovery) must pass keep_previous=False,
-        otherwise they spuriously create an old-ca entry and trigger the rotation routine.
+        otherwise they create an old-ca entry.
 
         Returns True on success, False if a filesystem error occurred.
         """
