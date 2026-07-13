@@ -40,7 +40,7 @@ boto3 = "^1.38.36"
 overrides = "^7.7.0"
 requests = "2.33.0"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
-ruamel-yaml = "0.18.14"
+ruamel-yaml = "0.19.1"
 shortuuid = "1.0.13"
 pydantic = ">= 1.0"
 cryptography = "^48.0.1"
