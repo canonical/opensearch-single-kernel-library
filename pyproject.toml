@@ -36,7 +36,7 @@ exclude = ["opensearch_single_kernel/charmcraft.yaml"]
 python = "^3.10"
 ops = "^3.3.0"
 tenacity = "^9.1.2"
-boto3 = "^1.38.36"
+boto3 = "^1.43.46"
 overrides = "^7.7.0"
 requests = "2.33.0"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
@@ -105,7 +105,7 @@ responses = "^0.25.7"
 pytest-mock = "*"
 
 [tool.poetry.group.integration.dependencies]
-boto3 = "^1.38.36"
+boto3 = "^1.43.46"
 pytest = "^9.0.3"
 pytest-asyncio = "^0.21.2"
 pytest-operator = "^0.42.0"
