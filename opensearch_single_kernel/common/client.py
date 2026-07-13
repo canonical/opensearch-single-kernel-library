@@ -161,7 +161,6 @@ class OpenSearchClient:
                 "GET",
                 f"_snapshot/{repo_name}/{snapshot_id}",
                 alt_hosts=alt_hosts,
-                timeout=30,
                 retries=3,
                 wait_strategy=wait_fixed(3),
             )
