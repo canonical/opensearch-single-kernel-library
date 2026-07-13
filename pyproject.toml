@@ -67,7 +67,7 @@ cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
 cosl = "^1.9.1"
-bcrypt = "^4.3.0"
+bcrypt = "^5.0.0"
 email-validator = ">=2"
 
 
