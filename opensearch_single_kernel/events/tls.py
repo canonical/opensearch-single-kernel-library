@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from ops import (
     ActionEvent,
     Object,
+    RelationBrokenEvent,
     RelationCreatedEvent,
 )
 
@@ -54,6 +55,9 @@ class TLSEventsHandler(Object):
         # Events
         self.framework.observe(
             self.charm.on[TLS_RELATION].relation_created, self._on_tls_relation_created
+        )
+        self.framework.observe(
+            self.charm.on[TLS_RELATION].relation_broken, self._on_tls_relation_broken
         )
 
         self.framework.observe(self.certs.on.certificate_available, self._on_certificate_available)

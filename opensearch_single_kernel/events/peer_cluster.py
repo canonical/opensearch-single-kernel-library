@@ -25,7 +25,6 @@ from opensearch_single_kernel.common.constants import (
     Directive,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchCmdError,
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
 from opensearch_single_kernel.common.statuses import (
