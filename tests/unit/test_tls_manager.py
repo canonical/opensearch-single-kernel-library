@@ -269,7 +269,7 @@ def test_get_sans(harness, mocker, substrate):
     gethostname.return_value = "nebula"
     getfqdn.return_value = "nebula"
     base_ips = ["1.1.1.1", "address1", "address2"]
-    base_dns_entries = [harness.charm.state.unit_name, "nebula", "localhost", "alias"]
+    base_dns_entries = [harness.charm.state.unit_name, "nebula", "alias"]
     unit_http_sans = harness.charm.tls_manager._get_sans(CertType.UNIT_HTTP)
 
     # expected results differ by substrate

@@ -17,6 +17,7 @@ from opensearch_single_kernel.common.constants import (
     PEER_RELATION,
     S3_RELATION,
     TLS_RELATION,
+    UPGRADE_RELATION,
 )
 from tests.helpers import Substrate
 from tests.integration.conftest import ACTIONS, CONFIG, METADATA
