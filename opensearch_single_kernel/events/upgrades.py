@@ -44,12 +44,13 @@ class UpgradesEventsHandler(Object):
 
     lifecycle_state_stored = ops.StoredState()
 
-    # This is to differentiate between substrates
-    UPGRADE_NOTATION = "refresh" if Substrates.K8S else "upgrade"
-
     def __init__(self, charm: "OpenSearchBaseCharm") -> None:
         super().__init__(charm, key="upgrade_events")
         self.charm = charm
+        # This is to differentiate between substrates
+        self.UPGRADE_NOTATION = (
+            "refresh" if self.charm.state.substrate == Substrates.K8S else "upgrade"
+        )
 
         # lifecycle
         for relation_endpoint in self.model.relations.keys():
@@ -404,6 +405,7 @@ class UpgradesEventsHandler(Object):
                     )
                     self._set_upgrade_status()
                     # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
+                    self.charm.lock_manager.release()
                     return
                 else:
                     logger.warning("Rollback detected")

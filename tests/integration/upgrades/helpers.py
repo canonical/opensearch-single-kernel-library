@@ -244,9 +244,14 @@ async def assert_upgrade_to_local(
 
     # run pre-upgrade-check action on leader
     action_name = "pre-upgrade-check" if substrate == "vm" else "pre-refresh-check"
-    action = await run_action(ops_test, leader_id, action_name, app=app)
-    logger.info("%s: %s", action_name, action)
-    assert action.status == "completed"
+    for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+        with attempt:
+            action = await run_action(ops_test, leader_id, action_name, app=app)
+            logger.info("%s: %s", action_name, action)
+            if action.status != "completed":
+                raise Exception(f"Action {action_name} failed with status: {action.status}")
+
+            assert action.status == "completed"
 
     async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
         logger.info("Refreshing '%s' local charm", app)
@@ -271,19 +276,29 @@ async def assert_upgrade_to_local(
         await wait_until_upgrade_state_healthy(ops_test, app)
         # run resume-upgrade action on leader
         action_name = "resume-upgrade" if substrate == "vm" else "resume-refresh"
-        action = await run_action(ops_test, leader_id, action_name, app=app)
-        logger.info("%s: %s", action_name, action)
-        # If leader is second unit to upgrade, the task would be terminated
-        # Since unit will restart
-        second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
-        if substrate == "k8s" and second_unit.id == leader_id:
-            logger.info(
-                "Unit '%s' is leader, action may be terminated due to unit restart."
-                " Skipping status check.",
-                second_unit,
-            )
-        else:
-            assert action.status == "completed"
+        for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+            with attempt:
+                action = await run_action(ops_test, leader_id, action_name, app=app)
+                logger.info("%s: %s", action_name, action)
+                # if the cluster is not healthy, the action may fail, so we retry
+                if (
+                    action.status == "failed"
+                    and action.message
+                    and "unhealthy" in action.message.lower()
+                ):
+                    raise Exception(f"Action {action_name} failed due to unhealthy cluster")
+
+                # If leader is second unit to upgrade, the task would be terminated
+                # Since unit will restart
+                second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
+                if substrate == "k8s" and second_unit.id == leader_id:
+                    logger.info(
+                        "Unit '%s' is leader, action may be terminated due to unit restart."
+                        " Skipping status check.",
+                        second_unit,
+                    )
+                else:
+                    assert action.status == "completed"
 
         await wait_until(
             ops_test,

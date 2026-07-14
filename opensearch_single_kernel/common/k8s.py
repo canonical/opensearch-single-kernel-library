@@ -59,7 +59,7 @@ class K8sClient:
                         resourceAttributes=ResourceAttributes(
                             name=self.app_name,
                             namespace=self.namespace,
-                            resource="statefulset",
+                            resource="statefulsets",
                             verb="patch",
                         )
                     )
