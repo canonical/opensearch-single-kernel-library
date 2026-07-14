@@ -4,7 +4,6 @@
 
 """A set of helpers functions."""
 
-
 import base64
 import errno
 import hashlib

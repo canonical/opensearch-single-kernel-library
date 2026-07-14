@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 """Unit test for opensearch tls manager."""
+
 import itertools
 import re
 import uuid

@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Helper functions for data related tests, such as indexing, searching etc.."""
+
 import base64
 import json
 import logging

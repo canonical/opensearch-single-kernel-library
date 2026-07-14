@@ -38,12 +38,12 @@ ops = "^3.3.0"
 tenacity = "^9.1.2"
 boto3 = "^1.38.36"
 overrides = "^7.7.0"
-requests = "2.32.4"
+requests = "2.33.0"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-pydantic = ">= 2.0"
-cryptography = "^45.0.4"
+pydantic = ">= 1.0"
+cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.7"
 poetry-core = "<2.0.0"
@@ -63,7 +63,7 @@ ops = "^3.3.0"
 # data_platform_libs/v0/upgrade.py
 pydantic = ">= 2.0"
 # tls_certificates_interface/v3/tls_certificates.py
-cryptography = "^45.0.4"
+cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
 cosl = "^1.9.1"
@@ -75,14 +75,14 @@ email-validator = ">=2"
 optional = true
 
 [tool.poetry.group.format.dependencies]
-black = "^25.1.0"
+black = "^26.3.1"
 isort = "^6.0.1"
 
 [tool.poetry.group.lint]
 optional = true
 
 [tool.poetry.group.lint.dependencies]
-black = "^25.1.0"
+black = "^26.3.1"
 isort = "^6.0.1"
 flake8 = "^7.0.0"
 flake8-docstrings = "^1.7.0"
@@ -96,8 +96,8 @@ shellcheck-py = "^0.10.0.1"
 [tool.poetry.group.unit.dependencies]
 ops = { version = "^3.3.0", extras = ["testing"] }
 ops-scenario = "^8.5.2"
+pytest = "^9.0.3"
 pytest-operator = "^0.42.0"
-pytest = "^8.4.0"
 pytest-asyncio = "^0.21.2"
 coverage = { extras = ["toml"], version = "^7.9.1" }
 parameterized = "^0.9.0"
@@ -106,7 +106,7 @@ pytest-mock = "*"
 
 [tool.poetry.group.integration.dependencies]
 boto3 = "^1.38.36"
-pytest = "^8.4.0"
+pytest = "^9.0.3"
 pytest-asyncio = "^0.21.2"
 pytest-operator = "^0.42.0"
 pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
@@ -116,8 +116,8 @@ jsonschema = "^4.24.0"
 ops = "^3.3.0"
 tenacity = "^9.1.2"
 pyyaml = "^6.0.2"
-pyjwt = "^2.10.1"
-urllib3 = "^2.4.0"
+pyjwt = "^2.13.0"
+urllib3 = "^2.7.0"
 protobuf = "^6.31.1"
 opensearch-py = "^2.8.0"
 allure-pytest = "^2.14.3"
