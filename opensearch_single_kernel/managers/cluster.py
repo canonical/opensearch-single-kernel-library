@@ -947,7 +947,8 @@ class ClusterManager(BaseManager):
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
         if (
-            Directive.SHOW_STATUS in deployment_desc.pending_directives
+            not self.no_blocking_directives(deployment_desc)
+            and deployment_desc.state.value != State.ACTIVE
             and deployment_desc.state.message
         ):
             status_list.append(

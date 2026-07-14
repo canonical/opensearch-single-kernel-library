@@ -11,7 +11,6 @@ from ops import (
     Object,
     Relation,
     RelationChangedEvent,
-    RelationDataContent,
     RelationDepartedEvent,
     RelationJoinedEvent,
 )
@@ -33,7 +32,6 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.models import (
-    DeploymentDescription,
     PeerClusterApp,
     PeerClusterRelData,
     PeerClusterRelErrorData,
@@ -682,27 +680,4 @@ class PeerClusterEventsHandler(Object):
         self.charm.config_manager.update_seeds_config(data.cm_nodes)
         self.charm.opensearch_events.apply_status_from_deployment_desc(
             self.charm.state.application.deployment_desc
-        )
-
-    def _put_relation_conflict_error(
-        self,
-        relation_data: RelationDataContent,
-        relation_id: int,
-        deployment_desc: DeploymentDescription,
-    ) -> None:
-        """Add orchestrator relation conflict error into cluster peer data and show the status."""
-        if not relation_data.get("data"):
-            return
-        data = PeerClusterRelData.peer_cluster_rel_data_from_str(
-            self.charm.state.secrets, relation_data["data"]
-        )
-        self.reconcile_peer_cluster_errors(
-            label="error_from_providers-%s" % relation_id,
-            error=PeerClusterRelErrorData(
-                cluster_name=data.cluster_name,
-                should_sever_relation=True,
-                should_wait=False,
-                blocked_message=PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message,
-                deployment_desc=deployment_desc,
-            ),
         )
