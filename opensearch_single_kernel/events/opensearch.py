@@ -971,9 +971,13 @@ class OpenSearchEventsHandler(Object):
             self.charm.unit.is_leader()
             and self.charm.cluster_manager.should_initialise_security_index()
         ):
-            # In large deployment we need at least one CM up and running to
-            # initialize the security index
-            if not self.charm.peer_cluster_manager.is_cm_up():
+            # init_hold=True means this is a requirer app waiting for
+            # the main orchestrator — we need to check a remote CM is up.
+            # In small deployment (init_hold=False) the current unit is the CM.
+            if (
+                self.charm.state.application.deployment_desc.config.init_hold
+                and not self.charm.peer_cluster_manager.is_cm_up()
+            ):
                 logger.warning(
                     "Waiting for a cluster manager node to initialize the security index. \
 Deferring event."
