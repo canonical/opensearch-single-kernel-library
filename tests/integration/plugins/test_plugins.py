@@ -290,7 +290,7 @@ async def test_build_and_deploy_small_deployment(
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    opensearch_storage = {"opensearch-data": "kubernetes,5G,1"} if substrate == "k8s" else None
+    opensearch_storage = {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None
     await asyncio.gather(
         ops_test.model.deploy(
             charm,
