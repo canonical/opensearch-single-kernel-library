@@ -35,6 +35,10 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
+    CLUSTER_MANAGER_VOTING_ONLY_INVALID = StatusObject(
+        status="blocked",
+        message="cluster_manager and voting_only roles cannot be both set on the same nodes.",
+    )
 
     # Blocking directive should be a running status since it is set based on the presence
     # of a SHOW_STATUS directive and once the status set we remove the directive
