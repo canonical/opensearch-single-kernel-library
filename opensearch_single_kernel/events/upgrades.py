@@ -67,7 +67,10 @@ class UpgradesEventsHandler(Object):
             self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
         )
         self.framework.observe(self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action)
-        self.framework.observe(self.charm.on.force_upgrade_action, self._on_force_upgrade_action)
+        if self.charm.substrate == Substrates.VM:
+            self.framework.observe(
+                self.charm.on.force_upgrade_action, self._on_force_upgrade_action
+            )
         self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
 
         self.framework.observe(
