@@ -6,7 +6,6 @@ updates:
       interval: "weekly"
       day: "sunday"
       time: "06:00"
-    open-pull-requests-limit: 5
     groups:
       all-non-major:
         update-types:
