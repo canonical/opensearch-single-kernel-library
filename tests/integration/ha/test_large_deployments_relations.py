@@ -124,7 +124,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
         apps=list(APP_UNITS.keys()),
         apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
-            FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            FAILOVER_APP: [PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value],
             DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
