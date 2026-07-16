@@ -67,7 +67,7 @@ class K8sClient:
             ).status.allowed
         ):
             logger.warning(
-                f"Run `juju trust {self.app_name} --scope=cluster`. Needed for in-place refreshes"
+                f"Run `juju trust {self.app_name} --scope=cluster`. Needed for in-place upgrades"
             )
             raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.app_name)
 

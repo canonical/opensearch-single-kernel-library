@@ -164,7 +164,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         if action_event:
             assert len(units) >= 2
             if self.partition > int(units[1].unit.name.split("/")[-1]):
-                message = "Highest number unit is unhealthy. Refresh will not resume."
+                message = "Highest number unit is unhealthy. Upgrade will not resume."
                 raise OpenSearchReconcilePartitionError(message=message)
             if force:
                 # If a unit was unhealthy and the upgrade was forced, only
@@ -179,9 +179,9 @@ class UpgradesManagerK8s(UpgradesManagerBase):
                 # is not ready). This is also applicable `if not force`,
                 # but is unlikely to happen since all units are healthy `if
                 # not force`.
-                message = f"Attempting to refresh unit {partition}."
+                message = f"Attempting to upgrade unit {partition}."
             else:
-                message = f"Refresh resumed. Unit {partition} is refreshing next."
+                message = f"Upgrade resumed. Unit {partition} is upgrading next."
         return message
 
     def prepare_for_shutdown(self) -> None:  # pragma: nocover

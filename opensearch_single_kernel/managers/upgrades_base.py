@@ -128,8 +128,6 @@ class UpgradesManagerBase(BaseManager):
             # User confirmation needed to resume upgrade (i.e. upgrade second unit)
             # Statuses over 120 characters are truncated in `juju status` as of juju 3.1.6 and
             # 2.9.45
-            if self.state.substrate == Substrates.K8S:
-                return UpgradesStatuses.K8S_UPGRADES_WAITING_FOR_RESUME.value
             return UpgradesStatuses.UPGRADES_WAITING_FOR_RESUME.value
         return UpgradesStatuses.UPGRADES_UPGRADING.value
 

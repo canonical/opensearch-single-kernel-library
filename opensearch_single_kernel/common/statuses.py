@@ -355,11 +355,6 @@ class UpgradesStatuses(Enum):
         message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
         approved_critical_component=True,
     )
-    K8S_UPGRADES_WAITING_FOR_RESUME = StatusObject(
-        status="blocked",
-        message="Upgrading. Verify highest unit is healthy & run `resume-refresh` action.",
-        approved_critical_component=True,
-    )
     UPGRADES_INCOMPATIBLE = StatusObject(
         status="blocked",
         message="Upgrade incompatible. Rollback to previous revision with `juju refresh`.",
@@ -367,7 +362,7 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_UNHEALTHY = StatusObject(
         status="blocked",
-        message="Unhealthy after refresh. Rollback to previous revision with `juju refresh`.",
+        message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
         approved_critical_component=True,
     )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(

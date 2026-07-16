@@ -47,10 +47,6 @@ class UpgradesEventsHandler(Object):
     def __init__(self, charm: "OpenSearchBaseCharm") -> None:
         super().__init__(charm, key="upgrade_events")
         self.charm = charm
-        # This is to differentiate between substrates
-        self.UPGRADE_NOTATION = (
-            "refresh" if self.charm.state.substrate == Substrates.K8S else "upgrade"
-        )
 
         # lifecycle
         for relation_endpoint in self.model.relations.keys():
@@ -67,24 +63,12 @@ class UpgradesEventsHandler(Object):
         self.framework.observe(
             self.charm.on[UPGRADE_RELATION].relation_changed, self._reconcile_upgrade
         )
-        if self.charm.substrate == Substrates.K8S:
-            self.framework.observe(
-                self.charm.on.pre_refresh_check_action, self._on_pre_upgrade_check_action
-            )
-            self.framework.observe(
-                self.charm.on.resume_refresh_action, self._on_resume_upgrade_action
-            )
-        else:
-            self.framework.observe(
-                self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
-            )
-            self.framework.observe(
-                self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action
-            )
-            self.framework.observe(
-                self.charm.on.force_upgrade_action, self._on_force_upgrade_action
-            )
-            self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
+        self.framework.observe(
+            self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
+        )
+        self.framework.observe(self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action)
+        self.framework.observe(self.charm.on.force_upgrade_action, self._on_force_upgrade_action)
+        self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
 
         self.framework.observe(
             self.charm.on.force_refresh_start_action,
@@ -176,7 +160,7 @@ class UpgradesEventsHandler(Object):
         if self.charm.upgrades_manager.unit_state is UnitUpgradesState.RESTARTING:
             if not self.charm.upgrades_manager.is_compatible:
                 logger.info(
-                    "Refresh incompatible. If you accept potential *data loss* and *downtime*, you can continue with resume-refresh"
+                    "Upgrade incompatible. If you accept potential *data loss* and *downtime*, you can continue with resume-upgrade"
                 )
                 self.charm.state.add_status_if_not_present(
                     UpgradesStatuses.UPGRADES_INCOMPATIBLE.value,
@@ -258,7 +242,7 @@ class UpgradesEventsHandler(Object):
     def _on_pre_upgrade_check_action(self, event: ops.ActionEvent) -> None:
         """Handle pre-upgrade-check action."""
         if not self.authorized_leader:
-            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader pre-{self.UPGRADE_NOTATION}-check`)"
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader pre-upgrade-check`)"
             logger.debug(f"Pre-upgrade check event failed: {message}")
             event.fail(message)
             return
@@ -273,24 +257,24 @@ class UpgradesEventsHandler(Object):
             self._run_general_prechecks()
             self.charm.upgrades_manager.pre_upgrade_check()
         except OpenSearchUpgradePrecheckError as exception:
-            message = f"Charm is *not* ready for {self.UPGRADE_NOTATION}. Pre-{self.UPGRADE_NOTATION}-check failed: {exception}"
-            logger.debug(f"Pre-{self.UPGRADE_NOTATION}-check event failed: {message}")
+            message = f"Charm is *not* ready for upgrade. Pre-upgrade-check failed: {exception}"
+            logger.debug(f"Pre-upgrade-check event failed: {message}")
             event.fail(message)
             return
 
-        message = f"Charm is ready for {self.UPGRADE_NOTATION}"
+        message = "Charm is ready for upgrade"
         event.set_results({"result": message})
         logger.debug(f"Pre-upgrade check event succeeded: {message}")
 
     def _on_resume_upgrade_action(self, event: ops.ActionEvent) -> None:
         """Handle resume-upgrade action."""
         if not self.authorized_leader:
-            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-{self.UPGRADE_NOTATION}`)"
+            message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-upgrade`)"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
         if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
-            message = f"No {self.UPGRADE_NOTATION} in progress"
+            message = "No upgrade in progress"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return

@@ -243,7 +243,7 @@ async def assert_upgrade_to_local(
     leader_id = [u.id for u in units if u.is_leader][0]
 
     # run pre-upgrade-check action on leader
-    action_name = "pre-upgrade-check" if substrate == "vm" else "pre-refresh-check"
+    action_name = "pre-upgrade-check"
     for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
         with attempt:
             action = await run_action(ops_test, leader_id, action_name, app=app)
@@ -275,7 +275,7 @@ async def assert_upgrade_to_local(
 
         await wait_until_upgrade_state_healthy(ops_test, app)
         # run resume-upgrade action on leader
-        action_name = "resume-upgrade" if substrate == "vm" else "resume-refresh"
+        action_name = "resume-upgrade"
         for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
             with attempt:
                 action = await run_action(ops_test, leader_id, action_name, app=app)

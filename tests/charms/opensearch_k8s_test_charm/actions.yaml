@@ -64,16 +64,16 @@ restore:
   required:
     - backup-id
 
-pre-refresh-check:
+pre-upgrade-check:
   description: Check if charm is ready to upgrade
 
-resume-refresh:
-  description: Refresh remaining units (after you manually verified that refreshed units are healthy).
+resume-upgrade:
+  description: Upgrade remaining units (after you manually verified that upgraded units are healthy).
   params:
     force:
       type: boolean
       default: false
-      description: a boolean indicating whether to force the refresh to continue even if some refreshed units are not healthy.
+      description: a boolean indicating whether to force the upgrade to continue even if some upgraded units are not healthy.
 
 
 status-detail:
