@@ -57,11 +57,11 @@ class PeerClusterOrchestratorManager(BaseManager):
     def refresh_relation_data(  # noqa: C901
         self,
         event_rel_id: int | None = None,
-    ) -> None:
+    ) -> bool:
         """Refresh the peer cluster rel data (new cm node, admin password change etc.).
 
-        This function is only called on leader unit. it returns whether
-        a defer is needed.
+        Returns:
+            whether the operation was completed. In case of negative result retry is preferred.
         """
         # get deployment descriptor of current app
         deployment_desc = self.state.application.deployment_desc
@@ -80,7 +80,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             self.set_peer_cluster_err_data_if_wrong_integration(event_rel_id, rel_err_data)
             and event_rel_id
         ):
-            return
+            return True
 
         # store the main/failover-cm planned units count
         self.save_cluster_fleet_apps(deployment_desc)
@@ -105,7 +105,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             orchestrators_dict
         )
 
-        should_defer = rel_err_data and rel_err_data.should_wait
+        should_wait = rel_err_data and rel_err_data.should_wait
 
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
@@ -150,7 +150,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             # if no planned units, delete relation data as it won't get updated
             if not has_units:
                 del local_peer_cluster.error_data
-        return should_defer
+        return not should_wait
 
     def build_peer_cluster_rel_data(
         self,

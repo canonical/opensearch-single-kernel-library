@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
+
 import logging
 import os
 import subprocess

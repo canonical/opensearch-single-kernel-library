@@ -161,6 +161,7 @@ class ExternalClientsStatuses(Enum):
 class PeerClusterStatuses(Enum):
     """Collection of charm statuses related to peer cluster relation."""
 
+    # TODO; Think about a better name
     PEER_CLUSTER_NO_DATA_NODE = StatusObject(
         status="blocked",
         message="Cannot run cluster with current roles. Waiting for data node...",

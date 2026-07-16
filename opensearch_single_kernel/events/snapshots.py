@@ -21,7 +21,6 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
-    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
@@ -310,9 +309,7 @@ class SnapshotsEventsHandler(Object):
             interpolated=True,
         )
 
-        if not self._remove_credentials(
-            object_storage_type=object_storage_type,
-        ):
+        if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
             self.charm.state.add_status_if_not_present(
                 SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
@@ -553,7 +550,9 @@ class SnapshotsEventsHandler(Object):
         )
         if info_to_save:
             for object_storage_type in object_storage_type_to_cleanup:
-                if not self._remove_credentials(object_storage_type):
+                if not self.charm.keystore_manager.cleanup_storage_credentials(
+                    object_storage_type
+                ):
                     logger.warning(
                         "Cleanup for %s credentials are failed during peer cluster relation change.",
                         object_storage_type,
@@ -608,7 +607,10 @@ class SnapshotsEventsHandler(Object):
             ObjectStorageType.AZURE,
             ObjectStorageType.GCS,
         ]:
-            self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type)
+            if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
+                logger.warning(
+                    "Failed to cleanup keystore credentials for %s.", object_storage_type
+                )
 
         # clean S3 CA
         if self.charm.snapshots_manager.is_custom_s3_ca_stored():
@@ -646,7 +648,7 @@ class SnapshotsEventsHandler(Object):
             ObjectStorageType.AZURE,
             ObjectStorageType.GCS,
         ]:
-            if not self._remove_credentials(object_storage_type):
+            if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
                     "Cleanup for %s credentials are failed during peer cluster relation departure.",
                     object_storage_type,
@@ -794,16 +796,3 @@ class SnapshotsEventsHandler(Object):
         self.charm.keystore_manager.put_object_storage_credentials(
             object_storage_type, object_storage_credentials
         )
-
-    def _remove_credentials(self, object_storage_type: ObjectStorageType) -> bool:
-        """Cleanup stored credentials and related config for a given object storage type."""
-        try:
-            self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type)
-        except OpenSearchCmdError as e:
-            logger.warning(
-                "Keystore cleanup for %s failed after retries: %s",
-                object_storage_type,
-                e,
-            )
-            return False
-        return True

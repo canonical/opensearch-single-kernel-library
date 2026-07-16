@@ -58,7 +58,7 @@ TLS_NOT_FULLY_CONFIGURED_IN_MAIN = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
+async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resources) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -75,6 +75,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=MAIN_APP,
             num_units=3,
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME} | CONFIG_OPTS,
         ),
         ops_test.model.deploy(
@@ -82,6 +83,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=FAILOVER_APP,
             num_units=3,
             series=series,
+            resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True} | CONFIG_OPTS,
         ),
         ops_test.model.deploy(
@@ -89,6 +91,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=DATA_APP,
             num_units=2,
             series=series,
+            resources=charm_resources,
             config={
                 "cluster_name": CLUSTER_NAME,
                 "init_hold": True,
@@ -101,6 +104,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
             application_name=INVALID_APP,
             num_units=1,
             series=series,
+            resources=charm_resources,
             config={
                 "cluster_name": INVALID_CLUSTER_NAME,
                 "init_hold": True,

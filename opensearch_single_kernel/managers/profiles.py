@@ -51,6 +51,26 @@ class ProfilesManager(BaseManager):
         missing_requirements.extend(self.check_cluster_topology(self.profile))
         return missing_requirements
 
+    def check_profile_requirements(self) -> bool:
+        """Check all requirements of profile.
+
+        Returns:
+            True if the profile passed validation and all requirements.
+        """
+        try:
+            self.get_config_profile()
+        except ValueError:
+            logger.error(
+                "Invalid profile configuration. Value: %s",
+                self.state.config.get("profile"),
+            )
+            return False
+        try:
+            return not self.get_missing_requirements()
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            return False
+
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
         if not profile.memory_requirements.memory_size:

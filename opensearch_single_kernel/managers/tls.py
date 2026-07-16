@@ -17,7 +17,6 @@ from overrides import override
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
-    CA_TRUSTSTORE_P12,
     CERTS_EXPIRATION_DATE_FORMAT,
     OLD_CA_ALIAS,
     CertType,
@@ -489,21 +488,27 @@ class TlsManager(BaseManager):
             raise
 
         logger.info("TLS certificate for %s stored.", name)
+        return True
 
-    def store_admin_tls_secrets_if_applies(self) -> None:
-        """Store admin TLS resources if available and mark unit as configured if correct."""
+    def store_admin_tls_secrets_if_applies(self) -> bool:
+        """Store admin TLS resources if available and mark unit as configured if correct.
+
+        Returns:
+            whether operation was successful.
+        """
         # In the case of the first units before TLS is initialized,
         # or non-main orchestrator units having not received the secrets from the main yet
         if not (current_secrets := self.state.application.admin_secrets):
-            return
+            return False
 
         # in the case the cluster was bootstrapped with multiple units at the same time
         # and the certificates have not been generated yet
         if not current_secrets.get("cert") or not current_secrets.get("chain"):
-            return
+            return False
 
         # Store the "Admin" certificate, key and CA on the disk of the new unit
-        self.store_new_tls_resources(CertType.APP_ADMIN, current_secrets)
+        if not self.store_new_tls_resources(CertType.APP_ADMIN, current_secrets):
+            return False
 
         # Mark this unit as tls configured
         if self.is_fully_configured():
@@ -511,6 +516,7 @@ class TlsManager(BaseManager):
             peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
                 peer_cluster_server.tls_configured = True
+        return True
 
     def reconcile_k8s_runtime_resources(self) -> None:
         """Prepare the K8s runtime and restore TLS artifacts from secrets.
@@ -542,8 +548,6 @@ class TlsManager(BaseManager):
             self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
-            if not self.workload.exists(certs_dir / CA_TRUSTSTORE_P12):
-                return False
             if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
                 return False
             if not self.workload.exists(certs_dir / "chain.pem"):
@@ -582,8 +586,9 @@ class TlsManager(BaseManager):
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             # create_store_pwd=False, passwords should already be in secrets
-            # don't mutate secrets here
-            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False)
+            # don't mutate secrets here.
+            # keep_previous=False: this is keystore recovery from secrets, not a rotation.
+            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False)
 
         # recreate PKCS12 stores for all cert types we might need on startup.
         for scope, cert_type in [
@@ -748,11 +753,17 @@ class TlsManager(BaseManager):
         # remove it from the request bundle
         self._remove_ca_from_request_bundle(old_ca)
 
-    def store_new_ca(self, cert_type: CertType, create_store_pwd: bool) -> bool:
+    def store_new_ca(
+        self, cert_type: CertType, create_store_pwd: bool, keep_previous: bool = True
+    ) -> bool:
         """Add new CA cert to trust store.
 
-        Returns:
-            True on success, False if data is missing or a filesystem error occurred.
+        keep_previous renames the current CA to old-ca before importing the new one, which is
+        the behaviour required for a CA rotation. Callers that just rebuild the
+        keystore from secrets (e.g. K8s pod-restart recovery) must pass keep_previous=False,
+        otherwise they create an old-ca entry.
+
+        Returns True on success, False if a filesystem error occurred.
         """
         if create_store_pwd:
             self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
@@ -771,7 +782,7 @@ class TlsManager(BaseManager):
                 store_pwd=admin_secrets.get("truststore-password"),
                 store_path=self.workload.paths.certs / f"{CA_ALIAS}.p12",
                 ca=cert_secrets.get("ca-cert"),
-                keep_previous=True,
+                keep_previous=keep_previous,
                 use_sudo=self.state.substrate == Substrates.VM,
             ):
                 return False

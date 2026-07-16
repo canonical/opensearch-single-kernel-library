@@ -171,7 +171,7 @@ class NotificationsEvents(Object):
 
         # propagate to subclusters if this is the main provider
         if self.charm.state.is_peer_cluster_provider():
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
@@ -197,7 +197,7 @@ class NotificationsEvents(Object):
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.state.is_peer_cluster_provider():
-                    if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                    if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                         event.defer()
             return
 
@@ -216,11 +216,10 @@ class NotificationsEvents(Object):
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:
-            try:
-                self.charm.keystore_manager.remove_entries(keys)
+            if self.charm.keystore_manager.remove_entries(keys):
                 self.charm.reload_keystore_event.emit()
-            except OpenSearchCmdError as e:
-                logger.error("Failed to remove SMTP credentials from keystore: %s", e)
+            else:
+                logger.error("Failed to remove SMTP credentials from keystore.")
 
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
 
@@ -230,7 +229,7 @@ class NotificationsEvents(Object):
         self.charm.plugin_manager.remove_plugin_secret(label)
 
         if self.charm.state.is_peer_cluster_provider():
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:

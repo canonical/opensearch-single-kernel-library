@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """Object representing the global state of OpenSearch Charm."""
+
 import json
 import logging
 import re
@@ -633,8 +634,7 @@ class ClusterState(Object):
         rotation_complete = all([server.tls_ca_renewed for server in all_units_in_fleet])
 
         logger.debug(
-            "CA rotation state"
-            "CA rotation happening in cluster: %s | \
+            "CA rotation state CA rotation happening in cluster: %s | \
                 rotation complete in cluster: %s |",
             rotation_in_progress,
             rotation_complete,
@@ -648,8 +648,7 @@ class ClusterState(Object):
         # Use related_peer_cluster_servers since we are reading remote data.
         all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
         logger.debug(
-            "CA and certs rotation state"
-            "Units in fleet: %s | \
+            "CA and certs rotation state Units in fleet: %s | \
                 CA rotation complete in fleet: %s | \
                 TLS configured in fleet: %s",
             [server.unit.name for server in all_units_in_fleet],
