@@ -128,7 +128,7 @@ class PeerClusterEventsHandler(Object):
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
             # check if any credentials exist without relations
             self.check_credentials_with_missing_relations()
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
@@ -140,7 +140,9 @@ class PeerClusterEventsHandler(Object):
         # Do not defer the event if we are waiting for a peer cluster relation
         # Once the relation is established and the cluster starts we will re-process the event
         if (
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+            not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id
+            )
             and not is_waiting_for_peer_relation
         ):
             event.defer()
@@ -180,7 +182,7 @@ class PeerClusterEventsHandler(Object):
             self.handle_joining_data_node()
 
         if data.get("is_candidate_failover_orchestrator", "").lower() != "true":
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
@@ -194,7 +196,7 @@ class PeerClusterEventsHandler(Object):
         target_relation_ids = self.charm.state.peer_clusters_relations_ids(is_provider=True)
         if orchestrators.failover_app and orchestrators.failover_rel_id in target_relation_ids:
             logger.info("A failover cluster orchestrator is already registered.")
-            if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
                 event.defer()
