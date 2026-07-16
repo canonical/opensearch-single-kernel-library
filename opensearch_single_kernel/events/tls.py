@@ -368,7 +368,9 @@ class TLSEventsHandler(Object):
             if not admin_secrets.get("subject"):
                 return
 
-        self.charm.tls_manager.store_admin_tls_secrets_if_applies()
+        if not self.charm.tls_manager.store_admin_tls_secrets_if_applies():
+            event.defer()
+            return
 
         # In case of renewal of the unit transport layer cert - restart opensearch
         if not renewal or not self.charm.state.application.is_admin_user_initialized:
