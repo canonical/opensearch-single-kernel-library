@@ -416,7 +416,7 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.upgrades_manager.in_progress:
             logger.debug(
-                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
+                "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
             )
         elif self.charm.unit.is_leader():
             if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
@@ -1507,7 +1507,7 @@ class OpenSearchEventsHandler(Object):
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
                 "Changing config during an upgrade is not supported. The charm may be in a broken"
-                ",unrecoverable state"
+                " ,unrecoverable state"
             )
             event.defer()
             return
