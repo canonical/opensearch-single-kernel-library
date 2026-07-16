@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy(
-    ops_test: OpsTest, charm, series, ops_test_microk8s: OpsTest, charm_resources, substrate
+    ops_test: OpsTest, charm, series, ops_test_k8s: OpsTest, charm_resources, substrate
 ):
     """Deploy OpenSearch, data integrator and identity platform (K8s) simultaneously."""
-    k8s_ops = ops_test_microk8s if substrate == "vm" else ops_test
+    k8s_ops = ops_test_k8s if substrate == "vm" else ops_test
     await gather(
         ops_test.model.deploy(
             charm,
@@ -78,7 +78,7 @@ async def test_deploy(
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model, substrate):
+async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate):
     """Establish all the required relations.
 
     Connects OpenSearch, data integrator and identity platform (cross-model).
@@ -89,14 +89,12 @@ async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model, substra
         await ops_test.model.integrate(f"{APP_NAME}:certificates", "self-signed-certificates")
         await ops_test.model.integrate(f"{APP_NAME}:oauth", "hydra")
     else:
-        await microk8s_model.create_offer(
-            "certificates", "certificates", "self-signed-certificates"
-        )
-        await ops_test.model.consume(f"admin/{microk8s_model.name}.certificates")
+        await k8s_model.create_offer("certificates", "certificates", "self-signed-certificates")
+        await ops_test.model.consume(f"admin/{k8s_model.name}.certificates")
         await ops_test.model.integrate("opensearch:certificates", "certificates")
 
-        await microk8s_model.create_offer("oauth", "oauth", "hydra")
-        await ops_test.model.consume(f"admin/{microk8s_model.name}.oauth")
+        await k8s_model.create_offer("oauth", "oauth", "hydra")
+        await ops_test.model.consume(f"admin/{k8s_model.name}.oauth")
         await ops_test.model.integrate("opensearch:oauth", "oauth")
 
     await ops_test.model.integrate(
@@ -107,22 +105,22 @@ async def test_setup_relations(ops_test: OpsTest, microk8s_model: Model, substra
     await gather(
         ops_test.model.wait_for_idle(apps=[APP_NAME, DATA_INTEGRATOR_NAME], status="active"),
         # we can get a blocked status on kratos-external-idp-integrator
-        # but setup can still proceed, so we don't check for active status on microk8s model
-        microk8s_model.wait_for_idle(timeout=1200),
+        # but setup can still proceed, so we don't check for active status on k8s model
+        k8s_model.wait_for_idle(timeout=1200),
     )
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_oauth(ops_test: OpsTest, microk8s_model: Model):
+async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model):
     """Configure new OAuth client on Hydra (identity platform).
 
     Also, acquire corresponding access token for the further testing.
     """
     # Ensure Hydra is active before running the action
-    await microk8s_model.wait_for_idle(apps=["hydra"], status="active", timeout=300)
+    await k8s_model.wait_for_idle(apps=["hydra"], status="active", timeout=300)
 
     action: Action = (
-        await microk8s_model.applications["hydra"]
+        await k8s_model.applications["hydra"]
         .units[0]
         .run_action(
             "create-oauth-client",
@@ -146,7 +144,7 @@ async def test_setup_oauth(ops_test: OpsTest, microk8s_model: Model):
         raise AssertionError(msg)
 
     action = (
-        await microk8s_model.applications["traefik-public"]
+        await k8s_model.applications["traefik-public"]
         .units[0]
         .run_action("show-proxied-endpoints")
     )
@@ -180,7 +178,7 @@ async def test_setup_oauth(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
     """Check access to the OpenSearch with an access token, acquired earlier.
 
     Ensure that roles mapping works correctly by elevating user
@@ -224,7 +222,7 @@ async def test_oauth_access(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_second_client(ops_test: OpsTest, microk8s_model: Model):
+async def test_deploy_second_client(ops_test: OpsTest, k8s_model: Model):
     """Deploy and configure second data integrator."""
     await ops_test.model.deploy(
         DATA_INTEGRATOR_NAME,
@@ -237,7 +235,7 @@ async def test_deploy_second_client(ops_test: OpsTest, microk8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_second_client(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
     """Change roles mapping from first data integrator user to second one.
 
     Ensure, that admin permissions from the first one is removed, while role
@@ -289,7 +287,7 @@ async def test_oauth_access_second_client(ops_test: OpsTest, microk8s_model: Mod
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_cleanup(ops_test: OpsTest, microk8s_model: Model):
+async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
     """Ensure that all of the oauth clients permissions are removed with clean roles mapping."""
     await ops_test.model.applications["opensearch"].set_config(original_opensearch_config)
     await ops_test.model.wait_for_idle(apps=["opensearch"], status="active")
@@ -305,7 +303,7 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, microk8s_model: Model):
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
@@ -362,7 +360,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, microk8s_mo
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_model: Model):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
     await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
@@ -397,7 +395,7 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, micro
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, microk8s_model: Model):
+async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
     await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
