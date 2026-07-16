@@ -6,12 +6,8 @@ updates:
       interval: "weekly"
       day: "sunday"
       time: "06:00"
-    # Prefer fewer concurrent dep PRs so CI does not fan out full self-hosted
-    # integration matrices for many one-package bumps at once.
     open-pull-requests-limit: 5
     groups:
-      # Bundle all minor/patch pip updates into a single weekly PR.
-      # Major bumps stay ungrouped (one PR each) for deliberate review.
       all-non-major:
         update-types:
           - "minor"
