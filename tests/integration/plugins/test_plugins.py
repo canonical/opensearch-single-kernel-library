@@ -290,6 +290,7 @@ async def test_build_and_deploy_small_deployment(
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
+    opensearch_storage = {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None
     await asyncio.gather(
         ops_test.model.deploy(
             charm,
@@ -299,6 +300,7 @@ async def test_build_and_deploy_small_deployment(
             constraints="mem=8G",
             config={"profile": "production"},
             resources=charm_resources,
+            storage=opensearch_storage,
         ),
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
@@ -585,6 +587,8 @@ async def test_knn_search_with_hnsw_faiss(ops_test: OpsTest, deploy_type: str) -
     docs = await search(ops_test, app, leader_unit_ip, index_name, query, retries=30)
     assert len(docs) == 2
 
+    await delete_index(ops_test, app, leader_unit_ip, index_name)
+
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
@@ -631,6 +635,8 @@ async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) 
     }
     docs = await search(ops_test, app, leader_unit_ip, index_name, query, retries=30)
     assert len(docs) == 2
+
+    await delete_index(ops_test, app, leader_unit_ip, index_name)
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -709,6 +715,15 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
         retries=3,
     )
     assert len(docs) == 2, f"Unexpected search results count: {len(docs)}."
+
+    await delete_index(ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_training")
+    await delete_index(ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_target")
+    await http_request(
+        ops_test,
+        "DELETE",
+        f"https://{leader_unit_ip}:9200/_plugins/_knn/models/{model_name}",
+        app=app,
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)

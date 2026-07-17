@@ -197,6 +197,8 @@ MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
 OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
+# Revision 2.19.5
+# OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -326,7 +328,6 @@ CLUSTER_MANAGER_ROLE_REMOVAL_FORBIDDEN = (
 DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
-
 # Endpoints
 USER_ENDPOINT = "/_plugins/_security/api/internalusers"
 USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
@@ -358,4 +359,5 @@ PEBBLE_SERVICE_GROUP = "_daemon_"
 # Upgrades
 UPGRADES_COMPATIBILITY_MATRIX = {
     "2.19.4": {"2.18.0", "2.19.0", "2.19.1", "2.19.2", "2.19.3"},
+    "2.19.5": {"2.19.1", "2.19.4"},
 }

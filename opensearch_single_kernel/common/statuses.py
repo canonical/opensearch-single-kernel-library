@@ -334,6 +334,16 @@ class UpgradesStatuses(Enum):
         message="OpenSearch {workload_version} running; Snap rev {snap_revision}; Charmed operator {charm_version}",
         approved_critical_component=True,
     )
+    K8S_UPGRADES_ACTIVE = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running; Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
+    K8S_UPGRADES_ACTIVE_OUTDATED = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running (restart pending); Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
     UPGRADES_ACTIVE_OUTDATED = StatusObject(
         status="active",
         message="OpenSearch {workload_version} running; Snap rev {snap_revision} (outdated); Charmed operator {charm_version}",
@@ -346,7 +356,7 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
-        message="Upgrading. Verify highest unit is healthy & run `resume upgrade action.",
+        message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
         approved_critical_component=True,
     )
     UPGRADES_INCOMPATIBLE = StatusObject(
@@ -354,9 +364,14 @@ class UpgradesStatuses(Enum):
         message="Upgrade incompatible. Rollback to previous revision with `juju refresh`.",
         approved_critical_component=True,
     )
+    UPGRADES_UNHEALTHY = StatusObject(
+        status="blocked",
+        message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
+        approved_critical_component=True,
+    )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
         status="blocked",
-        message="Pre upgrade check failed: please check the logs for more details.",
+        message="Pre upgrade check failed: {message}",
         approved_critical_component=True,
     )
     UPGRADES_ROLLBACK_UNSUPPORTED = StatusObject(
@@ -367,5 +382,10 @@ class UpgradesStatuses(Enum):
     UPGRADES_ROLLBACK_INCOMPATIBLE = StatusObject(
         status="blocked",
         message="Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure",
+        approved_critical_component=True,
+    )
+    K8S_DEPLOYED_WITHOUT_TRUST = StatusObject(
+        status="blocked",
+        message="Run `juju trust {charm_app} --scope=cluster`. Needed for in-place refreshes",
         approved_critical_component=True,
     )

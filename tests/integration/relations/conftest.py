@@ -11,29 +11,29 @@ from juju.controller import Controller
 from juju.model import Model
 from pytest_operator.plugin import OpsTest
 
-MICROK8S_CLOUD_NAME = "uk8s"
+K8S_CLOUD_NAME = "uk8s"
 
 
 @pytest.fixture(scope="module")
-async def ops_test_microk8s(
+async def ops_test_k8s(
     request, tmp_path_factory, ops_test: OpsTest, substrate
 ) -> AsyncGenerator[OpsTest, Any]:
-    """Create second OpsTest object, that is connected to the MicroK8s cloud.
+    """Create second OpsTest object, that is connected to the k8s cloud.
 
     Automatically creates and destroys (unless keep models parameter is used)
-    corresponding Juju model. MicroK8s and uk8s cloud are set up by spread prepare
+    corresponding Juju model. k8s and uk8s cloud are set up by spread prepare
     for OAuth tests.
 
     Returns:
-        OpsTest object with MicroK8s connection and Juju model.
+        OpsTest object with k8s connection and Juju model.
     """
     if substrate == "k8s":
         yield ops_test
         return
 
-    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
+    model_name = f"{ops_test.model_name}-{K8S_CLOUD_NAME}"
     request.config.option.controller = ops_test.controller_name
-    request.config.option.cloud = MICROK8S_CLOUD_NAME
+    request.config.option.cloud = K8S_CLOUD_NAME
     request.config.option.model = model_name
     request.config.option.model_alias = model_name
     ops_res = OpsTest(request, tmp_path_factory)
@@ -54,8 +54,8 @@ async def application_charm() -> str:
 
 
 @pytest.fixture(scope="module")
-async def microk8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
-    """Create new Juju model on the connected MicroK8s cloud.
+async def k8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
+    """Create new Juju model on the connected k8s cloud.
 
     Automatically destroys that model unless keep models parameter is used.
 
@@ -66,13 +66,13 @@ async def microk8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, 
         assert ops_test.model is not None, "OpsTest model is not connected"
         yield ops_test.model
         return
-    model_name = f"{ops_test.model_name}-{MICROK8S_CLOUD_NAME}"
+    model_name = f"{ops_test.model_name}-{K8S_CLOUD_NAME}"
     controller = Controller()
     await controller.connect()
     if model_name in await controller.list_models():
         model = await controller.get_model(model_name)
     else:
-        model = await controller.add_model(model_name, cloud_name=MICROK8S_CLOUD_NAME)
+        model = await controller.add_model(model_name, cloud_name=K8S_CLOUD_NAME)
 
     yield model
 
