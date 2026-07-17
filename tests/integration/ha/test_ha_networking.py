@@ -71,6 +71,7 @@ async def test_build_and_deploy(
     }
     if substrate == "k8s":
         os_deploy_kwargs["resources"] = charm_resources
+        os_deploy_kwargs["trust"] = True
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
