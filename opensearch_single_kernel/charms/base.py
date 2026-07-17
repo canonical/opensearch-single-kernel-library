@@ -157,6 +157,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.peer_cluster_manager,
             self.peer_cluster_orchestrator_manager,
             self.cluster_manager,
+            self.plugin_manager,
             self.lock_manager,
             self.snapshots_manager,
             self.internal_users_manager,
