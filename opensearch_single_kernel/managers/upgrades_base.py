@@ -10,21 +10,28 @@ Based off specification: DA058 - In-Place Upgrades - Kubernetes v2
 import abc
 import json
 import logging
+import re
 from typing import Any
 
 import ops
+import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
 
-from opensearch_single_kernel.common.constants import UPGRADES_COMPATIBILITY_MATRIX
+from opensearch_single_kernel.common.constants import (
+    UPGRADES_COMPATIBILITY_MATRIX,
+    Substrates,
+)
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchK8sDeployedWithoutTrustError,
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
-from opensearch_single_kernel.core.models import UpgradeVersions
+from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.status import format_status
@@ -42,7 +49,6 @@ class UpgradesManagerBase(BaseManager):
         workload: BaseWorkload,
     ) -> None:
         super().__init__(state, workload, "upgrades_manager")
-        self.reconcile_compatibility_matrix()
 
     @property
     def current_versions(self) -> UpgradeVersions:
@@ -84,9 +90,15 @@ class UpgradesManagerBase(BaseManager):
             return False
 
     @property
-    @abc.abstractmethod
     def in_progress(self) -> bool:
-        """Whether upgrade is in progress"""
+        """Whether an upgrade is in progress"""
+        logger.debug(
+            f"{self._app_workload_container_version=} {self._unit_workload_container_versions=}"
+        )
+        return any(
+            version != self._app_workload_container_version
+            for version in self._unit_workload_container_versions.values()
+        )
 
     @property
     @abc.abstractmethod
@@ -96,6 +108,15 @@ class UpgradesManagerBase(BaseManager):
     @property
     def app_status(self) -> StatusObject | None:
         """App upgrade status"""
+        if self.state.substrate == Substrates.K8S:
+            try:
+                self.k8s_client.check_if_deployed_without_trust()
+            except OpenSearchK8sDeployedWithoutTrustError as e:
+                return format_status(
+                    UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
+                    {"charm_app": e.app_name},
+                )
+
         if not self.in_progress:
             return None
         if not self.is_compatible:
@@ -111,23 +132,15 @@ class UpgradesManagerBase(BaseManager):
         return UpgradesStatuses.UPGRADES_UPGRADING.value
 
     @abc.abstractmethod
-    def reconcile_partition(self, *, action_event: ops.ActionEvent | None = None) -> None:
+    def reconcile_partition(
+        self, *, action_event: ops.ActionEvent | None = None, force=False
+    ) -> None:
         """If ready, allow next unit to upgrade."""
 
     @property
     @abc.abstractmethod
-    def authorized(self) -> bool:
-        """Whether this unit is authorized to upgrade
-
-        Only applies to machine charm
-        """
-
-    @abc.abstractmethod
-    def upgrade_unit(self, *, snap: BaseWorkload) -> None:
-        """Upgrade this unit.
-
-        Only applies to machine charm
-        """
+    def unit_state(self) -> UnitUpgradesState | None:
+        """Calculate the upgrade state of current unit."""
 
     def pre_upgrade_check(self) -> None:
         """Check if this app is ready to upgrade
@@ -193,9 +206,68 @@ class UpgradesManagerBase(BaseManager):
 
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
+    def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
+        """Get the version of OpenSearch before override-version is run."""
+        if self.workload.is_service_started():
+            logger.debug("Service is started. The override version can not be run unless we stop.")
+            return None
+
+        # Regex to match the version to be overridden
+        regex = r"last written by OpenSearch version \[([0-9]+\.[0-9]+\.[0-9]+)\]"
+        # Exact error message when the version is already overridden
+        already_overridden_error = "so there is no need to override the version checks"
+
+        def check_output_for_version(output: str) -> poetry_version.Version | None:
+            """Check the output for the version to be overridden."""
+            version = re.search(regex, str(output))
+            if version:
+                return poetry_version.Version.parse(version.group(1))
+            return None
+
+        output = ""
+
+        try:
+            if self.state.substrate == Substrates.K8S:
+                output = self.workload.run_script(
+                    "bin/opensearch-node", "override-version", stdin="N\n"
+                )
+            else:
+                # Separated the command and passed 'N' via stdin to match the K8s behavior
+                output = self.workload.run_cmd("opensearch.node", "override-version", stdin="N\n")
+
+            # Optional: strip() the output if your framework doesn't do it automatically
+            if isinstance(output, str):
+                output = output.strip()
+
+            return check_output_for_version(str(output))
+        except OpenSearchCmdError as e:
+            # If the workload runner raises an exception upon the tool exiting/aborting,
+            # the output containing the version string is often trapped inside
+            # the exception message (stderr).
+            if self.state.substrate == Substrates.VM:
+                output = str(e.out)
+            else:
+                # On K8s the output is stderr so we get both stdout and stderr from pebble
+                output = str(e.err)
+
+            if version := check_output_for_version(str(output)):
+                return version
+
+            # Check if the error message indicates that the version is already overridden
+            if already_overridden_error in str(output):
+                logger.debug("Version is already overridden. No need to override again.")
+                return None
+
+            # If neither condition is met, re-raise the exception
+            logger.error(f"Unexpected error running override-version. Output: {output}")
+            raise e
+
     def override_version(self) -> None:
         """Override the version on disk to allow rollback to proceed."""
-        self.workload.run_cmd("opensearch.node", "override-version y")
+        if self.state.substrate == Substrates.K8S:
+            self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
+        else:
+            self.workload.run_cmd("opensearch.node", "override-version", stdin="y\n")
 
     @property
     def compatibility_matrix(self) -> dict[str, set[str]]:
@@ -206,7 +278,7 @@ class UpgradesManagerBase(BaseManager):
         except OpenSearchFileOperationError as e:
             logger.debug("Failed to read compatibility matrix file: %s", str(e))
             return {}
-        except (json.JSONDecodeError, TypeError) as e:
+        except json.JSONDecodeError as e:
             logger.error("Failed to decode compatibility matrix file: %s", str(e))
             return {}
 
@@ -232,40 +304,79 @@ class UpgradesManagerBase(BaseManager):
 
         return disk_matrix
 
+    def should_check_rollback(self) -> bool:
+        """Should we check if rollback is possible"""
+        # Basically We check if it is a rollback if:
+        # 1. We are in the highest numbered unit (i.e. the first unit to upgrade)
+        # 2. We are in the middle of an upgrade (i.e. not all units have upgraded)
+        # 3. The upgrade is compatible (i.e It is not a downgrade)
+        # 4. The version in application databag match the version in file
+        return (
+            self.in_progress
+            and self.state.server_upgrade.unit.name
+            == self.state.sorted_upgrades_units[0].unit.name
+            and self.is_compatible
+            and self.state.application_upgrade.versions.workload_parsed
+            == self.current_versions.workload_parsed
+        )
+
     @property
     def is_rollback(self) -> bool:
         """Whether this upgrade is a rollback"""
-        if not self.state.application_upgrade.versions or not (
-            unit_bag_version := self.state.server_upgrade.workload_version_parsed
-        ):
+        # First source of truth is the result of override-version command.
+        # If it raises an error, we check in the databag.
+        # The reason for this is that the databag can be out of sync because
+        # of errors in the upgrade process
+        if not self.should_check_rollback():
             return False
-        version_on_disk = self.current_versions.workload_parsed
-        logger.debug("Checking if rollback: %s > %s", str(unit_bag_version), str(version_on_disk))
-        return unit_bag_version > version_on_disk
+
+        logger.debug("Checking if it is a rollback")
+        try:
+            version_before_override = self.get_version_before_override()
+            return version_before_override is not None
+        except OpenSearchCmdError as e:
+            logger.debug(f"Failed to get version before override: {e}")
+            logger.debug("Reverting to check rollback based on databag in unit state")
+            if unit_databag := self.state.server_upgrade.workload_version_parsed:
+                return unit_databag > self.current_versions.workload_parsed
+            return False
 
     @property
     def can_rollback(self) -> bool:
         """Whether rollback is supported to previous versions"""
-        if not self.state.application_upgrade.versions or not (
-            unit_bag_version := self.state.server_upgrade.workload_version_parsed
-        ):
+        if not self.state.application_upgrade.versions:
+            return False
+
+        if not self.should_check_rollback():
+            return False
+        try:
+            version_before_override = self.get_version_before_override()
+        except OpenSearchCmdError as e:
+            logger.debug(f"Failed to get version before override: {e}")
+            logger.debug("Reverting to check rollback based on databag in unit state")
+            version_before_override = self.state.server_upgrade.workload_version_parsed
+
+        if not version_before_override:
+            logger.debug("Version before override not found")
             return False
 
         version_on_disk = self.current_versions.workload_parsed
         compatibility_matrix = self.reconcile_compatibility_matrix()
 
         if (
-            str(unit_bag_version) in compatibility_matrix
-            and str(version_on_disk) in compatibility_matrix[str(unit_bag_version)]
+            str(version_before_override) in compatibility_matrix
+            and str(version_on_disk) in compatibility_matrix[str(version_before_override)]
         ):
             logger.debug(
                 "Rollback supported from %s to %s",
-                unit_bag_version,
+                version_before_override,
                 version_on_disk,
             )
             return True
 
-        logger.warning("Rollback not supported from %s to %s", unit_bag_version, version_on_disk)
+        logger.warning(
+            "Rollback not supported from %s to %s", version_before_override, version_on_disk
+        )
         return False
 
     def update_grafana_dashboards_title(self, charm_revision: str) -> None:
@@ -286,3 +397,26 @@ class UpgradesManagerBase(BaseManager):
         self.workload.write_text(
             json.dumps(dashboard, indent=4), self.workload.paths.grafana_dashboard
         )
+
+    @abc.abstractmethod
+    def save_upgrades_versions(self) -> None:
+        """Save revision on first install"""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        """{Unit name: Kubernetes controller revision hash}
+
+        Even if the workload container version is the same, the workload will restart if the
+        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
+
+        Therefore, we must use the revision hash instead of the workload container version. (To
+        satisfy the requirement that if and only if this version changes, the workload will
+        restart.)
+        """
+
+    @property
+    @abc.abstractmethod
+    def _app_workload_container_version(self) -> str:
+        """App's Kubernetes controller revision hash"""

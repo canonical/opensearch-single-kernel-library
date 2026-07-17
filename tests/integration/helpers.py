@@ -11,7 +11,7 @@ import shlex
 import socket
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from hashlib import md5
 from types import SimpleNamespace
@@ -108,6 +108,9 @@ async def deploy_opensearch(  # noqa: C901
         deploy_kwargs["resources"] = resources
     if storage:
         deploy_kwargs["storage"] = storage
+    if substrate == "k8s":
+        # This is needed for upgrades
+        deploy_kwargs["trust"] = True
 
     await ops_test.model.deploy(charm, **deploy_kwargs)
 
@@ -488,6 +491,39 @@ async def wait_until_condition_on_units(
         raise
 
 
+async def wait_until_async_condition_on_units(
+    ops_test: OpsTest,
+    app: str,
+    condition: Callable[[list[Unit]], Awaitable[bool]],
+    timeout: int = 1200,
+) -> None:
+    """Block and wait until a condition is met on the units in `app` or timeout."""
+    try:
+        logger.info("\n\n\n")
+        logger.info(
+            subprocess.check_output(
+                f"juju status --model {ops_test.model.info.name}", shell=True
+            ).decode("utf-8")
+        )
+        for attempt in Retrying(stop=stop_after_delay(timeout), wait=wait_fixed(10)):
+            with attempt:
+                logger.info("Waiting for condition...")
+                units = await get_application_units(ops_test, app)
+                if await condition(units):
+                    logger.info(f"{now()} -- Waiting for condition: complete.\n\n\n")
+                    return
+                raise Exception
+    except RetryError:
+        logger.error("wait_until_condition_on_units -- Timed out!\n\n\n")
+        logger.info(
+            subprocess.check_output(
+                f"juju status --model {ops_test.model.info.name}", shell=True
+            ).decode("utf-8")
+        )
+        _dump_juju_logs(model=ops_test.model.info.name, lines=3000)
+        raise
+
+
 async def get_application_unit_ids_ips(ops_test: OpsTest, app: str = APP_NAME) -> Dict[int, str]:
     """List the units of an application by id and corresponding IP.
 
@@ -686,7 +722,9 @@ async def run_action(
     action = await ops_test.model.units.get(unit_name).run_action(action_name, **(params or {}))
     action = await action.wait()
 
-    return SimpleNamespace(status=action.status or "completed", response=action.results)
+    return SimpleNamespace(
+        status=action.status or "completed", response=action.results, message=action.message
+    )
 
 
 async def get_secrets(
@@ -1159,7 +1197,8 @@ async def get_unit_relation_data(
     target_unit_name: str,
     relation_name: str,
     key: str,
-    relation_id: str = None,
+    local_unit: bool = False,
+    relation_id: str | None = None,
 ) -> Optional[str]:
     """Get relation data for an application.
 
@@ -1192,6 +1231,11 @@ async def get_unit_relation_data(
         raise ValueError(
             f"no relation data could be grabbed on relation with endpoint {relation_name}"
         )
+    if local_unit:
+        # In this case we read our own data
+        for idx in range(len(relation_data)):
+            if "local-unit" in relation_data[idx] and relation_data[idx]["local-unit"]:
+                return relation_data[idx]["local-unit"].get("data", {}).get(key, {})
     # Consider the case we are dealing with subordinate charms, e.g. grafana-agent
     # The field "relation-units" is structured slightly different.
     for idx in range(len(relation_data)):
