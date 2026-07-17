@@ -574,11 +574,19 @@ class UpgradesStatuses(Enum):
     K8S_UPGRADES_ACTIVE = StatusObject(
         status="active",
         message="OpenSearch {workload_version} running; Charmed operator {charm_version}",
+        short_message="OpenSearch running",
+        check="Installed workload and charm versions.",
         approved_critical_component=True,
     )
     K8S_UPGRADES_ACTIVE_OUTDATED = StatusObject(
         status="active",
-        message="OpenSearch {workload_version} running (restart pending); Charmed operator {charm_version}",
+        message=(
+            "OpenSearch {workload_version} running (restart pending); "
+            "Charmed operator {charm_version}"
+        ),
+        short_message="Restart pending",
+        check="Kubernetes controller revision currency.",
+        action="Wait for the unit to restart on refresh, or force if stuck.",
         approved_critical_component=True,
     )
     UPGRADES_ACTIVE_OUTDATED = StatusObject(
@@ -617,6 +625,9 @@ class UpgradesStatuses(Enum):
     UPGRADES_UNHEALTHY = StatusObject(
         status="blocked",
         message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
+        short_message="Unhealthy after upgrade",
+        check="Unit health after upgrade.",
+        action="Rollback to previous revision with `juju refresh`.",
         approved_critical_component=True,
     )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
@@ -652,5 +663,8 @@ class UpgradesStatuses(Enum):
     K8S_DEPLOYED_WITHOUT_TRUST = StatusObject(
         status="blocked",
         message="Run `juju trust {charm_app} --scope=cluster`. Needed for in-place refreshes",
+        short_message="Missing juju trust",
+        check="Kubernetes app trusted for cluster-scoped refresh ops.",
+        action="Run `juju trust {charm_app} --scope=cluster`.",
         approved_critical_component=True,
     )

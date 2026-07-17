@@ -118,3 +118,20 @@ class UpgradeServerState(RelationState):
     def unit_number(self) -> int:
         """Get the unit number."""
         return int(self.unit.name.split("/")[-1])
+
+    @property
+    def precheck_failed_message(self) -> str | None:
+        """Last upgrade precheck failure message for this unit, if any."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("precheck_failed_message") or None
+
+    @precheck_failed_message.setter
+    def precheck_failed_message(self, value: str | None) -> None:
+        """Set or clear the last upgrade precheck failure message."""
+        if not self.relation:
+            return
+        if value:
+            self.relation.data[self.unit].update({"precheck_failed_message": value})
+        else:
+            self.relation.data[self.unit].pop("precheck_failed_message", None)

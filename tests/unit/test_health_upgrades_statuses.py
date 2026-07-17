@@ -40,15 +40,23 @@ class _UpgradesManager(UpgradesManagerBase):
     def app_status(self):
         return self._app_status
 
-    def reconcile_partition(self, *, action_event=None) -> None:
+    @property
+    def unit_state(self):
+        return None
+
+    def reconcile_partition(self, *, action_event=None, force=False) -> None:
+        return None
+
+    def save_upgrades_versions(self) -> None:
         return None
 
     @property
-    def authorized(self) -> bool:
-        return True
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        return {}
 
-    def upgrade_unit(self, *, snap) -> None:
-        return None
+    @property
+    def _app_workload_container_version(self) -> str:
+        return ""
 
 
 def test_health_red_app_status_merges_running():
@@ -102,3 +110,35 @@ def test_upgrades_app_incompatible():
     statuses = mgr.get_statuses("app")
 
     assert UpgradesStatuses.UPGRADES_INCOMPATIBLE.value in statuses
+
+
+def test_upgrades_vm_precheck_failed_message():
+    from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
+    from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
+
+    state = MagicMock()
+    state.upgrade_relation = object()
+    state.server_upgrade.precheck_failed_message = "Cluster health is yellow"
+    state.server_upgrade.snap_revision = "old-revision"
+
+    mgr = UpgradesManagerVM.__new__(UpgradesManagerVM)
+    mgr.state = state
+    mgr.workload = MagicMock()
+    mgr.name = "upgrades_manager"
+
+    status, params = mgr.unit_status
+    assert status == UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value
+    assert params == {"message": "Cluster health is yellow"}
+
+    # Once upgraded, precheck flag must not shadow active status
+    state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+    state.server_upgrade.workload_version = "2.0.0"
+    type(mgr).in_progress = property(lambda self: True)  # type: ignore[method-assign]
+    type(mgr).is_rollback = property(lambda self: False)  # type: ignore[method-assign]
+    type(mgr).current_versions = property(  # type: ignore[method-assign]
+        lambda self: SimpleNamespace(charm="1", workload="2.0.0")
+    )
+
+    status, params = mgr.unit_status
+    assert status == UpgradesStatuses.UPGRADES_ACTIVE.value
+    assert params is not None
