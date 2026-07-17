@@ -368,7 +368,7 @@ def _is_related_with(ops_test: OpsTest, app_name: str, target_app_name: str) -> 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_small_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
+    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str, substrate
 ) -> None:
     """Build and deploy an HA cluster of OpenSearch and corresponding S3/Azure integration."""
     if await app_name(ops_test):
@@ -400,6 +400,7 @@ async def test_small_deployment_build_and_deploy(
             series=series,
             config=CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
 
@@ -420,7 +421,7 @@ async def test_small_deployment_build_and_deploy(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str
+    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str, substrate
 ) -> None:
     """Build and deploy a large cluster (main/failover orchestrators + data.hot node).
 
@@ -477,6 +478,7 @@ async def test_large_deployment_build_and_deploy(
             series=series,
             config=main_orchestrator_conf | CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -485,6 +487,7 @@ async def test_large_deployment_build_and_deploy(
             series=series,
             config=failover_orchestrator_conf | CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -493,6 +496,7 @@ async def test_large_deployment_build_and_deploy(
             series=series,
             config=data_hot_conf | CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
 
@@ -835,6 +839,7 @@ async def test_restore_to_new_cluster(
     cloud_name: str,
     deploy_type: str,
     force_clear_cwrites_index,
+    substrate: str,
 ) -> None:
     """Tear down cluster, redeploy clean, then restore prior backups and validate.
 
@@ -878,6 +883,7 @@ async def test_restore_to_new_cluster(
             config=CONFIG_OPTS,
             application_name=app,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
 
@@ -1135,7 +1141,7 @@ async def _ensure_only_gcs_integrator_related(ops_test: OpsTest, app: str) -> No
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_deploy_and_test_status(
-    ops_test: OpsTest, charm, series, charm_resources
+    ops_test: OpsTest, charm, series, charm_resources, substrate
 ) -> None:
     """Deploy HA cluster + s3-integrator (credentials set per scenario later)."""
     if await app_name(ops_test):
@@ -1155,6 +1161,7 @@ async def test_build_deploy_and_test_status(
             config=CONFIG_OPTS,
             application_name=APP_NAME,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
 

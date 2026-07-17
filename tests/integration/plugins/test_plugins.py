@@ -301,6 +301,7 @@ async def test_build_and_deploy_small_deployment(
             config={"profile": "production"},
             resources=charm_resources,
             storage=opensearch_storage,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
