@@ -6,6 +6,10 @@
 
 import logging
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from overrides import override
+
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_ROLE,
@@ -21,6 +25,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
     InternalUsersStatuses,
 )
 from opensearch_single_kernel.core.state import ClusterState
@@ -31,6 +36,7 @@ from opensearch_single_kernel.utils.secrets import (
     hash_key,
     password_key,
 )
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -45,6 +51,21 @@ class InternalUsersManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
+
+    @override
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Return cached running statuses only.
+
+        ``ADMIN_USER_INIT_IN_PROGRESS`` is a running (blocking) status set via
+        ``StatusHandler.set_running_status`` during admin init; it must not be
+        re-derived here (DA161: get_statuses excludes blocking running statuses).
+        ``recompute`` is accepted for protocol compatibility.
+        """
+        return running_statuses(self.state.statuses, scope, self.name) or [
+            GeneralStatuses.ACTIVE_IDLE.value
+        ]
 
     def put_or_update_internal_user_leader(  # noqa: C901
         self,
