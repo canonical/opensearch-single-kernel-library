@@ -27,7 +27,7 @@ from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesSt
 from opensearch_single_kernel.core.models import UpgradeVersions
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -183,15 +183,22 @@ class UpgradesManagerBase(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Compute upgrade statuses pure from upgrade state.
+
+        ``recompute`` is accepted for protocol compatibility.
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
-            return [format_status(unit_status, unit_dynamic_params)]
+            formatted = format_status(unit_status, unit_dynamic_params)
+            if formatted not in status_list:
+                status_list.append(formatted)
 
-        if scope == "app" and (status := self.app_status):
-            return [status]
+        if scope == "app" and (status := self.app_status) and status not in status_list:
+            status_list.append(status)
 
-        return [GeneralStatuses.ACTIVE_IDLE.value]
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
     def override_version(self) -> None:
         """Override the version on disk to allow rollback to proceed."""

@@ -26,7 +26,7 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -115,8 +115,13 @@ class HealthManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = []
+        """Compute health statuses from OpenSearch health API (read-only).
+
+        Merges running statuses from cache. ``recompute=True`` allows waiting
+        for green briefly (expensive path for update-status / status-detail).
+        Default collect-status uses a non-blocking health check.
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         status = self.get(wait_for_green_first=recompute)
 
