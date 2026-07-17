@@ -65,6 +65,7 @@ async def test_build_and_deploy(
             series=series,
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
     )
     await ops_test.model.integrate(MAIN_APP, TLS_CERTIFICATES_APP_NAME)
@@ -89,6 +90,7 @@ async def test_build_and_deploy(
             series=series,
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         )
 
         logger.info("Consuming offers in failover model...")
@@ -121,6 +123,7 @@ async def test_build_and_deploy(
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         )
 
         consume_failover = (

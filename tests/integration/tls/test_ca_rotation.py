@@ -99,7 +99,10 @@ async def test_build_large_deployment(
     ops_test: OpsTest, charm, series, substrate, charm_resources
 ) -> None:
     """Setup a large deployments cluster."""
-    os_deploy_kwargs = {"resources": charm_resources} if substrate == "k8s" else {}
+    if substrate == "k8s":
+        os_deploy_kwargs = {"resources": charm_resources, "trust": True}
+    else:
+        os_deploy_kwargs = {}
     # deploy new cluster
     await asyncio.gather(
         ops_test.model.deploy(

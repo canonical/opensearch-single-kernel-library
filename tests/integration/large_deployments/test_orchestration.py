@@ -67,6 +67,7 @@ async def test_build_and_deploy(
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
             storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -77,6 +78,7 @@ async def test_build_and_deploy(
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
             | CONFIG_OPTS,
             storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -87,6 +89,7 @@ async def test_build_and_deploy(
             config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
             | CONFIG_OPTS,
             storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -97,6 +100,7 @@ async def test_build_and_deploy(
             config={"cluster_name": CLUSTER_NAME, "roles": "data", "init_hold": True}
             | CONFIG_OPTS,
             storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
+            trust=substrate == "k8s",
         ),
     )
     for app in APP_UNITS:
