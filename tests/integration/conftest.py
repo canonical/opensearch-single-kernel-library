@@ -70,11 +70,17 @@ def series(ubuntu_base) -> str:
 
 
 @pytest.fixture
-def charm(substrate: Substrate, opensearch_base_path: str, ubuntu_base: str) -> str:
+def charm(substrate: Substrate, opensearch_base_path: Path, ubuntu_base: str) -> str:
     """The OpenSearch charm path, to deploy charms, according to the substrate."""
     if substrate == "k8s":
-        return f"./{opensearch_base_path}/opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm"
-    return f"./{opensearch_base_path}/opensearch_ubuntu@{ubuntu_base}-amd64.charm"
+        return str(opensearch_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
+    return str(opensearch_base_path / f"opensearch_ubuntu@{ubuntu_base}-amd64.charm")
+
+
+@pytest.fixture
+def charm_version_minus_1(opensearch_minus_1_base_path: Path, ubuntu_base: str) -> str:
+    """The OpenSearch charm path for version n-1, to deploy charms, according to the substrate."""
+    return str(opensearch_minus_1_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
 
 
 @pytest.fixture

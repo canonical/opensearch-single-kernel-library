@@ -12,16 +12,20 @@ import pytest
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
+from opensearch_single_kernel.common.constants import UPGRADE_RELATION
 from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
 from tests.integration.conftest import CONFIG_OPTS
+from tests.integration.models import Unit
 
 from ..helpers import (
     EmptyBlockedStatus,
     cluster_health,
     get_application_units,
+    get_unit_relation_data,
     http_request,
     run_action,
     wait_until,
+    wait_until_async_condition_on_units,
     wait_until_condition_on_units,
 )
 
@@ -33,13 +37,19 @@ TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VERSION_N = "2.19.4"
-VERSION_N_MINUS_1 = "2.18.0"
-VERSION_N_MINUS_2 = "2.17.0"
+VM_VERSION_N = "2.19.4"
+VM_VERSION_N_MINUS_1 = "2.18.0"
+VM_VERSION_N_MINUS_2 = "2.17.0"
 
-VERSION_TO_REVISION = {
-    VERSION_N_MINUS_2: {"jammy": 168, "noble": 206},
-    VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
+VM_VERSION_TO_REVISION = {
+    VM_VERSION_N_MINUS_2: {"jammy": 168, "noble": 206},
+    VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
+}
+
+K8S_VERSION_N = "2.19.5"
+K8S_VERSION_N_MINUS_1 = "2.19.4"
+K8S_VERSION_TO_RESOURCE = {
+    K8S_VERSION_N_MINUS_1: {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
 }
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
@@ -49,10 +59,10 @@ UPGRADE_PARAMS = [
         version,
         id=FROM_VERSION_PREFIX.format(version),
         marks=pytest.mark.group(
-            id="two_version_upgrade" if version == VERSION_N_MINUS_2 else "one_version_upgrade"
+            id="two_version_upgrade" if version == VM_VERSION_N_MINUS_2 else "one_version_upgrade"
         ),
     )
-    for version in VERSION_TO_REVISION.keys()
+    for version in VM_VERSION_TO_REVISION.keys()
 ]
 
 logger = logging.getLogger(__name__)
@@ -72,6 +82,7 @@ def refresh(
     channel: Optional[str] = None,
     path: Optional[str] = None,
     config: Optional[dict[str, str]] = None,
+    resources: Optional[dict[str, str]] = None,
 ) -> None:
     # due to: https://github.com/juju/python-libjuju/issues/1057
     # the following call does not work:
@@ -90,6 +101,9 @@ def refresh(
         args.append(f"--channel={channel}")
     if path:
         args.append(f"--path={path}")
+    if resources:
+        for resource_name, resource_path in resources.items():
+            args.extend(["--resource", f"{resource_name}={resource_path}"])
     if config:
         for key, val in config.items():
             args.extend(["--config", f"{key}={val}"])
@@ -102,36 +116,40 @@ def refresh(
             subprocess.check_output(cmd)
 
 
-def get_version_on_unit(unit: str, model: str):
+def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
-    # opensearch.opensearch-bin not exposed in older snap revisions
-    cmd = [
-        "juju",
-        "exec",
-        "--model",
-        model,
-        "--unit",
-        unit,
-        "--",
-        "sudo",
-        "snap",
-        "run",
-        "--shell",
-        "opensearch.daemon",
-        "-c",
-        "$OPENSEARCH_BIN/opensearch --version",
-    ]
-    output = subprocess.check_output(cmd, text=True)
+    if substrate == "k8s":
+        cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+    else:
+        # opensearch.opensearch-bin not exposed in older snap revisions
+        cmd = [
+            "juju",
+            "exec",
+            "--model",
+            model,
+            "--unit",
+            unit,
+            "--",
+            "sudo",
+            "snap",
+            "run",
+            "--shell",
+            "opensearch.daemon",
+            "-c",
+            "$OPENSEARCH_BIN/opensearch --version",
+        ]
+        output = subprocess.check_output(cmd, text=True)
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 
 
-async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str):
+async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str, substrate):
     """Ensures all units in given app are running expected OpenSearch version"""
     logger.info("Ensuring units in '%s' running version %s", app, expected_version)
 
     units = [f"{app}/{unit.id}" for unit in await get_application_units(ops_test, app)]
-    versions = [get_version_on_unit(unit, ops_test.model.info.name) for unit in units]
+    versions = [get_version_on_unit(unit, ops_test.model.info.name, substrate) for unit in units]
     assert all(
         version == expected_version for version in versions
     ), f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
@@ -187,21 +205,62 @@ async def assert_upgrade_to_revision(
         logger.info("Upgrade of '%s' completed", app)
 
 
+async def wait_until_upgrade_state_healthy(ops_test: OpsTest, app: str):
+    """Waits until the given unit is healthy after an upgrade"""
+
+    async def is_highest_order_unit_healthy(units: list[Unit]) -> bool:
+        highest_unit = sorted(units, key=lambda u: u.id)[-1]
+        logger.info("Waiting for unit '%s' to be healthy...", highest_unit.name)
+        # Check relation data
+        relation_data = await get_unit_relation_data(
+            ops_test,
+            unit_name=highest_unit.short_name.replace("-", "/"),
+            target_unit_name=highest_unit.short_name.replace("-", "/"),
+            relation_name=UPGRADE_RELATION,
+            local_unit=True,
+            key="state",
+        )
+        return relation_data == "healthy"
+
+    await wait_until_async_condition_on_units(
+        ops_test,
+        app=app,
+        condition=is_highest_order_unit_healthy,
+        timeout=TIMEOUT,
+    )
+
+
 async def assert_upgrade_to_local(
-    ops_test: OpsTest, app: str, charm: str, config: dict[str, str] = {}
+    ops_test: OpsTest,
+    app: str,
+    charm: str,
+    substrate: str,
+    charm_resources: dict[str, str] | None = None,
+    config: dict[str, str] = {},
 ):
     """Upgrades to local charm"""
     units = await get_application_units(ops_test, app)
     leader_id = [u.id for u in units if u.is_leader][0]
 
     # run pre-upgrade-check action on leader
-    action = await run_action(ops_test, leader_id, "pre-upgrade-check", app=app)
-    logger.info("pre-upgrade-check: %s", action)
-    assert action.status == "completed"
+    action_name = "pre-upgrade-check"
+    for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+        with attempt:
+            action = await run_action(ops_test, leader_id, action_name, app=app)
+            logger.info("%s: %s", action_name, action)
+            if action.status != "completed":
+                raise Exception(f"Action {action_name} failed with status: {action.status}")
+
+            assert action.status == "completed"
 
     async with ops_test.fast_forward(fast_interval=FAST_INTERVAL):
         logger.info("Refreshing '%s' local charm", app)
-        refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
+        if substrate == "k8s":
+            refresh(
+                ops_test, app, path=charm, config=CONFIG_OPTS | config, resources=charm_resources
+            )
+        else:
+            refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
 
         await wait_until(
             ops_test,
@@ -214,10 +273,32 @@ async def assert_upgrade_to_local(
             idle_period=IDLE_PERIOD,
         )
 
+        await wait_until_upgrade_state_healthy(ops_test, app)
         # run resume-upgrade action on leader
-        action = await run_action(ops_test, leader_id, "resume-upgrade", app=app)
-        logger.info("resume-upgrade: %s", action)
-        assert action.status == "completed"
+        action_name = "resume-upgrade"
+        for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+            with attempt:
+                action = await run_action(ops_test, leader_id, action_name, app=app)
+                logger.info("%s: %s", action_name, action)
+                # if the cluster is not healthy, the action may fail, so we retry
+                if (
+                    action.status == "failed"
+                    and action.message
+                    and "unhealthy" in action.message.lower()
+                ):
+                    raise Exception(f"Action {action_name} failed due to unhealthy cluster")
+
+                # If leader is second unit to upgrade, the task would be terminated
+                # Since unit will restart
+                second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
+                if substrate == "k8s" and second_unit.id == leader_id:
+                    logger.info(
+                        "Unit '%s' is leader, action may be terminated due to unit restart."
+                        " Skipping status check.",
+                        second_unit,
+                    )
+                else:
+                    assert action.status == "completed"
 
         await wait_until(
             ops_test,

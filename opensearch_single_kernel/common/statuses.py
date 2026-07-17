@@ -571,6 +571,16 @@ class UpgradesStatuses(Enum):
         check="Installed workload and charm versions.",
         approved_critical_component=True,
     )
+    K8S_UPGRADES_ACTIVE = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running; Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
+    K8S_UPGRADES_ACTIVE_OUTDATED = StatusObject(
+        status="active",
+        message="OpenSearch {workload_version} running (restart pending); Charmed operator {charm_version}",
+        approved_critical_component=True,
+    )
     UPGRADES_ACTIVE_OUTDATED = StatusObject(
         status="active",
         message=(
@@ -590,7 +600,7 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
-        message="Upgrading. Verify highest unit is healthy & run `resume upgrade action.",
+        message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
         short_message="Resume upgrade needed",
         check="User confirmation to resume rolling upgrade.",
         action="Verify the highest unit is healthy, then run resume-upgrade.",
@@ -604,9 +614,14 @@ class UpgradesStatuses(Enum):
         action="Rollback with `juju refresh` to the previous revision.",
         approved_critical_component=True,
     )
+    UPGRADES_UNHEALTHY = StatusObject(
+        status="blocked",
+        message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
+        approved_critical_component=True,
+    )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
         status="blocked",
-        message="Pre upgrade check failed: please check the logs for more details.",
+        message="Pre upgrade check failed: {message}",
         short_message="Pre-upgrade check failed",
         check="Pre-upgrade health and topology checks.",
         action="Fix issues in the logs, then re-run pre-upgrade-check.",
@@ -632,5 +647,10 @@ class UpgradesStatuses(Enum):
         short_message="Rollback incompatible",
         check="Rollback compatibility.",
         action="Run force-refresh-start with check-compatibility=false if you accept risk.",
+        approved_critical_component=True,
+    )
+    K8S_DEPLOYED_WITHOUT_TRUST = StatusObject(
+        status="blocked",
+        message="Run `juju trust {charm_app} --scope=cluster`. Needed for in-place refreshes",
         approved_critical_component=True,
     )

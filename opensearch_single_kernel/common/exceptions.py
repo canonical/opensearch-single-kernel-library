@@ -157,3 +157,21 @@ class OpenSearchLockError(OpenSearchError):
 
 class OpenSearchUpgradePrecheckError(OpenSearchError):
     """App is not ready to upgrade"""
+
+
+class OpenSearchK8sDeployedWithoutTrustError(OpenSearchError):
+    """Exception thrown when the charm is deployed on k8s without the --trust flag."""
+
+    def __init__(self, *, app_name: str):
+        self.app_name = app_name
+        super().__init__(
+            f"Run `juju trust {app_name} --scope=cluster` and `juju resolve` for each unit (or remove & re-deploy {app_name} with `--trust`)"
+        )
+
+
+class OpenSearchReconcilePartitionError(OpenSearchError):
+    """Exception thrown when there is an error reconciling the partition during a k8s upgrade."""
+
+    def __init__(self, *, message: str):
+        self.message = message
+        super().__init__(message)
