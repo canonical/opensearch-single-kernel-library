@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
-from opensearch_single_kernel.common.statuses import JwtStatuses
 from opensearch_single_kernel.core.models import DeploymentType
 
 if TYPE_CHECKING:
@@ -50,18 +49,18 @@ class JWTEventsHandler(Object):
         )
 
     def _on_jwt_relation_created(self, _: RelationCreatedEvent) -> None:
-        """Handle relation creation."""
+        """Handle relation creation.
+
+        JWT statuses (invalid on non-main, invalid auth config) are pure-computed by
+        ``ClusterManager.get_statuses``; no imperative status writes here.
+        """
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # in large deployments, JWT configuration must only be handled by the main orchestrator
-            # this is a safeguard to avoid different sources for applying security configuration
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    JwtStatuses.JWT_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
+            # Large deployments: only main should apply JWT security configuration.
+            logger.warning(
+                "JWT relation created on non-main orchestrator; status is derived purely."
+            )
 
     def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle changed relation data."""
@@ -76,17 +75,6 @@ class JWTEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            if self.charm.unit.is_leader():
-                self.charm.state.remove_status_if_present(
-                    JwtStatuses.JWT_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
-                self.charm.state.remove_status_if_present(
-                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
             return
 
         del self.charm.state.server.jwt_auth_configuration
@@ -110,17 +98,7 @@ class JWTEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    JwtStatuses.JWT_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
-                self.charm.state.remove_status_if_present(
-                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
+            # Status computed by ClusterManager.get_statuses
             return
 
         if not self.charm.state.application.is_security_index_initialised:
@@ -135,20 +113,7 @@ class JWTEventsHandler(Object):
         except ValidationError as e:
             # safety mechanism, this should not happen; config is validated on the jwt-integrator
             logger.error(f"Validation failed for JWT authentication config: {e}")
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
             return
-
-        if self.charm.unit.is_leader():
-            self.charm.state.remove_status_if_present(
-                JwtStatuses.JWT_AUTH_CONFIG_INVALID.value,
-                "app",
-                self.charm.cluster_manager.name,
-            )
 
         self.charm.config_manager.update_security_config()
         logger.info("Updated JWT authentication configuration")
