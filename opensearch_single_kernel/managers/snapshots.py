@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     S3_CREDENTIALS,
     S3_RELATION,
     STORE_PASSWORD,
+    DeploymentType,
     ObjectStorageType,
     Scope,
     Substrates,
@@ -679,17 +680,29 @@ class SnapshotsManager(BaseManager):
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
+        if scope != "app":
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        deployment_desc = self.state.application.deployment_desc
+        if not deployment_desc:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
         pcluster_types = {
             ObjectStorageType.S3_PCLUSTER,
             ObjectStorageType.AZURE_PCLUSTER,
             ObjectStorageType.GCS_PCLUSTER,
         }
-        if (
-            scope == "app"
-            and self.state.application.deployment_desc
-            and (object_storage_type := self.state.storage_type)
-            and object_storage_type not in pcluster_types
+        object_storage_type = self.state.storage_type
+
+        # Non-main apps in multi-app topologies must not take direct backup relations.
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
+            self.state.is_peer_cluster_consumer() or self.state.is_peer_cluster_provider()
         ):
+            if object_storage_type and object_storage_type not in pcluster_types:
+                status_list.append(SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value)
+                return status_list
+
+        if object_storage_type and object_storage_type not in pcluster_types:
             if object_storage_type == ObjectStorageType.CONFLICT:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value)
                 return status_list
@@ -720,7 +733,7 @@ class SnapshotsManager(BaseManager):
                 status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
                 return status_list
 
-        if scope == "app" and (missing_relations := self.missing_backup_relations()):
+        if missing_relations := self.missing_backup_relations():
             status_list.append(
                 format_status(
                     PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,

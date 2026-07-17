@@ -107,17 +107,12 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
 
-        # block non-main orchestrators only when they are in a multi-app topology.
+        # Non-main apps in multi-app topologies must not take direct backup relations.
+        # Status pure-computed by SnapshotsManager.get_statuses.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
             self.charm.state.is_peer_cluster_consumer()
             or self.charm.state.is_peer_cluster_provider()
         ):
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value,
-                    scope="app",
-                    component=self.charm.snapshots_manager.name,
-                )
             return
 
         if not (object_storage_type := self.charm.state.storage_type):
@@ -125,19 +120,8 @@ class SnapshotsEventsHandler(Object):
             return
 
         if object_storage_type == ObjectStorageType.CONFLICT:
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             event.defer()
             return
-
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
 
         # Get connection info
         try:
@@ -150,11 +134,6 @@ class SnapshotsEventsHandler(Object):
                     storage_config_from_connection_info(object_storage_type, connection_info)
                 )
             ):
-                self.charm.state.add_status_if_not_present(
-                    SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                    "app",
-                    self.charm.snapshots_manager.name,
-                )
                 return
 
             self.charm.snapshots_manager.validate_storage_config(
@@ -162,11 +141,6 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchInvalidStorageTypeError as e:
             logger.error(str(e))
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchObjectStorageConfigValidationError as e:
             # Get config using the connection info
@@ -175,40 +149,14 @@ class SnapshotsEventsHandler(Object):
                 object_storage_type,
                 e.error,
             )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchBackupRelationDataIncompleteError:
             # Validate storage config
             logger.warning("No %s object storage configuration.", object_storage_type)
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
-
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
 
         # Update backup credentials
         # Catch file operation exceptions
@@ -293,16 +241,6 @@ class SnapshotsEventsHandler(Object):
 
         # Clear backup related statuses
         self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
             SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
             "app",
             self.charm.snapshots_manager.name,
@@ -351,11 +289,6 @@ class SnapshotsEventsHandler(Object):
             "app",
             self.charm.snapshots_manager.name,
         )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
 
         self.charm.reload_keystore_event.emit()
 
@@ -376,11 +309,6 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchInvalidStorageTypeError as e:
             logger.error(str(e))
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
 
         # Get config using the connection info
@@ -391,11 +319,6 @@ class SnapshotsEventsHandler(Object):
         ):
             logger.warning(
                 "Object storage configuration not ready for backup credentials verification."
-            )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
             )
             return
 
