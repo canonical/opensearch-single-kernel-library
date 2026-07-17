@@ -56,7 +56,7 @@ from opensearch_single_kernel.utils.certificates import (
 from opensearch_single_kernel.utils.helpers import (
     generate_password,
 )
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -855,8 +855,11 @@ class TlsManager(BaseManager):
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = []
+        """Compute TLS statuses pure from state / cert store (no databag writes).
+
+        ``recompute`` is accepted for protocol compatibility.
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
@@ -865,7 +868,7 @@ class TlsManager(BaseManager):
                 and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
-            return status_list
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         # Means the unit is  being terminated
         if not self.state.peer_relation:
@@ -894,7 +897,7 @@ class TlsManager(BaseManager):
                 if not self.all_tls_resources_stored(reconcile=False):
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
-            if not self.state.tls_relation and (certs := self.check_certs_expiration()):
+            if certs := self.check_certs_expiration():
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
                     format_status(
@@ -907,11 +910,9 @@ class TlsManager(BaseManager):
             if (
                 deployment_desc := self.state.application.deployment_desc
             ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-                if not self.all_tls_resources_stored():
+                if not self.all_tls_resources_stored(reconcile=False):
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
-            # Clean up any lingering errors
-            self.cleanup_peer_cluster_error_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 if self.state.application.relation_data.get(
                     f"error_from_tls-{peer_cluster.relation.id}"

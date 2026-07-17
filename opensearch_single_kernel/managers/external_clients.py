@@ -37,7 +37,7 @@ from opensearch_single_kernel.utils.helpers import (
     generate_hashed_password,
     validate_index_name,
 )
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -282,13 +282,13 @@ class ExternalClientsManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+        """Compute external-client statuses pure from state / read-only checks.
 
-        status_list: list[StatusObject] = []
+        Running statuses (e.g. NEW_INDEX_REQUESTED) come from
+        ``set_running_status`` and are merged from the cache.
+        ``recompute`` is accepted for protocol compatibility.
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit":
             for relation in self.state.external_client_relations:
