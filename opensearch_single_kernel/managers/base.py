@@ -15,6 +15,7 @@ from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Subs
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -117,10 +118,33 @@ class BaseManager(ManagerStatusProtocol):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Return the manager's statuses for advanced-status display.
+
+        Contract (Valkey-style pure-compute, DA161):
+        - Prefer deriving non-running statuses from cluster state (and optional
+          read-only queries). Do not mutate OpenSearch, relations, or databags
+          other than via explicit business-logic paths outside this method.
+        - Merge cached running statuses (``running="blocking"|"async"``) so
+          mid-hook / background operations can survive across events. Use
+          :func:`~opensearch_single_kernel.utils.status.running_statuses` for
+          that merge in overrides.
+        - Never invent ``ACTIVE_IDLE`` by discarding non-running statuses that
+          were not recomputed from state.
+        - ``recompute`` may allow expensive read-only probes in subclasses.
+
+        Base implementation notes:
+        - ``recompute=False`` (collect-status path): return the full status
+          cache so dual-path managers still surface event-written statuses
+          until pure-compute overrides land.
+        - ``recompute=True``: ``StatusHandler`` clears the component cache
+          before calling this. Return remaining running statuses if any, else
+          ``ACTIVE_IDLE``. Subclasses must override and pure-compute all
+          non-running statuses so recompute repopulates the cache correctly.
+        """
         if not recompute:
             return self.state.statuses.get(scope, self.name).root or [
                 GeneralStatuses.ACTIVE_IDLE.value
             ]
 
-        return [GeneralStatuses.ACTIVE_IDLE.value]
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
