@@ -28,6 +28,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
 )
+from opensearch_single_kernel.common.statuses import NotificationsStatuses
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     DEFAULT_RELATION_NAME as SMTP_RELATION,
 )
@@ -115,6 +116,9 @@ class NotificationsEvents(Object):
                     config.smtp_account_id,
                     str(e),
                 )
+                self._set_smtp_configuration_error(
+                    self.charm.notifications_manager.name, event.relation.id
+                )
                 event.defer()
                 return
 
@@ -128,6 +132,9 @@ class NotificationsEvents(Object):
                 )
             except OpenSearchCmdError as e:
                 logger.error("Failed to write SMTP credentials to keystore: %s", e)
+                self._set_smtp_configuration_error(
+                    self.charm.notifications_manager.name, event.relation.id
+                )
                 event.defer()
                 return
 
@@ -166,8 +173,15 @@ class NotificationsEvents(Object):
                     config.group_id,
                     str(e),
                 )
+                self._set_smtp_configuration_error(
+                    self.charm.notifications_manager.name, event.relation.id
+                )
                 event.defer()
                 return
+
+        self._clear_smtp_configuration_error(
+            self.charm.notifications_manager.name, event.relation.id
+        )
 
         # propagate to subclusters if this is the main provider
         if self.charm.state.is_peer_cluster_provider():
@@ -231,6 +245,26 @@ class NotificationsEvents(Object):
         if self.charm.state.is_peer_cluster_provider():
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
+
+    def _set_smtp_configuration_error(self, component: str, relation_id: int) -> None:
+        """Cache blocked status for a failed SMTP apply (apply path only)."""
+        self.charm.state.add_status_if_not_present(
+            NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+            "app",
+            component,
+            dynamic_params={"id": relation_id},
+            search_parameters={"id": relation_id},
+        )
+
+    def _clear_smtp_configuration_error(self, component: str, relation_id: int) -> None:
+        """Clear blocked status after a successful SMTP apply."""
+        self.charm.state.remove_status_if_present(
+            NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
+            "app",
+            component,
+            interpolated=True,
+            search_parameters={"id": relation_id},
+        )
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Handles smtp secrets changes (support multiple smtp relations).
