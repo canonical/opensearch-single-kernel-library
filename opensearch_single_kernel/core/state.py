@@ -122,6 +122,7 @@ class ClusterState(Object):
         super().__init__(charm, "cluster_state")
         self.config = charm.config
         self.substrate = substrate
+        logger.error("ClusterState initialized with substrate: %s", self.substrate)
 
         # Secrets  FIXME: Handle this separately.
         self.secrets = OpenSearchSecrets(charm, peer_relation=PEER_RELATION)
