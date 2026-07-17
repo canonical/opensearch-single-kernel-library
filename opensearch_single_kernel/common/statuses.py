@@ -176,6 +176,10 @@ class PeerClusterStatuses(Enum):
     PEER_CLUSTER_WRONG_ROLES_PROVIDED = StatusObject(
         status="blocked", message="Cannot start cluster with current set of roles."
     )
+    INVALID_CM_AND_VOTING_ONLY_ROLES = StatusObject(
+        status="blocked",
+        message="cluster_manager and voting_only roles cannot be both set on the same node.",
+    )
     CM_ROLE_REMOVAL_FORBIDDEN = StatusObject(
         status="blocked",
         message="Removal of cluster_manager role from deployment not allowed.",

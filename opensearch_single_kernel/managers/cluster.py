@@ -63,7 +63,7 @@ from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     deployment_type,
 )
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -905,13 +905,18 @@ class ClusterManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        current_status_list = self.state.statuses.get(scope, self.name).root
+        """Compute the manager's statuses (pure for app/unit role and deployment state).
 
-        status_list: list[StatusObject] = []
+        ``recompute`` is accepted for protocol compatibility. Non-running
+        statuses are derived from charm config and deployment description so
+        they survive ``update-status`` / status-detail recompute (e.g. DPE #75).
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+        cached = self.state.statuses.get(scope, self.name).root
 
         if scope == "unit":
-            if GeneralStatuses.SERVICE_START_ERROR.value in current_status_list:
+            # Start errors are event-set; keep them until life-cycle clears them.
+            if GeneralStatuses.SERVICE_START_ERROR.value in cached:
                 status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
             self._add_unit_statuses(status_list)
 
@@ -931,7 +936,7 @@ class ClusterManager(BaseManager):
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
-    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
+    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
         if not (deployment_desc := self.state.application.deployment_desc):
             return None
@@ -946,10 +951,28 @@ class ClusterManager(BaseManager):
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
+        # Pure validation of current juju `roles` config (DPE #75).
+        user_roles = self._user_config().roles
+        if "cluster_manager" in user_roles and "voting_only" in user_roles:
+            status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
+
+        # Cheap pure removal checks against last applied roles (no HTTP).
+        prev_roles = set(deployment_desc.config.roles or [])
+        new_roles = set(user_roles)
+        if user_roles and prev_roles != new_roles:
+            if "cluster_manager" in prev_roles and "cluster_manager" not in new_roles:
+                status_list.append(PeerClusterStatuses.CM_ROLE_REMOVAL_FORBIDDEN.value)
+            if (
+                "data" in prev_roles
+                and "data" not in new_roles
+                and not self.state.is_peer_cluster_consumer()
+            ):
+                status_list.append(PeerClusterStatuses.DATA_ROLE_REMOVAL_FORBIDDEN.value)
+
         if (
-            not self.no_blocking_directives(deployment_desc)
-            and deployment_desc.state.value != State.ACTIVE
+            deployment_desc.state.value != State.ACTIVE
             and deployment_desc.state.message
+            and not any(s.message == deployment_desc.state.message for s in status_list)
         ):
             status_list.append(
                 format_status(
