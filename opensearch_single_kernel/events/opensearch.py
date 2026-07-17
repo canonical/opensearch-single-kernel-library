@@ -199,8 +199,6 @@ class OpenSearchEventsHandler(Object):
                 # for failover promotions: this flag indicates that the user needs
                 # to relate integrators to this new main orchestrator
                 self.charm.peer_cluster_events.check_credentials_with_missing_relations()
-                if self.charm.state.peer_cluster_relations:
-                    self.charm.peer_cluster_events.apply_orchestrator_status()
 
         elif event.relation.data.get(event.app):
             # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
