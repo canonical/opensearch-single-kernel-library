@@ -675,6 +675,7 @@ class SnapshotsManager(BaseManager):
 
         Running statuses (backup/restore in progress) come from
         ``set_running_status`` and are merged from the cache.
+        Episodic repository/cleanup failures are reasserted from app databag flags.
         ``recompute`` is accepted for protocol compatibility; validation always
         derives from current relation data (read-only).
         """
@@ -682,6 +683,9 @@ class SnapshotsManager(BaseManager):
 
         if scope != "app":
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        # Failure flags (leader-written) must reassert even if backup relation is gone.
+        status_list.extend(self._failure_flag_statuses())
 
         deployment_desc = self.state.application.deployment_desc
         if not deployment_desc:
@@ -743,3 +747,20 @@ class SnapshotsManager(BaseManager):
             return status_list
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _failure_flag_statuses(self) -> list[StatusObject]:
+        """Pure statuses from app databag failure flags."""
+        statuses: list[StatusObject] = []
+        if storage_type := self.state.application.backup_repo_misconfigured_storage_type:
+            statuses.append(
+                format_status(
+                    SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
+                    {
+                        "storage_type": storage_type,
+                        "integrator": f"{storage_type} integrator",
+                    },
+                )
+            )
+        if self.state.application.backup_credentials_cleanup_failed:
+            statuses.append(SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value)
+        return statuses
