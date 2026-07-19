@@ -28,6 +28,8 @@ from ..helpers import get_application_unit_ips, get_secrets, opensearch_client
 
 logging.getLogger("opensearch").setLevel(logging.ERROR)
 logging.getLogger("opensearchpy.helpers").setLevel(logging.ERROR)
+# Explicitly silence the trace logger (which outputs the curl commands)
+logging.getLogger("opensearchpy.trace").setLevel(logging.ERROR)
 
 
 class ReplicationMode(Enum):
