@@ -14,6 +14,7 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.managers.health import HealthManager
 from opensearch_single_kernel.managers.upgrades_base import UpgradesManagerBase
+from opensearch_single_kernel.utils.status import format_status
 
 
 class _UpgradesManager(UpgradesManagerBase):
@@ -112,33 +113,17 @@ def test_upgrades_app_incompatible():
     assert UpgradesStatuses.UPGRADES_INCOMPATIBLE.value in statuses
 
 
-def test_upgrades_vm_precheck_failed_message():
-    from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
-    from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
-
-    state = MagicMock()
-    state.upgrade_relation = object()
-    state.server_upgrade.precheck_failed_message = "Cluster health is yellow"
-    state.server_upgrade.snap_revision = "old-revision"
-
-    mgr = UpgradesManagerVM.__new__(UpgradesManagerVM)
-    mgr.state = state
-    mgr.workload = MagicMock()
-    mgr.name = "upgrades_manager"
-
-    status, params = mgr.unit_status
-    assert status == UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value
-    assert params == {"message": "Cluster health is yellow"}
-
-    # Once upgraded, precheck flag must not shadow active status
-    state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-    state.server_upgrade.workload_version = "2.0.0"
-    type(mgr).in_progress = property(lambda self: True)  # type: ignore[method-assign]
-    type(mgr).is_rollback = property(lambda self: False)  # type: ignore[method-assign]
-    type(mgr).current_versions = property(  # type: ignore[method-assign]
-        lambda self: SimpleNamespace(charm="1", workload="2.0.0")
+def test_upgrades_merges_cached_precheck_failed():
+    cached = format_status(
+        UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
+        {"message": "Cluster health is yellow"},
     )
+    state = MagicMock()
+    state.statuses.get.side_effect = lambda *a, **k: SimpleNamespace(
+        root=[] if k.get("running_status_only") else [cached]
+    )
+    mgr = _UpgradesManager(state, MagicMock())
 
-    status, params = mgr.unit_status
-    assert status == UpgradesStatuses.UPGRADES_ACTIVE.value
-    assert params is not None
+    statuses = mgr.get_statuses("unit")
+
+    assert cached in statuses

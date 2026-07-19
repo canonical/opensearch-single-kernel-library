@@ -401,29 +401,6 @@ class OpenSearchApplication(RelationState):
         self.update({"admin_user_initialized": str(value)})
 
     @property
-    def backup_repo_misconfigured_storage_type(self) -> str | None:
-        """Storage type for last snapshot repository setup failure, if any."""
-        return self.relation_data.get("backup_repo_misconfigured_storage_type") or None
-
-    @backup_repo_misconfigured_storage_type.setter
-    def backup_repo_misconfigured_storage_type(self, value: str | None) -> None:
-        """Set or clear last snapshot repository setup failure storage type."""
-        self.update({"backup_repo_misconfigured_storage_type": value or ""})
-
-    @property
-    def backup_credentials_cleanup_failed(self) -> bool:
-        """Whether the last backup credentials/repository cleanup failed."""
-        return self.relation_data.get("backup_credentials_cleanup_failed", "").lower() == "true"
-
-    @backup_credentials_cleanup_failed.setter
-    def backup_credentials_cleanup_failed(self, value: bool) -> None:
-        """Set or clear backup credentials/repository cleanup failure flag."""
-        if value:
-            self.update({"backup_credentials_cleanup_failed": "True"})
-        else:
-            self.update({"backup_credentials_cleanup_failed": ""})
-
-    @property
     def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
         return self.relation_data.get("security_index_initialised", "").lower() == "true"

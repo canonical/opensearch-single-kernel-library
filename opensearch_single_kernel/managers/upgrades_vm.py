@@ -45,15 +45,6 @@ class UpgradesManagerVM(UpgradesManagerBase):
         if not self.state.upgrade_relation:
             return (None, None)
 
-        # Episodic precheck failure is pure-computed from unit databag flag.
-        if (
-            msg := self.state.server_upgrade.precheck_failed_message
-        ) and self.state.server_upgrade.snap_revision != OPENSEARCH_SNAP_REVISION:
-            return (
-                UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
-                {"message": msg},
-            )
-
         if not self.in_progress:
             return (None, None)
 

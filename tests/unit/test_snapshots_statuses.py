@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Unit tests for snapshots pure status compute (failure flags)."""
+"""Unit tests for snapshots status compute (cached failure merge)."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -19,32 +19,34 @@ def _mgr(state) -> SnapshotsManager:
     return mgr
 
 
-def test_get_statuses_repo_misconfigured_from_flag():
-    state = MagicMock()
-    state.statuses.get.return_value = SimpleNamespace(root=[])
-    state.application.backup_repo_misconfigured_storage_type = "s3"
-    state.application.backup_credentials_cleanup_failed = False
-    state.application.deployment_desc = None
-
-    statuses = _mgr(state).get_statuses("app")
-
-    expected = format_status(
+def test_get_statuses_merges_cached_repo_misconfigured():
+    cached = format_status(
         SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
         {"storage_type": "s3", "integrator": "s3 integrator"},
     )
-    assert expected in statuses
-
-
-def test_get_statuses_cleanup_failed_from_flag():
     state = MagicMock()
-    state.statuses.get.return_value = SimpleNamespace(root=[])
-    state.application.backup_repo_misconfigured_storage_type = None
-    state.application.backup_credentials_cleanup_failed = True
+    # running_statuses uses running_status_only; failure merge uses full get
+    state.statuses.get.side_effect = lambda *a, **k: SimpleNamespace(
+        root=[] if k.get("running_status_only") else [cached]
+    )
     state.application.deployment_desc = None
 
     statuses = _mgr(state).get_statuses("app")
 
-    assert SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value in statuses
+    assert cached in statuses
+
+
+def test_get_statuses_merges_cached_cleanup_failed():
+    cached = SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value
+    state = MagicMock()
+    state.statuses.get.side_effect = lambda *a, **k: SimpleNamespace(
+        root=[] if k.get("running_status_only") else [cached]
+    )
+    state.application.deployment_desc = None
+
+    statuses = _mgr(state).get_statuses("app")
+
+    assert cached in statuses
 
 
 def test_get_statuses_unit_scope_idle():

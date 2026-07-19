@@ -198,9 +198,12 @@ class UpgradesManagerBase(BaseManager):
     ) -> list[StatusObject]:
         """Compute upgrade statuses pure from upgrade state.
 
-        ``recompute`` is accepted for protocol compatibility.
+        Episodic precheck failures are written by the apply/event path into the
+        status cache and re-merged here (same pattern as SMTP configuration
+        errors). ``recompute`` is accepted for protocol compatibility.
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
+        status_list.extend(self._cached_episodic_statuses(scope))
 
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
@@ -212,6 +215,21 @@ class UpgradesManagerBase(BaseManager):
             status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _cached_episodic_statuses(self, scope: AdvancedStatusesScope) -> list[StatusObject]:
+        """Return non-running upgrade failure statuses still stored in the cache."""
+        if scope != "unit":
+            return []
+        template = UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value
+        cached: list[StatusObject] = []
+        for status in self.state.statuses.get(scope, self.name).root:
+            if status.running:
+                continue
+            if status.status != template.status:
+                continue
+            if "Pre upgrade check failed" in status.message:
+                cached.append(status)
+        return cached
 
     def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""

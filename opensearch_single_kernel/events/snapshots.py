@@ -623,24 +623,40 @@ class SnapshotsEventsHandler(Object):
         return None
 
     def _set_repository_misconfigured(self, object_storage_type: ObjectStorageType) -> None:
-        """Record repository setup failure for pure status reassert (leader only)."""
-        if not self.charm.unit.is_leader():
-            return
-        self.charm.state.application.backup_repo_misconfigured_storage_type = (
-            object_storage_type.value
+        """Cache blocked status for repository registration failure (apply path only)."""
+        self.charm.state.add_status_if_not_present(
+            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
+            "app",
+            self.charm.snapshots_manager.name,
+            dynamic_params={
+                "storage_type": object_storage_type.value,
+                "integrator": f"{object_storage_type.value} integrator",
+            },
         )
 
     def _clear_repository_misconfigured(self) -> None:
-        """Clear repository setup failure flag (leader only)."""
-        if not self.charm.unit.is_leader():
-            return
-        self.charm.state.application.backup_repo_misconfigured_storage_type = None
+        """Clear repository setup failure status after a successful apply."""
+        self.charm.state.remove_status_if_present(
+            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
+            "app",
+            self.charm.snapshots_manager.name,
+            interpolated=True,
+        )
 
     def _set_credentials_cleanup_failed(self, failed: bool) -> None:
-        """Record or clear credentials/repository cleanup failure for pure status reassert."""
-        if not self.charm.unit.is_leader():
-            return
-        self.charm.state.application.backup_credentials_cleanup_failed = failed
+        """Cache or clear credentials/repository cleanup failure status (apply path only)."""
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
 
     def update_stored_credentials(
         self,

@@ -25,6 +25,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
 )
+from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.core.models import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
@@ -143,10 +144,19 @@ class UpgradesEventsHandler(Object):
                 if self.charm.upgrades_manager.requires_general_prechecks:
                     self._run_general_prechecks()
                 authorized = self.charm.upgrades_manager.authorized
-                self.charm.state.server_upgrade.precheck_failed_message = None
+                self.charm.state.remove_status_if_present(
+                    UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
+                    "unit",
+                    self.charm.upgrades_manager.name,
+                    interpolated=True,
+                )
             except OpenSearchUpgradePrecheckError as exception:
-                self.charm.state.server_upgrade.precheck_failed_message = str(exception)
-                # Status pure-computed by UpgradesManagerVM.unit_status
+                self.charm.state.add_status_if_not_present(
+                    UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
+                    "unit",
+                    self.charm.upgrades_manager.name,
+                    dynamic_params={"message": str(exception)},
+                )
                 logger.error(exception)
                 return
 
@@ -366,7 +376,12 @@ class UpgradesEventsHandler(Object):
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
-        self.charm.state.server_upgrade.precheck_failed_message = None
+        self.charm.state.remove_status_if_present(
+            UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
+            "unit",
+            self.charm.upgrades_manager.name,
+            interpolated=True,
+        )
         logger.debug(
             f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
         )
