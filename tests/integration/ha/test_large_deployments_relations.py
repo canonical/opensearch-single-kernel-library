@@ -52,7 +52,7 @@ NO_CM_STATUS = StatusObject(
 )
 
 TLS_NOT_FULLY_CONFIGURED_IN_MAIN = StatusObject(
-    status="blocked", message="TLS not fully configured in related 'main-orchestrator'."
+    status="waiting", message="TLS not fully configured in related 'main-orchestrator'."
 )
 
 
@@ -135,7 +135,6 @@ async def test_build_and_deploy(
         apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
             FAILOVER_APP: [
-                PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value,
                 PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value,
             ],
             DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],

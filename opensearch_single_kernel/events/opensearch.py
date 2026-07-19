@@ -421,9 +421,10 @@ class OpenSearchEventsHandler(Object):
             logger.debug(
                 "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
             )
-        elif self.charm.unit.is_leader():
-            if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+        elif (
+            self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        ):
+            self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
