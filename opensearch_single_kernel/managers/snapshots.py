@@ -64,7 +64,11 @@ from opensearch_single_kernel.utils.object_storage import (
     verify_gcs_credentials,
     verify_s3_credentials,
 )
-from opensearch_single_kernel.utils.status import format_status, running_statuses
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -685,7 +689,15 @@ class SnapshotsManager(BaseManager):
         if scope != "app":
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        status_list.extend(self._cached_failure_statuses(scope))
+        status_list.extend(
+            cached_non_running_statuses(
+                self.state.statuses,
+                scope,
+                self.name,
+                matches=[SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value],
+                message_contains=["repository setup failed"],
+            )
+        )
 
         deployment_desc = self.state.application.deployment_desc
         if not deployment_desc:
@@ -747,23 +759,3 @@ class SnapshotsManager(BaseManager):
             return status_list
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
-
-    def _cached_failure_statuses(self, scope: AdvancedStatusesScope) -> list[StatusObject]:
-        """Return apply-path failure statuses still stored in the status cache."""
-        cleanup = SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value
-        repo_prefix = "OpenSearch "
-        repo_suffix = " repository setup failed"
-        failures: list[StatusObject] = []
-        for status in self.state.statuses.get(scope, self.name).root:
-            if status.running:
-                continue
-            if status == cleanup:
-                failures.append(status)
-            # BACKUP_REPOSITORY_MISCONFIGURED
-            elif (
-                status.status == "blocked"
-                and status.message.startswith(repo_prefix)
-                and repo_suffix in status.message
-            ):
-                failures.append(status)
-        return failures

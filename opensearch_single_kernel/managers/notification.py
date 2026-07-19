@@ -34,7 +34,11 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SmtpRelationData,
 )
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status, running_statuses
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -257,7 +261,15 @@ class NotificationsManager(BaseManager):
         successful apply clears them.
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
-        status_list.extend(self._cached_configuration_errors(scope))
+        # Apply-path SMTP configuration errors (events/notifications.py).
+        status_list.extend(
+            cached_non_running_statuses(
+                self.state.statuses,
+                scope,
+                self.name,
+                message_contains=["configuration failed"],
+            )
+        )
 
         if not (deployment_desc := self.state.application.deployment_desc):
             return status_list
@@ -273,20 +285,6 @@ class NotificationsManager(BaseManager):
                 status_list.append(NotificationsStatuses.SMTP_RELATION_INVALID.value)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
-
-    def _cached_configuration_errors(self, scope: AdvancedStatusesScope) -> list[StatusObject]:
-        """Return apply-failure statuses still stored in the status cache."""
-        template = NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value
-        errors: list[StatusObject] = []
-        for status in self.state.statuses.get(scope, self.name).root:
-            if status.running:
-                continue
-            if status.status != template.status:
-                continue
-            # message is "SMTP relation {id} configuration failed. ..."
-            if "configuration failed" in status.message:
-                errors.append(status)
-        return errors
 
     def _relation_statuses(self, relation: Relation) -> list[StatusObject]:
         """Pure validation statuses for one SMTP relation (no OpenSearch writes)."""

@@ -63,7 +63,11 @@ from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import (
     deployment_type,
 )
-from opensearch_single_kernel.utils.status import format_status, running_statuses
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -912,12 +916,18 @@ class ClusterManager(BaseManager):
         they survive ``update-status`` / status-detail recompute (e.g. DPE #75).
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
-        cached = self.state.statuses.get(scope, self.name).root
 
         if scope == "unit":
-            # Start errors are event-set; keep them until life-cycle clears them.
-            if GeneralStatuses.SERVICE_START_ERROR.value in cached:
-                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
+            # Start errors are event-set into the status cache; re-merge so they
+            # survive update-status without status-only databag flags.
+            status_list.extend(
+                cached_non_running_statuses(
+                    self.state.statuses,
+                    scope,
+                    self.name,
+                    matches=[GeneralStatuses.SERVICE_START_ERROR.value],
+                )
+            )
             self._add_unit_statuses(status_list)
 
         if scope == "app":

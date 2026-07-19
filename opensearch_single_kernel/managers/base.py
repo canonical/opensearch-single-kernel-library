@@ -136,6 +136,9 @@ class BaseManager(ManagerStatusProtocol):
           mid-hook / background operations can survive across events. Use
           :func:`~opensearch_single_kernel.utils.status.running_statuses` for
           that merge in overrides.
+        - Merge apply-path episodic non-running failures via
+          :func:`~opensearch_single_kernel.utils.status.cached_non_running_statuses`
+          (do not invent databag flags solely to hold statuses).
         - Never invent ``ACTIVE_IDLE`` by discarding non-running statuses that
           were not recomputed from state.
         - ``recompute`` may allow expensive read-only probes in subclasses.

@@ -34,7 +34,11 @@ from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesSt
 from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status, running_statuses
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -203,7 +207,15 @@ class UpgradesManagerBase(BaseManager):
         errors). ``recompute`` is accepted for protocol compatibility.
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
-        status_list.extend(self._cached_episodic_statuses(scope))
+        if scope == "unit":
+            status_list.extend(
+                cached_non_running_statuses(
+                    self.state.statuses,
+                    scope,
+                    self.name,
+                    message_contains=["Pre upgrade check failed"],
+                )
+            )
 
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
@@ -215,21 +227,6 @@ class UpgradesManagerBase(BaseManager):
             status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
-
-    def _cached_episodic_statuses(self, scope: AdvancedStatusesScope) -> list[StatusObject]:
-        """Return non-running upgrade failure statuses still stored in the cache."""
-        if scope != "unit":
-            return []
-        template = UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value
-        cached: list[StatusObject] = []
-        for status in self.state.statuses.get(scope, self.name).root:
-            if status.running:
-                continue
-            if status.status != template.status:
-                continue
-            if "Pre upgrade check failed" in status.message:
-                cached.append(status)
-        return cached
 
     def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""
