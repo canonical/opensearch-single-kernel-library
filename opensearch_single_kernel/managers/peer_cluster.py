@@ -47,6 +47,7 @@ from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -431,10 +432,12 @@ class PeerClusterManager(BaseManager):
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = self.state.statuses.get(
-            scope, self.name, running_status_only=True
-        ).root
+        """Compute peer-cluster statuses pure from orchestrator and relation state.
+
+        Orchestrator-removed / failover-waiting statuses are plain blocked/waiting
+        (not running). ``recompute`` is accepted for protocol compatibility.
+        """
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.deployment_desc:
             return status_list

@@ -52,15 +52,13 @@ class GeneralStatuses(Enum):
         running="blocking",
     )
 
-    # Blocking directive should be a running status since it is set based on the presence
-    # of a SHOW_STATUS directive and once the status set we remove the directive
+    # Blocking directive is pure-computed from deployment_desc.state when not ACTIVE.
     BLOCKING_DIRECTIVE = StatusObject(
         status="blocked",
         message="{directive}",
         short_message="Config / deployment blocked",
         check="Deployment description blocking message.",
         action="Read the status message and fix the configuration or relations.",
-        running="async",
     )
 
 
@@ -327,7 +325,6 @@ class PeerClusterStatuses(Enum):
         short_message="Orchestrators removed",
         check="Main/failover orchestrator presence for large deploy.",
         action="Relate a main or failover orchestrator again.",
-        running="async",
     )
     PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION = StatusObject(
         status="waiting",
@@ -335,7 +332,6 @@ class PeerClusterStatuses(Enum):
         short_message="Waiting failover promotion",
         check="Failover promotion after main removal.",
         action="Wait for failover promotion or re-relate main orchestrator.",
-        running="async",
     )
 
 
