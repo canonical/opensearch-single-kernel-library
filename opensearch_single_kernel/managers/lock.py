@@ -159,6 +159,9 @@ class PeerLockManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute lock statuses pure from peer lock state.
+
+        REQUEST_LOCK_ON_START is a plain waiting status derived from
+        ``lock_requested`` and peer lock ownership (not a running status).
         ``recompute`` is accepted for protocol compatibility.
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)

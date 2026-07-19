@@ -600,6 +600,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
+                statuses_state=self.charm.state.statuses,
                 component_name=self.charm.internal_users_manager.name,
             )
 
@@ -688,6 +689,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
+                statuses_state=self.charm.state.statuses,
                 component_name=self.charm.internal_users_manager.name,
             )
             event.defer()
@@ -970,6 +972,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
                 "unit",
+                statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
             self.charm.cluster_manager.initialise_security_index()
@@ -985,7 +988,7 @@ class OpenSearchEventsHandler(Object):
             else:
                 # notify the main orchestrator that the security index is initialized
                 self.charm.peer_cluster_manager.set_security_index_initialised()
-            # Clear SECURITY_INDEX_INIT before the long wait_for_opensearch_up().
+            # Drop async bag entry before the long wait_for_opensearch_up().
             self.charm.state.remove_status_if_present(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
                 "unit",

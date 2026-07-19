@@ -58,10 +58,10 @@ class InternalUsersManager(BaseManager):
     ) -> list[StatusObject]:
         """Return cached running statuses only.
 
-        ``ADMIN_USER_INIT_IN_PROGRESS`` is a running (blocking) status set via
-        ``StatusHandler.set_running_status`` during admin init; it must not be
-        re-derived here (DA161: get_statuses excludes blocking running statuses).
-        ``recompute`` is accepted for protocol compatibility.
+        ``ADMIN_USER_INIT_IN_PROGRESS`` is an async running status set via
+        ``StatusHandler.set_running_status`` during admin init and cleared
+        explicitly when init completes. ``recompute`` is accepted for protocol
+        compatibility.
         """
         return running_statuses(self.state.statuses, scope, self.name) or [
             GeneralStatuses.ACTIVE_IDLE.value

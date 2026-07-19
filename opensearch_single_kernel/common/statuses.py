@@ -30,7 +30,7 @@ class GeneralStatuses(Enum):
         status="maintenance",
         message="Initializing the security index...",
         check="Security index bootstrap completion.",
-        running="blocking",
+        running="async",
     )
     WAITING_TO_START = StatusObject(
         status="waiting",
@@ -126,7 +126,7 @@ class InternalUsersStatuses(Enum):
         status="maintenance",
         message="Configuring admin user...",
         check="Admin user initialization.",
-        running="blocking",
+        running="async",
     )
 
 
