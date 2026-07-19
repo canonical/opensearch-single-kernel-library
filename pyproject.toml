@@ -34,13 +34,13 @@ exclude = ["opensearch_single_kernel/charmcraft.yaml"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-ops = "^3.3.0"
+ops = "^3.8.0"
 tenacity = "^9.1.2"
-boto3 = "^1.38.36"
+boto3 = "^1.43.51"
 overrides = "^7.7.0"
-requests = "2.33.0"
+requests = "2.34.2"
 # Official name: ruamel.yaml, but due to Poetry GH#109 - replace dots with dashes
-ruamel-yaml = "0.18.14"
+ruamel-yaml = "0.19.1"
 shortuuid = "1.0.13"
 pydantic = ">= 1.0"
 cryptography = "^48.0.1"
@@ -48,25 +48,25 @@ jsonschema = "^4.24.0"
 data-platform-helpers = "^0.1.7"
 poetry-core = "<2.0.0"
 pre-commit = "^4.4.0"
-charmlibs-pathops = "^1.0.1"
-lightkube = "^0.17.0"
-azure-storage-blob = "^12.25.0"
+charmlibs-pathops = "^1.3.0"
+lightkube = "^0.22.0"
+azure-storage-blob = "^12.30.0"
 google-cloud-storage = "^2.16.0"
-google-api-core = "^2.17.0"
+google-api-core = "^2.32.0"
 # grafana_agent/v0/cos_agent.py
-cosl = "^1.9.1"
+cosl = "^1.10.2"
 
 
 [tool.poetry.group.charm-libs.dependencies]
 # data_platform_libs/v0/data_interfaces.py
-ops = "^3.3.0"
+ops = "^3.8.0"
 # data_platform_libs/v0/upgrade.py
 pydantic = ">= 2.0"
 # tls_certificates_interface/v3/tls_certificates.py
 cryptography = "^48.0.1"
 jsonschema = "^4.24.0"
 # grafana_agent/v0/cos_agent.py
-cosl = "^1.9.1"
+cosl = "^1.10.2"
 bcrypt = "^4.3.0"
 email-validator = ">=2"
 
@@ -90,30 +90,30 @@ flake8-copyright = "^0.2.4"
 flake8-builtins = "^2.5.0"
 pyproject-flake8 = "^7.0.0"
 pep8-naming = "^0.15.1"
-codespell = "^2.4.1"
-shellcheck-py = "^0.10.0.1"
+codespell = "^2.4.3"
+shellcheck-py = "^0.11.0.1"
 
 [tool.poetry.group.unit.dependencies]
-ops = { version = "^3.3.0", extras = ["testing"] }
+ops = { version = "^3.8.0", extras = ["testing"] }
 ops-scenario = "^8.5.2"
 pytest = "^9.0.3"
-pytest-operator = "^0.42.0"
+pytest-operator = "^0.43.2"
 pytest-asyncio = "^0.21.2"
-coverage = { extras = ["toml"], version = "^7.9.1" }
+coverage = { extras = ["toml"], version = "^7.15.2" }
 parameterized = "^0.9.0"
-responses = "^0.25.7"
+responses = "^0.26.2"
 pytest-mock = "*"
 
 [tool.poetry.group.integration.dependencies]
-boto3 = "^1.38.36"
+boto3 = "^1.43.51"
 pytest = "^9.0.3"
 pytest-asyncio = "^0.21.2"
-pytest-operator = "^0.42.0"
+pytest-operator = "^0.43.2"
 pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
 pytest-mock = "*"
 juju = "^3.6.1.2"
 jsonschema = "^4.24.0"
-ops = "^3.3.0"
+ops = "^3.8.0"
 tenacity = "^9.1.2"
 pyyaml = "^6.0.2"
 pyjwt = "^2.13.0"
@@ -124,7 +124,7 @@ allure-pytest = "^2.14.3"
 allure-pytest-default-results = "^0.1.3"
 # Azure integration tests
 azure-identity = "^1.23.0"
-azure-storage-blob = "^12.25.1"
+azure-storage-blob = "^12.30.0"
 oauth_tools = { git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0" }
 kubernetes = "^30.0.0"
 
