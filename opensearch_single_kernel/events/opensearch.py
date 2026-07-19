@@ -63,7 +63,6 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     InternalUsersStatuses,
-    LockStatuses,
 )
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
@@ -861,12 +860,8 @@ class OpenSearchEventsHandler(Object):
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
         elif not self.charm.lock_manager.acquire():
-            self.charm.status_handler.set_running_status(
-                LockStatuses.REQUEST_LOCK_ON_START.value,
-                "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.lock_manager.name,
-            )
+            # REQUEST_LOCK_ON_START is pure-computed by LockManager.get_statuses
+            # from lock_requested + unit_with_lock peer state.
             logger.debug("Lock to start opensearch not acquired. Will retry next event")
             event.defer()
             return
@@ -990,10 +985,11 @@ class OpenSearchEventsHandler(Object):
             else:
                 # notify the main orchestrator that the security index is initialized
                 self.charm.peer_cluster_manager.set_security_index_initialised()
+            # Clear SECURITY_INDEX_INIT before the long wait_for_opensearch_up().
             self.charm.state.remove_status_if_present(
-                status=GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
-                scope="app",
-                component=self.charm.cluster_manager.name,
+                GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
+                "unit",
+                self.charm.cluster_manager.name,
             )
 
         # Wait for opensearch to be fully ready or throw error
@@ -1108,12 +1104,7 @@ class OpenSearchEventsHandler(Object):
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
         if not self.charm.lock_manager.acquire():
-            self.charm.status_handler.set_running_status(
-                LockStatuses.REQUEST_LOCK_ON_START.value,
-                "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.lock_manager.name,
-            )
+            # REQUEST_LOCK_ON_START pure-computed by LockManager.get_statuses
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
             return

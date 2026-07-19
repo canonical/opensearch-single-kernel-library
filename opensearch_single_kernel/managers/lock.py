@@ -73,10 +73,6 @@ class PeerLockManager(BaseManager):
             )
             return False
 
-        self.state.remove_status_if_present(
-            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
-        )
-
         if (
             self.state.server.is_app_leader
             and self.state.application_lock.leader_acquired_after_juju_event_id
@@ -122,10 +118,6 @@ class PeerLockManager(BaseManager):
             self.refresh_lock()
             logger.debug("[Node lock] Released peer lock as leader unit")
 
-        self.state.remove_status_if_present(
-            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
-        )
-
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
         if not self.state.lock_relation:
@@ -166,15 +158,14 @@ class PeerLockManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute lock statuses from peer state (+ async/running cache).
-
+        """Compute lock statuses pure from peer lock state.
         ``recompute`` is accepted for protocol compatibility.
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        # Waiting for the peer lock so start can proceed. Cleared on acquire/release.
-        # Guard when lock relation is not joined yet (StatusHandler may call get_statuses
-        # early during install / before peer relations exist).
+        # Waiting for the peer lock so start can proceed.
+        # Guard when lock relation is not joined yet (StatusHandler may call
+        # get_statuses early during install / before peer relations exist).
         if (
             scope == "unit"
             and self.state.lock_relation is not None
