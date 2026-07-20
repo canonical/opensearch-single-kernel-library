@@ -48,8 +48,8 @@ logger = logging.getLogger(__name__)
 
 # Keep the existing connect/read timeout used by http_request.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
-_OPENSEARCH_LOG_EXCERPT_LINES = 2400
-_OPENSEARCH_LOG_CONTEXT_LINES = 240
+_OPENSEARCH_LOG_EXCERPT_LINES = 10000
+_OPENSEARCH_LOG_CONTEXT_LINES = 2400
 EmptyBlockedStatus = StatusObject(
     status="blocked",
     message="",

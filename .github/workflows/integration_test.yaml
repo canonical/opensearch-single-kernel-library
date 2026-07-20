@@ -90,7 +90,7 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 406 # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 226 # Sum of steps `timeout-minutes` + 5
     steps:
       - name: Disk usage
         timeout-minutes: 1
@@ -138,10 +138,6 @@ jobs:
           GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
           GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - name: Setup tmate session
-        if: ${{ failure() && steps.spread.outcome == 'failure' }}
-        timeout-minutes: 180
-        uses: canonical/action-tmate@main
       - name: Upload Allure results
         timeout-minutes: 3
         # Only upload results from one spread system & one spread variant
