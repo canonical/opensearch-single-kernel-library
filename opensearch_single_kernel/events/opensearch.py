@@ -596,6 +596,9 @@ class OpenSearchEventsHandler(Object):
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
+        if not self.charm.unit.is_leader():
+            return
+
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
@@ -604,9 +607,6 @@ class OpenSearchEventsHandler(Object):
                 component_name=self.charm.internal_users_manager.name,
             )
 
-        if not self.charm.unit.is_leader():
-            return
-
         # Restore purged system users in local `internal_users.yml` with corresponding credentials
         for user in OPENSEARCH_SYSTEM_USERS:
             if not self.charm.internal_users_manager.put_or_update_internal_user_leader(
@@ -614,6 +614,12 @@ class OpenSearchEventsHandler(Object):
             ):
                 event.defer()
                 return
+
+        self.charm.state.remove_status_if_present(
+            InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
+            "unit",
+            self.charm.internal_users_manager.name,
+        )
 
     def _on_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
@@ -686,12 +692,6 @@ class OpenSearchEventsHandler(Object):
             return
 
         if not self.charm.state.application.is_admin_user_initialized:
-            self.charm.status_handler.set_running_status(
-                InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
-                "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.internal_users_manager.name,
-            )
             event.defer()
             return
 
@@ -727,6 +727,7 @@ class OpenSearchEventsHandler(Object):
             and not self.charm.state.application.is_security_index_initialised
         ):
             # PEER_CLUSTER_NO_DATA_NODE pure-computed by ClusterManager.get_statuses
+            event.defer()
             return
         # We are requesting start of openSearch
 

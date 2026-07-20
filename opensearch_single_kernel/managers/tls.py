@@ -897,7 +897,7 @@ class TlsManager(BaseManager):
                 if not self.state.server.tls_configured:
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
-            if certs := self.check_certs_expiration():
+            if recompute and (certs := self.check_certs_expiration()):
                 missing = [cert.val for cert in certs.keys()]
                 status_list.append(
                     format_status(
