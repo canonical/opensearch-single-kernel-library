@@ -11,6 +11,11 @@ on:
         description: "Target branch to create PR against (e.g. 2/edge)"
         required: true
         type: string
+    secrets:
+      PAT:
+        required: true
+      CI_COMMITS_SSH_SIGNING_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -34,8 +39,7 @@ jobs:
           - canonical/opensearch-k8s-operator
 
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
 
     env:
       VERSION: ${{ inputs.version }}
@@ -49,6 +53,7 @@ jobs:
         with:
           fetch-depth: 20
           fetch-tags: true
+          persist-credentials: false
 
       - name: Get new tag content
         id: get-tag
@@ -79,6 +84,7 @@ jobs:
           repository: ${{ matrix.repo }}
           ref: ${{ env.BASE_BRANCH }}
           token: ${{ secrets.PAT }}
+          persist-credentials: false
 
       - name: Install tox & poetry
         run: |
@@ -122,9 +128,11 @@ jobs:
         run: poetry update "${DEP_NAME}"
 
       - name: Configure git signing
+        env:
+          SIGNING_KEY: ${{ secrets.CI_COMMITS_SSH_SIGNING_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.CI_COMMITS_SSH_SIGNING_KEY }}" > ~/.ssh/ssh-key
+          echo "${SIGNING_KEY}" > ~/.ssh/ssh-key
           chmod 600 ~/.ssh/ssh-key
 
           git config --global user.name "canonical-data-platform-bot"
@@ -146,23 +154,29 @@ jobs:
           git commit -m "Bump ${DEP_NAME} to version ${VERSION}"
 
       - name: Push branch
+        env:
+          TARGET_REPO: ${{ matrix.repo }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
-          git push origin "${PR_BRANCH}" -f
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git" "${PR_BRANCH}" -f
 
       - name: Open Pull Request
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
+          VERSION_CONTENT: ${{ steps.get-tag.outputs.VERSION_CONTENT }}
+          REVIEWERS: ${{ steps.get-reviewers.outputs.REVIEWERS }}
+          TARGET_REPO: ${{ matrix.repo }}
         run: |
           BODY="Automated bump of \`${DEP_NAME}\` to version \`${VERSION}\` after PyPI release.
             ### What's Changed
-            ${{ steps.get-tag.outputs.VERSION_CONTENT }}"
+            ${VERSION_CONTENT}"
 
           PR_URL=$(gh pr create \
             --title "patch: Bump ${DEP_NAME} to ${VERSION}" \
             --body "${BODY}" \
-            --base ${{ env.BASE_BRANCH }}  \
+            --base "${BASE_BRANCH}" \
             --head "${PR_BRANCH}" \
-            --reviewer "${{ steps.get-reviewers.outputs.REVIEWERS }}"
+            --reviewer "${REVIEWERS}"
           )
           # shellcheck disable=SC2086
-          echo "- ${{ matrix.repo }}: ${PR_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "- ${TARGET_REPO}: ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"
