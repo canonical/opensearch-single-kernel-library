@@ -894,7 +894,7 @@ class TlsManager(BaseManager):
                 )
                 or self.state.peer_clusters(remote=True, is_provider=True)
             ):
-                if not self.all_tls_resources_stored(reconcile=False):
+                if not self.state.server.tls_configured:
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
             if certs := self.check_certs_expiration():
@@ -910,7 +910,7 @@ class TlsManager(BaseManager):
             if (
                 deployment_desc := self.state.application.deployment_desc
             ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-                if not self.all_tls_resources_stored(reconcile=False):
+                if not self.state.server.tls_configured:
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
