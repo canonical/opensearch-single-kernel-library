@@ -164,6 +164,10 @@ jobs:
           AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
           AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 60
       - name: Upload Allure results
         timeout-minutes: 3
         # Only upload results from one spread system & one spread variant
