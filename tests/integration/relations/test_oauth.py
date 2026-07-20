@@ -61,6 +61,7 @@ async def test_deploy(
             series=series,
             config=CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             DATA_INTEGRATOR_NAME,
@@ -303,7 +304,7 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
+async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model, substrate):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
@@ -317,6 +318,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             num_units=APP_UNITS[MAIN_APP],
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -325,6 +327,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             series=series,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -333,6 +336,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             series=series,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
     )
 

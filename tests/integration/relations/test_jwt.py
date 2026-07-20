@@ -46,7 +46,9 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 3}
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_small_cluster(charm, series, ops_test: OpsTest, charm_resources) -> None:
+async def test_deploy_small_cluster(
+    charm, series, ops_test: OpsTest, charm_resources, substrate
+) -> None:
     """Deploy OpenSearch and JWT integrator, configure and integrate them."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
@@ -57,6 +59,7 @@ async def test_deploy_small_cluster(charm, series, ops_test: OpsTest, charm_reso
         series=series,
         config=CONFIG_OPTS,
         resources=charm_resources,
+        trust=substrate == "k8s",
     )
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
@@ -152,7 +155,9 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
 @pytest.mark.abort_on_fail
 # TODO Add when Large deployments is implemented
 @pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsTest) -> None:
+async def test_configure_and_use_jwt_large_cluster(
+    charm, series, ops_test: OpsTest, substrate
+) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")
     await asyncio.gather(
@@ -162,6 +167,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
             num_units=APP_UNITS[MAIN_APP],
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -174,6 +180,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
                 "roles": "cluster_manager",
             }
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -182,6 +189,7 @@ async def test_configure_and_use_jwt_large_cluster(charm, series, ops_test: OpsT
             series=series,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
     )
 

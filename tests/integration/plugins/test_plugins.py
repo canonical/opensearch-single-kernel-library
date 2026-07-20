@@ -305,6 +305,7 @@ async def _ensure_small_opensearch_deployed(
             config={"profile": "production"},
             resources=charm_resources,
             storage=opensearch_storage,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config

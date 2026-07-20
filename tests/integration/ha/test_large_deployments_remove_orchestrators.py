@@ -49,7 +49,9 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resources) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, charm_resources, substrate
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
@@ -66,6 +68,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             series=series,
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -75,6 +78,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -84,6 +88,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
     )
     await wait_until(
