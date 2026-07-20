@@ -90,7 +90,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
             action_event.fail(message)
             return
 
-        self.state.application_upgrade.upgrade_resumed = True
+        self.state.application_upgrade.set_upgrade_resumed(True)
         message = "Upgrade resumed."
         action_event.set_results({"result": message})
         logger.debug(f"Resume upgrade event succeeded: {message}")

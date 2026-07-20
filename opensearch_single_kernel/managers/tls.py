@@ -35,9 +35,12 @@ from opensearch_single_kernel.common.statuses import (
     TlsStatuses,
 )
 from opensearch_single_kernel.core.models import (
+    OpenSearchAppPeerAdminTlsSecretsModel,
+    OpenSearchServerPeerHttpSecretsModel,
+    OpenSearchServerPeerTransportSecretsModel,
+    PeerClusterAppModel,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -46,6 +49,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     cert_expiration_remaining_hours,
+    parse_ca_chains,
     parse_tls_file,
     read_ca,
     remove_ca,
@@ -74,7 +78,7 @@ class TlsManager(BaseManager):
 
     def all_tls_resources_stored(  # noqa: C901
         self, only_unit_resources: bool = False, reconcile: bool = True
-    ) -> bool:  # noqa: C901
+    ) -> bool:
         """Check if all TLS resources are stored and ready to use.
 
         For K8s, we need first to save TLS resources from secrets.
@@ -98,17 +102,6 @@ class TlsManager(BaseManager):
                 # we assume they are not ready.
                 return False
 
-        cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
-        if not only_unit_resources:
-            cert_types.append(CertType.APP_ADMIN)
-
-        # compare issuer of the cert with the issuer of the CA
-        # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
-        if not (current_ca := self.read_stored_ca()):
-            return False
-
-        ca_issuer = self.get_cert_issuer(cert=current_ca)
-
         resources = [
             (CertType.UNIT_TRANSPORT, self.state.server.transport_keystore_password),
             (CertType.UNIT_HTTP, self.state.server.http_keystore_password),
@@ -117,26 +110,130 @@ class TlsManager(BaseManager):
         if not only_unit_resources:
             resources.append((CertType.APP_ADMIN, self.state.application.admin_keystore_password))
 
-        for name, password in resources:
-            path = self.workload.paths.certs / f"{name}.p12"
+        ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
+        unit_resources = [
+            (name, password, self.workload.paths.certs / f"{name}.p12")
+            for name, password in resources
+        ]
 
+        # Check existence up front (cheap file-stat calls) before issuing a single container
+        # command for all lookups below: on K8s, every additional `run_cmd()` here is a
+        # separate Pebble exec round-trip, so batching the `openssl` invocations materially
+        # speeds up every Juju event that calls this (i.e. most of them).
+        all_paths = [ca_trust_store] + [path for _, _, path in unit_resources]
+        for path in all_paths:
             try:
                 if not self.workload.exists(path):
+                    logger.debug("all_tls_resources_stored: missing file on disk: %s", path)
                     return False
             except OpenSearchFileOperationError as e:
                 logger.warning(f"Error checking existence of TLS resource {path}: {e}")
                 return False
 
-            cert_issuer = self.get_cert_issuer_from_path(
-                store_pwd=password,
-                store_path=path,
+        ca_pwd = self.state.application.admin_truststore_password
+        sections = [("ca", f"openssl pkcs12 -in {ca_trust_store} -passin pass:{ca_pwd}")]
+        sections += [
+            (
+                name.value,
+                f"openssl pkcs12 -in {path} -nodes -passin pass:{password} "
+                "| openssl x509 -noout -issuer",
             )
+            for name, password, path in unit_resources
+        ]
+        batched = self._run_batched(sections)
 
+        # The truststore may hold both the current CA (alias "ca") and a retained previous
+        # CA (alias "old-ca") during rotation, so the alias-scoped chain parsing here (as
+        # opposed to naively taking the first cert `openssl x509` happens to see in the dump)
+        # is required to pick the right one.
+        if not (raw_ca_dump := batched.get("ca")):
+            logger.debug("all_tls_resources_stored: no 'ca' section in batched output.")
+            return False
+        current_ca = parse_ca_chains(raw_ca_dump).get(CA_ALIAS)
+        if not current_ca:
+            logger.debug(
+                "all_tls_resources_stored: parse_ca_chains found no entry for alias %r "
+                "(parsed aliases: %s).",
+                CA_ALIAS,
+                list(parse_ca_chains(raw_ca_dump).keys()),
+            )
+            return False
+
+        # compare issuer of the cert with the issuer of the CA
+        # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
+        ca_issuer = self.get_cert_issuer(cert=current_ca)
+        if not ca_issuer:
+            logger.debug("all_tls_resources_stored: could not read issuer off current_ca.")
+            return False
+
+        for name, _, _ in unit_resources:
+            cert_issuer = batched.get(name.value)
             if not cert_issuer or cert_issuer != ca_issuer:
+                logger.debug(
+                    "all_tls_resources_stored: issuer mismatch for %s: cert_issuer=%r "
+                    "ca_issuer=%r",
+                    name.value,
+                    cert_issuer,
+                    ca_issuer,
+                )
                 return False
 
         logger.info("All TLS resources are stored on disk and valid.")
         return True
+
+    def _run_batched(self, sections: list[tuple[str, str]]) -> dict[str, str | None]:
+        """Run several independent shell commands in a single container command.
+
+        Each command in `sections` normally costs its own `run_cmd()` call, which on K8s is a
+        separate Pebble exec round-trip. Running them back to back in one shell invocation
+        instead costs a single round-trip regardless of how many sections there are.
+
+        Args:
+            sections: list of (key, shell_command) tuples. Each command's stderr is discarded
+                so it can't bleed into a neighboring section's output.
+
+        Returns:
+            Mapping from key to that command's stripped stdout, or None if the whole batch
+            failed to run, or if a given section produced no output (e.g. its command failed).
+        """
+        if not sections:
+            return {}
+
+        marker = "===TLS_BATCH_SECTION==="
+        script_lines = []
+        for key, command in sections:
+            script_lines.append(f"echo '{marker}{key}'")
+            script_lines.append(f"{{ {command} ; }} 2>/dev/null")
+        # `true` keeps the overall exit code at 0 even if an individual section's command
+        # fails, so one bad/missing resource doesn't turn the whole batch into a raised
+        # exception and lose every other section's output along with it.
+        script = "\n".join(script_lines) + "\ntrue"
+
+        try:
+            output = self.workload.run_cmd(script, use_errors_replace=True).out
+        except OpenSearchCmdError as e:
+            logger.error("Error running batched TLS command: %s", e)
+            return {key: None for key, _ in sections}
+
+        results: dict[str, str | None] = dict.fromkeys(key for key, _ in sections)
+        current_key: str | None = None
+        buffer: list[str] = []
+
+        def flush() -> None:
+            if current_key is not None:
+                text = "\n".join(buffer).strip()
+                results[current_key] = text or None
+
+        for line in output.splitlines():
+            if line.startswith(marker):
+                flush()
+                current_key = line[len(marker) :]  # noqa: E203
+                buffer = []
+            else:
+                buffer.append(line)
+        flush()
+
+        return results
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
@@ -294,21 +391,25 @@ class TlsManager(BaseManager):
 
         match cert_type:
             case CertType.APP_ADMIN:
-                with self.state.application.update() as m:
+                with self.state.application.update_secrets(
+                    OpenSearchAppPeerAdminTlsSecretsModel
+                ) as m:
                     m.admin_key = key.decode("utf-8")
                     m.admin_key_password = password
                     m.admin_csr = csr.decode("utf-8")
                     m.admin_subject = f"O={organization},CN={subject}"
 
             case CertType.UNIT_TRANSPORT:
-                with self.state.server.update() as m:
+                with self.state.server.update_secrets(
+                    OpenSearchServerPeerTransportSecretsModel
+                ) as m:
                     m.transport_key = key.decode("utf-8")
                     m.transport_key_password = password
                     m.transport_csr = csr.decode("utf-8")
                     m.transport_subject = f"O={organization},CN={subject}"
 
             case CertType.UNIT_HTTP:
-                with self.state.server.update() as m:
+                with self.state.server.update_secrets(OpenSearchServerPeerHttpSecretsModel) as m:
                     m.http_key = key.decode("utf-8")
                     m.http_key_password = password
                     m.http_csr = csr.decode("utf-8")
@@ -334,17 +435,23 @@ class TlsManager(BaseManager):
             # for the same content
             match cert_type:
                 case CertType.APP_ADMIN:
-                    with self.state.application.update() as m:
+                    with self.state.application.update_secrets(
+                        OpenSearchAppPeerAdminTlsSecretsModel
+                    ) as m:
                         m.admin_chain = ca_chain
                         m.admin_cert = certificate
                         m.admin_ca_cert = ca
                 case CertType.UNIT_HTTP:
-                    with self.state.server.update() as m:
+                    with self.state.server.update_secrets(
+                        OpenSearchServerPeerHttpSecretsModel
+                    ) as m:
                         m.http_chain = ca_chain
                         m.http_cert = certificate
                         m.http_ca_cert = ca
                 case CertType.UNIT_TRANSPORT:
-                    with self.state.server.update() as m:
+                    with self.state.server.update_secrets(
+                        OpenSearchServerPeerTransportSecretsModel
+                    ) as m:
                         m.transport_chain = ca_chain
                         m.transport_cert = certificate
                         m.transport_ca_cert = ca
@@ -604,24 +711,11 @@ class TlsManager(BaseManager):
             with self.workload.temp_file(
                 mode="w+t", data=cert, dir=self.workload.root / "/tmp"
             ) as tmp_ca_file:
-                return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
+                return self.workload.run_cmd(
+                    f"openssl x509 -in {tmp_ca_file} -noout -issuer"
+                ).out.strip()
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
             logger.error("Error reading the current truststore: %s", e)
-            return None
-
-    def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
-        """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
-        try:
-            return self.workload.run_cmd(
-                f"openssl pkcs12 -in {store_path}",
-                f"""-nodes \
-                -passin pass:{store_pwd} \
-                | openssl x509 -noout -issuer
-                """,
-                use_errors_replace=True,
-            ).out
-        except OpenSearchCmdError as e:
-            logger.error("Error reading the current certificate: %s", e)
             return None
 
     def reload_tls_certificates(self) -> bool:
@@ -776,7 +870,7 @@ class TlsManager(BaseManager):
         return self.update_request_ca_bundle(self.get_secret_by_cert(cert_type, "chain"))
 
     def peer_cluster_error_from_tls(
-        self, peer_cluster_rel_data: PeerCluster
+        self, peer_cluster_rel_data: PeerClusterAppModel
     ) -> PeerClusterRelErrorData | None:
         """Compute TLS related errors."""
         blocked_msg, should_sever_relation = None, False
@@ -840,23 +934,22 @@ class TlsManager(BaseManager):
 
     def cleanup_peer_cluster_error_relation_data(self) -> None:
         """Clean up the error data in relation data when the error is resolved."""
-        model = self.state.application.model
+        model = self.state.application
 
         if not model or not model.model_extra:
             return
 
         relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
-        changed = False
+        keys_to_clear = [
+            key
+            for key in model.model_extra
+            if key.startswith("error_from_tls-") and int(key.split("-")[-1]) not in relation_ids
+        ]
 
-        for key in list(model.model_extra.keys()):
-            if key.startswith("error_from_tls-"):
-                rel_id = int(key.split("-")[-1])
-                if rel_id not in relation_ids:
+        if keys_to_clear:
+            with model.update():
+                for key in keys_to_clear:
                     model.model_extra[key] = None
-                    changed = True
-
-        if changed:
-            self.state.application.write(model)
 
     @override
     def get_statuses(  # noqa: C901
@@ -921,7 +1014,7 @@ class TlsManager(BaseManager):
             self.cleanup_peer_cluster_error_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 error_key = f"error_from_tls-{peer_cluster.relation.id}"
-                model = self.state.application.model
+                model = self.state.application
                 error_value = (
                     model.model_extra.get(error_key) if model and model.model_extra else None
                 )

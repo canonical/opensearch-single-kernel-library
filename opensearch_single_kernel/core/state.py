@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import Object, Relation, Unit
+from ops.model import SecretNotFoundError
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
@@ -43,8 +44,6 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
-from opensearch_single_kernel.core.jwt_relation import JwtState
-from opensearch_single_kernel.core.lock_relation import LockAppState, LockServerState
 from opensearch_single_kernel.core.models import (
     JWTAuthConfiguration,
     LockAppStateModel,
@@ -53,22 +52,11 @@ from opensearch_single_kernel.core.models import (
     OpenSearchAppPeerModel,
     OpenSearchServerPeerModel,
     PeerClusterApp,
-)
-from opensearch_single_kernel.core.peer_cluster_relation import (
-    PeerCluster,
     PeerClusterAppModel,
-    PeerClusterServer,
     PeerClusterServerModel,
-)
-from opensearch_single_kernel.core.peer_relation import (
-    OpenSearchApplication,
-    OpenSearchServer,
-)
-from opensearch_single_kernel.core.upgrade_relation import (
     UpgradeAppModel,
-    UpgradeAppState,
     UpgradeServerModel,
-    UpgradeServerState,
+    bind_model,
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
     AzureStorageRequires,
@@ -78,6 +66,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage impor
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+    DataContractV1,
     OpsPeerRepositoryInterface,
     OpsPeerUnitRepositoryInterface,
     OpsRelationRepository,
@@ -235,38 +224,58 @@ class ClusterState(Object):
         relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
         return bool(relation)
 
+    def _bind_model_or_default(
+        self,
+        interface,
+        relation: Relation | None,
+        model_cls: type,
+        component,
+        write_context: dict | None = None,
+    ):
+        """Bind a model to its relation databag, tolerating a not-yet-created relation.
+
+        Before the relation exists, return an unbound default model: reads yield the
+        fields' defaults and writes are dropped, matching the old wrapper behavior.
+        """
+        if not relation:
+            return model_cls()
+        return bind_model(interface, relation.id, model_cls, component, write_context)
+
     # --- Upgrade Relation State Properties ---
 
     @property
-    def server_upgrade(self) -> UpgradeServerState:
+    def server_upgrade(self) -> UpgradeServerModel:
         """Get state of upgrade relation for current unit."""
-        return UpgradeServerState(
-            relation=self.upgrade_relation,
-            repository=self.upgrade_unit_interface,
+        return self._bind_model_or_default(
+            self.upgrade_unit_interface,
+            self.upgrade_relation,
+            UpgradeServerModel,
             component=self.model.unit,
         )
 
     @property
-    def application_upgrade(self) -> UpgradeAppState:
+    def application_upgrade(self) -> UpgradeAppModel:
         """Get application state of upgrade relation."""
-        return UpgradeAppState(
-            relation=self.upgrade_relation,
-            repository=self.upgrade_app_interface,
+        return self._bind_model_or_default(
+            self.upgrade_app_interface,
+            self.upgrade_relation,
+            UpgradeAppModel,
             component=self.model.app,
         )
 
     @property
-    def sorted_upgrades_units(self) -> list[UpgradeServerState]:
+    def sorted_upgrades_units(self) -> list[UpgradeServerModel]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
-                UpgradeServerState(
-                    relation=self.upgrade_relation,
-                    repository=self.upgrade_unit_interface,
+                bind_model(
+                    self.upgrade_unit_interface,
+                    self.upgrade_relation.id,
+                    UpgradeServerModel,
                     component=unit,
                 )
                 for unit in sorted(
-                    (self.server.unit, *self.upgrade_relation.units),
+                    (self.model.unit, *self.upgrade_relation.units),
                     key=lambda unit: int(unit.name.split("/")[1]),
                     reverse=True,
                 )
@@ -289,7 +298,7 @@ class ClusterState(Object):
 
     def peer_cluster_by_relation_id(
         self, is_provider: bool, relation_id: int, remote: bool = False
-    ) -> PeerCluster | None:
+    ) -> PeerClusterAppModel | None:
         """Return the current related peer cluster if any.
 
         Args:
@@ -301,56 +310,76 @@ class ClusterState(Object):
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
-        repository = (
+        interface = (
             self.peer_cluster_orchestrator_repository
             if is_provider
             else self.peer_cluster_data_repository
         )
 
-        def get_component(relation):
-            """Get the component for the relation based on the remote flag."""
-            return relation.app if remote else self.model.app
+        if not (relation := self.model.get_relation(relation_name, relation_id)):
+            return None
 
-        if relation := self.model.get_relation(relation_name, relation_id):
-            return PeerCluster(
-                relation=relation,
-                repository=repository,
-                component=get_component(relation),
-                is_provider=is_provider,
+        component = relation.app if remote else self.model.app
+        # The requirer side never manages secrets for this relation -- those are only
+        # created/rotated by the provider (orchestrator) side. See PeerClusterAppModel.
+        write_context = None if is_provider else {"skip_secrets": True}
+        try:
+            return bind_model(
+                interface,
+                relation_id,
+                PeerClusterAppModel,
+                component=component,
+                write_context=write_context,
             )
-        return None
+        except SecretNotFoundError:
+            logger.warning(
+                "Secret not found when reading relation %s model — relation may be departing.",
+                relation_id,
+            )
+            return None
 
     def peer_clusters(
         self, is_provider: bool, must_have_units: bool = True, remote: bool = False
-    ) -> list[PeerCluster]:
+    ) -> list[PeerClusterAppModel]:
         """Return the list of peer clusters for each relations."""
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
-        repository = (
+        interface = (
             self.peer_cluster_orchestrator_repository
             if is_provider
             else self.peer_cluster_data_repository
         )
+        write_context = None if is_provider else {"skip_secrets": True}
 
         def get_component(relation):
             """Get the component for the relation based on the remote flag."""
             return relation.app if remote else self.model.app
 
-        return [
-            PeerCluster(
-                relation=rel,
-                repository=repository,
-                component=get_component(rel),
-                is_provider=is_provider,
-            )
-            for rel in self.model.relations[relation_name]
-            if not must_have_units or len(rel.units) > 0
-        ]
+        clusters = []
+        for rel in self.model.relations[relation_name]:
+            if must_have_units and not rel.units:
+                continue
+            try:
+                clusters.append(
+                    bind_model(
+                        interface,
+                        rel.id,
+                        PeerClusterAppModel,
+                        component=get_component(rel),
+                        write_context=write_context,
+                    )
+                )
+            except SecretNotFoundError:
+                logger.warning(
+                    "Secret not found when reading relation %s model — relation may be departing.",
+                    rel.id,
+                )
+        return clusters
 
     def _peer_clusters_servers(
         self, is_provider: bool, remote: bool = False
-    ) -> list[PeerClusterServer]:
+    ) -> list[PeerClusterServerModel]:
         """Return the list of peer cluster servers for each relations.
 
         Args:
@@ -367,11 +396,12 @@ class ClusterState(Object):
             return relation.units if remote else [self.model.unit]
 
         return [
-            PeerClusterServer(
-                relation=rel,
-                repository=RepositoryInterface(
+            bind_model(
+                RepositoryInterface(
                     self.model, relation_name, unit, OpsRelationRepository, PeerClusterServerModel
                 ),
+                rel.id,
+                PeerClusterServerModel,
                 component=unit,
             )
             for rel in self.model.relations[relation_name]
@@ -382,23 +412,24 @@ class ClusterState(Object):
         self,
         is_provider: bool,
         relation_id: int,
-    ) -> PeerClusterServer | None:
+    ) -> PeerClusterServerModel | None:
         """Return the peer cluster server for the given relation id."""
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
         if relation := self.model.get_relation(relation_name, relation_id):
             unit = self.model.unit
-            return PeerClusterServer(
-                relation=relation,
-                repository=RepositoryInterface(
+            return bind_model(
+                RepositoryInterface(
                     self.model, relation_name, unit, OpsRelationRepository, PeerClusterServerModel
                 ),
+                relation.id,
+                PeerClusterServerModel,
                 component=unit,
             )
         return None
 
-    def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServer]:
+    def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServerModel]:
         """Return the list of all peer cluster servers for each relations."""
         return self._peer_clusters_servers(
             is_provider=False, remote=remote
@@ -420,33 +451,30 @@ class ClusterState(Object):
     # -- Core Components
 
     @property
-    def server(self) -> OpenSearchServer:
+    def server(self) -> OpenSearchServerPeerModel:
         """Get the opensearch unit state."""
-        return OpenSearchServer(
-            relation=self.peer_relation,
-            repository=self.peer_unit_interface,
-            component=self.model.unit,
+        return self._bind_model_or_default(
+            self.peer_unit_interface,
+            self.peer_relation,
+            OpenSearchServerPeerModel,
+            self.model.unit,
         )
 
     @property
-    def application_servers(self) -> list[OpenSearchServer]:
+    def application_servers(self) -> list[OpenSearchServerPeerModel]:
         """Return all opensearch servers using peer relation."""
         return [
-            OpenSearchServer(
-                relation=self.peer_relation,
-                repository=self.peer_unit_interface,
-                component=unit,
+            bind_model(
+                self.peer_unit_interface, self.peer_relation.id, OpenSearchServerPeerModel, unit
             )
             for unit in self.all_units
         ]
 
     @property
-    def application(self) -> OpenSearchApplication:
+    def application(self) -> OpenSearchAppPeerModel:
         """Get the opensearch application state."""
-        return OpenSearchApplication(
-            relation=self.peer_relation,
-            repository=self.peer_app_interface,
-            component=self.model.app,
+        return self._bind_model_or_default(
+            self.peer_app_interface, self.peer_relation, OpenSearchAppPeerModel, self.model.app
         )
 
     def get_dashboards_relations(self) -> list[Relation]:
@@ -481,56 +509,62 @@ class ClusterState(Object):
         return result
 
     @property
-    def jwt(self) -> JwtState:
-        """Get JWT state."""
-        return JwtState(relation=self.jwt_relation, model=self.model)
+    def jwt(self) -> JWTAuthConfiguration | None:
+        """Get JWT configuration published by the provider on the JWT relation, if any."""
+        relation = self.jwt_relation
+        if not relation or not relation.app:
+            return None
+        repository = OpsRelationRepository(self.model, relation, component=relation.app)
+        version = repository.get_field("version") or "v0"
+        try:
+            if version == "v0":
+                return build_model(repository, JWTAuthConfiguration)
+            contract = build_model(repository, DataContractV1[JWTAuthConfiguration])
+            return contract.requests[0] if contract.requests else None
+        except ValidationError as e:
+            logger.error(f"failed to validate jwt: {e}")
+            return None
 
     @property
-    def server_lock(self) -> LockServerState:
+    def server_lock(self) -> LockServerStateModel:
         """Get state of lock relation for current unit."""
-        return LockServerState(
-            relation=self.lock_relation,
-            repository=self.lock_unit_interface,
-            component=self.model.unit,
+        return self._bind_model_or_default(
+            self.lock_unit_interface, self.lock_relation, LockServerStateModel, self.model.unit
         )
 
     @property
-    def lock_granted_server(self) -> LockServerState | None:
+    def lock_granted_server(self) -> LockServerStateModel | None:
         """Get state of lock relation for unit granted with lock."""
         granted_unit_name = self.application_lock.unit_with_lock
         if not granted_unit_name:
             return None
 
-        return LockServerState(
-            relation=self.lock_relation,
-            repository=self.lock_unit_interface,
-            component=self.get_unit(lock_unit_name(granted_unit_name)),
+        return bind_model(
+            self.lock_unit_interface,
+            self.lock_relation.id,
+            LockServerStateModel,
+            self.get_unit(lock_unit_name(granted_unit_name)),
         )
 
     @property
-    def server_locks(self) -> list[LockServerState]:
+    def server_locks(self) -> list[LockServerStateModel]:
         """Get state of lock relation for all units in it."""
         return (
             [
-                LockServerState(
-                    relation=self.lock_relation,
-                    repository=self.lock_unit_interface,
-                    component=unit,
+                bind_model(
+                    self.lock_unit_interface, self.lock_relation.id, LockServerStateModel, unit
                 )
-                for unit in [self.server.unit, *self.lock_relation.units]
+                for unit in [self.model.unit, *self.lock_relation.units]
             ]
             if self.lock_relation
             else []
         )
 
     @property
-    def application_lock(self) -> LockAppState:
+    def application_lock(self) -> LockAppStateModel:
         """Get application state of lock relation."""
-        return LockAppState(
-            relation=self.lock_relation,
-            repository=self.lock_app_interface,
-            component=self.model.app,
-            unit_name=self.unit_name,
+        return self._bind_model_or_default(
+            self.lock_app_interface, self.lock_relation, LockAppStateModel, self.model.app
         )
 
     # -- Cluster State Properties
@@ -723,7 +757,7 @@ class ClusterState(Object):
         """Fetch the list of units for the current app."""
         if not self.peer_relation:
             return []
-        return list(self.peer_relation.units.union({self.server.unit}))
+        return list(self.peer_relation.units.union({self.model.unit}))
 
     @property
     def all_unit_names(self) -> list[str]:
@@ -989,7 +1023,7 @@ class ClusterState(Object):
             relation_id=orchestrators.main_rel_id,
             remote=True,
         )
-        return peer_cluster.model if peer_cluster else None
+        return peer_cluster if peer_cluster else None
 
     def is_peer_cluster_consumer(self, of: str | None = None) -> bool:
         """Return True if this app is a peer-cluster consumer (requirer side).

@@ -219,9 +219,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         if on_other_units or not on_current_unit:
             if only_by_leader:
-                self.state.application.update_ts = time_ns()
+                self.state.application.update_ts = str(time_ns())
             else:
-                self.state.server.update_ts = time_ns()
+                self.state.server.update_ts = str(time_ns())
 
         if on_current_unit:
             self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)

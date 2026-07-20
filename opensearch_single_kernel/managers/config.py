@@ -356,7 +356,7 @@ class ConfigManager(BaseManager):
 
         Intended for authc category in opensearch-security/config.yml config file.
         """
-        jwt_config = self.state.jwt.auth_configuration
+        jwt_config = self.state.jwt
         if jwt_config:
             config_opts = {
                 "signing_key": jwt_config.signing_key,

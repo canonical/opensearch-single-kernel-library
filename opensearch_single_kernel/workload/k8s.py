@@ -515,7 +515,13 @@ class K8sWorkload(BaseWorkload):
             command: command to run, can contain arguments
             args: additional command line arguments
             stdin: string input to be passed on the standard input
-            use_errors_replace: ignored in K8s (kept for interface compatibility)
+            use_errors_replace: if True, tolerate non-UTF-8 bytes in stdout/stderr
+                (e.g. `openssl pkcs12` dumps, which may contain raw bytes in Bag
+                Attributes) by decoding with errors="replace" instead of strict
+                UTF-8. Pebble's exec() has no `errors=` knob, so we request raw
+                bytes (encoding=None) and decode them ourselves; requesting
+                strict UTF-8 decoding on such output crashes Pebble's background
+                I/O thread and hangs wait_output() forever.
 
         Returns:
             SimpleNamespace with cmd, out, err, return code attributes
@@ -533,11 +539,25 @@ class K8sWorkload(BaseWorkload):
 
             cmd_list = build_command_list(command_with_args)
 
-            process = self.container.exec(
-                cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
-            )
+            if use_errors_replace:
+                process = self.container.exec(
+                    cmd_list,
+                    stdin=stdin.encode("utf-8") if stdin is not None else None,
+                    encoding=None,
+                    combine_stderr=True,
+                    timeout=30,
+                )
+            else:
+                process = self.container.exec(
+                    cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
+                )
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
+            if use_errors_replace:
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode("utf-8", "replace")
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode("utf-8", "replace")
             logger.debug(
                 "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
             )

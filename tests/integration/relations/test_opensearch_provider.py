@@ -145,6 +145,13 @@ async def test_create_relation(
         )
 
 
+def _all_apps(substrate: str) -> list:
+    """Return ALL_APPS, dropping dashboards on k8s where it's never deployed."""
+    if substrate == "k8s":
+        return [app for app in ALL_APPS if app != DASHBOARDS_APP_NAME]
+    return ALL_APPS
+
+
 def _get_client_relation(ops_test, endpoint_name: str = FIRST_RELATION_NAME):
     """Helper function to retrieve the client relation from the model."""
     for relation in ops_test.model.relations:
@@ -352,7 +359,7 @@ async def test_scaling(ops_test: OpsTest, substrate):
     for app_name in [CLIENT_APP_NAME, V1_CLIENT_APP_NAME]:
         assert await _is_endpoint_count_valid(app_name)
 
-    await wait_until(ops_test, apps=ALL_APPS, idle_period=70)
+    await wait_until(ops_test, apps=_all_apps(substrate), idle_period=70)
 
     # Test scale down
     opensearch_unit_ids = get_application_unit_ids(ops_test, OPENSEARCH_APP_NAME)
@@ -396,8 +403,9 @@ async def test_multiple_relations(
 ):
     """Test that two different applications can connect to the database."""
     # scale-down for CI
-    logger.info("Removing 1 unit for CI and sleep a minute..")
+    logger.info("Removing 1 unit for CI..")
     opensearch_unit_ids = get_application_unit_ids(ops_test, app=OPENSEARCH_APP_NAME)
+    expected_opensearch_units = len(opensearch_unit_ids) - 1
     if substrate == "k8s":
         await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=-1)
     else:
@@ -405,8 +413,14 @@ async def test_multiple_relations(
             f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
         )
 
-    # sleep a minute to ease the load on machine
-    await asyncio.sleep(60)
+    # Wait for the scale-down to actually complete before moving on: a fixed sleep here is
+    # racy since k8s pod removal (and any shard relocation) isn't guaranteed to finish within it.
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME],
+        wait_for_exact_units={OPENSEARCH_APP_NAME: expected_opensearch_units},
+        idle_period=70,
+    )
 
     # Deploy secondary application.
     v0 = True if app_name == CLIENT_APP_NAME else False
@@ -422,9 +436,8 @@ async def test_multiple_relations(
     relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, f"{name}:{relation_name}")
 
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, name)
-    opensearch_unit_ids = get_application_unit_ids(ops_test, app=OPENSEARCH_APP_NAME)
     units = {
-        OPENSEARCH_APP_NAME: len(opensearch_unit_ids),
+        OPENSEARCH_APP_NAME: expected_opensearch_units,
         CLIENT_APP_NAME: 1,
         SECONDARY_CLIENT_APP_NAME: 1,
         TLS_CERTIFICATES_APP_NAME: 1,
@@ -435,7 +448,7 @@ async def test_multiple_relations(
 
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [name],
+        apps=_all_apps(substrate) + [name],
         wait_for_exact_units=units,
         idle_period=70,
         timeout=2000,
@@ -463,7 +476,7 @@ async def test_multiple_relations(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("app_name", [CLIENT_APP_NAME, V1_CLIENT_APP_NAME])
-async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_name):
+async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_name, substrate):
     """Test that two different applications can connect to the database."""
     # Relate the new application and wait for them to exchange connection data.
     v0 = True if app_name == CLIENT_APP_NAME else False
@@ -474,7 +487,7 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_na
 
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [name],
+        apps=_all_apps(substrate) + [name],
         idle_period=70,
     )
 
@@ -501,7 +514,7 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_na
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("app_name", [CLIENT_APP_NAME, V1_CLIENT_APP_NAME])
-async def test_admin_relation(ops_test: OpsTest, app_name):
+async def test_admin_relation(ops_test: OpsTest, app_name, substrate):
     """Test we can create relations with admin permissions."""
     # Add an admin relation and wait for them to exchange data
     global admin_relation
@@ -524,7 +537,7 @@ async def test_admin_relation(ops_test: OpsTest, app_name):
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, name)
     await wait_until(
         ops_test,
-        apps=ALL_APPS + [secondary_name],
+        apps=_all_apps(substrate) + [secondary_name],
         idle_period=70,
     )
 
@@ -749,7 +762,7 @@ async def test_relation_broken(ops_test: OpsTest):
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("app_name", [CLIENT_APP_NAME, V1_CLIENT_APP_NAME])
-async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str):
+async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str, substrate):
     """Verify that if we recreate a relation, we can access the same index for both v0 and v1."""
     v0 = True if app_name == CLIENT_APP_NAME else False
     relation_name = FIRST_RELATION_NAME if v0 else V1_FIRST_RELATION_NAME
@@ -763,11 +776,12 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str
     apps_to_wait = [
         OPENSEARCH_APP_NAME,
         TLS_CERTIFICATES_APP_NAME,
-        DASHBOARDS_APP_NAME,
         app_name,
         SECONDARY_CLIENT_APP_NAME,
         V1_SECONDARY_CLIENT_APP_NAME,
     ]
+    if substrate == "vm":
+        apps_to_wait.append(DASHBOARDS_APP_NAME)
 
     await wait_until(
         ops_test,

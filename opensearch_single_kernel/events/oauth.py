@@ -20,11 +20,11 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_REDIRECT_URI,
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
+    DeploymentType,
 )
 from opensearch_single_kernel.common.statuses import (
     OAuthStatuses,
 )
-from opensearch_single_kernel.core.models import DeploymentType
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
     ClientConfig,
     OAuthRequirer,

@@ -244,7 +244,7 @@ def test_k8s_runtime_tls_ready_does_not_require_cacerts_p12(harness, mocker):
 def test_get_sans(harness, mocker, substrate):
     """Test the SANs returned depending on the cert type."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
@@ -369,7 +369,7 @@ def test_find_secret(harness):
 def test_on_relation_created_admin(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -407,7 +407,7 @@ def test_on_relation_created_admin(harness, mocker):
 def test_on_relation_created_only_main_orchestrator_requests_application_cert(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -448,7 +448,7 @@ def test_on_relation_created_only_main_orchestrator_requests_application_cert(ha
 def test_on_relation_created_non_admin(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -503,7 +503,7 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
 
@@ -526,7 +526,7 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
 def test_on_certificate_available(harness, mocker):
     """Test _on_certificate_available event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
@@ -578,7 +578,7 @@ def test_on_certificate_expiring(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     if substrate != "vm":
@@ -616,7 +616,7 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     if substrate != "vm":
@@ -651,7 +651,7 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
 # Testing store_new_ca() function
 def test_truststore_password_secret(harness, mocker, substrate):
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch("opensearch_single_kernel.utils.certificates.store_ca_chain")
@@ -764,7 +764,7 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
 
     # Purposefully not adding unit certificates, to also trigger corner-case checks
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -879,7 +879,7 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
     harness.charm.state.server.http_truststore_password = "truststore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1000,7 +1000,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     new_ca = "new_ca"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1113,7 +1113,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_non_leader
     harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1191,7 +1191,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         - LEADER ONLY
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
@@ -1349,7 +1349,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         - any units
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
@@ -1491,7 +1491,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
 
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
 
@@ -1624,7 +1624,7 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     keystore_password = "keystore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     exists = mocker.patch("charmlibs.pathops.LocalPath.exists")
@@ -1777,7 +1777,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         - any unit
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
     )
     mocker.patch(

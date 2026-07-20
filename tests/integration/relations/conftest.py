@@ -56,7 +56,7 @@ async def application_charm() -> str:
 @pytest.fixture(scope="module")
 async def v1_application_charm() -> str:
     """Build the application charm."""
-    return "./tests/integration/relations/opensearch_provider/application-charm-v1/v1-application_ubuntu@22.04-amd64.charm"
+    return "./tests/integration/relations/opensearch_provider/application-charm-v1/v1-application_ubuntu@24.04-amd64.charm"
 
 
 @pytest.fixture(scope="module")

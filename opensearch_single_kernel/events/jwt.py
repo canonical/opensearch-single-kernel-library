@@ -16,9 +16,10 @@ from ops import (
 
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
+    DeploymentType,
 )
 from opensearch_single_kernel.common.statuses import JwtStatuses
-from opensearch_single_kernel.core.models import DeploymentType, JWTAuthConfiguration
+from opensearch_single_kernel.core.models import JWTAuthConfiguration
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     RequirerCommonModel,
     ResourceRequirerEventHandler,
@@ -97,7 +98,7 @@ class JWTEventsHandler(Object):
         if not event.app:
             return
 
-        parsed_config = self.charm.state.jwt.auth_configuration
+        parsed_config = self.charm.state.jwt
 
         if not parsed_config:
             logger.debug("No valid JWT configuration found in the databag yet.")

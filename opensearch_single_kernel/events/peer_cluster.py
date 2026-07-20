@@ -32,9 +32,9 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.models import (
+    PeerClusterAppModel,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.utils.peer_cluster import is_failover_promoted
 
 if TYPE_CHECKING:
@@ -370,10 +370,7 @@ class PeerClusterEventsHandler(Object):
 
         if reconcile_deployment_desc:
             # check if valid data is present if so update the seed hosts
-            if (
-                remote_peer_cluster is not None
-                and remote_peer_cluster.deployment_description is not None
-            ):
+            if remote_peer_cluster is not None and remote_peer_cluster.deployment_desc is not None:
                 # In case the main orchestrator was scaled down to 0 and back
                 # we need to update the seed hosts with the data from the relation
                 # to pick up the new IPs and enable the data node see it
@@ -583,7 +580,7 @@ class PeerClusterEventsHandler(Object):
                 m.model_extra[label] = err_message
         else:
             # if there is no error, clear the status and stored message for this label
-            app_m = self.charm.state.application.model
+            app_m = self.charm.state.application
             error_message = app_m.model_extra.get(label, "") if app_m else ""
             status = PeerClusterRelErrorData.get_status_from_message(error_message)
             if status:
@@ -593,8 +590,8 @@ class PeerClusterEventsHandler(Object):
                     component=self.charm.peer_cluster_manager.name,
                 )
             if app_m and label in app_m.model_extra:
-                app_m.model_extra[label] = None
-                self.charm.state.application.write(app_m)
+                with app_m.update():
+                    app_m.model_extra[label] = None
 
     def apply_orchestrator_status(self) -> None:
         """Sets or clears status based on presence of local orchestrators."""
@@ -633,7 +630,7 @@ class PeerClusterEventsHandler(Object):
                 component=self.charm.peer_cluster_manager.name,
             )
 
-    def _set_security_conf(self, data: PeerCluster) -> None:
+    def _set_security_conf(self, data: PeerClusterAppModel) -> None:
         """Store security related config."""
         # set admin secrets
         self.charm.state.application.update_from_peer_cluster_rel_data(data)
@@ -676,7 +673,7 @@ class PeerClusterEventsHandler(Object):
                 component=self.charm.peer_cluster_manager.name,
             )
 
-    def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerCluster) -> None:
+    def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterAppModel) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""
         self.charm.cluster_manager.reconcile_cluster_config_with_relation_data(data)
         self.charm.config_manager.update_seeds_config(list(data.nodes_config.values()))

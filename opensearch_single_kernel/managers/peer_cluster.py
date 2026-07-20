@@ -29,10 +29,10 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     Node,
     PeerClusterApp,
+    PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
@@ -119,7 +119,7 @@ class PeerClusterManager(BaseManager):
 
     def reconcile_orchestrators_from_provider_data(
         self,
-        remote_peer_cluster: PeerCluster,
+        remote_peer_cluster: PeerClusterAppModel,
         trigger: str | None,
         relation_id: str,
         relation_app_name: str,
@@ -239,7 +239,7 @@ class PeerClusterManager(BaseManager):
         self,
         orchestrators: PeerClusterOrchestrators,
         deployment_desc: DeploymentDescription,
-        peer_cluster_rel_data: PeerCluster,
+        peer_cluster_rel_data: PeerClusterAppModel,
         event_rel_id: int | None,
     ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
@@ -390,7 +390,7 @@ class PeerClusterManager(BaseManager):
 
     def cleanup_error_in_relation_data(self) -> None:
         """Clean up the error data in relation data when the error is resolved."""
-        app_m = self.state.application.model
+        app_m = self.state.application
         if not app_m:
             return
         relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
@@ -401,13 +401,15 @@ class PeerClusterManager(BaseManager):
             and int(key.split("-")[-1]) not in relation_ids
         ]
         if keys_to_remove:
-            for key in keys_to_remove:
-                error_message = app_m.model_extra.get(key, "")
-                status = PeerClusterRelErrorData.get_status_from_message(error_message)
-                if status:
-                    self.state.remove_status_if_present(status, scope="app", component=self.name)
-                app_m.model_extra.pop(key, None)
-            self.state.application.write(app_m)
+            with app_m.update():
+                for key in keys_to_remove:
+                    error_message = app_m.model_extra.get(key, "")
+                    status = PeerClusterRelErrorData.get_status_from_message(error_message)
+                    if status:
+                        self.state.remove_status_if_present(
+                            status, scope="app", component=self.name
+                        )
+                    app_m.model_extra.pop(key, None)
 
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).

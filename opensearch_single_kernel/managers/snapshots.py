@@ -41,9 +41,9 @@ from opensearch_single_kernel.core.models import (
     AzureRelData,
     GcsRelData,
     ObjectStorageConfig,
+    PeerClusterAppModel,
     S3RelData,
 )
-from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
@@ -576,7 +576,7 @@ class SnapshotsManager(BaseManager):
 
         return missing
 
-    def update_backup_credentials_from_peer_relation(self, data: PeerCluster) -> None:
+    def update_backup_credentials_from_peer_relation(self, data: PeerClusterAppModel) -> None:
         """Update backup credentials based on data from peer relation."""
         if (s3_creds := data.s3) and self.state.application.s3:
             self.state.application.s3.access_key = s3_creds.access_key

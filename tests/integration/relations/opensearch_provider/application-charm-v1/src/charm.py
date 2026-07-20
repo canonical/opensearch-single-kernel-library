@@ -19,15 +19,21 @@ from ops.model import ActiveStatus, BlockedStatus
 
 logger = logging.getLogger(__name__)
 
+
 CERT_PATH = "/tmp/test_cert.ca"
 
 
 class V1ApplicationCharm(CharmBase):
-    """V1 Application charm that connects to database charms."""
+    """V1 Application charm that connects to database charms.
+
+    Enters BlockedStatus if it cannot constantly reach the database.
+    """
 
     def __init__(self, *args):
         super().__init__(*args)
+        # Default charm events.
         self.framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.start, self._on_start)
 
         self.first_opensearch = ResourceRequirerEventHandler(
             self,
@@ -67,13 +73,20 @@ class V1ApplicationCharm(CharmBase):
 
         self.framework.observe(self.on.run_request_action, self._on_run_request_action)
 
+    def _on_start(self, _):
+        """Check connection on start."""
+        self.unit.status = BlockedStatus("Waiting for connection to opensearch charm")
+
     def _on_update_status(self, _) -> None:
+        """Health check for index connection."""
         if self.connection_check():
             self.unit.status = ActiveStatus()
         else:
+            logger.error("connection check to opensearch charm failed")
             self.unit.status = BlockedStatus("No connection to opensearch charm")
 
     def connection_check(self) -> bool:
+        """Simple connection check to see if backend exists and we can connect to it."""
         relations = []
         for relation in self.relations.keys():
             relations += self.model.relations.get(relation, [])
@@ -85,8 +98,10 @@ class V1ApplicationCharm(CharmBase):
             try:
                 self.relation_request(relation.name, relation.id, "GET", "/")
             except Exception as e:
-                logger.error(f"relation {relation} didn't connect: {e}")
+                logger.error(e)
+                logger.error(f"relation {relation} didn't connect")
                 connected = False
+
         return connected
 
     def _get_requires(self, relation_name):
@@ -95,15 +110,17 @@ class V1ApplicationCharm(CharmBase):
     def _on_authentication_updated(self, event):
         tls_ca = event.response.tls_ca
         if not tls_ca:
-            event.defer()
+            event.defer()  # We're waiting until we get a CA.
             return
 
+        logger.error(f"writing cert to {CERT_PATH}.")
         with open(CERT_PATH, "w") as f:
             f.write(tls_ca)
 
         self._on_update_status(None)
 
     def _on_run_request_action(self, event: ActionEvent):
+        logger.info(event.params)
         relation_id = event.params["relation-id"]
         relation_name = event.params["relation-name"]
         method = event.params["method"]
@@ -134,6 +151,7 @@ class V1ApplicationCharm(CharmBase):
 
         host_addr, port = response.endpoints.split(",")[0].split(":")
 
+        logger.info(f"sending {method} request to {endpoint}")
         try:
             req_response = self.request(
                 method,
@@ -190,12 +208,14 @@ class V1ApplicationCharm(CharmBase):
             endpoint = endpoint[1:]
 
         full_url = f"https://{host}:{port}/{endpoint}"
+
         request_kwargs = {
             "verify": CERT_PATH,
             "method": method.upper(),
             "url": full_url,
             "headers": {"Content-Type": "application/json", "Accept": "application/json"},
         }
+
         if isinstance(payload, str):
             request_kwargs["data"] = payload
         elif isinstance(payload, dict):
@@ -207,6 +227,7 @@ class V1ApplicationCharm(CharmBase):
                 resp = s.request(**request_kwargs)
                 resp.raise_for_status()
         except requests.exceptions.RequestException as e:
+            logger.error(f"Request {method} to {full_url} with payload: {payload} failed. \n{e}")
             raise OpenSearchHttpError(str(e))
 
         return resp.json()

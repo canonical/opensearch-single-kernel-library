@@ -55,6 +55,16 @@ def read_ca(
     return (list_cas(workload, store_pwd, store_path) or {}).get(alias)
 
 
+def parse_ca_chains(stored_certs: str) -> dict[str, str]:
+    """Parse a raw `openssl pkcs12` truststore dump into per-alias PEM chains.
+
+    Exposed separately from `list_cas` so callers that already fetched the raw dump
+    themselves (e.g. as part of a batched container command) can reuse the same
+    alias-aware parsing without an extra `run_cmd()` round-trip.
+    """
+    return _assemble_ca_chains(_list_ca_chains(stored_certs))
+
+
 def list_aliases(
     workload: BaseWorkload, store_pwd: str, store_path: PathProtocol
 ) -> list[str] | None:
@@ -107,7 +117,7 @@ def list_cas(
         logger.error("Error reading the current truststore: %s", e)
         return None
 
-    return _assemble_ca_chains(_list_ca_chains(stored_certs))
+    return parse_ca_chains(stored_certs)
 
 
 def _parse_ca_alias(alias: str) -> tuple[str, int]:

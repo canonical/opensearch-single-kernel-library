@@ -62,7 +62,7 @@ p_units = [
 def test_can_start(harness, mocker):
     """Test the can_start logic."""
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         return_value=None,
         new_callable=PropertyMock,
     )
@@ -90,7 +90,7 @@ def test_can_start(harness, mocker):
             profile="production",
         )
         mocker.patch(
-            "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+            "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
             return_value=deployment_description,
             new_callable=PropertyMock,
         )
@@ -109,7 +109,7 @@ def test_pre_validate_roles_change(harness, mocker):
         new_callable=PropertyMock,
     )
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         new_callable=PropertyMock,
         return_value=DeploymentDescription(
             config=user_configs["roles_ok"],

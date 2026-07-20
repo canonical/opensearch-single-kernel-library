@@ -53,9 +53,9 @@ from opensearch_single_kernel.core.models import (
     DeploymentDescription,
     DeploymentState,
     Node,
+    PeerClusterAppModel,
     PeerClusterConfig,
 )
-from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -130,7 +130,9 @@ class ClusterManager(BaseManager):
         self.state.application.deployment_desc = deployment_desc
         return True
 
-    def reconcile_cluster_config_with_relation_data(self, data: PeerCluster) -> None:  # noqa: C901
+    def reconcile_cluster_config_with_relation_data(
+        self, data: PeerClusterAppModel
+    ) -> None:  # noqa: C901
         """Update current peer cluster related config based on peer_cluster rel_data."""
         logger.debug("running with relation data")
         current_deployment_desc = self.state.application.deployment_desc
@@ -938,7 +940,7 @@ class ClusterManager(BaseManager):
                 status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
         elif self.state.jwt_relation:
             try:
-                _ = self.state.jwt.auth_configuration
+                _ = self.state.jwt
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 

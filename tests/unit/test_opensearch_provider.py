@@ -65,11 +65,8 @@ def test_on_index_requested(harness, mocker):
         "opensearch_single_kernel.common.client.OpenSearchClient.request",
         return_value={"status": "OK"},
     )
-    mocker.patch(
-        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.admin_chain",
-        new_callable=PropertyMock,
-        return_value="tls_chain",
-    )
+    harness.set_leader(True)
+    harness.charm.state.application.admin_chain = "tls_chain"
     mocker.patch(
         "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
     )
@@ -151,11 +148,8 @@ def test_on_index_requested_kibanaserver(harness, mocker):
         "opensearch_single_kernel.common.client.OpenSearchClient.request",
         return_value={"status": "OK"},
     )
-    mocker.patch(
-        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.admin_chain",
-        new_callable=PropertyMock,
-        return_value="tls_chain",
-    )
+    harness.set_leader(True)
+    harness.charm.state.application.admin_chain = "tls_chain"
     mocker.patch(
         "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
     )
@@ -242,7 +236,7 @@ def test_create_opensearch_users(
         "opensearch_single_kernel.common.client.OpenSearchClient.patch_user",
     )
     client_users_dict = mocker.patch(
-        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.client_users_dict",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.client_users_dict",
         new_callable=PropertyMock,
         return_value={},
     )

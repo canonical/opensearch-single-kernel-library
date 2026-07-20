@@ -20,8 +20,8 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState
-from opensearch_single_kernel.core.state import ClusterState, UpgradeServerState
+from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeServerModel
+from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
@@ -224,7 +224,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
 
     def _determine_partition(
-        self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
+        self, units: list[UpgradeServerModel], action_event: ops.ActionEvent | None, force: bool
     ) -> int:
         """Determine the new partition to use.
 
@@ -236,7 +236,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """
         if not self.in_progress:
             return 0
-        logger.debug(f"{self.state.server_upgrade.model=}")
+        logger.debug(f"{self.state.server_upgrade=}")
         logger.debug(f"{action_event=}, {force=}, {self.in_progress=}")
         for upgrade_order_index, server_upgrade_unit in enumerate(units):
             logger.debug(f"{upgrade_order_index=}, {server_upgrade_unit=}")

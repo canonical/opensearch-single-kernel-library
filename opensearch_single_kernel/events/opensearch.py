@@ -71,9 +71,10 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
+    OpenSearchServerPeerModel,
     UnitUpgradesState,
+    bind_model,
 )
-from opensearch_single_kernel.core.peer_relation import OpenSearchServer
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
     RestartOpenSearch,
@@ -218,9 +219,10 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        event_server = OpenSearchServer(
-            relation=event.relation,
-            repository=self.charm.state.peer_unit_interface,
+        event_server = bind_model(
+            self.charm.state.peer_unit_interface,
+            event.relation.id,
+            OpenSearchServerPeerModel,
             component=event.unit,
         )
 
@@ -791,7 +793,7 @@ class OpenSearchEventsHandler(Object):
         ):
             event.defer()
             return
-        if self.charm.state.is_peer_cluster_consumer():
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_consumer():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
         if (
@@ -1394,9 +1396,9 @@ class OpenSearchEventsHandler(Object):
 
         if on_other_units or not on_current_unit:
             if only_by_leader:
-                self.charm.state.application.update_ts = time_ns()
+                self.charm.state.application.update_ts = str(time_ns())
             else:
-                self.charm.state.server.update_ts = time_ns()
+                self.charm.state.server.update_ts = str(time_ns())
 
         if on_current_unit:
             self.charm.on[PEER_RELATION].relation_changed.emit(self.charm.state.peer_relation)

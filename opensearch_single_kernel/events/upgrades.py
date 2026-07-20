@@ -671,7 +671,7 @@ class UpgradesEventsHandler(Object):
         if not self.charm.upgrades_manager.in_progress:
             logger.info("Charm upgraded. OpenSearch version unchanged")
 
-        self.charm.state.application_upgrade.upgrade_resumed = False
+        self.charm.state.application_upgrade.set_upgrade_resumed(False)
         # Only call `_reconcile_upgrade` on leader unit to avoid race conditions with
         # `upgrade_resumed`
         self._reconcile_upgrade()

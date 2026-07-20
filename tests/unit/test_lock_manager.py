@@ -28,7 +28,7 @@ def lock_rel_id(harness):
 def mock_deployment_description(mocker):
     """Patch deployment_description and the file-based internal-user operations it triggers."""
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
