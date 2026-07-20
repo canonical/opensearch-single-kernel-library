@@ -104,7 +104,9 @@ class NotificationsManager(BaseManager):
         """
         return f"smtp-{relation_id}_smtp-account"
 
-    def get_smtp_config(self, smtp_data: SmtpRelationData, relation_id: int) -> SmtpConfig:
+    def get_smtp_config(
+        self, smtp_data: SmtpRelationData, relation_id: int
+    ) -> SmtpConfig:
         """Derive SMTP-related config IDs and normalized values from relation data.
 
         Args:
@@ -235,7 +237,9 @@ class NotificationsManager(BaseManager):
             "config_type": "email",
             "email": {
                 "email_account_id": smtp_account_id,
-                "recipient_list": [{"recipient": r} for r in (fallback_recipients or [])],
+                "recipient_list": [
+                    {"recipient": r} for r in (fallback_recipients or [])
+                ],
                 "email_group_id_list": list(email_group_ids),
             },
         }
@@ -265,11 +269,15 @@ class NotificationsManager(BaseManager):
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-    def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:
+    def _add_relation_statuses(
+        self, status_list: list[StatusObject], relation: Relation
+    ) -> None:
         """Compute the manager's app statuses for relation and append them to list."""
         try:
             if not (
-                smtp_data := self.state.smtp_requires.get_relation_data_from_relation(relation)
+                smtp_data := self.state.smtp_requires.get_relation_data_from_relation(
+                    relation
+                )
             ):
                 status_list.append(
                     format_status(

@@ -67,7 +67,8 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[MAIN_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"}
+            | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
@@ -76,7 +77,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "roles": "cluster_manager",
+                "init_hold": True,
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
@@ -86,7 +91,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[DATA_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
@@ -102,9 +111,15 @@ async def test_build_and_deploy(
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
         await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
+    )
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
@@ -128,7 +143,9 @@ async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) 
         timeout=1800,
     )
     # re-relate main and failover
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
@@ -143,7 +160,10 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     """Test that the orchestrator apps can be deleted."""
     unit = ops_test.model.applications[MAIN_APP].units[-1]
     deployment_desc = await get_application_relation_data(
-        ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="deployment-description"
+        ops_test,
+        unit_name=unit.name,
+        relation_name=PEER_RELATION,
+        key="deployment-description",
     )
     deployment_desc = DeploymentDescription.from_dict(json.loads(deployment_desc))
 
@@ -167,7 +187,10 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
 
     unit = ops_test.model.applications[FAILOVER_APP].units[-1]
     deployment_desc = await get_application_relation_data(
-        ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="deployment-description"
+        ops_test,
+        unit_name=unit.name,
+        relation_name=PEER_RELATION,
+        key="deployment-description",
     )
     deployment_desc = DeploymentDescription.from_dict(json.loads(deployment_desc))
 
@@ -190,7 +213,9 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     await wait_until(
         ops_test,
         apps=[DATA_APP],
-        apps_statuses={DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]},
+        apps_statuses={
+            DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value]
+        },
         units_statuses={DATA_APP: [NO_CM_STATUS]},
         wait_for_exact_units={
             DATA_APP: APP_UNITS[DATA_APP],

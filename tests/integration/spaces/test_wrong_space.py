@@ -27,7 +27,9 @@ DEFAULT_NUM_UNITS = 3
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series, lxd_spaces, substrate) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, lxd_spaces, substrate
+) -> None:
     """Build and deploy OpenSearch.
 
     For this test, we will misconfigure space bindings and see if the charm still
@@ -93,7 +95,9 @@ async def test_check_opensearch_transport(ops_test: OpsTest) -> None:
             .rsplit()
         )
         addrs = list(ids_to_addr.values())
-        assert sorted(addrs) == sorted(hosts), f"Expected {sorted(addrs)}, got {sorted(hosts)}"
+        assert sorted(addrs) == sorted(hosts), (
+            f"Expected {sorted(addrs)}, got {sorted(hosts)}"
+        )
 
         # Now, ensure we only have IPs
         for host in hosts:

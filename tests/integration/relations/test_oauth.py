@@ -87,10 +87,14 @@ async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate):
     if substrate == "k8s":
         # if we're on k8s, we already have identity platform deployed in the same model,
         # so we just relate to it
-        await ops_test.model.integrate(f"{APP_NAME}:certificates", "self-signed-certificates")
+        await ops_test.model.integrate(
+            f"{APP_NAME}:certificates", "self-signed-certificates"
+        )
         await ops_test.model.integrate(f"{APP_NAME}:oauth", "hydra")
     else:
-        await k8s_model.create_offer("certificates", "certificates", "self-signed-certificates")
+        await k8s_model.create_offer(
+            "certificates", "certificates", "self-signed-certificates"
+        )
         await ops_test.model.consume(f"admin/{k8s_model.name}.certificates")
         await ops_test.model.integrate("opensearch:certificates", "certificates")
 
@@ -104,7 +108,9 @@ async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate):
 
     # Require identity platform to be active so OAuth setup can succeed
     await gather(
-        ops_test.model.wait_for_idle(apps=[APP_NAME, DATA_INTEGRATOR_NAME], status="active"),
+        ops_test.model.wait_for_idle(
+            apps=[APP_NAME, DATA_INTEGRATOR_NAME], status="active"
+        ),
         # we can get a blocked status on kratos-external-idp-integrator
         # but setup can still proceed, so we don't check for active status on k8s model
         k8s_model.wait_for_idle(timeout=1200),
@@ -156,7 +162,11 @@ async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model):
 
     result = requests.post(
         f"{hydra_url}/oauth2/token",
-        {"scope": "openid", "grant_type": "client_credentials", "audience": "opensearch"},
+        {
+            "scope": "openid",
+            "grant_type": "client_credentials",
+            "audience": "opensearch",
+        },
         auth=requests.auth.HTTPBasicAuth(oauth_client_id, oauth_client_secret),
         verify=False,
     )
@@ -196,7 +206,9 @@ async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
     opensearch_address = await get_leader_unit_ip(ops_test, "opensearch")
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.json().get("status") == 403, "no permissions error expected"
 
@@ -210,14 +222,20 @@ async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
     assert data_integrator_user, "failed to retrieve data integrator user"
 
     global original_opensearch_config
-    original_opensearch_config = await ops_test.model.applications["opensearch"].get_config()
+    original_opensearch_config = await ops_test.model.applications[
+        "opensearch"
+    ].get_config()
     config_with_roles = original_opensearch_config.copy()
-    config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
+    config_with_roles["roles_mapping"] = json.dumps(
+        {oauth_client_id: data_integrator_user}
+    )
     await ops_test.model.applications["opensearch"].set_config(config_with_roles)
     await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active")
 
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 200, "request expected to succeed with roles mapping"
 
@@ -255,9 +273,13 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
     oauth_access_token = oauth_info.get("access_token")
     oauth_client_id = oauth_info.get("client_id")
 
-    original_opensearch_config = await ops_test.model.applications["opensearch"].get_config()
+    original_opensearch_config = await ops_test.model.applications[
+        "opensearch"
+    ].get_config()
     config_with_roles = original_opensearch_config.copy()
-    config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: second_data_integrator_user})
+    config_with_roles["roles_mapping"] = json.dumps(
+        {oauth_client_id: second_data_integrator_user}
+    )
     await ops_test.model.applications["opensearch"].set_config(config_with_roles)
     await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active")
 
@@ -268,9 +290,9 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
         headers={"Authorization": f"Bearer {oauth_access_token}"},
         verify=False,
     )
-    assert (
-        result.json().get("status") == 403
-    ), "no permissions error expected as admin role should be removed"
+    assert result.json().get("status") == 403, (
+        "no permissions error expected as admin role should be removed"
+    )
 
     # Ensure second data integrator role is configured
     result = requests.get(
@@ -290,7 +312,9 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
 @pytest.mark.abort_on_fail
 async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
     """Ensure that all of the oauth clients permissions are removed with clean roles mapping."""
-    await ops_test.model.applications["opensearch"].set_config(original_opensearch_config)
+    await ops_test.model.applications["opensearch"].set_config(
+        original_opensearch_config
+    )
     await ops_test.model.wait_for_idle(apps=["opensearch"], status="active")
 
     result = requests.get(
@@ -299,7 +323,9 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
         verify=False,
     )
     assert result.status_code == 200, "request for authinfo should success"
-    assert result.json().get("roles") == ["own_index"], "all the mapped roles should be removed"
+    assert result.json().get("roles") == ["own_index"], (
+        "all the mapped roles should be removed"
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -309,7 +335,9 @@ async def test_setup_large_cluster(
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
-    await ops_test.model.remove_application(SECOND_DATA_INTEGRATOR_NAME, block_until_done=True)
+    await ops_test.model.remove_application(
+        SECOND_DATA_INTEGRATOR_NAME, block_until_done=True
+    )
 
     logger.info("Create large deployment cluster of Opensearch")
     await asyncio.gather(
@@ -318,7 +346,8 @@ async def test_setup_large_cluster(
             application_name=MAIN_APP,
             num_units=APP_UNITS[MAIN_APP],
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"}
+            | CONFIG_OPTS,
             trust=substrate == "k8s",
             resources=charm_resources,
         ),
@@ -327,7 +356,11 @@ async def test_setup_large_cluster(
             application_name=FAILOVER_APP,
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "cluster_manager",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
             resources=charm_resources,
@@ -352,9 +385,15 @@ async def test_setup_large_cluster(
             await ops_test.model.integrate(app, "certificates")
 
     # integrate large deployment cluster
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
+    )
 
     # integrate with Data integrator
     await ops_test.model.integrate(
@@ -374,7 +413,9 @@ async def test_oauth_relation_restricted(
     ops_test: OpsTest, charm, series, k8s_model: Model, substrate
 ):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
-    logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
+    logger.info(
+        f"Integrating {DATA_APP} with OAuth - this will result in blocked status"
+    )
     if substrate == "k8s":
         await ops_test.model.integrate(f"{DATA_APP}:oauth", "hydra")
     else:
@@ -392,7 +433,9 @@ async def test_oauth_relation_restricted(
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 401, "`Unauthorized` error expected"
     logger.info("Access with OAuth Token failed as expected")
@@ -436,15 +479,21 @@ async def test_oauth_access_large_cluster(
     data_integrator_user = action.results.get("opensearch", {}).get("username")
     assert data_integrator_user, "failed to retrieve data integrator user"
 
-    original_opensearch_config = await ops_test.model.applications[DATA_APP].get_config()
+    original_opensearch_config = await ops_test.model.applications[
+        DATA_APP
+    ].get_config()
     config_with_roles = original_opensearch_config.copy()
-    config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
+    config_with_roles["roles_mapping"] = json.dumps(
+        {oauth_client_id: data_integrator_user}
+    )
     await ops_test.model.applications[DATA_APP].set_config(config_with_roles)
     await ops_test.model.wait_for_idle(status="active")
 
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 200, "request expected to succeed with roles mapping"

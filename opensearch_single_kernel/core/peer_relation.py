@@ -131,7 +131,9 @@ class OpenSearchServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
+        return (
+            self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
+        )
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool) -> None:
@@ -217,7 +219,9 @@ class OpenSearchServer(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(
+                    ","
+                ),
             )
         )
 
@@ -316,7 +320,10 @@ class OpenSearchServer(RelationState):
     @property
     def transport_secrets(self) -> dict[str, str]:
         """Get the Transport layer TLS secrets."""
-        return self.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT, peek=True) or {}
+        return (
+            self.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT, peek=True)
+            or {}
+        )
 
     @property
     def http_secrets(self) -> dict[str, str]:
@@ -348,7 +355,9 @@ class OpenSearchServer(RelationState):
 
     def remove_relation_departing(self, relation: Relation) -> None:
         """Cleanup mark whether relation broken event should be skipped."""
-        self.relation.data[self.unit].pop(f"{relation.name}_{relation.id}_departing", None)
+        self.relation.data[self.unit].pop(
+            f"{relation.name}_{relation.id}_departing", None
+        )
 
 
 class OpenSearchApplication(RelationState):
@@ -403,7 +412,9 @@ class OpenSearchApplication(RelationState):
     @property
     def is_security_index_initialised(self) -> bool:
         """Return the value of 'security_index_initialised' in application state."""
-        return self.relation_data.get("security_index_initialised", "").lower() == "true"
+        return (
+            self.relation_data.get("security_index_initialised", "").lower() == "true"
+        )
 
     @is_security_index_initialised.setter
     def is_security_index_initialised(self, value: bool) -> None:
@@ -426,7 +437,9 @@ class OpenSearchApplication(RelationState):
     @nodes_config.setter
     def nodes_config(self, value: dict[str, Node]) -> None:
         """Set the value of 'nodes_config' in application state."""
-        self.put_object("nodes_config", {name: node.to_dict() for name, node in value.items()})
+        self.put_object(
+            "nodes_config", {name: node.to_dict() for name, node in value.items()}
+        )
 
     @nodes_config.deleter
     def nodes_config(self) -> None:
@@ -463,14 +476,19 @@ class OpenSearchApplication(RelationState):
     @property
     def cluster_fleet_apps(self) -> dict[str, PeerClusterApp]:
         """Get the cluster fleet applications."""
-        cluster_fleet_apps = json.loads(self.relation_data.get("cluster_fleet_apps", "{}"))
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
+        cluster_fleet_apps = json.loads(
+            self.relation_data.get("cluster_fleet_apps", "{}")
+        )
+        return {
+            id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()
+        }
 
     @cluster_fleet_apps.setter
     def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]) -> None:
         """Set the cluster fleet applications."""
         self.put_object(
-            "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
+            "cluster_fleet_apps",
+            {id: app.to_dict() for id, app in cluster_fleet_apps.items()},
         )
 
     @property
@@ -478,10 +496,15 @@ class OpenSearchApplication(RelationState):
         """Get the cluster fleet applications from relations."""
         if not (cluster_fleet_apps_rels := self.get_object("cluster_fleet_apps_rels")):
             return {}
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps_rels.items()}
+        return {
+            id: PeerClusterApp.from_dict(app)
+            for id, app in cluster_fleet_apps_rels.items()
+        }
 
     @cluster_fleet_apps_rels.setter
-    def cluster_fleet_apps_rels(self, cluster_fleet_apps_rels: dict[str, PeerClusterApp]) -> None:
+    def cluster_fleet_apps_rels(
+        self, cluster_fleet_apps_rels: dict[str, PeerClusterApp]
+    ) -> None:
         """Set the cluster fleet applications to relations."""
         self.put_object(
             "cluster_fleet_apps_rels",
@@ -524,7 +547,9 @@ class OpenSearchApplication(RelationState):
         return set(
             filter(
                 None,
-                self.relation_data.get("allocation-exclusions-to-delete", "").split(","),
+                self.relation_data.get("allocation-exclusions-to-delete", "").split(
+                    ","
+                ),
             )
         )
 
@@ -571,7 +596,9 @@ class OpenSearchApplication(RelationState):
     @property
     def admin_secrets(self) -> dict[str, str]:
         """Get the admin secrets dict."""
-        return self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        return (
+            self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        )
 
     @property
     def tls_truststore_password(self) -> str | None:
@@ -588,7 +615,8 @@ class OpenSearchApplication(RelationState):
         """Get the normalized_tls_subject from the TLS admin_secrets."""
         return (
             normalized_tls_subject(subject)
-            if (admin_secrets := self.admin_secrets) and (subject := admin_secrets.get("subject"))
+            if (admin_secrets := self.admin_secrets)
+            and (subject := admin_secrets.get("subject"))
             else None
         )
 

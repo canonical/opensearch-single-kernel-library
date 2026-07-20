@@ -154,7 +154,9 @@ def _get_relation_id(model, endpoint1: str, endpoint2: str) -> int:
     raise RuntimeError(f"Relation not found between {endpoint1} and {endpoint2}")
 
 
-async def _notifications_list_configs(ops_test: OpsTest, base_url: str) -> dict[str, Any]:
+async def _notifications_list_configs(
+    ops_test: OpsTest, base_url: str
+) -> dict[str, Any]:
     """Fetch all notification configs from the OpenSearch Notifications plugin API.
 
     Args:
@@ -164,7 +166,9 @@ async def _notifications_list_configs(ops_test: OpsTest, base_url: str) -> dict[
     Returns:
         Response body from GET /_plugins/_notifications/configs.
     """
-    return await http_request(ops_test, "GET", f"{base_url}/_plugins/_notifications/configs")
+    return await http_request(
+        ops_test, "GET", f"{base_url}/_plugins/_notifications/configs"
+    )
 
 
 def _cfg_name(item: dict) -> str | None:
@@ -290,7 +294,9 @@ async def test_build_and_deploy_small_deployment(
 
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-    opensearch_storage = {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None
+    opensearch_storage = (
+        {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None
+    )
     await asyncio.gather(
         ops_test.model.deploy(
             charm,
@@ -324,7 +330,9 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
     """
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
-    response = await http_request(ops_test, "get", endpoint, app=APP_NAME, json_resp=False)
+    response = await http_request(
+        ops_test, "get", endpoint, app=APP_NAME, json_resp=False
+    )
 
     response_str = response.content.decode("utf-8")
     assert response_str.count("opensearch_") > 500
@@ -417,15 +425,21 @@ async def test_large_deployment_build_and_deploy(
     )
 
     # Large deployment setup
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
-    await ops_test.model.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
+    await ops_test.model.integrate(
+        "main:peer-cluster-orchestrator", "failover:peer-cluster"
+    )
+    await ops_test.model.integrate(
+        "main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
+    )
     await ops_test.model.integrate(
         "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
     )
 
     # TLS setup
     await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(
+        FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME
+    )
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
     await _wait_for_units(ops_test, deploy_type)
@@ -471,7 +485,9 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy_type: str):
+async def test_monitoring_user_fetch_prometheus_data(
+    ops_test, substrate, deploy_type: str
+):
     if substrate == "k8s" and deploy_type == "large_deployment":
         pytest.skip("Large deployment is not yet supported on k8s substrate.")
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
@@ -637,7 +653,9 @@ async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrate) -> None:
+async def test_knn_training_search(
+    ops_test: OpsTest, deploy_type: str, substrate
+) -> None:
     """Tests the entire cycle of KNN plugin.
 
     1) Enters data and trains a model in "test_end_to_end_with_ivf_faiss_training"
@@ -658,7 +676,13 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     model_name = "test_end_to_end_with_ivf_faiss_model"
     logger.info("Creating index and bulk inserting data for KNN training...")
     await create_index_and_bulk_insert(
-        ops_test, app, leader_unit_ip, index_name, len(units) - 1, vector_name, substrate=substrate
+        ops_test,
+        app,
+        leader_unit_ip,
+        index_name,
+        len(units) - 1,
+        vector_name,
+        substrate=substrate,
     )
     logger.info("Starting KNN training...")
     await run_knn_training(
@@ -680,9 +704,9 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
     logger.info("KNN training started.")
     # wait for training to finish -> fails with an exception otherwise
-    assert await is_knn_training_complete(
-        ops_test, app, leader_unit_ip, model_name
-    ), "KNN training did not complete."
+    assert await is_knn_training_complete(ops_test, app, leader_unit_ip, model_name), (
+        "KNN training did not complete."
+    )
 
     logger.info("Creating target index and bulk inserting data for KNN search...")
     # Creates the target index, to use the model
@@ -712,8 +736,12 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
     assert len(docs) == 2, f"Unexpected search results count: {len(docs)}."
 
-    await delete_index(ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_training")
-    await delete_index(ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_target")
+    await delete_index(
+        ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_training"
+    )
+    await delete_index(
+        ops_test, app, leader_unit_ip, "test_end_to_end_with_ivf_faiss_target"
+    )
     await http_request(
         ops_test,
         "DELETE",
@@ -737,7 +765,9 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
         apps=[DASHBOARDS_APP_NAME, APP_NAME],
         status="active",
     )
-    dashboards_leader_unit_ip = await get_leader_unit_ip(ops_test, app=DASHBOARDS_APP_NAME)
+    dashboards_leader_unit_ip = await get_leader_unit_ip(
+        ops_test, app=DASHBOARDS_APP_NAME
+    )
     dashboards_base_url = f"https://{dashboards_leader_unit_ip}:5601"
 
     # download sample data
@@ -750,7 +780,9 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
         extra_headers={"osd-xsrf": "true"},
     )
     logger.info(f"Download response: {response}")
-    assert response["opensearchIndicesCreated"], f"Sample data '{sample_data}' not downloaded"
+    assert response["opensearchIndicesCreated"], (
+        f"Sample data '{sample_data}' not downloaded"
+    )
 
     logger.info("Finding a dashboard..")
     response = await http_request(
@@ -775,7 +807,9 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
             "format": {"duration": "PT12H", "fileFormat": "Pdf"},
             "trigger": {
                 "triggerType": "IntervalSchedule",
-                "schedule": {"interval": {"start_time": start, "period": 1, "unit": "Minutes"}},
+                "schedule": {
+                    "interval": {"start_time": start, "period": 1, "unit": "Minutes"}
+                },
             },
             "delivery": {
                 "title": "",
@@ -826,14 +860,19 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     response = await http_request(ops_test, "GET", f"{endpoint}/instances")
     logger.info(f"Instances {response}")
     assert report_definition_id in [
-        instance["reportDefinitionDetails"]["id"] for instance in response["reportInstanceList"]
+        instance["reportDefinitionDetails"]["id"]
+        for instance in response["reportInstanceList"]
     ], "Could not find report instance from report definition"
 
     # delete report definition
-    await http_request(ops_test, "DELETE", f"{endpoint}/definition/{report_definition_id}")
+    await http_request(
+        ops_test, "DELETE", f"{endpoint}/definition/{report_definition_id}"
+    )
 
     # delete sample data
-    await http_request(ops_test, "DELETE", f"{dashboards_base_url}/api/sample_data/{sample_data}")
+    await http_request(
+        ops_test, "DELETE", f"{dashboards_base_url}/api/sample_data/{sample_data}"
+    )
 
     # remove dashboards application
     await ops_test.model.remove_application(DASHBOARDS_APP_NAME, block_until_done=True)
@@ -850,7 +889,9 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     await create_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
 
     # insert test docs
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
+    await bulk_insert(
+        ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX)
+    )
     await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
     # select target doc
@@ -859,7 +900,9 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     target_text = target["passage_text"]
 
     # create query
-    query = {"query": f"SELECT id, passage_text FROM {TEST_INDEX} WHERE id = '{target_id}'"}
+    query = {
+        "query": f"SELECT id, passage_text FROM {TEST_INDEX} WHERE id = '{target_id}'"
+    }
     endpoint = f"https://{leader_unit_ip}:9200/_plugins/_sql"
     response = await http_request(ops_test, "POST", endpoint, query)
     logger.info(f"SQL query response: {response}")
@@ -869,7 +912,9 @@ async def test_sql_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_ism_and_job_scheduler_plugins(
+    ops_test: OpsTest, deploy_type: str
+) -> None:
     """Test that the ISM and job scheduler plugins are enabled and functional."""
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     base_url = f"https://{leader_unit_ip}:9200"
@@ -891,15 +936,15 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
     # create index with alias
     index_alias = "ism-test"
     initial_index = f"{index_alias}-000001"
-    expected_end_index = (
-        f"{index_alias}-000002"  # after rollover the new index will have the number incremented
-    )
+    expected_end_index = f"{index_alias}-000002"  # after rollover the new index will have the number incremented
     await create_index(
         ops_test,
         APP_NAME,
         leader_unit_ip,
         initial_index,
-        extra_index_settings={"plugins.index_state_management.rollover_alias": index_alias},
+        extra_index_settings={
+            "plugins.index_state_management.rollover_alias": index_alias
+        },
     )
 
     # set alias
@@ -925,7 +970,9 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
             ],
         }
     }
-    await http_request(ops_test, "PUT", f"{base_url}/_plugins/_ism/policies/{policy_id}", rollover)
+    await http_request(
+        ops_test, "PUT", f"{base_url}/_plugins/_ism/policies/{policy_id}", rollover
+    )
 
     # attach policy
     await http_request(
@@ -953,7 +1000,9 @@ async def test_ism_and_job_scheduler_plugins(ops_test: OpsTest, deploy_type: str
     # delete indices
     await delete_index(ops_test, APP_NAME, leader_unit_ip, initial_index)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, expected_end_index)
-    await http_request(ops_test, "DELETE", f"{base_url}/_plugins/_ism/policies/{policy_id}")
+    await http_request(
+        ops_test, "DELETE", f"{base_url}/_plugins/_ism/policies/{policy_id}"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -984,7 +1033,9 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
         value = anomaly if i == 200 else 10.0 + (i % 5)
         docs.append({"timestamp": timestamp, "value": value})
 
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(docs, anomaly_index))
+    await bulk_insert(
+        ops_test, APP_NAME, leader_unit_ip, bulk_encode(docs, anomaly_index)
+    )
     await http_request(ops_test, "POST", f"{base_url}/{anomaly_index}/_refresh")
 
     # create detector
@@ -1036,11 +1087,19 @@ async def test_anomaly_detection(ops_test: OpsTest, deploy_type: str) -> None:
         }
     }
 
-    response = await http_request(ops_test, "POST", f"{detectors_url}/results/_search", payload)
+    response = await http_request(
+        ops_test, "POST", f"{detectors_url}/results/_search", payload
+    )
     logger.info(f"Anomaly results search response: {response}")
-    assert response.get("hits", {}).get("total", {}).get("value", 0) > 0, "No anomalies found"
+    assert response.get("hits", {}).get("total", {}).get("value", 0) > 0, (
+        "No anomalies found"
+    )
     assert (
-        response.get("hits").get("hits")[0].get("_source").get("feature_data")[0].get("data")
+        response.get("hits")
+        .get("hits")[0]
+        .get("_source")
+        .get("feature_data")[0]
+        .get("data")
         == anomaly
     ), "Unexpected anomaly result"
 
@@ -1107,7 +1166,9 @@ async def test_alerting_plugin(ops_test: OpsTest, deploy_type: str) -> None:
             {
                 "name": "has_docs",
                 "severity": "1",
-                "condition": {"script": {"source": "ctx.results[0].hits.total.value > 0"}},
+                "condition": {
+                    "script": {"source": "ctx.results[0].hits.total.value > 0"}
+                },
                 "actions": [],
             }
         ],
@@ -1172,21 +1233,25 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
         }
     }
     logger.info("Creating notification channel")
-    response = await http_request(ops_test, "POST", f"{notifications_endpoint}/configs", payload)
+    response = await http_request(
+        ops_test, "POST", f"{notifications_endpoint}/configs", payload
+    )
     channel_id = response.get("config_id")
     assert channel_id, "Notification channel not created"
     logger.info(f"Created: {channel_id}")
 
     # attempt to send test notification
-    logger.info(f"Attempting test notification to channel {channel_id} (attempt should fail)")
+    logger.info(
+        f"Attempting test notification to channel {channel_id} (attempt should fail)"
+    )
     response = await http_request(
         ops_test, "GET", f"{notifications_endpoint}/feature/test/{channel_id}"
     )
 
     logger.info(f"Notifications test response: {response}")
-    assert (
-        "Failed to send webhook" in response["error"]["reason"]
-    ), "Did not attempt to send webhook notification"
+    assert "Failed to send webhook" in response["error"]["reason"], (
+        "Did not attempt to send webhook notification"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1260,7 +1325,9 @@ async def test_observability_plugin(ops_test: OpsTest, deploy_type: str) -> None
 
     # send PPL query
     payload = {"query": f"source = {TEST_INDEX}"}
-    response = await http_request(ops_test, "POST", f"{base_url}/_plugins/_ppl", payload)
+    response = await http_request(
+        ops_test, "POST", f"{base_url}/_plugins/_ppl", payload
+    )
     assert response.get("size") == len(TEST_DOCS)
 
 
@@ -1286,7 +1353,9 @@ async def test_flow_framework_plugin(ops_test: OpsTest, deploy_type: str) -> Non
 
     # register model
     payload = TEXT_EMBEDDING_MODEL | {"model_group_id": model_group_id}
-    response = await http_request(ops_test, "POST", f"{ml_endpoint}/models/_register", payload)
+    response = await http_request(
+        ops_test, "POST", f"{ml_endpoint}/models/_register", payload
+    )
     task_id = response.get("task_id")
     assert task_id, "Model registration task not created"
 
@@ -1364,15 +1433,25 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     )
 
     # insert docs
-    await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
+    await bulk_insert(
+        ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX)
+    )
     await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
     # run neural search
     payload = {
-        "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
+        "query": {
+            "neural": {
+                "passage_embedding": {"query_text": "hello", "model_id": model_id}
+            }
+        }
     }
-    response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
-    assert len(response.get("hits", {}).get("hits", [])) > 0, "Neural search did not yield results"
+    response = await http_request(
+        ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload
+    )
+    assert len(response.get("hits", {}).get("hits", [])) > 0, (
+        "Neural search did not yield results"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1428,16 +1507,22 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
         "rescore": [
             {
                 "window_size": 10,
-                "query": {"rescore_query": {"sltr": {"model": model, "params": {"q": "planet"}}}},
+                "query": {
+                    "rescore_query": {
+                        "sltr": {"model": model, "params": {"q": "planet"}}
+                    }
+                },
             }
         ],
         "size": 1,
     }
-    response = await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_search", payload)
+    response = await http_request(
+        ops_test, "POST", f"{base_url}/{TEST_INDEX}/_search", payload
+    )
     logger.info(f"LTR search response: {response}")
-    assert (
-        len(response.get("hits", {}).get("hits", [])) == 1
-    ), "Scoring with LTR did not yield a result"
+    assert len(response.get("hits", {}).get("hits", [])) == 1, (
+        "Scoring with LTR did not yield a result"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
 
 
@@ -1578,17 +1663,19 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # 2. For very small datasets, fixed overhead (metadata, segment headers, minimum segment sizes)
     #    may dominate, making compressed and uncompressed sizes equal (e.g., 416 == 416).
     #    Fixed by using <= instead of < to allow equality for edge cases.
-    stats = await http_request(ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store")
+    stats = await http_request(
+        ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store"
+    )
     zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
     default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
 
     logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
-    assert (
-        zstd_size > 0 and default_size > 0
-    ), "Index store sizes should be positive after bulk indexing"
-    assert (
-        zstd_size <= default_size
-    ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    assert zstd_size > 0 and default_size > 0, (
+        "Index store sizes should be positive after bulk indexing"
+    )
+    assert zstd_size <= default_size, (
+        f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
 
@@ -1623,10 +1710,14 @@ async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 
     geo_pipeline = "geo-pipeline"
     payload = {"processors": [{"ip2geo": {"field": "ip", "datasource": datasource}}]}
-    await http_request(ops_test, "PUT", f"{base_url}/_ingest/pipeline/{geo_pipeline}", payload)
+    await http_request(
+        ops_test, "PUT", f"{base_url}/_ingest/pipeline/{geo_pipeline}", payload
+    )
 
     # get geo-enriched data
-    payload = {"docs": [{"_index": "testindex1", "_id": "1", "_source": {"ip": "172.0.0.1"}}]}
+    payload = {
+        "docs": [{"_index": "testindex1", "_id": "1", "_source": {"ip": "172.0.0.1"}}]
+    }
     response = await http_request(
         ops_test,
         "POST",
@@ -1638,7 +1729,9 @@ async def test_geospatial_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     # ensure geo enriched data exists
     enriched_documents = response.get("docs", [])
     assert len(enriched_documents) > 0, "No geo-enriched documents found"
-    assert enriched_documents[0]["doc"]["_source"]["ip2geo"], "No geo-enriched data found"
+    assert enriched_documents[0]["doc"]["_source"]["ip2geo"], (
+        "No geo-enriched data found"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1662,8 +1755,12 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     # run the agent
     payload = {"parameters": {"question": "How many indices do I have?"}}
 
-    response = await http_request(ops_test, "POST", f"{endpoint}/{agent_id}/_execute", payload)
-    assert len(response.get("inference_results", [])) > 0, "Flow agent did not return any results"
+    response = await http_request(
+        ops_test, "POST", f"{endpoint}/{agent_id}/_execute", payload
+    )
+    assert len(response.get("inference_results", [])) > 0, (
+        "Flow agent did not return any results"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1705,7 +1802,9 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     )
 
     # relate opensearch and smtp
-    await ops_test.model.integrate(f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp")
+    await ops_test.model.integrate(
+        f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp"
+    )
     await _wait_for_units(ops_test, deploy_type)
 
     leader_unit_ip = await get_leader_unit_ip(ops_test)
@@ -1721,9 +1820,15 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     email_channel_cfg_name = f"smtp-{relation_id}_email-channel"
     email_group_cfg_name = f"smtp-{relation_id}_recipients"
 
-    sender_cfg = await _wait_until_config_present(ops_test, base_url, smtp_sender_cfg_name)
-    channel_cfg = await _wait_until_config_present(ops_test, base_url, email_channel_cfg_name)
-    group_cfg = await _wait_until_config_present(ops_test, base_url, email_group_cfg_name)
+    sender_cfg = await _wait_until_config_present(
+        ops_test, base_url, smtp_sender_cfg_name
+    )
+    channel_cfg = await _wait_until_config_present(
+        ops_test, base_url, email_channel_cfg_name
+    )
+    group_cfg = await _wait_until_config_present(
+        ops_test, base_url, email_group_cfg_name
+    )
 
     assert _cfg_name(sender_cfg) == smtp_sender_cfg_name
     assert _cfg_name(channel_cfg) == email_channel_cfg_name

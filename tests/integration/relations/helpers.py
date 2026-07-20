@@ -49,7 +49,9 @@ async def get_application_relation_data(
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)
     # Filter the data based on the relation name.
-    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
+    relation_data = [
+        v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name
+    ]
     if relation_id:
         # Filter the data based on the relation id.
         relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
@@ -91,7 +93,9 @@ async def get_unit_relation_data(
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)
     # Filter the data based on the relation name.
-    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
+    relation_data = [
+        v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name
+    ]
     if relation_id:
         # Filter the data based on the relation id.
         relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
@@ -107,7 +111,10 @@ async def get_unit_relation_data(
     else:
         return {}
     return (
-        relation_data[idx]["related-units"].get(target_unit_name, {}).get("data", {}).get(key, {})
+        relation_data[idx]["related-units"]
+        .get(target_unit_name, {})
+        .get("data", {})
+        .get(key, {})
     )
 
 
@@ -130,7 +137,9 @@ def wait_for_relation_joined_between(
         assert False, "New relation failed to join after 3 minutes."
 
 
-def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str) -> bool:
+def new_relation_joined(
+    ops_test: OpsTest, endpoint_one: str, endpoint_two: str
+) -> bool:
     for rel in ops_test.model.relations:
         endpoints = [endpoint.name for endpoint in rel.endpoints]
         if endpoint_one in endpoints and endpoint_two in endpoints:

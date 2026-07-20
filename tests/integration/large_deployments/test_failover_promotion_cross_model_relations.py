@@ -70,7 +70,9 @@ async def test_build_and_deploy(
     )
     await ops_test.model.integrate(MAIN_APP, TLS_CERTIFICATES_APP_NAME)
 
-    await ops_test.model.wait_for_idle(apps=[MAIN_APP, TLS_CERTIFICATES_APP_NAME], timeout=TIMEOUT)
+    await ops_test.model.wait_for_idle(
+        apps=[MAIN_APP, TLS_CERTIFICATES_APP_NAME], timeout=TIMEOUT
+    )
     main_peer_cluster_orchestrator_offer = f"offer {ops_test.model.info.name}.{MAIN_APP}:{PEER_CLUSTER_ORCHESTRATOR_RELATION} {MAIN_ORCHESTRATOR_OFFER}"
     logger.info("Offering relations in main model...")
     await ops_test.juju(*main_peer_cluster_orchestrator_offer.split())
@@ -102,7 +104,9 @@ async def test_build_and_deploy(
             f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
         )
         logger.info("Integrating certs with failover...\n")
-        await failover_model.integrate(f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}")
+        await failover_model.integrate(
+            f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}"
+        )
         await failover_model.wait_for_idle(
             apps=[FAILOVER_APP],
             timeout=TIMEOUT,
@@ -121,7 +125,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[DATA_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         )
@@ -202,7 +210,10 @@ async def test_failover_orchestrator_promotion(
         # get orchestrators registered in data app
         unit = data_model.applications[DATA_APP].units[-1]
         orchestrators = await get_application_relation_data(
-            ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="orchestrators"
+            ops_test,
+            unit_name=unit.name,
+            relation_name=PEER_RELATION,
+            key="orchestrators",
         )
         # ensure failover is the new main and that no failover is registered
         orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))

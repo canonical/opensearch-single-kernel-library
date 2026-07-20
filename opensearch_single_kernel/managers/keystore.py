@@ -79,7 +79,9 @@ class KeystoreManager(BaseManager):
                 raise ValueError(
                     "GCS credentials file path must be provided for GCS object storage."
                 )
-            self.put_file_entry(key="gcs.client.default.credentials_file", filename=gcs_file_path)
+            self.put_file_entry(
+                key="gcs.client.default.credentials_file", filename=gcs_file_path
+            )
         else:
             raise ValueError(f"Unknown object storage type: {object_storage_type}")
 
@@ -89,7 +91,9 @@ class KeystoreManager(BaseManager):
         wait=wait_fixed(3),
         retry_error_callback=lambda _: False,
     )
-    def cleanup_storage_credentials(self, object_storage_type: ObjectStorageType) -> bool:
+    def cleanup_storage_credentials(
+        self, object_storage_type: ObjectStorageType
+    ) -> bool:
         """Remove keystore entries for the given object storage type. Returns True on success.
 
         Args:
@@ -100,9 +104,15 @@ class KeystoreManager(BaseManager):
         """
         keystore_entries = []
         if object_storage_type == ObjectStorageType.S3:
-            keystore_entries = ["s3.client.default.access_key", "s3.client.default.secret_key"]
+            keystore_entries = [
+                "s3.client.default.access_key",
+                "s3.client.default.secret_key",
+            ]
         elif object_storage_type == ObjectStorageType.AZURE:
-            keystore_entries = ["azure.client.default.account", "azure.client.default.key"]
+            keystore_entries = [
+                "azure.client.default.account",
+                "azure.client.default.key",
+            ]
         else:
             keystore_entries = ["gcs.client.default.credentials_file"]
 
@@ -114,7 +124,9 @@ class KeystoreManager(BaseManager):
             return True
 
         if not self.remove_entries(keystore_entries):
-            logger.warning("Failed to remove keystore entries for %s.", object_storage_type)
+            logger.warning(
+                "Failed to remove keystore entries for %s.", object_storage_type
+            )
             return False
 
         logger.info("Removed keystore entries for %s.", object_storage_type)
@@ -140,7 +152,8 @@ class KeystoreManager(BaseManager):
         """
         entries = {
             f"opensearch.notifications.core.email.{account_id}.username": user or "",
-            f"opensearch.notifications.core.email.{account_id}.password": password or "",
+            f"opensearch.notifications.core.email.{account_id}.password": password
+            or "",
         }
         self.put_entries(entries)
         return entries
@@ -194,7 +207,9 @@ class KeystoreManager(BaseManager):
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup
-            logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
+            logger.debug(
+                "Opensearch not running. Keystore settings will be loaded at start time."
+            )
             return True
 
         if not self.opensearch_client.reload_secure_settings():

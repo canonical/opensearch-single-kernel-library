@@ -73,11 +73,16 @@ def test_node_lock_no_online_hosts_leader_acquire_lock_via_databag(
     # If the charm code raises an uncaught exception later in the Juju event,
     # the lock will be reverted to its previous value.
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.update_relation_data(
+        lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""}
+    )
     assert not harness.charm.lock_manager.acquire()
 
     assert (
-        harness.get_relation_data(lock_rel_id, harness.charm.unit.name)["lock-requested"] == "True"
+        harness.get_relation_data(lock_rel_id, harness.charm.unit.name)[
+            "lock-requested"
+        ]
+        == "True"
     )
 
     # A new event introduces a new Juju context ID.
@@ -109,7 +114,9 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
     mock_response_lock_not_requested(host)
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.update_relation_data(
+        lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""}
+    )
 
     # The leader acquires the lock via the OpenSearch document without waiting for another
     # Juju event.
@@ -128,7 +135,9 @@ def test_node_lock_no_online_nodes_departing_node_doesnt_break(
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.update_relation_data(
+        lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""}
+    )
 
     # We simulate a departing node by removing it from the relation.
     harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")
@@ -164,7 +173,9 @@ def test_node_lock_has_online_nodes_departing_node_doesnt_break(
     mock_response_lock_not_requested(host)
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.update_relation_data(
+        lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""}
+    )
 
     # We simulate a departing node by removing it from the relation.
     harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")

@@ -95,7 +95,9 @@ class CosEventsHandler(Object):
             not self.charm.state.application.deployment_desc
             or not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
             or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
+            or not (
+                prometheus_labels := self.charm.cluster_manager.get_prometheus_labels()
+            )
         ):
             # Not yet ready, waiting for certain values to be set
             return []
@@ -110,7 +112,9 @@ class CosEventsHandler(Object):
                 ],
                 "tls_config": {"ca": ca},
                 "scheme": (
-                    "https" if self.charm.tls_manager.all_tls_resources_stored() else "http"
+                    "https"
+                    if self.charm.tls_manager.all_tls_resources_stored()
+                    else "http"
                 ),
                 "basic_auth": {"username": f"{COS_USER}", "password": f"{pwd}"},
             }
@@ -122,7 +126,9 @@ class CosEventsHandler(Object):
             # deployment_desc is used to get unit name which is needed for prometheus labels
             not self.charm.state.application.deployment_desc
             or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
+            or not (
+                prometheus_labels := self.charm.cluster_manager.get_prometheus_labels()
+            )
         ):
             # Not yet ready, waiting for certain values to be set
             return []

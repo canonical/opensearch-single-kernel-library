@@ -49,7 +49,10 @@ def repository_name(object_storage_type: ObjectStorageType) -> str | None:
     """
     if object_storage_type in {ObjectStorageType.S3, ObjectStorageType.S3_PCLUSTER}:
         return S3_REPOSITORY
-    if object_storage_type in {ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER}:
+    if object_storage_type in {
+        ObjectStorageType.AZURE,
+        ObjectStorageType.AZURE_PCLUSTER,
+    }:
         return AZURE_REPOSITORY
     if object_storage_type in {ObjectStorageType.GCS, ObjectStorageType.GCS_PCLUSTER}:
         return GCS_REPOSITORY
@@ -67,7 +70,10 @@ def repository_type(object_storage_type: ObjectStorageType) -> str | None:
     """
     if object_storage_type in {ObjectStorageType.S3, ObjectStorageType.S3_PCLUSTER}:
         return "s3"
-    if object_storage_type in {ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER}:
+    if object_storage_type in {
+        ObjectStorageType.AZURE,
+        ObjectStorageType.AZURE_PCLUSTER,
+    }:
         return "azure"
     if object_storage_type in {ObjectStorageType.GCS, ObjectStorageType.GCS_PCLUSTER}:
         return "gcs"
@@ -202,7 +208,8 @@ def verify_s3_credentials(storage_config: ObjectStorageConfig) -> bool:  # noqa:
 
             if bucket_missing:
                 logger.warning(
-                    "S3 bucket %r not found; attempting to create it.", storage_config.s3.bucket
+                    "S3 bucket %r not found; attempting to create it.",
+                    storage_config.s3.bucket,
                 )
                 create_s3_bucket(s3_params, verify=verify_param)
             else:
@@ -254,7 +261,9 @@ def get_azure_container_client(azure_parameters: dict[str, str]) -> ContainerCli
         ContainerClient: Client bound to the target container.
     """
     if not (account_url := azure_parameters.get("account-url")):
-        account_url = f"https://{azure_parameters['storage-account']}.blob.core.windows.net"
+        account_url = (
+            f"https://{azure_parameters['storage-account']}.blob.core.windows.net"
+        )
 
     return ContainerClient(
         account_url=account_url,
@@ -280,7 +289,10 @@ def create_azure_container(azure_parameters: dict[str, str]) -> None:
         logger.info(f"Container {azure_parameters['container']} already exists")
     except AzureError as e:
         logger.error(
-            "Failed to create container %s: %s", azure_parameters["container"], e, exc_info=True
+            "Failed to create container %s: %s",
+            azure_parameters["container"],
+            e,
+            exc_info=True,
         )
         raise
 
@@ -461,7 +473,9 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
             exists = False
 
         if not exists:
-            logger.warning("GCS bucket %r not found; attempting to create it.", bucket_name)
+            logger.warning(
+                "GCS bucket %r not found; attempting to create it.", bucket_name
+            )
             try:
                 create_gcs_bucket(client, bucket)
             except (Conflict, Forbidden):
@@ -484,7 +498,11 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
         return True
 
     except (ValueError, TypeError, KeyError) as e:
-        logger.error("GCS credential validation failed: invalid credentials: %s", e, exc_info=True)
+        logger.error(
+            "GCS credential validation failed: invalid credentials: %s",
+            e,
+            exc_info=True,
+        )
         return False
 
     except Forbidden as e:
@@ -531,7 +549,13 @@ def storage_config_from_connection_info(
         case _:
             return
     try:
-        rel_data = data_model.from_relation(connection_info) if connection_info else None
+        rel_data = (
+            data_model.from_relation(connection_info) if connection_info else None
+        )
     except ValidationError as e:
         raise OpenSearchObjectStorageConfigValidationError(e) from e
-    return ObjectStorageConfig(**{object_storage_type.value: rel_data}) if rel_data else None
+    return (
+        ObjectStorageConfig(**{object_storage_type.value: rel_data})
+        if rel_data
+        else None
+    )

@@ -205,9 +205,13 @@ class K8sWorkload(BaseWorkload):
         try:
             # The K8s image exposes the OpenSearch launcher directly as `opensearch`.
             layer = self._build_pebble_layer()
-            self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
+            self.container.add_layer(
+                OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True
+            )
 
-            logger.info("Configured pebble plan for %s service", OPENSEARCH_PEBBLE_SERVICE_NAME)
+            logger.info(
+                "Configured pebble plan for %s service", OPENSEARCH_PEBBLE_SERVICE_NAME
+            )
 
         except (PebbleConnectionError, PebbleError, ModelError) as e:
             logger.warning("Failed to configure pebble plan: %s", e)
@@ -294,7 +298,13 @@ class K8sWorkload(BaseWorkload):
                 file_path.unlink()
             except FileNotFoundError:
                 pass
-            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
+            except (
+                PebbleConnectionError,
+                PebbleError,
+                ModelError,
+                OSError,
+                ValueError,
+            ) as e:
                 logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
@@ -316,7 +326,9 @@ class K8sWorkload(BaseWorkload):
         script_path = f"{self.paths.home}/{script_name}"
         bash_cmd = f"bash {script_path}"
         result = self.run_cmd(bash_cmd, args, stdin=stdin)
-        return SimpleNamespace(cmd=bash_cmd, out=result.out, err=result.err, returncode=0)
+        return SimpleNamespace(
+            cmd=bash_cmd, out=result.out, err=result.err, returncode=0
+        )
 
     @property
     @override
@@ -366,7 +378,9 @@ class K8sWorkload(BaseWorkload):
             self._configure_pebble_plan(enable_checks=True)
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
+            logger.error(
+                "Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e
+            )
             raise OpenSearchStartError() from e
 
     @override
@@ -384,7 +398,13 @@ class K8sWorkload(BaseWorkload):
                 return False
 
             return service.current == ServiceStatus.ERROR
-        except (PebbleConnectionError, PebbleError, ModelError, KeyError, TypeError) as e:
+        except (
+            PebbleConnectionError,
+            PebbleError,
+            ModelError,
+            KeyError,
+            TypeError,
+        ) as e:
             logger.warning("Failed to check if service is failed: %s", e)
             return False
 
@@ -405,13 +425,19 @@ class K8sWorkload(BaseWorkload):
             # ensure pebble plan is configured before starting
             self._configure_pebble_plan(enable_checks=True)
 
-            if (service := self._get_service()) and service.current == ServiceStatus.ACTIVE:
-                logger.info("The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME)
+            if (
+                service := self._get_service()
+            ) and service.current == ServiceStatus.ACTIVE:
+                logger.info(
+                    "The %s service is already started.", OPENSEARCH_PEBBLE_SERVICE_NAME
+                )
                 return
 
             self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
-            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
+            logger.error(
+                "Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e
+            )
             raise OpenSearchStartError() from e
 
     @override
@@ -438,9 +464,7 @@ class K8sWorkload(BaseWorkload):
 
         # Currently, soft requirement (warn-only): tcp_retries2 should be
         # lowered for better stability. Do not block charm execution if this is not set.
-        tcp_retries2_config_method = (
-            "recommended net.ipv4.tcp_retries2=5 (configure at kubelet/node level as appropriate)"
-        )
+        tcp_retries2_config_method = "recommended net.ipv4.tcp_retries2=5 (configure at kubelet/node level as appropriate)"
         if warn_message := self._check_kernel_property_requirement(
             "net.ipv4.tcp_retries2",
             5,
@@ -481,7 +505,8 @@ class K8sWorkload(BaseWorkload):
             violates = current_value > required_value
         else:
             logger.error(
-                "Invalid comparison operator '%s' for kernel property check", comparison_op
+                "Invalid comparison operator '%s' for kernel property check",
+                comparison_op,
             )
             raise ValueError("Invalid comparison operator: %s" % comparison_op)
 
@@ -489,7 +514,7 @@ class K8sWorkload(BaseWorkload):
             comparison_text = "below" if comparison_op == "<" else "above"
             fix_instruction = "%s=%s" % (property_name, required_value)
             return (
-                "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
+                "%s=%s is %s recommended %s. For K8s deployments, configure via %s: %s."
             ) % (
                 property_name,
                 current_value,
@@ -529,7 +554,9 @@ class K8sWorkload(BaseWorkload):
 
         try:
             if not self.container.can_connect():
-                raise OpenSearchCmdError(cmd=command, out="", err="Container not connected")
+                raise OpenSearchCmdError(
+                    cmd=command, out="", err="Container not connected"
+                )
 
             cmd_list = build_command_list(command_with_args)
 
@@ -539,15 +566,27 @@ class K8sWorkload(BaseWorkload):
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
             logger.debug(
-                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
+                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0",
+                masked_command,
+                stdout,
+                stderr,
             )
 
             # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 
-        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
+        except (
+            PebbleConnectionError,
+            PebbleError,
+            ModelError,
+            OSError,
+            ValueError,
+        ) as e:
             logger.warning(
-                "Error executing command %s: %s: %s", masked_command, type(e).__name__, e
+                "Error executing command %s: %s: %s",
+                masked_command,
+                type(e).__name__,
+                e,
             )
             raise OpenSearchCmdError(cmd=command, out="", err=str(e)) from e
 
@@ -564,7 +603,9 @@ class K8sWorkload(BaseWorkload):
 
             self.container.stop(OPENSEARCH_PEBBLE_SERVICE_NAME)
         except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to stop the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
+            logger.error(
+                "Failed to stop the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e
+            )
             raise OpenSearchStopError() from e
 
     @property
@@ -605,7 +646,9 @@ class K8sWorkload(BaseWorkload):
 
         try:
             if self.exists(self.paths.certs_chain):
-                staged_path.write_text(self.read_text(self.paths.certs_chain), mode=0o644)
+                staged_path.write_text(
+                    self.read_text(self.paths.certs_chain), mode=0o644
+                )
                 return staged_path.as_posix()
         except OpenSearchFileOperationError as e:
             logger.warning(
@@ -645,9 +688,13 @@ class K8sWorkload(BaseWorkload):
                 # result can be int or max for cgroup v2, check if it's a digit before converting
                 if result.returncode == 0:
                     if result.out.strip().isdigit():
-                        return float(result.out.strip()) / 1024  # convert bytes to kbytes
+                        return (
+                            float(result.out.strip()) / 1024
+                        )  # convert bytes to kbytes
                     elif result.out.strip() == "max":
-                        logger.debug("Memory limit is 'max' in cgroup v2, treating as unlimited")
+                        logger.debug(
+                            "Memory limit is 'max' in cgroup v2, treating as unlimited"
+                        )
                         return MAX_HEAP_SIZE_IN_KB
                     else:
                         raise OpenSearchCmdError(

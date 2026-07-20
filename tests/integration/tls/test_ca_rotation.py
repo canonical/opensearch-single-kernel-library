@@ -110,7 +110,8 @@ async def test_build_large_deployment(
             application_name=MAIN_APP,
             num_units=3,
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"}
+            | CONFIG_OPTS,
             **os_deploy_kwargs,
         ),
         ops_test.model.deploy(
@@ -147,9 +148,15 @@ async def test_build_large_deployment(
         await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     # create the peer-cluster-relation
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
+    )
 
     # wait for the cluster to fully form
     await wait_until(
@@ -180,7 +187,9 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
 
         # trigger a rollout of the new CA by changing the config on TLS Provider side
         new_config = {"ca-common-name": "NEW_CA"}
-        await ops_test.model.applications[TLS_CERTIFICATES_APP_NAME].set_config(new_config)
+        await ops_test.model.applications[TLS_CERTIFICATES_APP_NAME].set_config(
+            new_config
+        )
 
         if deploy_type == SMALL_DEPLOYMENT:
             await wait_until(
@@ -225,6 +234,9 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
 
         response = requests.get(url, cert=("admin.cert", "admin.key"), verify=False)
         data = response.json()
-        assert new_config["ca-common-name"] in data["http_certificates_list"][0]["issuer_dn"]
+        assert (
+            new_config["ca-common-name"]
+            in data["http_certificates_list"][0]["issuer_dn"]
+        )
     finally:
         await c_writes.stop()

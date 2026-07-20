@@ -116,7 +116,9 @@ def microceph() -> ConnectionInformation:
     # socket.gethostbyname() might return `127.0.0.1`,
     # which does not work from inside lxd container
     host_ip = (
-        subprocess.run(["hostname", "-I"], capture_output=True, check=True, encoding="utf-8")
+        subprocess.run(
+            ["hostname", "-I"], capture_output=True, check=True, encoding="utf-8"
+        )
         .stdout.strip()
         .split()[0]
     )
@@ -223,7 +225,9 @@ def microceph_config(microceph: ConnectionInformation) -> dict[str, str]:
     # socket.gethostbyname() might return `127.0.0.1`,
     # which does not work from inside lxd container
     host_ip = (
-        subprocess.run(["hostname", "-I"], capture_output=True, check=True, encoding="utf-8")
+        subprocess.run(
+            ["hostname", "-I"], capture_output=True, check=True, encoding="utf-8"
+        )
         .stdout.strip()
         .split()[0]
     )
@@ -267,9 +271,9 @@ def s3_bucket(microceph_credentials, microceph_config) -> None:
 
 @pytest.fixture(scope="module")
 def chaos_mesh(ops_test, substrate: Substrate) -> Generator[None, Any, Any]:
-    assert (
-        ops_test.model
-    ), "Juju model is not set. Ensure that the test is running with a Juju model."
+    assert ops_test.model, (
+        "Juju model is not set. Ensure that the test is running with a Juju model."
+    )
     if substrate == "k8s":
         deploy_chaos_mesh(ops_test.model_name)
         yield

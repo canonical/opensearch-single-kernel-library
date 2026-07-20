@@ -41,14 +41,18 @@ class PeerCluster(RelationState):
     def is_candidate_failover_orchestrator(self) -> bool:
         """Return whether this cluster is a candidate failover orchestrator."""
         return (
-            self.relation.data[self.app].get("is_candidate_failover_orchestrator", "").lower()
+            self.relation.data[self.app]
+            .get("is_candidate_failover_orchestrator", "")
+            .lower()
             == "true"
         )
 
     @is_candidate_failover_orchestrator.setter
     def is_candidate_failover_orchestrator(self, value: bool):
         """Set whether this cluster is a candidate failover orchestrator."""
-        self.relation.data[self.app].update({"is_candidate_failover_orchestrator": str(value)})
+        self.relation.data[self.app].update(
+            {"is_candidate_failover_orchestrator": str(value)}
+        )
 
     @is_candidate_failover_orchestrator.deleter
     def is_candidate_failover_orchestrator(self):
@@ -73,7 +77,10 @@ class PeerCluster(RelationState):
     @property
     def security_index_initialised(self) -> bool:
         """Return whether the security index has been initialised."""
-        return self.relation.data[self.app].get("security_index_initialised", "").lower() == "true"
+        return (
+            self.relation.data[self.app].get("security_index_initialised", "").lower()
+            == "true"
+        )
 
     @security_index_initialised.setter
     def security_index_initialised(self, value: bool):
@@ -86,13 +93,16 @@ class PeerCluster(RelationState):
         cluster_fleet_apps = json.loads(
             self.relation.data[self.app].get("cluster_fleet_apps", "{}")
         )
-        return {id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()}
+        return {
+            id: PeerClusterApp.from_dict(app) for id, app in cluster_fleet_apps.items()
+        }
 
     @cluster_fleet_apps.setter
     def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]):
         """Set the cluster fleet applications."""
         self.put_object(
-            "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
+            "cluster_fleet_apps",
+            {id: app.to_dict() for id, app in cluster_fleet_apps.items()},
         )
 
     @cluster_fleet_apps.deleter
@@ -104,7 +114,9 @@ class PeerCluster(RelationState):
     def error_data(self) -> PeerClusterRelErrorData | None:
         """Get the error data."""
         error_data_str = self.relation.data[self.app].get("error_data", "")
-        return PeerClusterRelErrorData.from_str(error_data_str) if error_data_str else None
+        return (
+            PeerClusterRelErrorData.from_str(error_data_str) if error_data_str else None
+        )
 
     @error_data.setter
     def error_data(self, error_data: PeerClusterRelErrorData):
@@ -130,7 +142,8 @@ class PeerCluster(RelationState):
         # rel_data with their corresponding secret IDs
         rel_data_redacted_dict = self._protect_secrets_relation_data(rel_data)
         logger.debug(
-            "Setting peer cluster relation data with redacted secrets: %s", rel_data_redacted_dict
+            "Setting peer cluster relation data with redacted secrets: %s",
+            rel_data_redacted_dict,
         )
 
         # grant the secrets inside the rel_data to all the related clusters
@@ -185,8 +198,12 @@ class PeerCluster(RelationState):
 
         redacted_dict["credentials"] = {
             "admin_username": ADMIN_USER,
-            "admin_password": self.secrets.get_secret_id(Scope.APP, password_key(ADMIN_USER)),
-            "admin_password_hash": self.secrets.get_secret_id(Scope.APP, hash_key(ADMIN_USER)),
+            "admin_password": self.secrets.get_secret_id(
+                Scope.APP, password_key(ADMIN_USER)
+            ),
+            "admin_password_hash": self.secrets.get_secret_id(
+                Scope.APP, hash_key(ADMIN_USER)
+            ),
             "kibana_password": self.secrets.get_secret_id(
                 Scope.APP, password_key(KIBANA_SERVER_USER)
             ),
@@ -195,7 +212,9 @@ class PeerCluster(RelationState):
             ),
         }
 
-        if monitor_password := self.secrets.get_secret_id(Scope.APP, password_key(COS_USER)):
+        if monitor_password := self.secrets.get_secret_id(
+            Scope.APP, password_key(COS_USER)
+        ):
             redacted_dict["credentials"]["monitor_password"] = monitor_password
         if admin_tls := self.secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val):
             redacted_dict["credentials"]["admin_tls"] = admin_tls
@@ -211,7 +230,9 @@ class PeerCluster(RelationState):
                 "secret-key": self.secrets.get_secret_id(Scope.APP, "s3-secret-key"),
             }
 
-        if rel_data.credentials and getattr(rel_data.credentials.s3, "s3_tls_ca_chain", None):
+        if rel_data.credentials and getattr(
+            rel_data.credentials.s3, "s3_tls_ca_chain", None
+        ):
             if sid := self.secrets.get_secret_id(Scope.APP, "s3-tls-ca-chain"):
                 redacted_dict["credentials"]["s3"]["s3-tls-ca-chain"] = sid
 
@@ -222,7 +243,9 @@ class PeerCluster(RelationState):
         ):
             # TODO Move this to azure relation and include both in one secret
             redacted_dict["credentials"]["azure"] = {
-                "storage-account": self.secrets.get_secret_id(Scope.APP, "azure-storage-account"),
+                "storage-account": self.secrets.get_secret_id(
+                    Scope.APP, "azure-storage-account"
+                ),
                 "secret-key": self.secrets.get_secret_id(Scope.APP, "azure-secret-key"),
             }
 
@@ -275,7 +298,9 @@ class PeerCluster(RelationState):
     @main_orchestrator_registered.setter
     def main_orchestrator_registered(self, value: bool) -> None:
         """Set the value of 'main_orchestrator_registered' in the databag."""
-        self.relation.data[self.app].update({"main_orchestrator_registered": str(value)})
+        self.relation.data[self.app].update(
+            {"main_orchestrator_registered": str(value)}
+        )
 
     @main_orchestrator_registered.deleter
     def main_orchestrator_registered(self) -> None:
@@ -293,7 +318,9 @@ class PeerClusterServer(RelationState):
     @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
-        return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
+        return (
+            self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"
+        )
 
     @tls_ca_renewing.setter
     def tls_ca_renewing(self, value: bool):

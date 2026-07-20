@@ -82,7 +82,8 @@ def deployment_type(
 ) -> DeploymentType:
     """Check if the current cluster is an independent cluster."""
     has_cm_roles = (
-        start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in config.roles
+        start_mode == StartMode.WITH_GENERATED_ROLES
+        or "cluster_manager" in config.roles
     )
     if not has_cm_roles:
         return DeploymentType.OTHER
@@ -183,12 +184,13 @@ def validate_index_name(index_name: str) -> bool:
         return False
 
     if not index_name.islower():
-        logger.error("invalid index name %s - index names must be lowercase", index_name)
+        logger.error(
+            "invalid index name %s - index names must be lowercase", index_name
+        )
         return False
 
     forbidden_chars = [" ", ",", ":", '"', "*", "+", "\\", "/", "|", "?", "#", ">", "<"]
     if any([char in index_name for char in forbidden_chars]):
-
         logger.error(
             "invalid index name %s - index name includes one or more of "
             "the following forbidden characters: %s",
@@ -243,7 +245,21 @@ def build_command_list(command_with_args: str) -> list[str]:
     Returns:
         list[str]: Command list suitable for container.exec().
     """
-    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
+    shell_metachars = [
+        "|",
+        ">",
+        "<",
+        "&&",
+        "||",
+        ";",
+        "$(",
+        "${",
+        "`",
+        "2>",
+        ">>",
+        "<<",
+        "&",
+    ]
     if any(char in command_with_args for char in shell_metachars):
         return ["sh", "-c", command_with_args]
     if " " in command_with_args:
@@ -270,7 +286,8 @@ def _is_expected_exec_teardown_error(exc: BaseException | None) -> bool:
     # name on purpose: it keeps this helper usable VM-side where the websocket
     # package (a Pebble-only transitive dependency) may not be importable.
     return (
-        type(exc).__name__ in {"WebSocketConnectionClosedException", "WebSocketTimeoutException"}
+        type(exc).__name__
+        in {"WebSocketConnectionClosedException", "WebSocketTimeoutException"}
         or isinstance(exc, (BrokenPipeError, ConnectionError))
         or (isinstance(exc, OSError) and exc.errno == errno.EBADF)
     )
@@ -322,11 +339,12 @@ def _install_pebble_pump_excepthook() -> None:
         previous_hook = threading.excepthook
 
         def hook(args: threading.ExceptHookArgs) -> None:
-            if _is_expected_exec_teardown_error(args.exc_value) and _raised_in_pebble_pump(
-                args.exc_traceback
-            ):
+            if _is_expected_exec_teardown_error(
+                args.exc_value
+            ) and _raised_in_pebble_pump(args.exc_traceback):
                 logger.debug(
-                    "Suppressed expected Pebble exec I/O thread error: %r", args.exc_value
+                    "Suppressed expected Pebble exec I/O thread error: %r",
+                    args.exc_value,
                 )
                 return
             previous_hook(args)
@@ -362,7 +380,9 @@ def _shutdown_exec_websockets(process: Any) -> None:
         try:
             ws.shutdown()
         except Exception as cleanup_error:  # noqa: BLE001 - best effort teardown
-            logger.debug("Failed to shut down exec %s during cleanup: %s", ws_attr, cleanup_error)
+            logger.debug(
+                "Failed to shut down exec %s during cleanup: %s", ws_attr, cleanup_error
+            )
 
 
 def _join_exec_threads(process: Any) -> None:
@@ -379,7 +399,9 @@ def _join_exec_threads(process: Any) -> None:
         try:
             thread.join(timeout=_EXEC_THREAD_JOIN_TIMEOUT)
         except Exception as cleanup_error:  # noqa: BLE001 - best effort teardown
-            logger.debug("Failed to join exec I/O thread during cleanup: %s", cleanup_error)
+            logger.debug(
+                "Failed to join exec I/O thread during cleanup: %s", cleanup_error
+            )
         if thread.is_alive():
             logger.warning("Exec I/O thread %s still alive after cleanup", thread.name)
 
@@ -463,10 +485,14 @@ def wait_for_process_output(
         else:
             logger.warning("wait_output() failed for %s: %s", masked_command, e)
 
-        raise OpenSearchCmdError(cmd=original_command, out="", err=full_err_output) from None
+        raise OpenSearchCmdError(
+            cmd=original_command, out="", err=full_err_output
+        ) from None
     except Exception as e:
         _cleanup_exec_process(process)
-        logger.warning("wait_output() failed unexpectedly for %s: %s", masked_command, e)
+        logger.warning(
+            "wait_output() failed unexpectedly for %s: %s", masked_command, e
+        )
         raise OpenSearchCmdError(cmd=original_command, out="", err=str(e)) from None
 
 

@@ -39,7 +39,12 @@ logger = logging.getLogger(__name__)
 CLIENT_APP_NAME = "application"
 SECONDARY_CLIENT_APP_NAME = "secondary-application"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
-ALL_APPS = [OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME, CLIENT_APP_NAME, DASHBOARDS_APP_NAME]
+ALL_APPS = [
+    OPENSEARCH_APP_NAME,
+    TLS_CERTIFICATES_APP_NAME,
+    CLIENT_APP_NAME,
+    DASHBOARDS_APP_NAME,
+]
 
 NUM_UNITS = 3
 
@@ -98,12 +103,15 @@ async def test_create_relation(
         )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
-        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME], status="active", timeout=1600
+        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
+        status="active",
+        timeout=1600,
     )
 
     global client_relation
     client_relation = await ops_test.model.integrate(
-        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
 
     # This test shouldn't take so long
@@ -163,7 +171,8 @@ async def test_index_usage(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 1
     assert (
-        results.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("artist") == "Vulfpeck"
+        results.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("artist")
+        == "Vulfpeck"
     )
 
 
@@ -204,7 +213,8 @@ async def test_bulk_index_usage(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 3
     artists = [
-        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist")
+        for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -244,7 +254,9 @@ async def test_dashboard_relation(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
-    dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
+    dashboards_relation = await ops_test.model.integrate(
+        OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME
+    )
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
 
     await wait_until(
@@ -264,7 +276,9 @@ async def test_dashboard_relation(ops_test: OpsTest):
     assert relation_user_name == "kibanaserver"
 
     leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(
+        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
+    )
     assert relation_user_pwd == result.response.get("password")
 
 
@@ -275,10 +289,16 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Changing Opensearch kibanaserver password
     leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(
+        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
+    )
     orig_pwd = result.response.get("password")
-    result = await run_action(ops_test, leader_id, "set-password", {"username": "kibanaserver"})
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(
+        ops_test, leader_id, "set-password", {"username": "kibanaserver"}
+    )
+    result = await run_action(
+        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
+    )
     new_pwd = result.response.get("password")
     assert orig_pwd != new_pwd
 
@@ -294,7 +314,9 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
     assert relation_user_pwd == new_pwd
 
     # Double-checking
-    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
+    result = await run_action(
+        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
+    )
     assert relation_user_pwd == result.response.get("password")
 
 
@@ -317,9 +339,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
         return len(units) == len(endpoints.split(","))
 
     # Test things are already working fine
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
@@ -340,9 +362,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1},
         idle_period=70,
     )
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
 
     # test scale back up again
     await ops_test.model.applications[OPENSEARCH_APP_NAME].add_unit(count=1)
@@ -354,9 +376,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
     )
     # Now, we want to sleep until an update-status happens
     time.sleep(30)
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -390,7 +412,9 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm, substrat
     second_client_relation = await ops_test.model.integrate(
         f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}", OPENSEARCH_APP_NAME
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME)
+    wait_for_relation_joined_between(
+        ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME
+    )
 
     await wait_until(
         ops_test,
@@ -458,7 +482,8 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
     results = json.loads(run_bulk_read_index["results"])
     logging.info(results)
     artists = [
-        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist")
+        for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -492,7 +517,8 @@ async def test_admin_relation(ops_test: OpsTest):
     results = json.loads(run_bulk_read_index["results"])
     logging.info(results)
     artists = [
-        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist")
+        for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -535,7 +561,9 @@ async def test_admin_permissions(ops_test: OpsTest):
     first_relation_user_data = await get_secret_data(ops_test, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
-    first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
+    first_relation_user_endpoint = (
+        f"/_plugins/_security/api/internalusers/{first_relation_user}"
+    )
     run_delete_users = await run_request(
         ops_test,
         unit_name=test_unit.name,
@@ -595,7 +623,9 @@ async def test_normal_user_permissions(ops_test: OpsTest):
     first_relation_user_data = await get_secret_data(ops_test, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
-    first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
+    first_relation_user_endpoint = (
+        f"/_plugins/_security/api/internalusers/{first_relation_user}"
+    )
     run_delete_users = await run_request(
         ops_test,
         unit_name=test_unit.name,
@@ -686,7 +716,8 @@ async def test_relation_broken(ops_test: OpsTest):
 async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     """Verify that if we recreate a relation, we can access the same index."""
     client_relation = await ops_test.model.integrate(
-        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
 
@@ -715,6 +746,7 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 3
     artists = [
-        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist")
+        for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}

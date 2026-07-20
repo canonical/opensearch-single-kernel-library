@@ -49,7 +49,9 @@ VM_VERSION_TO_REVISION = {
 K8S_VERSION_N = "2.19.5"
 K8S_VERSION_N_MINUS_1 = "2.19.4"
 K8S_VERSION_TO_RESOURCE = {
-    K8S_VERSION_N_MINUS_1: {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
+    K8S_VERSION_N_MINUS_1: {
+        "opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"
+    }
 }
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
@@ -59,7 +61,9 @@ UPGRADE_PARAMS = [
         version,
         id=FROM_VERSION_PREFIX.format(version),
         marks=pytest.mark.group(
-            id="two_version_upgrade" if version == VM_VERSION_N_MINUS_2 else "one_version_upgrade"
+            id="two_version_upgrade"
+            if version == VM_VERSION_N_MINUS_2
+            else "one_version_upgrade"
         ),
     )
     for version in VM_VERSION_TO_REVISION.keys()
@@ -144,15 +148,19 @@ def get_version_on_unit(unit: str, model: str, substrate):
     return match.group(1) if match else None
 
 
-async def assert_version_units(ops_test: OpsTest, app: str, expected_version: str, substrate):
+async def assert_version_units(
+    ops_test: OpsTest, app: str, expected_version: str, substrate
+):
     """Ensures all units in given app are running expected OpenSearch version"""
     logger.info("Ensuring units in '%s' running version %s", app, expected_version)
 
     units = [f"{app}/{unit.id}" for unit in await get_application_units(ops_test, app)]
-    versions = [get_version_on_unit(unit, ops_test.model.info.name, substrate) for unit in units]
-    assert all(
-        version == expected_version for version in versions
-    ), f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
+    versions = [
+        get_version_on_unit(unit, ops_test.model.info.name, substrate) for unit in units
+    ]
+    assert all(version == expected_version for version in versions), (
+        f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
+    )
     logger.info("All units in '%s' running version %s", app, expected_version)
 
 
@@ -249,7 +257,9 @@ async def assert_upgrade_to_local(
             action = await run_action(ops_test, leader_id, action_name, app=app)
             logger.info("%s: %s", action_name, action)
             if action.status != "completed":
-                raise Exception(f"Action {action_name} failed with status: {action.status}")
+                raise Exception(
+                    f"Action {action_name} failed with status: {action.status}"
+                )
 
             assert action.status == "completed"
 
@@ -257,7 +267,11 @@ async def assert_upgrade_to_local(
         logger.info("Refreshing '%s' local charm", app)
         if substrate == "k8s":
             refresh(
-                ops_test, app, path=charm, config=CONFIG_OPTS | config, resources=charm_resources
+                ops_test,
+                app,
+                path=charm,
+                config=CONFIG_OPTS | config,
+                resources=charm_resources,
             )
         else:
             refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
@@ -286,7 +300,9 @@ async def assert_upgrade_to_local(
                     and action.message
                     and "unhealthy" in action.message.lower()
                 ):
-                    raise Exception(f"Action {action_name} failed due to unhealthy cluster")
+                    raise Exception(
+                        f"Action {action_name} failed due to unhealthy cluster"
+                    )
 
                 # If leader is second unit to upgrade, the task would be terminated
                 # Since unit will restart
@@ -398,13 +414,17 @@ async def assert_rollback_to_revision(
         logger.info("Recovery from rollback of '%s' completed", app)
 
 
-async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_size: int):
+async def recover_from_rollback(
+    ops_test: OpsTest, app: str, expected_cluster_size: int
+):
     """Recover from refreshing back mid-upgrade"""
     units = await get_application_units(ops_test, app)
     rolled_back_unit_id = sorted([unit.id for unit in units])[-1]
     # make calls to any unit which is not the rolled back unit
     unit_ip = [unit.ip for unit in units if unit.id != rolled_back_unit_id][0]
-    rolled_back_node = [unit.name for unit in units if unit.id == rolled_back_unit_id][0]
+    rolled_back_node = [unit.name for unit in units if unit.id == rolled_back_unit_id][
+        0
+    ]
 
     # re-enable allocation
     logger.info("Re-enabling cluster routing allocation")
@@ -447,7 +467,8 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
 
         cluster_health_resp = await cluster_health(ops_test, unit_ip)
         logger.info(
-            "Cluster health response after removing indices: %s", cluster_health_resp["status"]
+            "Cluster health response after removing indices: %s",
+            cluster_health_resp["status"],
         )
     # add unit
     logger.info("Adding new unit")
@@ -470,7 +491,9 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
         app=app,
         condition=lambda units: any(
             LockStatuses.REQUEST_LOCK_ON_START.value.message
-            in (unit.workload_status.message or "")  # unit may be stuck waiting for lock
+            in (
+                unit.workload_status.message or ""
+            )  # unit may be stuck waiting for lock
             or unit.agent_status.value == "idle"
             for unit in units
             if unit.id == new_unit_id
@@ -514,7 +537,9 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
     logger.info("Nodes in cluster: %s", ", ".join(node_names))
 
     new_node_name = [unit.name for unit in remaining_units if unit.id == new_unit_id][0]
-    assert new_node_name in node_names, f"Replacement node '{new_node_name}' not found in cluster."
-    assert (
-        len(nodes) == expected_cluster_size
-    ), f"Expected cluster size of {expected_cluster_size} but found {len(nodes)}"
+    assert new_node_name in node_names, (
+        f"Replacement node '{new_node_name}' not found in cluster."
+    )
+    assert len(nodes) == expected_cluster_size, (
+        f"Expected cluster size of {expected_cluster_size} but found {len(nodes)}"
+    )

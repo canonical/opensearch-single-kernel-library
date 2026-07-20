@@ -118,7 +118,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.internal_users_manager = InternalUsersManager(self.state, self.workload)
         self.cluster_manager = ClusterManager(self.state, self.workload)
         self.exclusions_manager = NodesExclusionsManager(self.state, self.workload)
-        self.external_clients_manager = ExternalClientsManager(self.state, self.workload)
+        self.external_clients_manager = ExternalClientsManager(
+            self.state, self.workload
+        )
         self.lock_manager = LockManager(self.state, self.workload)
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
@@ -210,7 +212,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                         allocation=not restart,
                     )
             except (OpenSearchHttpError, OpenSearchExclusionsException):
-                logger.error("Failed to get online nodes, voting and alloc exclusions not added")
+                logger.error(
+                    "Failed to get online nodes, voting and alloc exclusions not added"
+                )
 
         # block until all primary shards are moved away from the unit that is stopping
         self.health_manager.wait_for_shards_relocation()

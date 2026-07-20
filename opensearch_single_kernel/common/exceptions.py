@@ -41,7 +41,9 @@ class OpenSearchSecretInsertionError(OpenSearchSecretError):
 class OpenSearchHttpError(OpenSearchError):
     """Exception thrown when an OpenSearch REST call fails."""
 
-    def __init__(self, response_text: Optional[str] = None, response_code: Optional[int] = None):
+    def __init__(
+        self, response_text: Optional[str] = None, response_code: Optional[int] = None
+    ):
         self.response_text = response_text
         try:
             self.response_body = json.loads(response_text)

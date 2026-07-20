@@ -94,7 +94,10 @@ async def test_build_and_deploy(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_with_ip_change_node_with_elected_cm(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner, substrate: Substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_balanced_writes_runner,
+    substrate: Substrate,
 ) -> None:
     """Check that cluster can self-heal and unit reconfigures itself with new IP."""
     app = (await app_name(ops_test)) or APP_NAME
@@ -120,9 +123,9 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
         )
 
     # verify the node is well reachable
-    assert await is_up(
-        ops_test, first_elected_cm_unit_ip
-    ), "Initial elected cluster manager node not online."
+    assert await is_up(ops_test, first_elected_cm_unit_ip), (
+        "Initial elected cluster manager node not online."
+    )
 
     # cut network from current elected cm unit
     await cut_network_from_unit_with_ip_change(ops_test, app, first_elected_cm_unit_id)
@@ -141,20 +144,23 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
 
     # check reach from controller - noticed that the controller is able to ping the unit for longer
     assert not is_unit_reachable(
-        from_host=await get_controller_hostname(ops_test), to_host=first_elected_cm_unit_hostname
+        from_host=await get_controller_hostname(ops_test),
+        to_host=first_elected_cm_unit_hostname,
     ), "Unit is still reachable from controller"
 
     # verify node not up anymore
-    assert not await is_up(
-        ops_test, first_elected_cm_unit_ip, retries=3
-    ), "Connection still possible to the first CM node where the network was cut."
+    assert not await is_up(ops_test, first_elected_cm_unit_ip, retries=3), (
+        "Connection still possible to the first CM node where the network was cut."
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
     # check new CM got elected
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
     current_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip)
-    assert current_elected_cm_unit_id != first_elected_cm_unit_id, "No CM re-election happened."
+    assert current_elected_cm_unit_id != first_elected_cm_unit_id, (
+        "No CM re-election happened."
+    )
 
     # restore the network on the unit
     await restore_network_for_unit_with_ip_change(first_elected_cm_unit_hostname)
@@ -192,7 +198,10 @@ async def test_full_network_cut_with_ip_change_node_with_elected_cm(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_full_network_cut_with_ip_change_node_with_primary_shard(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner, substrate: Substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_balanced_writes_runner,
+    substrate: Substrate,
 ) -> None:
     """Check that cluster can self-heal and unit reconfigures itself with new IP."""
     app = (await app_name(ops_test)) or APP_NAME
@@ -203,9 +212,15 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # find unit hosting the primary shard of the index "series-index"
-    shards = await get_shards_by_index(ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME)
-    first_unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
-    first_unit_with_primary_shard_hostname = unit_ids_hostnames[first_unit_with_primary_shard]
+    shards = await get_shards_by_index(
+        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME
+    )
+    first_unit_with_primary_shard = [
+        shard.unit_id for shard in shards if shard.is_prim
+    ][0]
+    first_unit_with_primary_shard_hostname = unit_ids_hostnames[
+        first_unit_with_primary_shard
+    ]
     first_unit_with_primary_shard_ip = unit_ids_ips[first_unit_with_primary_shard]
 
     # Killing the only instance can be disastrous.
@@ -220,12 +235,14 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
         )
 
     # verify the node is well reachable
-    assert await is_up(
-        ops_test, first_unit_with_primary_shard_ip
-    ), "Initial node with primary shard of 'series_index' elected cluster manager node not online."
+    assert await is_up(ops_test, first_unit_with_primary_shard_ip), (
+        "Initial node with primary shard of 'series_index' elected cluster manager node not online."
+    )
 
     # cut network from current elected cm unit
-    await cut_network_from_unit_with_ip_change(ops_test, app, first_unit_with_primary_shard)
+    await cut_network_from_unit_with_ip_change(
+        ops_test, app, first_unit_with_primary_shard
+    )
 
     # verify machine not reachable from / to peer units
     for unit_id, unit_hostname in unit_ids_hostnames.items():
@@ -244,9 +261,9 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     ), "Unit is still reachable from controller"
 
     # verify node not up anymore
-    assert not await is_up(
-        ops_test, first_unit_with_primary_shard_ip, retries=3
-    ), "Connection still possible to the first unit with primary shard where the network was cut."
+    assert not await is_up(ops_test, first_unit_with_primary_shard_ip, retries=3), (
+        "Connection still possible to the first unit with primary shard where the network was cut."
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -254,16 +271,20 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # fetch units hosting the new primary shards of the previous index
-    shards = await get_shards_by_index(ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(
+        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME
+    )
     units_with_p_shards = [shard.unit_id for shard in shards if shard.is_prim]
     assert len(units_with_p_shards) == 2
     for unit_id in units_with_p_shards:
-        assert (
-            unit_id != first_unit_with_primary_shard
-        ), "Primary shard still assigned to the unit where the service was killed."
+        assert unit_id != first_unit_with_primary_shard, (
+            "Primary shard still assigned to the unit where the service was killed."
+        )
 
     # restore the network on the unit
-    await restore_network_for_unit_with_ip_change(first_unit_with_primary_shard_hostname)
+    await restore_network_for_unit_with_ip_change(
+        first_unit_with_primary_shard_hostname
+    )
 
     # Wait until the cluster becomes idle (new TLS certs, node reconfigured / restarted).
     await wait_until(
@@ -284,19 +305,25 @@ async def test_full_network_cut_with_ip_change_node_with_primary_shard(
     first_unit_with_primary_shard_new_ip = unit_ids_ips[first_unit_with_primary_shard]
 
     # check if node up and is included in the cluster formation
-    assert await is_up(ops_test, first_unit_with_primary_shard_new_ip), "Unit still not up."
+    assert await is_up(ops_test, first_unit_with_primary_shard_new_ip), (
+        "Unit still not up."
+    )
 
     # get new leader unit ip
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # check that the unit previously hosting the primary shard now hosts a replica
-    shards = await get_shards_by_index(ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(
+        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME
+    )
     units_with_r_shards = [shard.unit_id for shard in shards if not shard.is_prim]
     assert first_unit_with_primary_shard in units_with_r_shards
 
     # verify the node with the old primary successfully joined the rest of the fleet
     assert await check_cluster_formation_successful(
-        ops_test, first_unit_with_primary_shard_new_ip, get_application_unit_names(ops_test, app)
+        ops_test,
+        first_unit_with_primary_shard_new_ip,
+        get_application_unit_names(ops_test, app),
     ), "Unit did NOT join the rest of the cluster."
 
     # continuous writes checks
@@ -312,9 +339,9 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
     chaos_mesh,
 ) -> None:
     """Check that cluster can self-heal and unit reconfigures itself with network cut.."""
-    assert (
-        ops_test.model and ops_test.model_name
-    ), "Model name is required to cut network from unit without IP change"
+    assert ops_test.model and ops_test.model_name, (
+        "Model name is required to cut network from unit without IP change"
+    )
     app = (await app_name(ops_test)) or APP_NAME
 
     unit_ids_ips = await get_application_unit_ids_ips(ops_test, app)
@@ -322,7 +349,9 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
 
     # find unit currently elected cluster_manager
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
-    first_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
+    first_elected_cm_unit_id = await get_elected_cm_unit_id(
+        ops_test, leader_unit_ip, app=app
+    )
     first_elected_cm_unit_ip = unit_ids_ips[first_elected_cm_unit_id]
     first_elected_cm_unit_hostname = unit_ids_hostnames[first_elected_cm_unit_id]
 
@@ -341,9 +370,9 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
         )
 
     # verify the node is well reachable
-    assert await is_up(
-        ops_test, first_elected_cm_unit_ip
-    ), "Initial elected cluster manager node not online."
+    assert await is_up(ops_test, first_elected_cm_unit_ip), (
+        "Initial elected cluster manager node not online."
+    )
 
     # cut network from current elected cm unit
     if substrate == "k8s":
@@ -351,7 +380,9 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
             ops_test.model_name, first_elected_cm_unit_hostname
         )
     else:
-        await cut_network_from_unit_without_ip_change(ops_test, app, first_elected_cm_unit_id)
+        await cut_network_from_unit_without_ip_change(
+            ops_test, app, first_elected_cm_unit_id
+        )
 
     # verify machine not reachable from / to peer units
     for unit_id, unit_hostname in unit_ids_hostnames.items():
@@ -374,16 +405,20 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
         ), "Unit is still reachable from controller"
 
     # verify node not up anymore
-    assert not await is_up(
-        ops_test, first_elected_cm_unit_ip, retries=3, app=app
-    ), "Connection still possible to the first CM node where the network was cut."
+    assert not await is_up(ops_test, first_elected_cm_unit_ip, retries=3, app=app), (
+        "Connection still possible to the first CM node where the network was cut."
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
     # check new CM got elected
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
-    current_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
-    assert current_elected_cm_unit_id != first_elected_cm_unit_id, "No CM re-election happened."
+    current_elected_cm_unit_id = await get_elected_cm_unit_id(
+        ops_test, leader_unit_ip, app=app
+    )
+    assert current_elected_cm_unit_id != first_elected_cm_unit_id, (
+        "No CM re-election happened."
+    )
 
     # restore the network on the unit
     if substrate == "k8s":
@@ -401,11 +436,16 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
     )
 
     # check if node up and is included in the cluster formation
-    assert await is_up(ops_test, first_elected_cm_unit_ip, app=app), "Unit still not up."
+    assert await is_up(ops_test, first_elected_cm_unit_ip, app=app), (
+        "Unit still not up."
+    )
 
     # verify the previously elected CM node successfully joined the rest of the fleet
     assert await check_cluster_formation_successful(
-        ops_test, first_elected_cm_unit_ip, get_application_unit_names(ops_test, app), app=app
+        ops_test,
+        first_elected_cm_unit_ip,
+        get_application_unit_names(ops_test, app),
+        app=app,
     ), "Unit did NOT join the rest of the cluster."
 
     # continuous writes checks
@@ -414,7 +454,11 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
 
 @pytest.mark.abort_on_fail
 async def test_full_network_cut_without_ip_change_node_with_primary_shard(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_balanced_writes_runner, chaos_mesh, substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_balanced_writes_runner,
+    chaos_mesh,
+    substrate,
 ) -> None:
     """Check that cluster can self-heal and unit reconfigures itself with network cut."""
     app = (await app_name(ops_test)) or APP_NAME
@@ -428,8 +472,12 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     shards = await get_shards_by_index(
         ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME, app=app
     )
-    first_unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
-    first_unit_with_primary_shard_hostname = unit_ids_hostnames[first_unit_with_primary_shard]
+    first_unit_with_primary_shard = [
+        shard.unit_id for shard in shards if shard.is_prim
+    ][0]
+    first_unit_with_primary_shard_hostname = unit_ids_hostnames[
+        first_unit_with_primary_shard
+    ]
     first_unit_with_primary_shard_ip = unit_ids_ips[first_unit_with_primary_shard]
 
     # Killing the only instance can be disastrous.
@@ -447,9 +495,9 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
         )
 
     # verify the node is well reachable
-    assert await is_up(
-        ops_test, first_unit_with_primary_shard_ip, app=app
-    ), "Initial node with primary shard of 'series_index' elected cluster manager node not online."
+    assert await is_up(ops_test, first_unit_with_primary_shard_ip, app=app), (
+        "Initial node with primary shard of 'series_index' elected cluster manager node not online."
+    )
 
     # cut network from current primary shard hosting unit
     if substrate == "k8s":
@@ -457,18 +505,23 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
             ops_test.model_name, first_unit_with_primary_shard_hostname
         )
     else:
-        await cut_network_from_unit_without_ip_change(ops_test, app, first_unit_with_primary_shard)
+        await cut_network_from_unit_without_ip_change(
+            ops_test, app, first_unit_with_primary_shard
+        )
 
     # verify machine not reachable from / to peer units
     for unit_id, unit_hostname in unit_ids_hostnames.items():
         if unit_id != first_unit_with_primary_shard:
             if substrate == "k8s":
                 assert not k8s_is_unit_reachable(
-                    ops_test.model_name, unit_hostname, first_unit_with_primary_shard_hostname
+                    ops_test.model_name,
+                    unit_hostname,
+                    first_unit_with_primary_shard_hostname,
                 ), "Unit is still reachable from other units."
             else:
                 assert not is_unit_reachable(
-                    from_host=unit_hostname, to_host=first_unit_with_primary_shard_hostname
+                    from_host=unit_hostname,
+                    to_host=first_unit_with_primary_shard_hostname,
                 ), "Unit is still reachable from other units."
 
     # On VM check reach from controller - noticed that the controller is able to ping the
@@ -482,7 +535,9 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     # verify node not up anymore
     assert not await is_up(
         ops_test, first_unit_with_primary_shard_ip, retries=3, app=app
-    ), "Connection still possible to the first unit with primary shard where the network was cut."
+    ), (
+        "Connection still possible to the first unit with primary shard where the network was cut."
+    )
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -496,15 +551,17 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     units_with_p_shards = [shard.unit_id for shard in shards if shard.is_prim]
     assert len(units_with_p_shards) == 2
     for unit_id in units_with_p_shards:
-        assert (
-            unit_id != first_unit_with_primary_shard
-        ), "Primary shard still assigned to the unit where the service was killed."
+        assert unit_id != first_unit_with_primary_shard, (
+            "Primary shard still assigned to the unit where the service was killed."
+        )
 
     # restore the network on the unit
     if substrate == "k8s":
         k8s_restore_network_to_unit(ops_test.model_name)
     else:
-        await restore_network_for_unit_without_ip_change(first_unit_with_primary_shard_hostname)
+        await restore_network_for_unit_without_ip_change(
+            first_unit_with_primary_shard_hostname
+        )
 
     # Wait until the cluster becomes idle (new TLS certs, node reconfigured / restarted).
     await wait_until(
@@ -516,7 +573,9 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
     )
 
     # check if node up and is included in the cluster formation
-    assert await is_up(ops_test, first_unit_with_primary_shard_ip, app=app), "Unit still not up."
+    assert await is_up(ops_test, first_unit_with_primary_shard_ip, app=app), (
+        "Unit still not up."
+    )
 
     # check that the unit previously hosting the primary shard now hosts a replica
     shards = await get_shards_by_index(

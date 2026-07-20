@@ -11,9 +11,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import ops
+
 # A standalone module for workload-specific logic (no charming concerns):
 import opensearch_client
-import ops
 from models import (
     CA_CERTS_PATH,
     BulkInsertActionParams,

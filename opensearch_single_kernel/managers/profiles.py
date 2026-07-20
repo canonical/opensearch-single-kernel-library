@@ -68,7 +68,9 @@ class ProfilesManager(BaseManager):
         try:
             return not self.get_missing_requirements()
         except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            logger.error(
+                "An error occurred while checking profile requirements: %s", str(e)
+            )
             return False
 
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
@@ -97,7 +99,9 @@ class ProfilesManager(BaseManager):
         current_app = self.state.current_peer_cluster_app
         # backwards compatibility for revisions that do not set generated roles
         # in cluster_fleet_apps
-        if current_app and (not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps):
+        if current_app and (
+            not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps
+        ):
             cluster_fleet_apps[current_app.app.id] = current_app
 
         logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)
@@ -109,7 +113,9 @@ class ProfilesManager(BaseManager):
             if "cluster_manager" in app.roles
         )
         nbr_data_nodes = sum(
-            app.planned_units for app in cluster_fleet_apps.values() if "data" in app.roles
+            app.planned_units
+            for app in cluster_fleet_apps.values()
+            if "data" in app.roles
         )
 
         match (
@@ -137,7 +143,8 @@ class ProfilesManager(BaseManager):
         """Get the current config profile."""
         return (
             ProductionProfile()
-            if PerformanceType(self.state.config.get("profile")) == PerformanceType.PRODUCTION
+            if PerformanceType(self.state.config.get("profile"))
+            == PerformanceType.PRODUCTION
             else TestingProfile()
         )
 

@@ -94,7 +94,9 @@ class TlsManager(BaseManager):
             try:
                 self.reconcile_k8s_runtime_resources()
             except OpenSearchFileOperationError as e:
-                logger.warning(f"Error during TLS runtime resources reconciliation: {e}")
+                logger.warning(
+                    f"Error during TLS runtime resources reconciliation: {e}"
+                )
                 # If we cannot access the filesystem to check TLS resources
                 # we assume they are not ready.
                 return False
@@ -116,7 +118,9 @@ class TlsManager(BaseManager):
                 if not self.workload.exists(cert_type_path):
                     return False
             except OpenSearchFileOperationError as e:
-                logger.warning(f"Error checking existence of TLS resource {cert_type_path}: {e}")
+                logger.warning(
+                    f"Error checking existence of TLS resource {cert_type_path}: {e}"
+                )
                 return False
 
             secret = self.get_secrets_for_cert_type(cert_type)
@@ -179,9 +183,9 @@ class TlsManager(BaseManager):
             store_pwd = secrets.get(f"{store_type.val}-password")
 
         if not store_pwd and not (
-            self.state.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
+            self.state.is_peer_cluster_consumer(of="main")
+            and cert_type == CertType.APP_ADMIN
         ):
-
             self.state.secrets.put_object(
                 scope,
                 cert_type.val,
@@ -256,7 +260,9 @@ class TlsManager(BaseManager):
                 continue
 
         sans["sans_ip"] = (
-            [ip for ip in ips if ip.strip()] if self.state.substrate == Substrates.VM else []
+            [ip for ip in ips if ip.strip()]
+            if self.state.substrate == Substrates.VM
+            else []
         )
         sans["sans_dns"] = [entry for entry in dns if entry.strip()]
 
@@ -393,7 +399,9 @@ class TlsManager(BaseManager):
 
             # if the chain.pem already contains the current CA chain, we can skip rewriting it
             bundle_content = (
-                self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
+                self.workload.read_text(chain_path)
+                if self.workload.exists(chain_path)
+                else ""
             )
             if ca_chain not in bundle_content:
                 self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
@@ -411,7 +419,9 @@ class TlsManager(BaseManager):
         bundle_content = self.workload.read_text(bundle_path)
         self.workload.write_text(bundle_content.replace(ca_cert, ""), bundle_path)
 
-    def store_new_tls_resources(self, cert_type: CertType, secrets: dict[str, Any]) -> bool:
+    def store_new_tls_resources(
+        self, cert_type: CertType, secrets: dict[str, Any]
+    ) -> bool:
         """Add key and cert to keystore.
 
         Returns:
@@ -422,9 +432,13 @@ class TlsManager(BaseManager):
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         if cert_type == CertType.APP_ADMIN:
-            self.create_store_pwd_if_not_exists(Scope.APP, cert_type, StoreType.KEYSTORE)
+            self.create_store_pwd_if_not_exists(
+                Scope.APP, cert_type, StoreType.KEYSTORE
+            )
         else:
-            self.create_store_pwd_if_not_exists(Scope.UNIT, cert_type, StoreType.KEYSTORE)
+            self.create_store_pwd_if_not_exists(
+                Scope.UNIT, cert_type, StoreType.KEYSTORE
+            )
 
         if not secrets.get("key"):
             logger.error("TLS key not found, quitting.")
@@ -545,7 +559,8 @@ class TlsManager(BaseManager):
             return False
 
         admin_secrets = (
-            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+            or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             if not self.workload.exists(certs_dir / f"{CA_ALIAS}.p12"):
@@ -558,9 +573,13 @@ class TlsManager(BaseManager):
             (Scope.UNIT, CertType.UNIT_TRANSPORT),
             (Scope.UNIT, CertType.UNIT_HTTP),
         ]:
-            secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            secrets = (
+                self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            )
             if not (
-                secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
+                secrets.get("cert")
+                and secrets.get("key")
+                and secrets.get("keystore-password")
             ):
                 continue
             if not self.workload.exists(certs_dir / f"{cert_type.val}.p12"):
@@ -582,13 +601,16 @@ class TlsManager(BaseManager):
 
         # ensure CA truststore + chain.pem (if secrets available).
         admin_secrets = (
-            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+            self.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True)
+            or {}
         )
         if admin_secrets.get("ca-cert") and admin_secrets.get("truststore-password"):
             # create_store_pwd=False, passwords should already be in secrets
             # don't mutate secrets here.
             # keep_previous=False: this is keystore recovery from secrets, not a rotation.
-            self.store_new_ca(CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False)
+            self.store_new_ca(
+                CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False
+            )
 
         # recreate PKCS12 stores for all cert types we might need on startup.
         for scope, cert_type in [
@@ -596,9 +618,13 @@ class TlsManager(BaseManager):
             (Scope.UNIT, CertType.UNIT_TRANSPORT),
             (Scope.UNIT, CertType.UNIT_HTTP),
         ]:
-            secrets = self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            secrets = (
+                self.state.secrets.get_object(scope, cert_type.val, peek=True) or {}
+            )
             if not (
-                secrets.get("cert") and secrets.get("key") and secrets.get("keystore-password")
+                secrets.get("cert")
+                and secrets.get("key")
+                and secrets.get("keystore-password")
             ):
                 continue
 
@@ -618,12 +644,16 @@ class TlsManager(BaseManager):
             with self.workload.temp_file(
                 mode="w+t", data=cert, dir=self.workload.root / "/tmp"
             ) as tmp_ca_file:
-                return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
+                return self.workload.run_cmd(
+                    f"openssl x509 -in {tmp_ca_file} -noout -issuer"
+                ).out
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
             logger.error("Error reading the current truststore: %s", e)
             return None
 
-    def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
+    def get_cert_issuer_from_path(
+        self, store_pwd: str, store_path: PathProtocol
+    ) -> str | None:
         """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
         try:
             return self.workload.run_cmd(
@@ -677,7 +707,9 @@ class TlsManager(BaseManager):
         Returns:
             True on success, False if a filesystem error occurred.
         """
-        logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
+        logger.info(
+            "CA rotation completed. Deleting old CA and updating request bundle."
+        )
         try:
             self.remove_old_ca()
             return self.update_request_ca_bundle()
@@ -766,12 +798,16 @@ class TlsManager(BaseManager):
         Returns True on success, False if a filesystem error occurred.
         """
         if create_store_pwd:
-            self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
+            self.create_store_pwd_if_not_exists(
+                Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE
+            )
 
         admin_secrets = self.state.application.admin_secrets
         cert_secrets = self.get_secrets_for_cert_type(cert_type)
 
-        if not (cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")):
+        if not (
+            cert_secrets.get("ca-cert") and admin_secrets.get("truststore-password")
+        ):
             logger.error("CA cert or truststore-password not found, quitting.")
             return False
 
@@ -802,20 +838,21 @@ class TlsManager(BaseManager):
             unit_transport_ca_cert = self.state.secrets.get_object(
                 Scope.UNIT, CertType.UNIT_TRANSPORT.val
             )["ca-cert"]
-            if unit_transport_ca_cert != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]:
-                blocked_msg = (
-                    PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
-                )
+            if (
+                unit_transport_ca_cert
+                != peer_cluster_rel_data.credentials.admin_tls["ca-cert"]
+            ):
+                blocked_msg = PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
                 should_sever_relation = True
 
         if (
             peer_cluster_rel_data.credentials.admin_tls
-            and not peer_cluster_rel_data.credentials.admin_tls.get("truststore-password")
+            and not peer_cluster_rel_data.credentials.admin_tls.get(
+                "truststore-password"
+            )
         ):
             logger.info("Relation data for TLS is missing.")
-            blocked_msg = (
-                PeerClusterErrorDataStatuses.CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE.value.message
-            )
+            blocked_msg = PeerClusterErrorDataStatuses.CA_TRUSTSTORE_PASSWORD_NOT_AVAILABLE.value.message
             should_sever_relation = True
 
         if not blocked_msg:
@@ -862,7 +899,8 @@ class TlsManager(BaseManager):
             # Unit will fail if we combine the two iF
             if (
                 self.state.application.deployment_desc
-                and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                and self.state.application.deployment_desc.typ
+                == DeploymentType.MAIN_ORCHESTRATOR
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list
@@ -872,7 +910,10 @@ class TlsManager(BaseManager):
             return status_list
 
         if scope == "unit":
-            if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
+            if (
+                self.state.server.tls_ca_renewing
+                and not self.state.server.tls_ca_renewed
+            ):
                 status_list.append(TlsStatuses.TLS_CA_ROTATION.value)
 
             # If it is the main orchestrator then it will create all resources
@@ -912,7 +953,9 @@ class TlsManager(BaseManager):
 
             # Clean up any lingering errors
             self.cleanup_peer_cluster_error_relation_data()
-            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+            for peer_cluster in self.state.peer_clusters(
+                remote=True, is_provider=False
+            ):
                 if self.state.application.relation_data.get(
                     f"error_from_tls-{peer_cluster.relation.id}"
                 ):

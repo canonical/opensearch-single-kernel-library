@@ -13,10 +13,16 @@ from tests.helpers import Substrate
 logger = getLogger(__name__)
 
 
-CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
-ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
+CONFIG = yaml.safe_load(
+    Path("./tests/charms/opensearch_test_charm/config.yaml").read_text()
+)
+ACTIONS = yaml.safe_load(
+    Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text()
+)
 
-METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
+METADATA = yaml.safe_load(
+    Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text()
+)
 K8S_METADATA = yaml.safe_load(
     Path("./tests/charms/opensearch_k8s_test_charm/metadata.yaml").read_text()
 )
@@ -73,14 +79,19 @@ def series(ubuntu_base) -> str:
 def charm(substrate: Substrate, opensearch_base_path: Path, ubuntu_base: str) -> str:
     """The OpenSearch charm path, to deploy charms, according to the substrate."""
     if substrate == "k8s":
-        return str(opensearch_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
+        return str(
+            opensearch_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm"
+        )
     return str(opensearch_base_path / f"opensearch_ubuntu@{ubuntu_base}-amd64.charm")
 
 
 @pytest.fixture
 def charm_version_minus_1(opensearch_minus_1_base_path: Path, ubuntu_base: str) -> str:
     """The OpenSearch charm path for version n-1, to deploy charms, according to the substrate."""
-    return str(opensearch_minus_1_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
+    return str(
+        opensearch_minus_1_base_path
+        / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm"
+    )
 
 
 @pytest.fixture
@@ -96,7 +107,9 @@ def charm_resources(substrate: Substrate) -> dict[str, str]:
         return {}
 
     upstream = (
-        (K8S_METADATA.get("resources") or {}).get("opensearch-image", {}).get("upstream-source")
+        (K8S_METADATA.get("resources") or {})
+        .get("opensearch-image", {})
+        .get("upstream-source")
     )
     if not upstream:
         raise RuntimeError(

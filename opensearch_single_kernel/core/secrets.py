@@ -60,7 +60,11 @@ class OpenSearchSecrets(Object, RelationDataStore):
             else:
                 return self.charm.model.get_secret(id=credential).get_content()
         if peek_secrets:
-            return self.charm.model.get_secret(id=credential).peek_content().get(content_key)
+            return (
+                self.charm.model.get_secret(id=credential)
+                .peek_content()
+                .get(content_key)
+            )
         return self.charm.model.get_secret(id=credential).get_content().get(content_key)
 
     def label(self, scope: Scope, key: str) -> str:
@@ -89,7 +93,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
     def _get_juju_secret_content(
         self, scope: Scope, key: str, peek: bool = False
     ) -> dict[str, str] | None:
-        cached_secret_content = self.cached_secrets.get_content(scope, self.label(scope, key))
+        cached_secret_content = self.cached_secrets.get_content(
+            scope, self.label(scope, key)
+        )
         if cached_secret_content:
             return cached_secret_content
 
@@ -104,7 +110,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
         self.cached_secrets.put_content(scope, self.label(scope, key), content=content)
         return content
 
-    def _add_juju_secret(self, scope: Scope, key: str, value: dict[str, str]) -> Secret | None:
+    def _add_juju_secret(
+        self, scope: Scope, key: str, value: dict[str, str]
+    ) -> Secret | None:
         safe_value = secrets_utils.safe_obj_data(value)
 
         if not safe_value:
@@ -169,7 +177,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
         secret = self._get_juju_secret(scope, key)
         if not secret:
             logger.warning(
-                "Secret %s:%s can't be deleted as it doesn't exist", str(scope.val), str(key)
+                "Secret %s:%s can't be deleted as it doesn't exist",
+                str(scope.val),
+                str(key),
             )
             return
 
@@ -215,10 +225,14 @@ class OpenSearchSecrets(Object, RelationDataStore):
         if not isinstance(value, dict):
             return self.cast(value)
         else:
-            raise TypeError(f"Secret {scope}:{key} is to be retrieved with 'get_object()'")
+            raise TypeError(
+                f"Secret {scope}:{key} is to be retrieved with 'get_object()'"
+            )
 
     @override
-    def get_object(self, scope: Scope, key: str, peek: bool = False) -> dict[str, Any] | None:
+    def get_object(
+        self, scope: Scope, key: str, peek: bool = False
+    ) -> dict[str, Any] | None:
         """Get dict object from the relation data store."""
         if not self.charm.state.implements_secrets:
             return super().get_object(scope, key)
@@ -265,7 +279,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
 
         logger.debug("Deleted secret %s:%s", str(scope.val), str(key))
 
-    def get_tracked_secret(self, secret_id: str, scope: Scope, key: str) -> Secret | None:
+    def get_tracked_secret(
+        self, secret_id: str, scope: Scope, key: str
+    ) -> Secret | None:
         """Track a granted secret and add it to the cache"""
         label = self.label(scope, key)
         if cached_secret_meta := self.cached_secrets.get_meta(scope, label):
@@ -308,7 +324,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
         for local_peer_cluster in self.charm.state.peer_clusters(
             is_provider=is_provider, remote=False
         ):
-            if not self.grant_secret_to_relation(secret_id, local_peer_cluster.relation):
+            if not self.grant_secret_to_relation(
+                secret_id, local_peer_cluster.relation
+            ):
                 return False
         return True
 
@@ -334,20 +352,32 @@ class OpenSearchSecrets(Object, RelationDataStore):
                 if relation := local_peer_cluster.relation:
                     if key == "s3":
                         if secret_id["access-key"]:
-                            self.grant_secret_to_relation(secret_id["access-key"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["access-key"], relation
+                            )
                         if secret_id["secret-key"]:
-                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["secret-key"], relation
+                            )
                         if secret_id.get("s3-tls-ca-chain"):
-                            self.grant_secret_to_relation(secret_id["s3-tls-ca-chain"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["s3-tls-ca-chain"], relation
+                            )
                     elif key == "azure":
                         if secret_id["storage-account"]:
-                            self.grant_secret_to_relation(secret_id["storage-account"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["storage-account"], relation
+                            )
                         if secret_id["secret-key"]:
-                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["secret-key"], relation
+                            )
 
                     elif key == "gcs":
                         if secret_id["secret-key"]:
-                            self.grant_secret_to_relation(secret_id["secret-key"], relation)
+                            self.grant_secret_to_relation(
+                                secret_id["secret-key"], relation
+                            )
                     else:
                         self.grant_secret_to_relation(secret_id, relation)
 

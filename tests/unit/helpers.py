@@ -26,7 +26,9 @@ from opensearch_single_kernel.core.models import (
 logger = logging.getLogger(__name__)
 deployment_descriptions = {
     "ok": DeploymentDescription(
-        config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
+        config=PeerClusterConfig(
+            cluster_name="", init_hold=False, roles=[], profile="production"
+        ),
         start=StartMode.WITH_GENERATED_ROLES,
         pending_directives=[],
         typ=DeploymentType.MAIN_ORCHESTRATOR,
@@ -41,11 +43,16 @@ deployment_descriptions = {
         pending_directives=[Directive.WAIT_FOR_PEER_CLUSTER_RELATION],
         typ=DeploymentType.OTHER,
         app=App(model_uuid="model-uuid", name="opensearch"),
-        state=DeploymentState(value=State.BLOCKED_CANNOT_START_WITH_ROLES, message="error"),
+        state=DeploymentState(
+            value=State.BLOCKED_CANNOT_START_WITH_ROLES, message="error"
+        ),
     ),
     "cm-only": DeploymentDescription(
         config=PeerClusterConfig(
-            cluster_name="", init_hold=False, roles=["cluster-manager"], profile="production"
+            cluster_name="",
+            init_hold=False,
+            roles=["cluster-manager"],
+            profile="production",
         ),
         start=StartMode.WITH_PROVIDED_ROLES,
         pending_directives=[],
@@ -105,7 +112,9 @@ def create_utf8_encoded_private_key() -> str:
 opensearch_yml = copy_file_content_to_tmp(str(config_path), "opensearch.yml")
 seed_unicast_hosts = copy_file_content_to_tmp(str(config_path), "unicast_hosts.txt")
 jvm_options = copy_file_content_to_tmp(str(config_path), "jvm.options")
-sec_conf_yml = copy_file_content_to_tmp(str(config_path), "opensearch-security/config.yml")
+sec_conf_yml = copy_file_content_to_tmp(
+    str(config_path), "opensearch-security/config.yml"
+)
 
 
 def mock_response_root(unit_name: str, host: str, cluster_name: str = CLUSTER_NAME):
@@ -170,7 +179,10 @@ def mock_response_nodes(
     }
 
     responses.add(
-        method="GET", url=f"https://{host}:9200/_nodes", json=expected_response_nodes, status=200
+        method="GET",
+        url=f"https://{host}:9200/_nodes",
+        json=expected_response_nodes,
+        status=200,
     )
 
 
@@ -194,7 +206,13 @@ def mock_response_mynode(
                 "build_type": "tar",
                 "build_hash": "30dd870855093c9dca23fc6f8cfd5c0d7c83127d",
                 "total_indexing_buffer": 107374182,
-                "roles": ["cluster_manager", "coordinating_only", "data", "ingest", "ml"],
+                "roles": [
+                    "cluster_manager",
+                    "coordinating_only",
+                    "data",
+                    "ingest",
+                    "ml",
+                ],
                 "attributes": {
                     "shard_indexing_pressure_enabled": "true",
                     "app_id": "617e5f02-5be5-4e25-85f0-276b2347a5ad/opensearch",

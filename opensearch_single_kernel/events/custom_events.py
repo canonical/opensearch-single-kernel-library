@@ -59,7 +59,11 @@ class UpgradeOpenSearch(StartOpenSearch):
     """
 
     def __init__(
-        self, handle: Handle, *, ignore_lock: bool = False, override_version: bool = False
+        self,
+        handle: Handle,
+        *,
+        ignore_lock: bool = False,
+        override_version: bool = False,
     ) -> None:
         """Initialize the UpgradeOpenSearch event."""
         super().__init__(handle, ignore_lock=ignore_lock)

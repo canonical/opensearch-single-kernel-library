@@ -48,12 +48,16 @@ async def k8s_generate_bulk_training_data(
     app: str = "",
 ) -> list[float]:
     admin_secrets = await get_secrets(ops_test, app=app)
-    k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, f"https://{unit_ip}:9200/_bulk", app)
+    k8s_unit = await _find_k8s_unit_for_endpoint(
+        ops_test, f"https://{unit_ip}:9200/_bulk", app
+    )
     if not k8s_unit:
         raise RuntimeError(
             f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
         )
-    logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
+    logger.info(
+        f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}"
+    )
     action = await run_action(
         ops_test,
         app=CLIENT_CHARM,
@@ -96,7 +100,9 @@ def generate_bulk_training_data(
     result_list: list[list[float]] = []
     for i in range(docs_count):
         result += json.dumps({"index": {"_index": index_name, "_id": i}}) + "\n"
-        result_list.append([float(data[j]) for j in range(i * dimensions, (i + 1) * dimensions)])
+        result_list.append(
+            [float(data[j]) for j in range(i * dimensions, (i + 1) * dimensions)]
+        )
         inter = {vector_name: result_list[i]}
         if has_result:
             inter["price"] = float(responses[i])

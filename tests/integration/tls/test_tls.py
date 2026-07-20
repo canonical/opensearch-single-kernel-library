@@ -104,7 +104,9 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
     unit_names = get_application_unit_names(ops_test)
     leader_unit_ip = await get_leader_unit_ip(ops_test)
 
-    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names)
+    assert await check_cluster_formation_successful(
+        ops_test, leader_unit_ip, unit_names
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -113,14 +115,19 @@ async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     leader_id = await get_leader_unit_id(ops_test)
     non_leader_id = [
-        unit_id for unit_id in get_application_unit_ids(ops_test) if unit_id != leader_id
+        unit_id
+        for unit_id in get_application_unit_ids(ops_test)
+        if unit_id != leader_id
     ][0]
     units = await get_application_unit_ids_ips(ops_test, APP_NAME)
 
     # test against the leader unit for unit-transport cert
     current_certs = await get_loaded_tls_certificates(ops_test, leader_unit_ip)
     await run_action(
-        ops_test, leader_id, "set-tls-private-key", params={"category": "unit-transport"}
+        ops_test,
+        leader_id,
+        "set-tls-private-key",
+        params={"category": "unit-transport"},
     )
 
     await wait_until(
@@ -172,7 +179,9 @@ async def test_tls_expiration(
         await ops_test.model.remove_application(APP_NAME, block_until_done=True)
     if TLS_CERTIFICATES_APP_NAME in ops_test.model.applications:
         logger.info(f"Removing application {TLS_CERTIFICATES_APP_NAME}")
-        await ops_test.model.remove_application(TLS_CERTIFICATES_APP_NAME, block_until_done=True)
+        await ops_test.model.remove_application(
+            TLS_CERTIFICATES_APP_NAME, block_until_done=True
+        )
 
     # Deploy TLS Certificates operator
     logger.info("Deploying TLS Certificates operator")
@@ -206,7 +215,9 @@ async def test_tls_expiration(
     )
 
     # Change the expiry time of the secret carrying the certificate to 3 minutes for testing
-    logger.info("Changing the expiry time of the secret carrying the certificate to 3 minutes")
+    logger.info(
+        "Changing the expiry time of the secret carrying the certificate to 3 minutes"
+    )
     unit_id = get_application_unit_ids(ops_test, APP_NAME)[0]
     search_expression = "expire=self._get_next_secret_expiry_time\\(certificate\\)"
     replace_expression = f"expire=timedelta\\(seconds={SECRET_EXPIRY_TIME}\\)"
@@ -234,7 +245,9 @@ async def test_tls_expiration(
     # wait for the unit to be ready and API's available
     logger.info("Test cluster health")
     unit_ip = await get_leader_unit_ip(ops_test)
-    cluster_health_resp = await cluster_health(ops_test, unit_ip, wait_for_green_first=True)
+    cluster_health_resp = await cluster_health(
+        ops_test, unit_ip, wait_for_green_first=True
+    )
     assert cluster_health_resp["status"] == "green"
 
     # now start with the actual test
@@ -250,7 +263,9 @@ async def test_tls_expiration(
     time.sleep(SECRET_EXPIRY_WAIT_TIME)
 
     logger.info("Test cluster health after certificate expiry")
-    cluster_health_resp = await cluster_health(ops_test, unit_ip, wait_for_green_first=True)
+    cluster_health_resp = await cluster_health(
+        ops_test, unit_ip, wait_for_green_first=True
+    )
     assert cluster_health_resp["status"] == "green"
 
     # now compare the current certificates against the earlier ones and see if they were updated

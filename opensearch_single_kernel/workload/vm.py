@@ -81,7 +81,9 @@ class VMWorkload(BaseWorkload):
             cache = snap.SnapCache()
             self.opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
-            self.opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
+            self.opensearch_snap.ensure(
+                snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION
+            )
             self.opensearch_snap.connect("process-control")
             if not self.opensearch_snap.held:
                 # hold the snap in charm determined revision
@@ -214,7 +216,9 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
+            logger.error(
+                "Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e
+            )
             raise OpenSearchStartError()
 
     @override
@@ -232,13 +236,17 @@ class VMWorkload(BaseWorkload):
             raise OpenSearchMissingError()
 
         if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            logger.info("The opensearch.%s service is already started.", self.SERVICE_NAME)
+            logger.info(
+                "The opensearch.%s service is already started.", self.SERVICE_NAME
+            )
             return
 
         try:
             self.opensearch_snap.start([self.SERVICE_NAME])
         except snap.SnapError as e:
-            logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
+            logger.error(
+                "Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e
+            )
             raise OpenSearchStartError()
 
     def _apply_system_requirement(self, system_requirement: str, value: int) -> bool:
@@ -253,7 +261,10 @@ class VMWorkload(BaseWorkload):
         """
         try:
             self.run_cmd(f"sysctl -w {system_requirement}={value}")
-            return int(self.run_cmd(f"sysctl -n {system_requirement}").out.rstrip()) == value
+            return (
+                int(self.run_cmd(f"sysctl -n {system_requirement}").out.rstrip())
+                == value
+            )
         except OpenSearchCmdError:
             return False
 
@@ -268,21 +279,21 @@ class VMWorkload(BaseWorkload):
         missing_requirements = []
 
         prop, val = "vm.max_map_count", 262144
-        if self._get_kernel_property_value(prop) < val and not self._apply_system_requirement(
-            prop, val
-        ):
+        if self._get_kernel_property_value(
+            prop
+        ) < val and not self._apply_system_requirement(prop, val):
             missing_requirements.append(f"{prop} should be at least {val}")
 
         prop, val = "vm.swappiness", 0
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, 0
-        ):
+        if self._get_kernel_property_value(
+            prop
+        ) > val and not self._apply_system_requirement(prop, 0):
             missing_requirements.append(f"{prop} should be at most {val}")
 
         prop, val = "net.ipv4.tcp_retries2", 5
-        if self._get_kernel_property_value(prop) > val and not self._apply_system_requirement(
-            prop, val
-        ):
+        if self._get_kernel_property_value(
+            prop
+        ) > val and not self._apply_system_requirement(prop, val):
             missing_requirements.append(f"{prop} should be at most {val}")
 
         if missing_requirements:
@@ -341,11 +352,19 @@ class VMWorkload(BaseWorkload):
             output = subprocess.run(command_with_args, **run_kwargs)
             if output.returncode != 0:
                 logger.debug(
-                    "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout
+                    "%s:\n Stderr: %s\n Stdout: %s",
+                    command,
+                    output.stderr,
+                    output.stdout,
                 )
-                raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
+                raise OpenSearchCmdError(
+                    cmd=command, out=output.stdout, err=output.stderr
+                )
             return SimpleNamespace(
-                cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
+                cmd=command,
+                out=output.stdout,
+                err=output.stderr,
+                returncode=output.returncode,
             )
         except (TimeoutError, subprocess.TimeoutExpired):
             raise OpenSearchCmdError(cmd=command)
@@ -359,7 +378,9 @@ class VMWorkload(BaseWorkload):
         try:
             self.opensearch_snap.stop([self.SERVICE_NAME])
         except SnapError as e:
-            logger.error("Failed to stop the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
+            logger.error(
+                "Failed to stop the opensearch.%s service. \n%s", self.SERVICE_NAME, e
+            )
             raise OpenSearchStopError()
 
     @property
@@ -382,7 +403,9 @@ class VMWorkload(BaseWorkload):
     @override
     def get_workload_version(self) -> str:
         """Return the workload version."""
-        return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()
+        return self.run_cmd(
+            "opensearch.opensearch-bin", args="--version 2>/dev/null"
+        ).out.strip()
 
     @override
     def memtotal(self) -> float:
@@ -399,6 +422,12 @@ class VMWorkload(BaseWorkload):
             lines = [line.split() for line in output.split("\n") if line.strip()]
             meminfo = {line[0][:-1]: float(line[1]) for line in lines if len(line) >= 2}
             return meminfo["MemTotal"]
-        except (OpenSearchCmdError, OSError, ValueError, IndexError, AttributeError) as e:
+        except (
+            OpenSearchCmdError,
+            OSError,
+            ValueError,
+            IndexError,
+            AttributeError,
+        ) as e:
             logger.warning("Failed to read meminfo: %s", e)
             raise OpenSearchCmdError(cmd="cat /proc/meminfo", err=str(e))

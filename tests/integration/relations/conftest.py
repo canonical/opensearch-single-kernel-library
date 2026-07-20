@@ -41,7 +41,9 @@ async def ops_test_k8s(
     yield ops_res
     if not ops_test.keep_model:
         await ops_res.forget_model(alias=model_name)
-        await ops_res._controller.destroy_model(model_name, destroy_storage=True, force=True)
+        await ops_res._controller.destroy_model(
+            model_name, destroy_storage=True, force=True
+        )
         while model_name in await ops_res._controller.list_models():
             await sleep(5)
     await ops_res._cleanup_models()

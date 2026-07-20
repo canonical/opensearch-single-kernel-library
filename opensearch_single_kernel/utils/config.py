@@ -279,7 +279,9 @@ class YamlConfigSetter(ConfigSetter):
         logger.debug(f"New content: {new_content}")
         # Count the diff
         diff_count = sum(
-            1 for a, b in zip(old_content.splitlines(), new_content.splitlines()) if a != b
+            1
+            for a, b in zip(old_content.splitlines(), new_content.splitlines())
+            if a != b
         )
         logger.debug(f"Number of lines changed: {diff_count}")
         # Return the exact added/removed lines count
@@ -494,7 +496,9 @@ class YamlConfigSetter(ConfigSetter):
         if target_index == -1:
             source.append(self.__deep_update(None, node_keys, val))
         else:
-            source[target_index] = self.__deep_update(source[target_index], node_keys, val)
+            source[target_index] = self.__deep_update(
+                source[target_index], node_keys, val
+            )
 
         return source
 
@@ -565,7 +569,9 @@ class YamlConfigSetter(ConfigSetter):
 
         return int(str_index) if index is None else index
 
-    def __inline_array_format(self, data, node_keys: list[str], val: list[Any]) -> dict[str, Any]:
+    def __inline_array_format(
+        self, data, node_keys: list[str], val: list[Any]
+    ) -> dict[str, Any]:
         """Reformat a multiline YAML array into one with square braces."""
         leaf_k = node_keys[-1]
 
@@ -588,7 +594,11 @@ class YamlConfigSetter(ConfigSetter):
             if k not in val:
                 del target[k]
         for k, v in val.items():
-            if k in target and isinstance(target[k], CommentedMap) and isinstance(v, dict):
+            if (
+                k in target
+                and isinstance(target[k], CommentedMap)
+                and isinstance(v, dict)
+            ):
                 # Preserve comments in nested maps
                 YamlConfigSetter.__deep_rewrite_update(target[k], v)
             else:

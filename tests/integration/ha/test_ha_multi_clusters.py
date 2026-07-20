@@ -119,11 +119,15 @@ async def test_multi_clusters_db_isolation(
 
     # index document in second cluster
     second_app_leader_ip = await get_leader_unit_ip(ops_test, app=SECOND_APP_NAME)
-    await index_doc(ops_test, SECOND_APP_NAME, second_app_leader_ip, index_name, doc_id=2)
+    await index_doc(
+        ops_test, SECOND_APP_NAME, second_app_leader_ip, index_name, doc_id=2
+    )
 
     # fetch all documents in each cluster
     current_app_docs = await search(ops_test, app, main_app_leader_unit_ip, index_name)
-    second_app_docs = await search(ops_test, SECOND_APP_NAME, second_app_leader_ip, index_name)
+    second_app_docs = await search(
+        ops_test, SECOND_APP_NAME, second_app_leader_ip, index_name
+    )
 
     # check that the only doc indexed in each cluster is different
     assert len(current_app_docs) == 1

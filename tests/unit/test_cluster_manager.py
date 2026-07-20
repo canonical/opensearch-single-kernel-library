@@ -29,7 +29,9 @@ class PatchedUnit:
 
 
 user_configs = {
-    "default": PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
+    "default": PeerClusterConfig(
+        cluster_name="", init_hold=False, roles=[], profile="production"
+    ),
     "name": PeerClusterConfig(
         cluster_name="logs", init_hold=False, roles=[], profile="production"
     ),
@@ -96,9 +98,9 @@ def test_can_start(harness, mocker):
         )
         can_start = harness.charm.cluster_manager.no_blocking_directives()
 
-        assert (
-            can_start == expected
-        ), f"Failed for directives {directives}: expected {expected} but got {can_start}"
+        assert can_start == expected, (
+            f"Failed for directives {directives}: expected {expected} but got {can_start}"
+        )
 
 
 def test_pre_validate_roles_change(harness, mocker):

@@ -54,7 +54,9 @@ def _lxd_network(name: str, subnet: str, external: bool = True):
             f"sudo ip link set up dev {name}".split(),
         )
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error creating LXD network {name} with: {e.returncode} {e.stderr}")
+        logger.error(
+            f"Error creating LXD network {name} with: {e.returncode} {e.stderr}"
+        )
         raise
 
 
@@ -114,7 +116,9 @@ def pytest_sessionfinish(session, exitstatus):
             subprocess.check_output(cmd.split())
         except subprocess.CalledProcessError as e:
             # Log and try to delete the next network
-            logger.warning(f"Error deleting LXD network with: {e.returncode} {e.stderr}")
+            logger.warning(
+                f"Error deleting LXD network with: {e.returncode} {e.stderr}"
+            )
 
     for network in ["client", "cluster", "backup"]:
         __exec(f"sudo lxc network delete {network}")

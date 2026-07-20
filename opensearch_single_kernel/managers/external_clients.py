@@ -78,7 +78,9 @@ class ExternalClientsManager(BaseManager):
             # can't create a "default" and an "admin" role once because the permissions need to be
             # set to this relation's specific index.
             permissions = self.get_extra_user_role_permissions(extra_user_roles, index)
-            self._put_relation_user(username, permissions, hashed_pwd, external_client.relation.id)
+            self._put_relation_user(
+                username, permissions, hashed_pwd, external_client.relation.id
+            )
             try:
                 self.opensearch_client.patch_user(
                     username,
@@ -94,7 +96,9 @@ class ExternalClientsManager(BaseManager):
                 raise OpenSearchUserMgmtError(e)
         return username, pwd
 
-    def get_extra_user_role_permissions(self, extra_user_roles: str, index: str) -> dict[str, Any]:
+    def get_extra_user_role_permissions(
+        self, extra_user_roles: str, index: str
+    ) -> dict[str, Any]:
         """Get relation role permissions from the extra_user_roles field.
 
         Args:
@@ -114,7 +118,9 @@ class ExternalClientsManager(BaseManager):
         # this would create an invalid role config.
         for role in roles:
             if role.upper() in ExtraUserRolePermissions._member_names_:
-                for perm_scope, perms in ExtraUserRolePermissions[role.upper()].value.items():
+                for perm_scope, perms in ExtraUserRolePermissions[
+                    role.upper()
+                ].value.items():
                     permissions[perm_scope] += perms
 
         for perm_set in permissions["index_permissions"]:
@@ -137,7 +143,9 @@ class ExternalClientsManager(BaseManager):
             OpenSearchUserMgmtError: In case of role creation or user creation error.
         """
         try:
-            self.opensearch_client.create_user_role(role_name=user, permissions=permissions)
+            self.opensearch_client.create_user_role(
+                role_name=user, permissions=permissions
+            )
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
@@ -216,7 +224,10 @@ class ExternalClientsManager(BaseManager):
         if (
             departed_external_client
             and departed_external_client.relation
-            and (not relation_users or departed_external_client.relation.id not in relation_users)
+            and (
+                not relation_users
+                or departed_external_client.relation.id not in relation_users
+            )
         ):
             logging.warning(
                 "User for relation %d wasn't registered in internal cham workflows.",
@@ -227,7 +238,9 @@ class ExternalClientsManager(BaseManager):
         if departed_external_client:
             cleanup_rel_ids = [str(departed_external_client.relation.id)]
 
-        rel_ids = [str(relation.id) for relation in self.state.external_client_relations]
+        rel_ids = [
+            str(relation.id) for relation in self.state.external_client_relations
+        ]
         cleanup_rel_ids += list(set(relation_users.keys()) - set(rel_ids))
 
         for rel_id in cleanup_rel_ids:
@@ -296,7 +309,9 @@ class ExternalClientsManager(BaseManager):
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-    def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:
+    def _add_relation_statuses(
+        self, status_list: list[StatusObject], relation: Relation
+    ) -> None:
         """Compute the manager's app statuses for relation and append them to list."""
         if (
             not self.state.server.is_app_leader
@@ -327,14 +342,20 @@ class ExternalClientsManager(BaseManager):
 
             extra_user_roles = relation.data[relation.app].get("extra-user-roles")
             extra_user_roles = (
-                extra_user_roles.lower() if extra_user_roles else DEFAULT_EXTRA_USER_ROLE
+                extra_user_roles.lower()
+                if extra_user_roles
+                else DEFAULT_EXTRA_USER_ROLE
             )
-            if extra_user_roles != KIBANA_SERVER_ROLE and not self.opensearch_client.get_user(
-                external_client.relation_username
+            if (
+                extra_user_roles != KIBANA_SERVER_ROLE
+                and not self.opensearch_client.get_user(
+                    external_client.relation_username
+                )
             ):
                 status_list.append(
                     format_status(
-                        ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
+                        ExternalClientsStatuses.USER_CREATION_FAILED.value,
+                        {"id": relation.id},
                     )
                 )
                 return

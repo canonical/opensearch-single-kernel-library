@@ -103,7 +103,9 @@ class ContinuousWrites:
 
         client = await self._client()
         try:
-            client.indices.delete(index=ContinuousWrites.INDEX_NAME, ignore_unavailable=True)
+            client.indices.delete(
+                index=ContinuousWrites.INDEX_NAME, ignore_unavailable=True
+            )
         finally:
             client.close()
 
@@ -111,14 +113,18 @@ class ContinuousWrites:
         wait=wait_fixed(wait=5) + wait_random(0, 5),
         stop=stop_after_attempt(5),
     )
-    async def count(self, unit_ip: Optional[str] = None, preference: Optional[str] = None) -> int:
+    async def count(
+        self, unit_ip: Optional[str] = None, preference: Optional[str] = None
+    ) -> int:
         """Count the number of documents in the index."""
         client = await self._client(unit_ip)
         try:
             # refresh the index so that all writes are visible on search
             client.indices.refresh(index=ContinuousWrites.INDEX_NAME)
 
-            resp = client.count(index=ContinuousWrites.INDEX_NAME, preference=preference)
+            resp = client.count(
+                index=ContinuousWrites.INDEX_NAME, preference=preference
+            )
             return int(resp["count"])
         finally:
             client.close()
@@ -151,7 +157,12 @@ class ContinuousWrites:
             client.indices.create(
                 index=ContinuousWrites.INDEX_NAME,
                 body={
-                    "settings": {"index": {"number_of_shards": 2, "auto_expand_replicas": "1-all"}}
+                    "settings": {
+                        "index": {
+                            "number_of_shards": 2,
+                            "auto_expand_replicas": "1-all",
+                        }
+                    }
                 },
                 wait_for_active_shards="all",
             )
@@ -166,7 +177,12 @@ class ContinuousWrites:
             client.indices.create(
                 index=ContinuousWrites.INDEX_NAME,
                 body={
-                    "settings": {"index": {"number_of_shards": 1, "auto_expand_replicas": "0-all"}}
+                    "settings": {
+                        "index": {
+                            "number_of_shards": 1,
+                            "auto_expand_replicas": "0-all",
+                        }
+                    }
                 },
                 wait_for_active_shards="all",
             )
@@ -269,7 +285,9 @@ class ContinuousWrites:
         client = _client(data)
 
         while True:
-            if not data_queue.empty():  # currently evaluates to false as we don't make updates
+            if (
+                not data_queue.empty()
+            ):  # currently evaluates to false as we don't make updates
                 data = data_queue.get(False)
                 client.close()
                 client = _client(data)
@@ -344,6 +362,8 @@ class ContinuousWrites:
         )
 
     @staticmethod
-    def _run_async(event: Event, data_queue: Queue, starting_number: int, is_bulk: bool):
+    def _run_async(
+        event: Event, data_queue: Queue, starting_number: int, is_bulk: bool
+    ):
         """Run async code."""
         asyncio.run(ContinuousWrites._run(event, data_queue, starting_number, is_bulk))

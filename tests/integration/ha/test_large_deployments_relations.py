@@ -40,7 +40,9 @@ INVALID_CLUSTER_NAME = "timeseries"
 
 APP_UNITS = {MAIN_APP: 3, FAILOVER_APP: 3, DATA_APP: 2, INVALID_APP: 1}
 
-NO_CM_STATUS_MESSAGE = "Missing requirements: At least 1 cluster manager nodes are required."
+NO_CM_STATUS_MESSAGE = (
+    "Missing requirements: At least 1 cluster manager nodes are required."
+)
 
 NO_DATA_NODE_STATUS = StatusObject(
     status="blocked",
@@ -155,7 +157,9 @@ async def test_build_and_deploy(
 async def test_invalid_conditions(ops_test: OpsTest) -> None:
     """Check invalid conditions under different states."""
     # integrate an app with the main-orchestrator when TLS is not related to the provider
-    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
     await wait_until(
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP],
@@ -202,10 +206,14 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
     # fetch nodes, we should have 6 nodes (main + failover)-orchestrators
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
     nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
-    assert len(nodes) == 6, f"Wrong node count. Expecting 6 online nodes, found: {len(nodes)}."
+    assert len(nodes) == 6, (
+        f"Wrong node count. Expecting 6 online nodes, found: {len(nodes)}."
+    )
 
     # integrate cluster with different name
-    await ops_test.model.integrate(f"{INVALID_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{INVALID_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
     await wait_until(
         ops_test,
         apps=[MAIN_APP, INVALID_APP],
@@ -239,8 +247,12 @@ async def test_large_deployment_fully_formed(
     ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
 ) -> None:
     """Test that under optimal conditions all the nodes form the same big cluster."""
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
-    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+    )
+    await ops_test.model.integrate(
+        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
+    )
 
     await wait_until(
         ops_test,
@@ -255,7 +267,9 @@ async def test_large_deployment_fully_formed(
     # fetch nodes, we should have 8 nodes (main + failover)-orchestrators + 2 data nodes
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
     nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
-    assert len(nodes) == 8, f"Wrong node count. Expecting 8 online nodes, found: {len(nodes)}."
+    assert len(nodes) == 8, (
+        f"Wrong node count. Expecting 8 online nodes, found: {len(nodes)}."
+    )
 
     # check the roles
     auto_gen_roles = ["cluster_manager", "data", "ingest", "ml"]
@@ -264,21 +278,23 @@ async def test_large_deployment_fully_formed(
         current_app_nodes = [
             node for node in nodes if node.app.id == f"{ops_test.model.uuid}/{app}"
         ]
-        assert (
-            len(current_app_nodes) == node_count
-        ), f"Wrong count for {app}:{len(current_app_nodes)} - expected:{node_count}"
+        assert len(current_app_nodes) == node_count, (
+            f"Wrong count for {app}:{len(current_app_nodes)} - expected:{node_count}"
+        )
 
         roles = current_app_nodes[0].roles
         temperature = current_app_nodes[0].temperature
         if app in [MAIN_APP, FAILOVER_APP]:
-            assert sorted(roles) == sorted(
-                auto_gen_roles
-            ), f"Wrong roles for {app}:{roles} - expected:{auto_gen_roles}"
-            assert temperature is None, f"Wrong temperature for {app}:{roles} - expected:None"
+            assert sorted(roles) == sorted(auto_gen_roles), (
+                f"Wrong roles for {app}:{roles} - expected:{auto_gen_roles}"
+            )
+            assert temperature is None, (
+                f"Wrong temperature for {app}:{roles} - expected:None"
+            )
         else:
-            assert sorted(roles) == sorted(
-                data_roles
-            ), f"Wrong roles for {app}:{roles} - expected:{data_roles}"
-            assert (
-                temperature == "hot"
-            ), f"Wrong temperature for {app}:{temperature} - expected:hot"
+            assert sorted(roles) == sorted(data_roles), (
+                f"Wrong roles for {app}:{roles} - expected:{data_roles}"
+            )
+            assert temperature == "hot", (
+                f"Wrong temperature for {app}:{temperature} - expected:hot"
+            )

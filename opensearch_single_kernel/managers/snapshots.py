@@ -116,13 +116,22 @@ class SnapshotsManager(BaseManager):
             )
         if s3_info:
             info_to_save = s3_info
-            object_storage_types_to_clean = [ObjectStorageType.AZURE, ObjectStorageType.GCS]
+            object_storage_types_to_clean = [
+                ObjectStorageType.AZURE,
+                ObjectStorageType.GCS,
+            ]
         elif azure_info:
             info_to_save = azure_info
-            object_storage_types_to_clean = [ObjectStorageType.S3, ObjectStorageType.GCS]
+            object_storage_types_to_clean = [
+                ObjectStorageType.S3,
+                ObjectStorageType.GCS,
+            ]
         elif gcs_info:
             info_to_save = gcs_info
-            object_storage_types_to_clean = [ObjectStorageType.S3, ObjectStorageType.AZURE]
+            object_storage_types_to_clean = [
+                ObjectStorageType.S3,
+                ObjectStorageType.AZURE,
+            ]
         else:
             info_to_save = None
             object_storage_types_to_clean = []
@@ -183,9 +192,18 @@ class SnapshotsManager(BaseManager):
             raise OpenSearchBackupRelationDataIncompleteError()
 
         if (
-            (storage_type == ObjectStorageType.AZURE and not verify_azure_credentials(config))
-            or (storage_type == ObjectStorageType.S3 and not verify_s3_credentials(config))
-            or (storage_type == ObjectStorageType.GCS and not verify_gcs_credentials(config))
+            (
+                storage_type == ObjectStorageType.AZURE
+                and not verify_azure_credentials(config)
+            )
+            or (
+                storage_type == ObjectStorageType.S3
+                and not verify_s3_credentials(config)
+            )
+            or (
+                storage_type == ObjectStorageType.GCS
+                and not verify_gcs_credentials(config)
+            )
         ):
             raise OpenSearchBackupCredentialsIncorrectError()
 
@@ -322,7 +340,11 @@ class SnapshotsManager(BaseManager):
         Raises:
             OpenSearchHttpError: repository does not exist
         """
-        if not storage_type or not storage_cfg or storage_type == ObjectStorageType.CONFLICT:
+        if (
+            not storage_type
+            or not storage_cfg
+            or storage_type == ObjectStorageType.CONFLICT
+        ):
             return False
 
         if storage_type not in {
@@ -340,7 +362,9 @@ class SnapshotsManager(BaseManager):
             alt_hosts=self.alt_hosts,
         )
         logger.info("Created/Updated snapshot repository for %s", storage_type)
-        return self.opensearch_client.is_repository_created(storage_type, alt_hosts=self.alt_hosts)
+        return self.opensearch_client.is_repository_created(
+            storage_type, alt_hosts=self.alt_hosts
+        )
 
     def remove_repository(self, storage_type: ObjectStorageType) -> bool:
         """Remove the snapshot repository for the given storage type.
@@ -471,7 +495,9 @@ class SnapshotsManager(BaseManager):
                 f"Failed to restore {len(non_restored_indices)} indices. Check logs for details."
             )
         except OpenSearchHttpError as e:
-            logger.error("Failed to restore snapshot %s. Error: %s.", snapshot_id, str(e))
+            logger.error(
+                "Failed to restore snapshot %s. Error: %s.", snapshot_id, str(e)
+            )
             raise OpenSearchRestoreBackupError(
                 f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
             )
@@ -497,7 +523,9 @@ class SnapshotsManager(BaseManager):
                     % len(indices_failed_to_close)
                 )
         except OpenSearchHttpError as e:
-            raise OpenSearchRestoreBackupError("Failed to close open indices. Error: %s." % str(e))
+            raise OpenSearchRestoreBackupError(
+                "Failed to close open indices. Error: %s." % str(e)
+            )
 
     def verify_stored_credentials(
         self,
@@ -543,7 +571,9 @@ class SnapshotsManager(BaseManager):
 
         # all units have saved the latest credentials
         logger.info("All peer-cluster units have saved the latest backup credentials.")
-        self.opensearch_client.verify_repository(object_storage_type, alt_hosts=self.alt_hosts)
+        self.opensearch_client.verify_repository(
+            object_storage_type, alt_hosts=self.alt_hosts
+        )
 
     @property
     def is_operation_in_progress(self) -> bool:
@@ -573,7 +603,9 @@ class SnapshotsManager(BaseManager):
             if not self.state.relation_exists(relation_name)
         ]
 
-    def update_backup_credentials_from_peer_relation(self, data: PeerClusterRelData) -> None:
+    def update_backup_credentials_from_peer_relation(
+        self, data: PeerClusterRelData
+    ) -> None:
         """Update backup credentials based on data from peer relation."""
         if s3_creds := data.credentials.s3:
             self.state.secrets.put_object(
@@ -639,7 +671,9 @@ class SnapshotsManager(BaseManager):
             logger.warning("no azure credentials found.")
             return None
 
-        if not (data.credentials.azure.storage_account and data.credentials.azure.secret_key):
+        if not (
+            data.credentials.azure.storage_account and data.credentials.azure.secret_key
+        ):
             logger.debug("Azure storage credentials are incomplete.")
             return None
 
@@ -695,7 +729,9 @@ class SnapshotsManager(BaseManager):
 
                 if not (
                     object_storage_config := (
-                        storage_config_from_connection_info(object_storage_type, connection_info)
+                        storage_config_from_connection_info(
+                            object_storage_type, connection_info
+                        )
                     )
                 ):
                     return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]

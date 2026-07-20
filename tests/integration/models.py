@@ -53,7 +53,9 @@ class Unit:
 class Shard:
     """Class for holding a shard."""
 
-    def __init__(self, index: str, num: int, is_prim: bool, node_id: str, unit_id: int, app: str):
+    def __init__(
+        self, index: str, num: int, is_prim: bool, node_id: str, unit_id: int, app: str
+    ):
         self.index = index
         self.num = num
         self.is_prim = is_prim

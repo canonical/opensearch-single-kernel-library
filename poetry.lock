@@ -86,7 +86,7 @@ version = "3.0.1"
 description = "Annotate AST trees with source code positions"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "asttokens-3.0.1-py3-none-any.whl", hash = "sha256:15a3ebc0f43c2d0a50eeafea25e19046c68398e487b9f1f5b517f7c0f40f976a"},
     {file = "asttokens-3.0.1.tar.gz", hash = "sha256:71a4ee5de0bde6a31d64f6b13f2293ac190344478f081c3d1bccfcf5eacb0cb7"},
@@ -174,7 +174,7 @@ version = "2.0.3"
 description = "Backport of Python 3.11's datetime.fromisoformat"
 optional = false
 python-versions = ">3"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "backports_datetime_fromisoformat-2.0.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:5f681f638f10588fa3c101ee9ae2b63d3734713202ddfcfb6ec6cea0778a29d4"},
     {file = "backports_datetime_fromisoformat-2.0.3-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:cd681460e9142f1249408e5aee6d178c6d89b49e06d44913c8fdfb6defda8d1c"},
@@ -231,7 +231,7 @@ version = "1.3.1"
 description = "Base class for creating enumerated constants that are also subclasses of str"
 optional = false
 python-versions = ">=3.8.6,<3.11"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "python_version == \"3.10\""
 files = [
     {file = "backports_strenum-1.3.1-py3-none-any.whl", hash = "sha256:cdcfe36dc897e2615dc793b7d3097f54d359918fc448754a517e6f23044ccf83"},
@@ -244,7 +244,7 @@ version = "4.3.0"
 description = "Modern password hashing for your software and your servers"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "bcrypt-4.3.0-cp313-cp313t-macosx_10_12_universal2.whl", hash = "sha256:f01e060f14b6b57bbb72fc5b4a83ac21c443c9a2ee708e04a10e9192f90a6281"},
     {file = "bcrypt-4.3.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c5eeac541cefd0bb887a371ef73c62c3cd78535e4887b310626036a7c0a817bb"},
@@ -361,7 +361,7 @@ version = "2.0.0"
 description = "Foreign Function Interface for Python calling C code."
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 markers = "platform_python_implementation != \"PyPy\""
 files = [
     {file = "cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44"},
@@ -774,7 +774,7 @@ version = "49.0.0"
 description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
 optional = false
 python-versions = "!=3.9.0,!=3.9.1,>=3.9"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "cryptography-49.0.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:966fe0e9c67490071f14c0d2b1cb2dfb3023c5ce39457343931415f08382f2db"},
     {file = "cryptography-49.0.0-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:36d1709f992593689b45bda411498d62c6e365f2ca00b84657d4dadd24de16db"},
@@ -858,7 +858,7 @@ version = "5.3.1"
 description = "Decorators for Humans"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "decorator-5.3.1-py3-none-any.whl", hash = "sha256:f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c"},
     {file = "decorator-5.3.1.tar.gz", hash = "sha256:4cbcdd55a6efadb9dbea26b858f4fb3264567b52d69ca0d25b721b553f60ea82"},
@@ -949,7 +949,7 @@ version = "2.2.1"
 description = "Get the currently executing AST node of a frame, and other information"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "executing-2.2.1-py2.py3-none-any.whl", hash = "sha256:760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017"},
     {file = "executing-2.2.1.tar.gz", hash = "sha256:3632cc370565f6648cc328b32435bd120a1e4ebb20c77e3fdde9a13cd1e533c4"},
@@ -990,7 +990,7 @@ version = "2.53.0"
 description = "Google Authentication Library"
 optional = false
 python-versions = ">=3.10"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "google_auth-2.53.0-py3-none-any.whl", hash = "sha256:6e7449917c599b35126a99ec268ec6880301f2fea41dce198fe8fd83ff642b68"},
     {file = "google_auth-2.53.0.tar.gz", hash = "sha256:e7e6aa16f6bee7b2b264830fd04f08087a1d5a836df516251a5d15327b246c9c"},
@@ -1340,7 +1340,7 @@ version = "2.4.0"
 description = "HashiCorp Vault API client"
 optional = false
 python-versions = "<4.0,>=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "hvac-2.4.0-py3-none-any.whl", hash = "sha256:008db5efd8c2f77bd37d2368ea5f713edceae1c65f11fd608393179478649e0f"},
     {file = "hvac-2.4.0.tar.gz", hash = "sha256:e0056ad9064e7923e874e6769015b032580b639e29246f5ab1044f7959c1c7e0"},
@@ -1397,7 +1397,7 @@ version = "3.0.3"
 description = "Pythonic task execution"
 optional = false
 python-versions = ">=3.9"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "invoke-3.0.3-py3-none-any.whl", hash = "sha256:f11327165e5cbb89b2ad1d88d3292b5113332c43b8553b494da435d6ec6f5053"},
     {file = "invoke-3.0.3.tar.gz", hash = "sha256:437b6a622223824380bfb4e64f612711a6b648c795f565efc8625af66fb57f0c"},
@@ -1409,7 +1409,7 @@ version = "0.13.13"
 description = "IPython-enabled pdb"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "ipdb-0.13.13-py3-none-any.whl", hash = "sha256:45529994741c4ab6d2388bfa5d7b725c2cf7fe9deffabdb8a6113aa5ed449ed4"},
     {file = "ipdb-0.13.13.tar.gz", hash = "sha256:e3ac6018ef05126d442af680aad863006ec19d02290561ac88b8b1c0b0cfc726"},
@@ -1426,7 +1426,7 @@ version = "8.39.0"
 description = "IPython: Productive Interactive Computing"
 optional = false
 python-versions = ">=3.10"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "python_version < \"3.13\""
 files = [
     {file = "ipython-8.39.0-py3-none-any.whl", hash = "sha256:bb3c51c4fa8148ab1dea07a79584d1c854e234ea44aa1283bcb37bc75054651f"},
@@ -1466,7 +1466,7 @@ version = "9.13.0"
 description = "IPython: Productive Interactive Computing"
 optional = false
 python-versions = ">=3.11"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "python_version >= \"3.13\""
 files = [
     {file = "ipython-9.13.0-py3-none-any.whl", hash = "sha256:57f9d4639e20818d328d287c7b549af3d05f12486ea8f2e7f73e52a36ec4d201"},
@@ -1500,7 +1500,7 @@ version = "1.1.1"
 description = "Defines a variety of Pygments lexers for highlighting IPython code."
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "python_version >= \"3.13\""
 files = [
     {file = "ipython_pygments_lexers-1.1.1-py3-none-any.whl", hash = "sha256:a9462224a505ade19a605f71f8fa63c2048833ce50abc86768a0d81d876dc81c"},
@@ -1528,7 +1528,7 @@ version = "0.20.0"
 description = "An autocompletion tool for Python that can be used for text editors."
 optional = false
 python-versions = ">=3.10"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "jedi-0.20.0-py2.py3-none-any.whl", hash = "sha256:7bdd9c2634f56713299976f4cbd59cb3fa92165cc5e05ea811fb253480728b67"},
     {file = "jedi-0.20.0.tar.gz", hash = "sha256:c3f4ccbd276696f4b19c54618d4fb18f9fc24b0aef02acf704b23f487daa1011"},
@@ -1547,7 +1547,7 @@ version = "3.1.6"
 description = "A very fast and expressive template engine."
 optional = false
 python-versions = ">=3.7"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"},
     {file = "jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d"},
@@ -1614,7 +1614,7 @@ version = "3.6.1.3"
 description = "Python library for Juju"
 optional = false
 python-versions = ">=3.8.6"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "juju-3.6.1.3-py3-none-any.whl", hash = "sha256:87469500a0a4e6a3976ddf0595e316379868d5cea96e15af2d2d4b94188f76e5"},
     {file = "juju-3.6.1.3.tar.gz", hash = "sha256:2fcf510fa35b387abb382da3a8b2227f38852ae7e9dc1058afb228588e1aec51"},
@@ -1645,7 +1645,7 @@ version = "30.1.0"
 description = "Kubernetes python client"
 optional = false
 python-versions = ">=3.6"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "kubernetes-30.1.0-py2.py3-none-any.whl", hash = "sha256:e212e8b7579031dd2e512168b617373bc1e03888d41ac4e04039240a292d478d"},
     {file = "kubernetes-30.1.0.tar.gz", hash = "sha256:41e4c77af9f28e7a6c314e3bd06a8c6229ddd787cad684e0ab9f69b498e98ebc"},
@@ -1705,7 +1705,7 @@ version = "1.3.4"
 description = "A Python library port for bakery, higher level operation to work with macaroons"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "macaroonbakery-1.3.4-py2.py3-none-any.whl", hash = "sha256:1e952a189f5c1e96ef82b081b2852c770d7daa20987e2088e762dd5689fb253b"},
     {file = "macaroonbakery-1.3.4.tar.gz", hash = "sha256:41ca993a23e4f8ef2fe7723b5cd4a30c759735f1d5021e990770c8a0e0f33970"},
@@ -1749,7 +1749,7 @@ version = "3.0.3"
 description = "Safely add untrusted strings to HTML/XML markup."
 optional = false
 python-versions = ">=3.9"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:2f981d352f04553a7171b8e44369f2af4055f888dfb147d55e42d29e29e74559"},
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e1c1493fb6e50ab01d20a22826e57520f1284df32f2d8601fdd90b6304601419"},
@@ -1848,7 +1848,7 @@ version = "0.2.2"
 description = "Inline Matplotlib backend for Jupyter"
 optional = false
 python-versions = ">=3.9"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "matplotlib_inline-0.2.2-py3-none-any.whl", hash = "sha256:3c821cf1c209f59fb2d2d64abbf5b23b67bcb2210d663f9918dd851c6da1fcf6"},
     {file = "matplotlib_inline-0.2.2.tar.gz", hash = "sha256:72f3fe8fce36b70d4a5b612f899090cd0401deddc4ea90e1572b9f4bfb058c79"},
@@ -1916,7 +1916,7 @@ version = "1.1.0"
 description = "Type system extensions for programs checked with the mypy type checker."
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505"},
     {file = "mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558"},
@@ -1951,7 +1951,7 @@ version = "3.3.1"
 description = "A generic, spec-compliant, thorough implementation of the OAuth request-signing logic"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1"},
     {file = "oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9"},
@@ -2071,7 +2071,7 @@ version = "5.0.0"
 description = "SSH2 protocol library"
 optional = false
 python-versions = ">=3.9"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "paramiko-5.0.0-py3-none-any.whl", hash = "sha256:b7044611c30140d9a75261653210e2002977b71a0497ff3ba0d98d7edbf62f7c"},
     {file = "paramiko-5.0.0.tar.gz", hash = "sha256:36763b5b95c2a0dcfdf1abc48e48156ee425b21efe2f0e787c2dd5a95c0e5e79"},
@@ -2089,7 +2089,7 @@ version = "0.8.7"
 description = "A Python Parser"
 optional = false
 python-versions = ">=3.6"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "parso-0.8.7-py2.py3-none-any.whl", hash = "sha256:a8926eb2a1b915486941fdbd31e86a4baf88fe8c210f25f2f35ecec5b574ca1c"},
     {file = "parso-0.8.7.tar.gz", hash = "sha256:eaaac4c9fdd5e9e8852dc778d2d7405897ec510f2a298071453e5e3a07914bb1"},
@@ -2105,7 +2105,7 @@ version = "4.9.0"
 description = "Pexpect allows easy control of interactive console applications."
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "sys_platform != \"win32\" and sys_platform != \"emscripten\""
 files = [
     {file = "pexpect-4.9.0-py2.py3-none-any.whl", hash = "sha256:7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523"},
@@ -2171,7 +2171,7 @@ version = "3.0.52"
 description = "Library for building powerful interactive command lines in Python"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "prompt_toolkit-3.0.52-py3-none-any.whl", hash = "sha256:9aac639a3bbd33284347de5ad8d68ecc044b91a762dc39b7c21095fcd6a19955"},
     {file = "prompt_toolkit-3.0.52.tar.gz", hash = "sha256:28cde192929c8e7321de85de1ddbe736f1375148b02f2e17edd840042b1be855"},
@@ -2204,7 +2204,7 @@ version = "6.33.6"
 description = ""
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "protobuf-6.33.6-cp310-abi3-win32.whl", hash = "sha256:7d29d9b65f8afef196f8334e80d6bc1d5d4adedb449971fefd3723824e6e77d3"},
     {file = "protobuf-6.33.6-cp310-abi3-win_amd64.whl", hash = "sha256:0cd27b587afca21b7cfa59a74dcbd48a50f0a6400cfb59391340ad729d91d326"},
@@ -2224,7 +2224,7 @@ version = "7.2.2"
 description = "Cross-platform lib for process and system monitoring."
 optional = false
 python-versions = ">=3.6"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "python_version >= \"3.13\""
 files = [
     {file = "psutil-7.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:2edccc433cbfa046b980b0df0171cd25bcaeb3a68fe9022db0979e7aa74a826b"},
@@ -2260,7 +2260,7 @@ version = "0.7.0"
 description = "Run a subprocess in a pseudo terminal"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 markers = "sys_platform != \"win32\" and sys_platform != \"emscripten\""
 files = [
     {file = "ptyprocess-0.7.0-py2.py3-none-any.whl", hash = "sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35"},
@@ -2273,7 +2273,7 @@ version = "0.2.3"
 description = "Safely evaluate AST nodes without side effects"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0"},
     {file = "pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42"},
@@ -2288,7 +2288,7 @@ version = "0.6.3"
 description = "Pure-Python implementation of ASN.1 types and DER/BER/CER codecs (X.208)"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "pyasn1-0.6.3-py3-none-any.whl", hash = "sha256:a80184d120f0864a52a073acc6fc642847d0be408e7c7252f31390c0f4eadcde"},
     {file = "pyasn1-0.6.3.tar.gz", hash = "sha256:697a8ecd6d98891189184ca1fa05d1bb00e2f84b5977c481452050549c8a72cf"},
@@ -2300,7 +2300,7 @@ version = "0.4.2"
 description = "A collection of ASN.1-based protocols modules"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a"},
     {file = "pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6"},
@@ -2315,7 +2315,7 @@ version = "3.0"
 description = "C parser in Python"
 optional = false
 python-versions = ">=3.10"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
@@ -2535,7 +2535,7 @@ version = "0.13.0"
 description = "Macaroon library for Python"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pymacaroons-0.13.0-py2.py3-none-any.whl", hash = "sha256:3e14dff6a262fdbf1a15e769ce635a8aea72e6f8f91e408f9a97166c53b91907"},
     {file = "pymacaroons-0.13.0.tar.gz", hash = "sha256:1e6bba42a5f66c245adf38a5a4006a99dcc06a0703786ea636098667d42903b8"},
@@ -2551,7 +2551,7 @@ version = "1.6.2"
 description = "Python binding to the Networking and Cryptography (NaCl) library"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pynacl-1.6.2-cp314-cp314t-macosx_10_10_universal2.whl", hash = "sha256:622d7b07cc5c02c666795792931b50c91f3ce3c2649762efb1ef0d5684c81594"},
     {file = "pynacl-1.6.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d071c6a9a4c94d79eb665db4ce5cedc537faf74f2355e4d502591d850d3913c0"},
@@ -2593,7 +2593,7 @@ version = "1.1"
 description = "Generate and parse RFC 3339 timestamps"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pyRFC3339-1.1-py2.py3-none-any.whl", hash = "sha256:67196cb83b470709c580bb4738b83165e67c6cc60e1f2e4f286cfcb402a926f4"},
     {file = "pyRFC3339-1.1.tar.gz", hash = "sha256:81b8cbe1519cdb79bed04910dd6fa4e181faf8c88dff1e1b987b5f7ab23a5b1a"},
@@ -2632,7 +2632,7 @@ version = "0.21.2"
 description = "Pytest support for asyncio"
 optional = false
 python-versions = ">=3.7"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pytest_asyncio-0.21.2-py3-none-any.whl", hash = "sha256:ab664c88bb7998f711d8039cacd4884da6430886ae8bbd4eded552ed2004f16b"},
     {file = "pytest_asyncio-0.21.2.tar.gz", hash = "sha256:d67738fc232b94b326b9d060750beb16e0074210b98dd8b58a5239fa2a154f45"},
@@ -2709,7 +2709,7 @@ version = "0.43.2"
 description = "Fixtures for Charmed Operators"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pytest_operator-0.43.2-py3-none-any.whl", hash = "sha256:d7d01ffe35d14b75577fd80a07c34f0a9f4835cfc6d373b8e2f995bcb4146bda"},
     {file = "pytest_operator-0.43.2.tar.gz", hash = "sha256:3db34dcd9c114a2e41a9bc61da72daf1264e7644fd5b92e855f250cb337e01c3"},
@@ -2747,7 +2747,7 @@ version = "2.9.0.post0"
 description = "Extensions to the standard Python datetime module"
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3"},
     {file = "python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"},
@@ -2780,7 +2780,7 @@ version = "2026.2"
 description = "World timezone definitions, modern and historical"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "pytz-2026.2-py2.py3-none-any.whl", hash = "sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126"},
     {file = "pytz-2026.2.tar.gz", hash = "sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a"},
@@ -2914,7 +2914,7 @@ version = "2.0.0"
 description = "OAuthlib authentication support for Requests."
 optional = false
 python-versions = ">=3.4"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9"},
     {file = "requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36"},
@@ -3315,7 +3315,7 @@ version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
-groups = ["main", "integration"]
+groups = ["main", "integration", "unit"]
 files = [
     {file = "six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"},
     {file = "six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"},
@@ -3327,7 +3327,7 @@ version = "0.6.3"
 description = "Extract data from python stack frames and tracebacks for informative displays"
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695"},
     {file = "stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9"},
@@ -3375,8 +3375,7 @@ version = "2.4.1"
 description = "A lil' TOML parser"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration", "unit"]
-markers = "python_full_version <= \"3.11.0a6\""
+groups = ["integration", "lint", "unit"]
 files = [
     {file = "tomli-2.4.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:f8f0fc26ec2cc2b965b7a3b87cd19c5c6b8c5e5f436b984e85f486d652285c30"},
     {file = "tomli-2.4.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4ab97e64ccda8756376892c53a72bd1f964e519c77236368527f758fbc36a53a"},
@@ -3426,6 +3425,7 @@ files = [
     {file = "tomli-2.4.1-py3-none-any.whl", hash = "sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe"},
     {file = "tomli-2.4.1.tar.gz", hash = "sha256:7c7e1a961a0b2f2472c1ac5b69affa0ae1132c39adcb67aba98568702b9cc23f"},
 ]
+markers = {integration = "python_full_version <= \"3.11.0a6\"", lint = "python_version == \"3.10\"", unit = "python_full_version <= \"3.11.0a6\""}
 
 [[package]]
 name = "toposort"
@@ -3433,7 +3433,7 @@ version = "1.10"
 description = "Implements a topological sort algorithm."
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "toposort-1.10-py3-none-any.whl", hash = "sha256:cbdbc0d0bee4d2695ab2ceec97fe0679e9c10eab4b2a87a9372b929e70563a87"},
     {file = "toposort-1.10.tar.gz", hash = "sha256:bfbb479c53d0a696ea7402601f4e693c97b0367837c8898bc6471adfca37a6bd"},
@@ -3445,7 +3445,7 @@ version = "5.15.0"
 description = "Traitlets Python configuration system"
 optional = false
 python-versions = ">=3.9"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "traitlets-5.15.0-py3-none-any.whl", hash = "sha256:fb36a18867a6803deab09f3c5e0fa81bb7b26a5c9e82501c9933f759166eff40"},
     {file = "traitlets-5.15.0.tar.gz", hash = "sha256:4fead733f81cf1c4c938e06f8ca4633896833c9d89eff878159457f4d4392971"},
@@ -3473,7 +3473,7 @@ version = "0.9.0"
 description = "Runtime inspection utilities for typing module."
 optional = false
 python-versions = "*"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "typing_inspect-0.9.0-py3-none-any.whl", hash = "sha256:9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f"},
     {file = "typing_inspect-0.9.0.tar.gz", hash = "sha256:b23fc42ff6f6ef6954e4852c1fb512cdd18dbea03134f91f856a95ccc9461f78"},
@@ -3522,7 +3522,7 @@ version = "0.7.0"
 description = "Measures the displayed width of unicode strings in a terminal"
 optional = false
 python-versions = ">=3.8"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "wcwidth-0.7.0-py3-none-any.whl", hash = "sha256:5d69154c429a82910e241c738cd0e2976fac8a2dd47a1a805f4afed1c0f136f2"},
     {file = "wcwidth-0.7.0.tar.gz", hash = "sha256:90e3a7ea092341c44b99562e75d09e4d5160fe7a3974c6fb842a101a95e7eed0"},
@@ -3551,7 +3551,7 @@ version = "16.0"
 description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
 optional = false
 python-versions = ">=3.10"
-groups = ["integration"]
+groups = ["integration", "unit"]
 files = [
     {file = "websockets-16.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:04cdd5d2d1dacbad0a7bf36ccbcd3ccd5a30ee188f2560b7a62a30d14107b31a"},
     {file = "websockets-16.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8ff32bb86522a9e5e31439a58addbb0166f0204d64066fb955265c4e214160f0"},
@@ -3634,4 +3634,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "cadad657d167e34116c061c0af43503f9a497a0cd7520cc90dd4ab0f088b6810"
+content-hash = "d63b66853857e833841f07acf0cd57c54cb00583bf80b7d499dca139cd2b9ffc"

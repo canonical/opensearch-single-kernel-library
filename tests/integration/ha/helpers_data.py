@@ -46,7 +46,10 @@ async def create_dummy_indexes(
             f"https://{unit_ip}:9200/index_{index_id}",
             {
                 "settings": {
-                    "index": {"number_of_shards": p_shards, "number_of_replicas": r_shards}
+                    "index": {
+                        "number_of_shards": p_shards,
+                        "number_of_replicas": r_shards,
+                    }
                 }
             },
             app=app,
@@ -81,7 +84,9 @@ async def update_dummy_indexes(
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count: int = 5) -> None:
+async def delete_dummy_indexes(
+    ops_test: OpsTest, app: str, unit_ip: str, count: int = 5
+) -> None:
     """Delete dummy indexes."""
     for index_id in range(count):
         await http_request(
@@ -97,7 +102,11 @@ async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count:
     stop=stop_after_attempt(15),
 )
 async def create_dummy_docs(
-    ops_test: OpsTest, app: str, unit_ip: str, count: int = 5, substrate: Substrate = "vm"
+    ops_test: OpsTest,
+    app: str,
+    unit_ip: str,
+    count: int = 5,
+    substrate: Substrate = "vm",
 ) -> None:
     """Store documents in the dummy indexes."""
     if substrate == "k8s":
@@ -109,7 +118,9 @@ async def create_dummy_docs(
             raise RuntimeError(
                 f"Could not find k8s unit for {app} to create dummy docs through {CLIENT_CHARM} action"
             )
-        logger.info(f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}")
+        logger.info(
+            f"Creating dummy docs through {CLIENT_CHARM} action on unit {k8s_unit.name}"
+        )
         action = await run_action(
             ops_test,
             app=CLIENT_CHARM,
@@ -119,12 +130,16 @@ async def create_dummy_docs(
                 "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
                 "username": "admin",
                 "password": admin_secrets["password"],
-                "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
+                "ca_cert": base64.b64encode(
+                    admin_secrets["ca-chain"].encode()
+                ).decode(),
             },
             unit_id=None,
         )
         if action.status != "completed":
-            raise RuntimeError(f"Failed to create dummy docs through {CLIENT_CHARM} action")
+            raise RuntimeError(
+                f"Failed to create dummy docs through {CLIENT_CHARM} action"
+            )
         return
 
     all_docs = ""
@@ -139,7 +154,9 @@ async def create_dummy_docs(
                 f'"Store_Id": "{randint(1, 250)}"}}\n'
             )
 
-    await http_request(ops_test, "PUT", f"https://{unit_ip}:9200/_bulk", payload=all_docs, app=app)
+    await http_request(
+        ops_test, "PUT", f"https://{unit_ip}:9200/_bulk", payload=all_docs, app=app
+    )
 
 
 @retry(
@@ -161,10 +178,15 @@ async def create_index(
     Optionally, add extra settings and mappings to the new index.
     """
     content = {
-        "settings": {"index": {"number_of_shards": p_shards, "number_of_replicas": r_shards}}
+        "settings": {
+            "index": {"number_of_shards": p_shards, "number_of_replicas": r_shards}
+        }
     }
     if extra_index_settings:
-        content["settings"]["index"] = {**content["settings"]["index"], **extra_index_settings}
+        content["settings"]["index"] = {
+            **content["settings"]["index"],
+            **extra_index_settings,
+        }
     if extra_mappings:
         content["mappings"] = extra_mappings
     await http_request(
@@ -222,7 +244,9 @@ async def bulk_insert_generated(
                 "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
                 "username": "admin",
                 "password": admin_secrets["password"],
-                "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
+                "ca_cert": base64.b64encode(
+                    admin_secrets["ca-chain"].encode()
+                ).decode(),
             },
             unit_id=None,
         )
@@ -236,7 +260,9 @@ async def bulk_insert_generated(
         status_code = int(action.response["status-code"])
         result = action.response.get("result", {})
         if status_code >= 300 or result.get("errors", "False") != "False":
-            raise RuntimeError(f"Generated bulk insert failed with status {status_code}: {result}")
+            raise RuntimeError(
+                f"Generated bulk insert failed with status {status_code}: {result}"
+            )
         return
 
     await http_request(
@@ -248,7 +274,9 @@ async def bulk_insert_generated(
     )
 
 
-def _generated_bulk_body(index_names: list[str], docs_count: int, blob_size: int) -> str:
+def _generated_bulk_body(
+    index_names: list[str], docs_count: int, blob_size: int
+) -> str:
     """Generate deterministic NDJSON for local bulk insertion."""
     blob = "A" * blob_size
     lines = []
@@ -277,7 +305,11 @@ async def index_doc(
         doc = default_doc(index_name, doc_id)
 
     await http_request(
-        ops_test, "PUT", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", payload=doc, app=app
+        ops_test,
+        "PUT",
+        f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}",
+        payload=doc,
+        app=app,
     )
 
     # a refresh makes the indexed data available for search, runs by default every 30 sec,
@@ -321,7 +353,9 @@ async def delete_doc(
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def delete_index(ops_test: OpsTest, app: str, unit_ip: str, index_name: str) -> None:
+async def delete_index(
+    ops_test: OpsTest, app: str, unit_ip: str, index_name: str
+) -> None:
     """Delete an index."""
     await http_request(
         ops_test,

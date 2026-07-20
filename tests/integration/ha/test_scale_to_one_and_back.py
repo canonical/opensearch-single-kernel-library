@@ -86,7 +86,10 @@ async def test_build_and_deploy(
 
 @pytest.mark.abort_on_fail
 async def test_scale_down(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_0_repl_writes_runner, substrate: Substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_0_repl_writes_runner,
+    substrate: Substrate,
 ) -> None:
     """Tests the shutdown of a node, and see the voting exclusions to be applied.
 
@@ -104,7 +107,9 @@ async def test_scale_down(
     count = len(juju_app.units)
     while count > 1:
         # find unit currently elected cluster_manager
-        elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
+        elected_cm_unit_id = await get_elected_cm_unit_id(
+            ops_test, leader_unit_ip, app=app
+        )
 
         if substrate == "k8s":
             await juju_app.scale(scale_change=-1)
@@ -151,7 +156,10 @@ async def test_scale_down(
 
 @pytest.mark.abort_on_fail
 async def test_scale_back_up(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_0_repl_writes_runner, substrate: Substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_0_repl_writes_runner,
+    substrate: Substrate,
 ) -> None:
     """Tests the scaling back to 3x node-cluster and see the voting exclusions to be applied."""
     app = (await app_name(ops_test)) or APP_NAME

@@ -66,7 +66,9 @@ class BaseManager(ManagerStatusProtocol):
         client = self.opensearch_client
 
         active_hosts = [
-            host for host in all_hosts if host != self.state.node_host and client.is_node_up(host)
+            host
+            for host in all_hosts
+            if host != self.state.node_host and client.is_node_up(host)
         ]
 
         random.shuffle(active_hosts)
@@ -110,7 +112,11 @@ class BaseManager(ManagerStatusProtocol):
             if "nodes" in response:
                 for obj in response["nodes"].values():
                     # For k8s we need to use the host instead of IP
-                    host = obj["ip"] if self.state.substrate == Substrates.VM else obj["host"]
+                    host = (
+                        obj["ip"]
+                        if self.state.substrate == Substrates.VM
+                        else obj["host"]
+                    )
                     node = Node(
                         name=obj["name"],
                         roles=obj["roles"],

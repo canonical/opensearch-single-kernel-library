@@ -111,7 +111,9 @@ class UpgradeServerState(RelationState):
     def workload_version_parsed(self) -> poetry_version.Version | None:
         """Get the parsed workload version of installed OpenSearch from the relation bag."""
         return (
-            poetry_version.Version.parse(self.workload_version) if self.workload_version else None
+            poetry_version.Version.parse(self.workload_version)
+            if self.workload_version
+            else None
         )
 
     @property

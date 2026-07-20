@@ -113,7 +113,9 @@ async def test_horizontal_scale_up(
     unit_names = get_application_unit_names(ops_test, app=app)
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
-    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names)
+    assert await check_cluster_formation_successful(
+        ops_test, leader_unit_ip, unit_names
+    )
 
     cluster_health_resp = await cluster_health(ops_test, leader_unit_ip)
     assert cluster_health_resp["status"] == "green"
@@ -169,7 +171,9 @@ async def test_safe_scale_down_shards_realloc(
     unit_ids_to_keep = [unit_id for unit_id in unit_ids if unit_id != unit_id_to_stop]
 
     # create indices with right num of primary and replica shards, and populate with data
-    await create_dummy_indexes(ops_test, app, leader_unit_ip, max_r_shards=init_units_count)
+    await create_dummy_indexes(
+        ops_test, app, leader_unit_ip, max_r_shards=init_units_count
+    )
     await create_dummy_docs(ops_test, app, leader_unit_ip, substrate=substrate)
 
     # get initial cluster health - expected to be all good: green
@@ -181,7 +185,9 @@ async def test_safe_scale_down_shards_realloc(
     assert cluster_health_resp["unassigned_shards"] == 0
 
     # get initial cluster allocation (nodes and their corresponding shards)
-    init_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
+    init_shards_per_node = await get_number_of_shards_by_node(
+        ops_test, leader_unit_ip, app=app
+    )
     assert init_shards_per_node.get(-1, 0) == 0  # unallocated shards
 
     # remove the service in the chosen unit
@@ -198,7 +204,9 @@ async def test_safe_scale_down_shards_realloc(
     )
 
     # check if at least partial shard re-allocation happened
-    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
+    new_shards_per_node = await get_number_of_shards_by_node(
+        ops_test, leader_unit_ip, app=app
+    )
 
     # some shards should have been reallocated, NOT ALL due to already existing replicas elsewhere
     assert new_shards_per_node.get(-1, 0) > 0  # some shards not reallocated
@@ -233,7 +241,9 @@ async def test_safe_scale_down_shards_realloc(
         idle_period=IDLE_PERIOD,
     )
 
-    new_shards_per_node = await get_number_of_shards_by_node(ops_test, leader_unit_ip, app=app)
+    new_shards_per_node = await get_number_of_shards_by_node(
+        ops_test, leader_unit_ip, app=app
+    )
     if substrate == "vm":
         # on k8s we will have the same unit id for the new unit
         new_unit_id = [
@@ -308,7 +318,9 @@ async def test_safe_scale_down_remove_leaders(
     # scale-down: remove the current elected CM
     first_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip)
     assert first_elected_cm_unit_id != -1
-    await ops_test.model.applications[app].destroy_unit(f"{app}/{first_elected_cm_unit_id}")
+    await ops_test.model.applications[app].destroy_unit(
+        f"{app}/{first_elected_cm_unit_id}"
+    )
     await wait_until(
         ops_test,
         apps=[app],
@@ -324,13 +336,19 @@ async def test_safe_scale_down_remove_leaders(
     assert second_elected_cm_unit_id != first_elected_cm_unit_id
 
     # check health of cluster
-    cluster_health_resp = await cluster_health(ops_test, leader_unit_ip, wait_for_green_first=True)
+    cluster_health_resp = await cluster_health(
+        ops_test, leader_unit_ip, wait_for_green_first=True
+    )
     assert cluster_health_resp["status"] == "green"
 
     # remove node containing primary shard of index "series_index"
-    shards = await get_shards_by_index(ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(
+        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME
+    )
     unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
-    await ops_test.model.applications[app].destroy_unit(f"{app}/{unit_with_primary_shard}")
+    await ops_test.model.applications[app].destroy_unit(
+        f"{app}/{unit_with_primary_shard}"
+    )
     await wait_until(
         ops_test,
         apps=[app],
@@ -343,14 +361,16 @@ async def test_safe_scale_down_remove_leaders(
 
     # check that the primary shard reelection happened
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
-    shards = await get_shards_by_index(ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME)
+    shards = await get_shards_by_index(
+        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME
+    )
     units_with_p_shards = [shard.unit_id for shard in shards if shard.is_prim]
     assert len(units_with_p_shards) == 1
 
     for unit_id in units_with_p_shards:
-        assert (
-            unit_id != unit_with_primary_shard
-        ), "Primary shard still assigned to destroyed unit."
+        assert unit_id != unit_with_primary_shard, (
+            "Primary shard still assigned to destroyed unit."
+        )
 
     # check that writes are still going after the removal / p_shard reelection
     time.sleep(3)

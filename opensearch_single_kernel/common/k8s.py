@@ -73,7 +73,9 @@ class K8sClient:
 
     def set_partition(self, value: int) -> None:
         """Sets the partition value."""
-        logger.debug(f"From unit {self.pod_name} setting partition to {value} for {self.app_name}")
+        logger.debug(
+            f"From unit {self.pod_name} setting partition to {value} for {self.app_name}"
+        )
         self.client.patch(
             res=StatefulSet,
             name=self.app_name,
@@ -98,7 +100,9 @@ class K8sClient:
 
         This is used for kubernetes upgrades to get the version of each container.
         """
-        pods = self.client.list(res=Pod, labels={"app.kubernetes.io/name": self.app_name})
+        pods = self.client.list(
+            res=Pod, labels={"app.kubernetes.io/name": self.app_name}
+        )
 
         def get_unit_name(pod_name: str) -> str:
             app_name, unit_number = pod_name.rsplit("-", maxsplit=1)
@@ -106,6 +110,8 @@ class K8sClient:
 
         # We can type ignore here
         return {
-            get_unit_name(pod.metadata.name): pod.metadata.labels["controller-revision-hash"]  # type: ignore
+            get_unit_name(pod.metadata.name): pod.metadata.labels[
+                "controller-revision-hash"
+            ]  # type: ignore
             for pod in pods
         }

@@ -145,7 +145,9 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     patch_create_snapshot.assert_not_called()
 
 
-def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
+def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(
+    mocker, harness, context
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
@@ -261,7 +263,9 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
     # When
     try:
         with pytest.raises(testing.ActionFailed) as err:
-            context.run(context.on.action("list-backups", params={"output": "json"}), st)
+            context.run(
+                context.on.action("list-backups", params={"output": "json"}), st
+            )
     finally:
         OpenSearchClient.list_snapshots = original
 
@@ -270,7 +274,9 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
     assert "server error" in msg or "503" in msg
 
 
-def test_list_backups_when_not_leader_then_action_fails(harness, mocker, backend_setup, context):
+def test_list_backups_when_not_leader_then_action_fails(
+    harness, mocker, backend_setup, context
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -306,7 +312,10 @@ def test_restore_when_prereqs_missing_then_action_fails(
     )
 
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
     assert "cluster not ready" in err.value.message.lower()
 
@@ -349,9 +358,14 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
-    get_snapshot.side_effect = OpenSearchHttpError(response_text="server error", response_code=500)
+    get_snapshot.side_effect = OpenSearchHttpError(
+        response_text="server error", response_code=500
+    )
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
     assert "server error" in err.value.message.lower()
 
@@ -365,7 +379,14 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     ],
 )
 def test_restore_when_closing_indices_varies_then_paths_are_handled(
-    context, harness, mocker, backend_setup, close_result, expect_fail, expect_msg, monkeypatch
+    context,
+    harness,
+    mocker,
+    backend_setup,
+    close_result,
+    expect_fail,
+    expect_msg,
+    monkeypatch,
 ):
     # Given
     mocker.patch(
@@ -396,11 +417,17 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
     if expect_fail:
         with pytest.raises(testing.ActionFailed) as err:
             context.run(
-                context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st
+                context.on.action(
+                    "restore", params={"backup-id": "2025-01-01T10:00:00Z"}
+                ),
+                st,
             )
         assert expect_msg in err.value.message.lower()
     else:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
 
 def test_restore_when_start_fails_then_action_fails_with_message(
@@ -437,7 +464,10 @@ def test_restore_when_start_fails_then_action_fails_with_message(
     )
 
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
     assert "restore failed" in err.value.message.lower()
 
 
@@ -551,12 +581,16 @@ def test_restore_when_all_ok_then_health_apply_is_called(
         lambda *_a, **_k: fake_apply(),
     )
     # When
-    context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+    context.run(
+        context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st
+    )
     # Assert
     assert called["ok"]
 
 
-def test_restore_when_not_leader_then_action_fails(mocker, context, harness, backend_setup):
+def test_restore_when_not_leader_then_action_fails(
+    mocker, context, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -569,12 +603,17 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
     # Assert
     assert "leader" in err.value.message.lower()
 
 
-def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, backend_setup):
+def test_prereq_when_not_leader_then_action_fails(
+    context, mocker, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -865,7 +904,9 @@ def test_create_s3_bucket_when_region_us_east_1_then_calls_create_without_locati
     bucket = Mock()
     bucket.wait_until_exists = Mock()
 
-    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(
+        object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket
+    )
 
     params = {
         "access-key": "a",
@@ -891,7 +932,9 @@ def test_create_s3_bucket_when_bucket_already_exists_then_it_does_not_raise(
     bucket = Mock()
     bucket.create.side_effect = _client_error(code)
 
-    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(
+        object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket
+    )
 
     params = {
         "access-key": "a",
@@ -911,7 +954,9 @@ def test_create_s3_bucket_when_access_denied_then_other_clienterror_raises(
     bucket = Mock()
     bucket.create.side_effect = _client_error("AccessDenied", status=403)
 
-    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(
+        object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket
+    )
 
     params = {
         "access-key": "a",
@@ -945,13 +990,17 @@ def test_verify_s3_credentials_when_bucket_missing_then_triggers_create_and_prob
     bucket.meta.client = Mock()
 
     # head_bucket returns 404 (NoSuchBucket)
-    bucket.meta.client.head_bucket.side_effect = _client_error("NoSuchBucket", status=404)
+    bucket.meta.client.head_bucket.side_effect = _client_error(
+        "NoSuchBucket", status=404
+    )
 
     # probe write/delete
     bucket.put_object = Mock()
     bucket.Object.return_value.delete = Mock()
 
-    monkeypatch.setattr(object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket)
+    monkeypatch.setattr(
+        object_storage, "get_s3_bucket_resource", lambda *_a, **_k: bucket
+    )
 
     mock_create = Mock(return_value=None)
     monkeypatch.setattr(object_storage, "create_s3_bucket", mock_create)
@@ -970,7 +1019,9 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
 ):
     # Given
     client = Mock()
-    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(
+        object_storage, "get_azure_container_client", lambda _params: client
+    )
 
     params = {
         "storage-account": "acc",
@@ -990,7 +1041,9 @@ def test_create_azure_container_when_container_exists_and_we_run_create_containe
     # Given
     client = Mock()
     client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(
+        object_storage, "get_azure_container_client", lambda _params: client
+    )
 
     params = {
         "storage-account": "acc",
@@ -1008,7 +1061,9 @@ def test_create_azure_container_when_create_container_then_other_azure_error_rai
 ):
     client = Mock()
     client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
+    monkeypatch.setattr(
+        object_storage, "get_azure_container_client", lambda _params: client
+    )
 
     params = {
         "storage-account": "acc",
@@ -1036,7 +1091,9 @@ def test_create_azure_container_when_container_missing_then_triggers_create_and_
     cfg.azure.endpoint = "https://account.blob.core.windows.net/container"
 
     container_client = Mock()
-    container_client.get_container_properties.side_effect = ResourceNotFoundError("missing")
+    container_client.get_container_properties.side_effect = ResourceNotFoundError(
+        "missing"
+    )
 
     blob_client = Mock()
     container_client.get_blob_client.return_value = blob_client
@@ -1091,7 +1148,9 @@ def test_create_gcs_bucket_when_secret_key_is_invalid_json_then_return_false():
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(monkeypatch):
+def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(
+    monkeypatch,
+):
     cfg = _cfg(
         secret_key='{"project_id":"p"}',
         bucket="mybucket",
@@ -1122,7 +1181,9 @@ def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_acc
     blob.delete.assert_called_once()
 
 
-def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(monkeypatch):
+def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(
+    monkeypatch,
+):
     cfg = _cfg(secret_key='{"project_id":"p"}', bucket="mybucket")
 
     client = Mock()
@@ -1144,7 +1205,9 @@ def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(mo
 
 
 @pytest.mark.parametrize("exc", [Conflict("taken"), Forbidden("denied")])
-def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(monkeypatch, exc):
+def test_create_gcs_bucket_when_bucket_creation_fails_then_return_false(
+    monkeypatch, exc
+):
     cfg = _cfg(secret_key='{"project_id":"p"}', bucket="mybucket")
 
     client = Mock()

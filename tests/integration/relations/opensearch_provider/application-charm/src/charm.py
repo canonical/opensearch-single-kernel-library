@@ -38,11 +38,15 @@ class ApplicationCharm(CharmBase):
 
         index_name = f"{self.app.name.replace('-', '_')}_second_opensearch"
         # set invalid permissions to guarantee we still get default permissions.
-        self.second_opensearch = OpenSearchRequires(self, "second-index", index_name, "hackerman")
+        self.second_opensearch = OpenSearchRequires(
+            self, "second-index", index_name, "hackerman"
+        )
 
         # Checking comma-separated permissions. These should still basically have admin
         # permissions.
-        self.admin_opensearch = OpenSearchRequires(self, "admin", "admin-index", "admin,default")
+        self.admin_opensearch = OpenSearchRequires(
+            self, "admin", "admin-index", "admin,default"
+        )
 
         self.relations = {
             "first-index": self.first_opensearch,
@@ -240,7 +244,9 @@ class ApplicationCharm(CharmBase):
                 resp = s.request(**request_kwargs)
                 resp.raise_for_status()
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request {method} to {full_url} with payload: {payload} failed. \n{e}")
+            logger.error(
+                f"Request {method} to {full_url} with payload: {payload} failed. \n{e}"
+            )
             raise OpenSearchHttpError(str(e))
 
         return resp.json()

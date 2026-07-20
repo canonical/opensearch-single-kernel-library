@@ -27,7 +27,9 @@ from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S
 @pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
     if substrate == "vm":
-        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
+        mocker.patch(
+            "opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache"
+        )
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
@@ -98,7 +100,9 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
 @pytest.fixture(autouse=True)
 def context(substrate):
     charm_type = OpenSearchVMCharm if substrate == "vm" else OpenSearchK8sCharm
-    return testing.Context(charm_type=charm_type, config=CONFIG, meta=METADATA, actions=ACTIONS)
+    return testing.Context(
+        charm_type=charm_type, config=CONFIG, meta=METADATA, actions=ACTIONS
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +138,9 @@ def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
 # ---- Backup and Restore related fixtures ---- #
 
 
-def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None) -> None:
+def use_s3(
+    mocker, *, ca: str | None = None, info: dict[str, str] | None = None
+) -> None:
     """Configure fixture to behave as if S3 is connected, optionally inject a CA."""
     mock_s3_conn = mocker.patch(
         "opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3.S3Requirer.get_s3_connection_info",
@@ -168,7 +174,9 @@ def use_gcs(mocker, info: dict | None = None) -> None:
 
 
 def s3_relation() -> testing.Relation:
-    return testing.Relation(endpoint=S3_RELATION, interface="s3", remote_app_name="s3-integrator")
+    return testing.Relation(
+        endpoint=S3_RELATION, interface="s3", remote_app_name="s3-integrator"
+    )
 
 
 def azure_relation() -> testing.Relation:

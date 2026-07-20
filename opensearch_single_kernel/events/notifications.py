@@ -92,10 +92,13 @@ class NotificationsEvents(Object):
             return
 
         try:
-            config = self.charm.notifications_manager.get_smtp_config(smtp_data, event.relation.id)
+            config = self.charm.notifications_manager.get_smtp_config(
+                smtp_data, event.relation.id
+            )
         except OpenSearchSmtpMissingParametersError as e:
             logger.error(
-                "SMTP parameters missing. Cannot create notification configs without them: %s", e
+                "SMTP parameters missing. Cannot create notification configs without them: %s",
+                e,
             )
             return
 
@@ -121,10 +124,8 @@ class NotificationsEvents(Object):
         if smtp_data.auth_type != "none":
             # store keystore creds on every unit
             try:
-                credentials = (
-                    self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
-                        config.smtp_account_id, smtp_data.user, smtp_data.password
-                    )
+                credentials = self.charm.keystore_manager.put_notifications_plugin_smtp_credentials(
+                    config.smtp_account_id, smtp_data.user, smtp_data.password
                 )
             except OpenSearchCmdError as e:
                 logger.error("Failed to write SMTP credentials to keystore: %s", e)
@@ -193,7 +194,9 @@ class NotificationsEvents(Object):
 
         # No smtp_account_id; nothing to clean in keystore or notifications
         if not smtp_account_id:
-            self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
+            self.charm.plugin_manager.remove_plugin_config(
+                scope=Scope.UNIT, label=label
+            )
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.state.is_peer_cluster_provider():
@@ -204,15 +207,21 @@ class NotificationsEvents(Object):
         # Delete notification configs first so we never have configs that reference
         # missing keystore credentials (channel -> group -> smtp account dependency order)
         if self.charm.unit.is_leader():
-            channel_id = self.charm.notifications_manager.email_channel_id(smtp_account_id)
-            group_id = self.charm.notifications_manager.recipient_group_id(smtp_account_id)
+            channel_id = self.charm.notifications_manager.email_channel_id(
+                smtp_account_id
+            )
+            group_id = self.charm.notifications_manager.recipient_group_id(
+                smtp_account_id
+            )
             for config_id in (channel_id, group_id, smtp_account_id):
                 try:
                     self.charm.notifications_manager.opensearch_client.delete_notification_config(
                         config_id
                     )
                 except OpenSearchHttpError:
-                    logger.exception("Failed deleting notifications config %s", config_id)
+                    logger.exception(
+                        "Failed deleting notifications config %s", config_id
+                    )
 
         # Keystore cleanup after configs: keys may be absent when smtp_account_id exists
         if keys:

@@ -122,6 +122,7 @@ optional = true
 [tool.poetry.group.lint.dependencies]
 codespell = "^2.4.2"
 ruff = "^0.15.20"
+tomli = {version = "^2.0.1", python = "<3.11"}
 
 
 [tool.poetry.group.unit]
@@ -131,6 +132,7 @@ optional = true
 pytest = "^9.1.1"
 coverage = { extras = ["toml"], version = "^7.15.2" }
 pytest-mock = "^3.15.1"
+pytest-operator = "^0.43.2"
 responses = "^0.26.1"
 ops = { extras = ["testing"], version = "^3.8.0" }
 ops-scenario = "^8.8.0"

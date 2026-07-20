@@ -57,4 +57,8 @@ def breakdown_label(label: str) -> dict[str, Any]:
 
 def safe_obj_data(indict: dict) -> dict[str, Any]:
     """Return a dict with only non-empty values from the input dict."""
-    return {key: str(val) for key, val in indict.items() if val is not None and str(val).strip()}
+    return {
+        key: str(val)
+        for key, val in indict.items()
+        if val is not None and str(val).strip()
+    }

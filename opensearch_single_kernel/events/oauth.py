@@ -50,7 +50,9 @@ class OAuthEventsHandler(Object):
             scope=OAUTH_CLIENT_SCOPE,
             grant_types=OAUTH_CLIENT_GRANT_TYPES,
         )
-        self.oauth = OAuthRequirer(self.charm, client_config, relation_name=OAUTH_RELATION)
+        self.oauth = OAuthRequirer(
+            self.charm, client_config, relation_name=OAUTH_RELATION
+        )
         self.framework.observe(
             self.charm.on[OAUTH_RELATION].relation_created,
             self._on_oauth_relation_created,
@@ -108,13 +110,13 @@ class OAuthEventsHandler(Object):
             return
 
         if not self.charm.state.application.is_security_index_initialised:
-            logger.debug("Deferring oauth relation changed event as cluster is not ready yet")
+            logger.debug(
+                "Deferring oauth relation changed event as cluster is not ready yet"
+            )
             event.defer()
             return
 
-        self.charm.state.server.oauth_openid_connect_url = (
-            f"{relation.data[relation.app].get('issuer_url')}/.well-known/openid-configuration"
-        )
+        self.charm.state.server.oauth_openid_connect_url = f"{relation.data[relation.app].get('issuer_url')}/.well-known/openid-configuration"
         self.charm.config_manager.update_security_config()
 
         if not self.charm.unit.is_leader():
@@ -132,7 +134,10 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handler for `relation_departed` event."""
-        if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
+        if (
+            event.departing_unit == self.charm.unit
+            and self.charm.state.peer_relation is not None
+        ):
             self.charm.state.server.set_relation_departing(event.relation)
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
