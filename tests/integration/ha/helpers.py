@@ -5,6 +5,7 @@
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import time
 
@@ -23,6 +24,8 @@ from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.helpers import (
+    _backup_log_search_terms,
+    dump_opensearch_server_logs,
     get_application_unit_ids,
     get_application_unit_ids_hostnames,
     get_application_unit_ids_ips,
@@ -548,12 +551,36 @@ async def create_backup(
     """Runs the backup of the cluster."""
     action = await run_action(ops_test, leader_id, "create-backup", app=app)
     logger.debug(f"create-backup output: {action}")
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    backup_id = action.response.get("backup-id")
+    try:
+        await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    except Exception:
+        await dump_opensearch_server_logs(
+            ops_test,
+            app=app,
+            search_terms=_backup_log_search_terms(backup_id),
+        )
+        raise
+
+    if action.status != "completed":
+        await dump_opensearch_server_logs(
+            ops_test,
+            app=app,
+            search_terms=_backup_log_search_terms(backup_id),
+        )
     assert action.status == "completed"
+
     st = str(action.response.get("status", ""))
+    if st != "success" or os.getenv("OPENSEARCH_DUMP_SERVER_LOGS_ON_BACKUP"):
+        await dump_opensearch_server_logs(
+            ops_test,
+            app=app,
+            search_terms=_backup_log_search_terms(backup_id),
+        )
+
     assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
-    assert action.response.get("backup-id"), "backup-id is missing in response"
-    return action.response["backup-id"]
+    assert backup_id, "backup-id is missing in response"
+    return backup_id
 
 
 async def restore(
@@ -565,7 +592,22 @@ async def restore(
     )
     logger.debug(f"restore output: {action}")
 
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    try:
+        await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    except Exception:
+        await dump_opensearch_server_logs(
+            ops_test,
+            app=app,
+            search_terms=_backup_log_search_terms(backup_id),
+        )
+        raise
+
+    if action.status != "completed":
+        await dump_opensearch_server_logs(
+            ops_test,
+            app=app,
+            search_terms=_backup_log_search_terms(backup_id),
+        )
     return action.status == "completed"
 
 

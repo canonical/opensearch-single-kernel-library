@@ -1383,13 +1383,30 @@ class OpenSearchClient:
 
         def log_error(retry_state: RetryCallState):
             url = urls[(retry_state.attempt_number - 1) % len(urls)]
+            exception = retry_state.outcome.exception()
+            response = getattr(exception, "response", None)
+            response_status = getattr(response, "status_code", None)
+            response_text = getattr(response, "text", None)
+            response_elapsed = getattr(getattr(response, "elapsed", None), "total_seconds", None)
+            if callable(response_elapsed):
+                response_elapsed = response_elapsed()
+
             logger.debug(
-                "Request %s to %s with payload: %s failed. (Attempts left: %s)\n\tError: %s",
+                (
+                    "Request %s to %s with payload: %s failed. (Attempts left: %s)\n"
+                    "\tError: %s\n"
+                    "\tResponse status: %s\n"
+                    "\tResponse elapsed seconds: %s\n"
+                    "\tResponse body: %s"
+                ),
                 method,
                 url,
                 payload,
                 retry_max - retry_state.attempt_number,
-                retry_state.outcome.exception(),
+                exception,
+                response_status,
+                response_elapsed,
+                response_text,
             )
 
         return log_error
