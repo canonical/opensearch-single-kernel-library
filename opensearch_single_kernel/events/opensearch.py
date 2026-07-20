@@ -63,6 +63,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     InternalUsersStatuses,
+    LockStatuses,
 )
 from opensearch_single_kernel.core.models import (
     DeploymentDescription,
@@ -862,12 +863,17 @@ class OpenSearchEventsHandler(Object):
             # Only used for force upgrades and starting 1 data node on a large deployment
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
-        elif not self.charm.lock_manager.acquire():
-            # REQUEST_LOCK_ON_START is pure-computed by LockManager.get_statuses
-            # from lock_requested + unit_with_lock peer state.
-            logger.debug("Lock to start opensearch not acquired. Will retry next event")
-            event.defer()
-            return
+        else:
+            self.charm.status_handler.set_running_status(
+                LockStatuses.REQUEST_LOCK_ON_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.lock_manager.name,
+            )
+            if not self.charm.lock_manager.acquire():
+                logger.debug("Lock to start opensearch not acquired. Will retry next event")
+                event.defer()
+                return
 
         if self.charm.workload.is_failed():
             self.charm.lock_manager.release()
@@ -1107,8 +1113,13 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
+        self.charm.status_handler.set_running_status(
+            LockStatuses.REQUEST_LOCK_ON_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.lock_manager.name,
+        )
         if not self.charm.lock_manager.acquire():
-            # REQUEST_LOCK_ON_START pure-computed by LockManager.get_statuses
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
             return

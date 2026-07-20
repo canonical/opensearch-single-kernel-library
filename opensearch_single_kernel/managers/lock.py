@@ -23,22 +23,18 @@ The workflow logic goes alongside the following:
 import logging
 import os
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import Relation
-from overrides import override
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchLockError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
+from opensearch_single_kernel.common.statuses import LockStatuses
 from opensearch_single_kernel.core.models import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
-from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -102,6 +98,9 @@ class PeerLockManager(BaseManager):
                 return False
 
         logger.debug("[Node lock] Acquired via peer databag")
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
         return True
 
     def release(self) -> None:
@@ -117,6 +116,10 @@ class PeerLockManager(BaseManager):
             # A separate relation-changed event won't get fired
             self.refresh_lock()
             logger.debug("[Node lock] Released peer lock as leader unit")
+
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
 
     def refresh_lock(self) -> Relation | None:
         """Grant & release lock."""
@@ -153,32 +156,6 @@ class PeerLockManager(BaseManager):
         else:
             logger.debug("[Node lock] (leader) cleared peer lock")
             del self.state.application_lock.unit_with_lock
-
-    @override
-    def get_statuses(
-        self, scope: AdvancedStatusesScope, recompute: bool = False
-    ) -> list[StatusObject]:
-        """Compute lock statuses pure from peer lock state.
-
-        REQUEST_LOCK_ON_START is a plain waiting status derived from
-        ``lock_requested`` and peer lock ownership (not a running status).
-        ``recompute`` is accepted for protocol compatibility.
-        """
-        status_list = running_statuses(self.state.statuses, scope, self.name)
-
-        # Waiting for the peer lock so start can proceed.
-        # Guard when lock relation is not joined yet (StatusHandler may call
-        # get_statuses early during install / before peer relations exist).
-        if (
-            scope == "unit"
-            and self.state.lock_relation is not None
-            and self.state.server_lock.lock_requested
-            and self.state.application_lock.unit_with_lock != self.state.unit_name
-            and LockStatuses.REQUEST_LOCK_ON_START.value not in status_list
-        ):
-            status_list.append(LockStatuses.REQUEST_LOCK_ON_START.value)
-
-        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
 
 class LockManager(PeerLockManager):

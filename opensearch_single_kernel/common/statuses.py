@@ -167,6 +167,7 @@ class LockStatuses(Enum):
         message="Requesting lock on operation: start",
         check="Peer / OpenSearch start lock ownership.",
         action="Wait for the start lock; another unit may be starting.",
+        running="async",
     )
 
 
