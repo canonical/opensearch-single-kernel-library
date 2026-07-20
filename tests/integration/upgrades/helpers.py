@@ -320,6 +320,9 @@ async def assert_upgrade_to_local(
             ops_test,
             apps=[app],
             timeout=TIMEOUT,
+            wait_for_exact_units={
+                app: len(units),
+            },
             idle_period=IDLE_PERIOD,
         )
         logger.info("Upgrade of '%s' completed", app)
