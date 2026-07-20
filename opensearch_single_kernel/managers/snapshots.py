@@ -703,22 +703,18 @@ class SnapshotsManager(BaseManager):
         if not deployment_desc:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        pcluster_types = {
-            ObjectStorageType.S3_PCLUSTER,
-            ObjectStorageType.AZURE_PCLUSTER,
-            ObjectStorageType.GCS_PCLUSTER,
-        }
-        object_storage_type = self.state.storage_type
-
         # Non-main apps in multi-app topologies must not take direct backup relations.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
             self.state.is_peer_cluster_consumer() or self.state.is_peer_cluster_provider()
         ):
-            if object_storage_type and object_storage_type not in pcluster_types:
+            if self.state.s3_relation or self.state.azure_relation or self.state.gcs_relation:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value)
                 return status_list
 
-        if object_storage_type and object_storage_type not in pcluster_types:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        # MAIN_ORCHESTRATOR validates backup relation and data
+        if object_storage_type := self.state.storage_type:
             if object_storage_type == ObjectStorageType.CONFLICT:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value)
                 return status_list
