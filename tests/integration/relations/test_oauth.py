@@ -303,7 +303,9 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model, substrate):
+async def test_setup_large_cluster(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate, charm_resources
+):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
@@ -318,6 +320,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -327,6 +330,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -336,12 +340,16 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
     )
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, "certificates")
+        if substrate == "k8s":
+            await ops_test.model.integrate(app, "self-signed-certificates")
+        else:
+            await ops_test.model.integrate(app, "certificates")
 
     # integrate large deployment cluster
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
@@ -362,10 +370,15 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_model: Model):
+async def test_oauth_relation_restricted(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
-    await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
+    if substrate == "k8s":
+        await ops_test.model.integrate(f"{DATA_APP}:oauth", "hydra")
+    else:
+        await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
     await wait_until(
         ops_test,
         apps=[DATA_APP],
@@ -385,7 +398,10 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_m
     logger.info("Access with OAuth Token failed as expected")
 
     logger.info(f"Remove relation with {DATA_APP}")
-    remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
+    if substrate == "k8s":
+        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth hydra"
+    else:
+        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
     await ops_test.juju(*remove_relation_cmd.split(), check=True)
 
     await wait_until(
@@ -396,10 +412,15 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_m
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
+async def test_oauth_access_large_cluster(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
-    await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
+    if substrate == "k8s":
+        await ops_test.model.integrate(f"{MAIN_APP}:oauth", "hydra")
+    else:
+        await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],

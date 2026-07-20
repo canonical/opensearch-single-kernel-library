@@ -154,7 +154,7 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_configure_and_use_jwt_large_cluster(
-    charm, series, ops_test: OpsTest, substrate
+    charm, series, ops_test: OpsTest, substrate, charm_resources
 ) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")
@@ -166,6 +166,7 @@ async def test_configure_and_use_jwt_large_cluster(
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -179,6 +180,7 @@ async def test_configure_and_use_jwt_large_cluster(
             }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -188,6 +190,7 @@ async def test_configure_and_use_jwt_large_cluster(
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
     )
 

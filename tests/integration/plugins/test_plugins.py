@@ -331,10 +331,8 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
     assert len(response_str.split("\n")) > 500
 
 
-# TODO enable for k8s when cos is merged
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
@@ -367,7 +365,6 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-@pytest.mark.skip_if_substrate("k8s")
 async def test_large_deployment_build_and_deploy(
     ops_test: OpsTest, charm, series, deploy_type: str
 ) -> None:
@@ -437,7 +434,6 @@ async def test_large_deployment_build_and_deploy(
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_large_deployment_prometheus_exporter_cos_relation(
     ops_test, series, deploy_type: str
 ):
