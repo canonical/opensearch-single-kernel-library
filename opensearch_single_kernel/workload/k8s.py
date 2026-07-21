@@ -558,10 +558,6 @@ class K8sWorkload(BaseWorkload):
                     stdout = stdout.decode("utf-8", "replace")
                 if isinstance(stderr, bytes):
                     stderr = stderr.decode("utf-8", "replace")
-            logger.debug(
-                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
-            )
-
             # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 

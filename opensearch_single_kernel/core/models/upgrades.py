@@ -39,8 +39,13 @@ class UpgradeVersions(Model):
 class UpgradeAppModel(PersistentModel, PeerModel):
     """Pydantic model for the upgrade application-level databag."""
 
+    # Charm/workload versions the app is upgrading to.
     versions: Optional[UpgradeVersions] = Field(default=None)
+    # Whether the user has resumed the upgrade via the Juju action.
     upgrade_resumed: bool = Field(default=False)
+    # Write-only timestamp bumped alongside `upgrade_resumed` so a repeated resume with
+    # the same value still changes the databag and re-triggers relation-changed on peers.
+    # The databag key's "-unused-" prefix signals that the value itself is never read.
     upgrade_resume_last_updated: Optional[str] = Field(
         default=None, alias="-unused-timestamp-upgrade-resume-last-updated"
     )

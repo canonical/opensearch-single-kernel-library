@@ -26,6 +26,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchInstallError,
     OpenSearchReconcilePartitionError,
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
@@ -264,7 +265,7 @@ class UpgradesEventsHandler(Object):
         """
         app_name = self.charm.app.name
 
-        if not self.charm.state.application.admin_password:
+        if not (self.charm.state.application.admin_password or "").strip():
             user_mappings = [
                 (
                     f"{app_name}:app:{ADMIN_USER}-{PW_POSTFIX}",
@@ -529,7 +530,13 @@ class UpgradesEventsHandler(Object):
         else:
             logger.debug("Upgrading unit")
             self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
-            self.charm.workload.install()
+            try:
+                self.charm.workload.install()
+            except OpenSearchInstallError as e:
+                logger.exception(e)
+                self.charm.lock_manager.release()
+                event.defer()
+                return
 
             # We check if it is a rollback here only if the unit is highest order
             # If we reach this point we are sure its compatible and upgrade is in progress

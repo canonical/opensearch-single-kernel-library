@@ -76,15 +76,19 @@ def _sort_nested_dicts(obj: Any) -> Any:
     return obj
 
 
+def stripped_or_none(value: str | None) -> str | None:
+    """Collapse empty or whitespace-only values to None.
+
+    Secret fields use a single-space placeholder to force creation of their backing
+    Juju secret (see the models: `initialize_empty_secrets`)
+    this normalizes such placeholders and genuinely empty values to None
+    before they are copied around or handed to callers.
+    """
+    return (value or "").strip() or None
+
+
 class Model(ABC, BaseModel):
     """Base model class."""
-
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-
-    def to_str(self, by_alias: bool = False) -> str:
-        """Deserialize object into a string."""
-        return json.dumps(Model.sort_payload(self.to_dict(by_alias=by_alias)))
 
     def to_dict(self, by_alias: bool = False) -> dict[str, Any]:
         """Deserialize object into a dict."""
@@ -97,31 +101,8 @@ class Model(ABC, BaseModel):
             return cls()
         return cls(**input_dict)
 
-    @classmethod
-    def from_str(cls, input_str_dict: str):
-        """Create a new instance of this class from a stringified json/dict repr."""
-        return cls.model_validate_json(input_str_dict)
-
-    @staticmethod
-    def sort_payload(payload: Any) -> Any:
-        """Sort input payloads to avoid rel-changed events for same unordered objects."""
-        if isinstance(payload, dict):
-            # Sort dictionary by keys
-            return {key: Model.sort_payload(value) for key, value in sorted(payload.items())}
-        elif isinstance(payload, list):
-            # Sort each item in the list and then sort the list
-            sorted_list = [Model.sort_payload(item) for item in payload]
-            try:
-                return sorted(sorted_list)
-            except TypeError:
-                # If items are not sortable, return as is
-                return sorted_list
-        else:
-            # Return the value as is for non-dict, non-list types
-            return payload
-
     def __eq__(self, other) -> bool:
-        """Implement equality."""
+        """Compare field-by-field, treating list fields as unordered."""
         if other is None:
             return False
 
@@ -140,15 +121,15 @@ class PersistentModel(BaseModel):
     """Mixin for models fetched from a relation databag through ClusterState.
 
     Once a model instance is bound (see ClusterState / bind_model), setting any
-    field immediately writes the whole model back to its backing relation databag,
-    mirroring what the old `ModelProperty` descriptor + `RelationState.write()` did.
-    Use `.update()` as a context manager to batch several changes -- including
-    in-place mutation of nested collections -- into a single write.
+    field immediately writes the whole model back to its backing relation databag.
+    Use `.update()` as a context manager to batch several changes including
+    in-place mutation of nested collections into a single write.
     """
 
     _repository: Any = PrivateAttr(default=None)
     _write_context: dict | None = PrivateAttr(default=None)
-    _suspend_persist: bool = PrivateAttr(default=False)
+    _suspend_persist_depth: int = PrivateAttr(default=0)
+    _read_only: bool = PrivateAttr(default=False)
 
     # Maps field name -> sibling PersistentModel class, for fields split out into a dedicated
     # secret-group model (e.g. TLS/user secrets split out of a plain peer model). Overridden by
@@ -156,11 +137,20 @@ class PersistentModel(BaseModel):
     _secret_group_fields: ClassVar[dict[str, type]] = {}
 
     def bind(
-        self, repository: AbstractRepository, write_context: dict | None = None
+        self,
+        repository: AbstractRepository,
+        write_context: dict | None = None,
+        read_only: bool = False,
     ) -> "PersistentModel":
-        """Attach the repository this instance should persist itself through."""
+        """Attach the repository this instance should persist itself through.
+
+        `read_only` is for models loaded from a databag the charm cannot write
+        (a remote app's or remote unit's): field assignments then only mutate the
+        in-memory instance instead of triggering a persist.
+        """
         self._repository = repository
         self._write_context = write_context
+        self._read_only = read_only
         return self
 
     @property
@@ -196,7 +186,7 @@ class PersistentModel(BaseModel):
             if value is None:
                 # extract_secrets() overwrites a field with None when the group's Juju
                 # secret exists but doesn't hold that key; surface the field's declared
-                # default instead, as the old ModelProperty getter did.
+                # default instead so callers never see None on a defaulted field.
                 field_info = target_cls.__pydantic_fields__.get(name)
                 if field_info is not None:
                     return field_info.get_default(call_default_factory=True)
@@ -238,13 +228,18 @@ class PersistentModel(BaseModel):
         Also required for changes that mutate a field's value in place (e.g.
         appending to a list or updating a dict) since those don't go through
         `__setattr__` and wouldn't otherwise trigger a persist.
+
+        Reentrant: nesting `update()` (directly, or via a method like
+        `apply_rel_data()` that opens its own) only persists once, when the
+        outermost block exits.
         """
-        self._suspend_persist = True
+        self._suspend_persist_depth += 1
         try:
             yield self
         finally:
-            self._suspend_persist = False
-            self._persist()
+            self._suspend_persist_depth -= 1
+            if self._suspend_persist_depth == 0:
+                self._persist()
 
     @contextmanager
     def update_secrets(self, model_cls: type) -> Iterator[Any]:
@@ -257,36 +252,83 @@ class PersistentModel(BaseModel):
 
     def _persist(self) -> None:
         """Write the current model state back to its bound relation databag."""
-        if self._suspend_persist:
+        if self._suspend_persist_depth > 0:
+            return
+
+        if self._read_only:
+            # Bound to a remote (unwritable) databag -- mutations stay in-memory only.
             return
 
         repository = self._repository
         if repository is None:
             # Normal during __init__/validation (secret extraction sets fields before
             # `.bind()` runs) and for plain, never-bound instances -- nothing to persist to.
-            logger.debug(
-                "Not persisting %s: not bound to a relation yet.",
-                type(self).__name__,
-            )
+            # Not logged: models with several secret fields (e.g. PeerClusterAppModel) hit
+            # this once per field on every single bind, drowning out real log messages.
             return
 
         relation = getattr(repository, "relation", None)
         if relation is not None and not getattr(relation, "active", True):
             return
 
+        # Juju never allows writing a remote app's/unit's databag -- if this model is
+        # bound to one (e.g. built with remote=True), keep mutations in-memory only.
+        component = getattr(repository, "component", None)
+        if component is not None and component not in (
+            getattr(repository, "_local_unit", None),
+            getattr(repository, "_local_app", None),
+        ):
+            logger.debug(
+                "Not persisting %s: bound to remote component %s.",
+                type(self).__name__,
+                component,
+            )
+            return
+
         # BaseCommonModel/PeerModel serialization can itself call setattr() on this same
         # instance (e.g. to record a newly created secret's URI) -- suspend while writing
         # so that doesn't recursively re-trigger _persist().
-        self._suspend_persist = True
+        self._suspend_persist_depth += 1
 
         try:
             _write_model(repository, self, context=self._write_context)
         except (SecretNotFoundError, PydanticSerializationError) as e:
+            # A missing/deleted group secret aborts the whole model_dump. Dropping the
+            # entire write here would silently lose plain databag fields too (e.g. the
+            # demotion flow's trigger/orchestrators update) -- fall back to writing
+            # only the non-secret fields instead.
             logger.warning(
-                "Skipping write for %s -- secret unavailable: %s", type(self).__name__, e
+                "Secret unavailable while persisting %s -- writing non-secret fields only: %s",
+                type(self).__name__,
+                e,
             )
+            try:
+                self._write_non_secret_fields(repository)
+            except (SecretNotFoundError, PydanticSerializationError) as e2:
+                logger.warning(
+                    "Skipping write for %s -- fallback write failed: %s",
+                    type(self).__name__,
+                    e2,
+                )
         finally:
-            self._suspend_persist = False
+            self._suspend_persist_depth -= 1
+
+    def _write_non_secret_fields(self, repository: Any) -> None:
+        """Write the model's plain databag fields, leaving Juju secrets untouched.
+
+        Mirrors the lib's `write_model()` but dumps without the repository in the
+        serialization context: the secret-handling serializers then no-op, and
+        secret-backed fields (declared with `Field(exclude=True)`) are absent from
+        the dump entirely, so no secret material can land in the databag.
+        """
+        context = {k: v for k, v in (self._write_context or {}).items()}
+        dumped = self.model_dump(mode="json", context=context or None, exclude_none=False)
+        for field, value in dumped.items():
+            if value is None:
+                repository.delete_field(field)
+                continue
+            dumped_value = value if isinstance(value, str) else json.dumps(value)
+            repository.write_field(field, dumped_value)
 
 
 class App(Model):
@@ -374,9 +416,9 @@ class PeerClusterConfig(Model):
     cluster_name: str
     init_hold: bool
     roles: list[str]
-    # We have a breaking change in the model
-    # For older charms, this field will not exist, and they will be set in the
-    # profile called "testing".
+    # Derived from a "data.<temperature>" role by the validator below; None when no
+    # data-temperature role is configured (also the case for databags written by
+    # charm revisions that predate this field).
     data_temperature: str | None = None
 
     @model_validator(mode="after")
@@ -452,6 +494,7 @@ def bind_model(
     model_cls: type,
     component: Any | None = None,
     write_context: dict | None = None,
+    read_only: bool = False,
 ) -> Any:
     """Build a model through `interface` and bind it to its repository for self-writes.
 
@@ -459,9 +502,12 @@ def bind_model(
     OpsPeerRepositoryInterface, OpsPeerUnitRepositoryInterface, ...). If the built
     model is a PersistentModel, it is bound so that setting any of its fields (or
     using `.update()`) writes it straight back to the relation databag.
+
+    Pass `read_only=True` when `component` is a remote app/unit whose databag this
+    charm cannot write -- field assignments then stay in-memory.
     """
     repository = interface.repository(relation_id, component)
     model = _lib_build_model(repository, model_cls)
     if isinstance(model, PersistentModel):
-        model.bind(repository, write_context)
+        model.bind(repository, write_context, read_only=read_only)
     return model

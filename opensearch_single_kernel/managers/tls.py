@@ -49,7 +49,6 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     cert_expiration_remaining_hours,
-    parse_ca_chains,
     parse_tls_file,
     read_ca,
     remove_ca,
@@ -110,130 +109,33 @@ class TlsManager(BaseManager):
         if not only_unit_resources:
             resources.append((CertType.APP_ADMIN, self.state.application.admin_keystore_password))
 
-        ca_trust_store = self.workload.paths.certs / f"{CA_ALIAS}.p12"
-        unit_resources = [
-            (name, password, self.workload.paths.certs / f"{name}.p12")
-            for name, password in resources
-        ]
-
-        # Check existence up front (cheap file-stat calls) before issuing a single container
-        # command for all lookups below: on K8s, every additional `run_cmd()` here is a
-        # separate Pebble exec round-trip, so batching the `openssl` invocations materially
-        # speeds up every Juju event that calls this (i.e. most of them).
-        all_paths = [ca_trust_store] + [path for _, _, path in unit_resources]
-        for path in all_paths:
-            try:
-                if not self.workload.exists(path):
-                    logger.debug("all_tls_resources_stored: missing file on disk: %s", path)
-                    return False
-            except OpenSearchFileOperationError as e:
-                logger.warning(f"Error checking existence of TLS resource {path}: {e}")
-                return False
-
-        ca_pwd = self.state.application.admin_truststore_password
-        sections = [("ca", f"openssl pkcs12 -in {ca_trust_store} -passin pass:{ca_pwd}")]
-        sections += [
-            (
-                name.value,
-                f"openssl pkcs12 -in {path} -nodes -passin pass:{password} "
-                "| openssl x509 -noout -issuer",
-            )
-            for name, password, path in unit_resources
-        ]
-        batched = self._run_batched(sections)
-
-        # The truststore may hold both the current CA (alias "ca") and a retained previous
-        # CA (alias "old-ca") during rotation, so the alias-scoped chain parsing here (as
-        # opposed to naively taking the first cert `openssl x509` happens to see in the dump)
-        # is required to pick the right one.
-        if not (raw_ca_dump := batched.get("ca")):
-            logger.debug("all_tls_resources_stored: no 'ca' section in batched output.")
-            return False
-        current_ca = parse_ca_chains(raw_ca_dump).get(CA_ALIAS)
-        if not current_ca:
-            logger.debug(
-                "all_tls_resources_stored: parse_ca_chains found no entry for alias %r "
-                "(parsed aliases: %s).",
-                CA_ALIAS,
-                list(parse_ca_chains(raw_ca_dump).keys()),
-            )
-            return False
-
         # compare issuer of the cert with the issuer of the CA
         # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
-        ca_issuer = self.get_cert_issuer(cert=current_ca)
-        if not ca_issuer:
-            logger.debug("all_tls_resources_stored: could not read issuer off current_ca.")
+        if not (current_ca := self.read_stored_ca()):
             return False
 
-        for name, _, _ in unit_resources:
-            cert_issuer = batched.get(name.value)
-            if not cert_issuer or cert_issuer != ca_issuer:
-                logger.debug(
-                    "all_tls_resources_stored: issuer mismatch for %s: cert_issuer=%r "
-                    "ca_issuer=%r",
-                    name.value,
-                    cert_issuer,
-                    ca_issuer,
-                )
+        ca_issuer = self.get_cert_issuer(cert=current_ca)
+
+        for cert_type, password in resources:
+            cert_type_path = self.workload.paths.certs / f"{cert_type.value}.p12"
+            try:
+                if not self.workload.exists(cert_type_path):
+                    return False
+            except OpenSearchFileOperationError as e:
+                logger.warning(f"Error checking existence of TLS resource {cert_type_path}: {e}")
                 return False
 
+            cert_issuer = self.get_cert_issuer_from_path(
+                store_pwd=password,
+                store_path=cert_type_path,
+            )
+            if not cert_issuer:
+                return False
+
+            if cert_issuer != ca_issuer:
+                return False
         logger.info("All TLS resources are stored on disk and valid.")
         return True
-
-    def _run_batched(self, sections: list[tuple[str, str]]) -> dict[str, str | None]:
-        """Run several independent shell commands in a single container command.
-
-        Each command in `sections` normally costs its own `run_cmd()` call, which on K8s is a
-        separate Pebble exec round-trip. Running them back to back in one shell invocation
-        instead costs a single round-trip regardless of how many sections there are.
-
-        Args:
-            sections: list of (key, shell_command) tuples. Each command's stderr is discarded
-                so it can't bleed into a neighboring section's output.
-
-        Returns:
-            Mapping from key to that command's stripped stdout, or None if the whole batch
-            failed to run, or if a given section produced no output (e.g. its command failed).
-        """
-        if not sections:
-            return {}
-
-        marker = "===TLS_BATCH_SECTION==="
-        script_lines = []
-        for key, command in sections:
-            script_lines.append(f"echo '{marker}{key}'")
-            script_lines.append(f"{{ {command} ; }} 2>/dev/null")
-        # `true` keeps the overall exit code at 0 even if an individual section's command
-        # fails, so one bad/missing resource doesn't turn the whole batch into a raised
-        # exception and lose every other section's output along with it.
-        script = "\n".join(script_lines) + "\ntrue"
-
-        try:
-            output = self.workload.run_cmd(script, use_errors_replace=True).out
-        except OpenSearchCmdError as e:
-            logger.error("Error running batched TLS command: %s", e)
-            return {key: None for key, _ in sections}
-
-        results: dict[str, str | None] = dict.fromkeys(key for key, _ in sections)
-        current_key: str | None = None
-        buffer: list[str] = []
-
-        def flush() -> None:
-            if current_key is not None:
-                text = "\n".join(buffer).strip()
-                results[current_key] = text or None
-
-        for line in output.splitlines():
-            if line.startswith(marker):
-                flush()
-                current_key = line[len(marker) :]  # noqa: E203
-                buffer = []
-            else:
-                buffer.append(line)
-        flush()
-
-        return results
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
         """Load stored CA cert."""
@@ -540,7 +442,7 @@ class TlsManager(BaseManager):
                 store_path=self.workload.paths.certs / f"{cert_type}.p12",
                 cert=self.get_secret_by_cert(cert_type, "cert"),
                 key=self.get_secret_by_cert(cert_type, "key"),
-                key_pwd=self.get_secret_by_cert(cert_type, "key-password"),
+                key_pwd=(self.get_secret_by_cert(cert_type, "key-password") or "").strip() or None,
             )
         except (OpenSearchFileOperationError, OpenSearchCmdError) as e:
             logger.error("Unable to store TLS resources for %s: %s", cert_type.val, e)
@@ -691,7 +593,9 @@ class TlsManager(BaseManager):
             cert = self.get_secret_by_cert(cert_type, "cert")
             key = self.get_secret_by_cert(cert_type, "key")
             keystore_password = self.get_secret_by_cert(cert_type, "keystore-password")
-            key_password = self.get_secret_by_cert(cert_type, "key-password")
+            key_password = (
+                self.get_secret_by_cert(cert_type, "key-password") or ""
+            ).strip() or None
             if not (cert and key and keystore_password):
                 continue
 
@@ -711,11 +615,24 @@ class TlsManager(BaseManager):
             with self.workload.temp_file(
                 mode="w+t", data=cert, dir=self.workload.root / "/tmp"
             ) as tmp_ca_file:
-                return self.workload.run_cmd(
-                    f"openssl x509 -in {tmp_ca_file} -noout -issuer"
-                ).out.strip()
+                return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -issuer").out
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
             logger.error("Error reading the current truststore: %s", e)
+            return None
+
+    def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
+        """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
+        try:
+            return self.workload.run_cmd(
+                f"openssl pkcs12 -in {store_path}",
+                f"""-nodes \
+                -passin pass:{store_pwd} \
+                | openssl x509 -noout -issuer
+                """,
+                use_errors_replace=True,
+            ).out
+        except OpenSearchCmdError as e:
+            logger.error("Error reading the current certificate: %s", e)
             return None
 
     def reload_tls_certificates(self) -> bool:

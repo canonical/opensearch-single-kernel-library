@@ -162,11 +162,11 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
-        if (
-            is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
-            and self.charm.apply_health(app=self.charm.unit.is_leader())
-            in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]
-        ):
+        is_node_up = self.charm.cluster_manager.opensearch_client.is_node_up()
+        if is_node_up and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
+            HealthColors.UNKNOWN,
+            HealthColors.YELLOW_TEMP,
+        ]:
             # we defer because we want the temporary status to be updated
             logger.debug("Cluster health temp yellow or unknown. Deferring event.")
             event.defer()
@@ -737,6 +737,12 @@ class OpenSearchEventsHandler(Object):
                 "unit",
                 self.charm.cluster_manager.name,
             )
+            # Needed for non-leader units to start after a data node joins the cluster
+            # leader node starts via _on_peer_cluster_relation_changed
+            logger.debug(
+                "Main orchestrator cannot start without a data node. Deferring start event."
+            )
+            event.defer()
             return
         # We are requesting start of openSearch
 
@@ -793,7 +799,7 @@ class OpenSearchEventsHandler(Object):
         ):
             event.defer()
             return
-        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_consumer():
+        if self.charm.state.is_peer_cluster_consumer():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
         if (
@@ -983,6 +989,19 @@ class OpenSearchEventsHandler(Object):
             self.charm.unit.is_leader()
             and self.charm.cluster_manager.should_initialise_security_index()
         ):
+            # init_hold=True means this is a requirer app waiting for
+            # the main orchestrator — we need to check a remote CM is up.
+            # In small deployment (init_hold=False) the current unit is the CM.
+            if (
+                self.charm.state.application.deployment_desc.config.init_hold
+                and not self.charm.peer_cluster_manager.is_any_cm_up()
+            ):
+                logger.warning(
+                    "Deferring event. No cluster manager is up. Cannot initialize security index."
+                )
+                event.defer()
+                return
+
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
                 "unit",
@@ -1306,6 +1325,7 @@ class OpenSearchEventsHandler(Object):
                     logger.error("An error occurred while updating internal user: %s", str(e))
                     event.defer()
                     return
+
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id if hasattr(event, "relation") else None
@@ -1363,7 +1383,7 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.cluster_manager.no_blocking_directives(deployment_desc):
             return False
         try:
-            self.charm.cluster_manager.get_nodes(False)
+            self.charm.cluster_manager.get_nodes(use_localhost=False)
         except OpenSearchHttpError:
             return False
 
@@ -1432,7 +1452,9 @@ class OpenSearchEventsHandler(Object):
             del self.charm.state.server.is_cluster_manager_removed
             self.charm.restart_opensearch_event.emit()
 
-    def request_new_unit_certificates(self) -> None:
+    def request_new_unit_certificates(
+        self, cert_types: tuple[CertType, ...] = (CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT)
+    ) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
         del self.charm.state.server.tls_configured
         peer_cluster_servers = self.charm.state.all_peer_clusters_servers(remote=False)
@@ -1440,33 +1462,28 @@ class OpenSearchEventsHandler(Object):
         for peer_cluster_server in peer_cluster_servers:
             del peer_cluster_server.tls_configured
 
-        self.charm.tls_events.certs.request_certificate_revocation(
-            self.charm.state.server.http_csr.encode("utf-8")
-        )
-        self.charm.tls_events.certs.request_certificate_revocation(
-            self.charm.state.server.transport_csr.encode("utf-8")
-        )
+        csr_state_field = {
+            CertType.UNIT_HTTP: "http_csr",
+            CertType.UNIT_TRANSPORT: "transport_csr",
+        }
 
-        old_http_csr = self.charm.state.server.http_csr.encode("utf-8")
-        old_transport_csr = self.charm.state.server.transport_csr.encode("utf-8")
+        current_csrs = {
+            cert_type: getattr(self.charm.state.server, csr_state_field[cert_type]).encode("utf-8")
+            for cert_type in cert_types
+        }
+        for csr in current_csrs.values():
+            self.charm.tls_events.certs.request_certificate_revocation(csr)
 
-        http_csr = self.charm.tls_manager.create_certificate_signing_request(
-            cert_type=CertType.UNIT_HTTP,
-            tls_file=False,
-        )
-        transport_csr = self.charm.tls_manager.create_certificate_signing_request(
-            cert_type=CertType.UNIT_TRANSPORT,
-            tls_file=False,
-        )
+        for cert_type, old_csr in current_csrs.items():
+            new_csr = self.charm.tls_manager.create_certificate_signing_request(
+                cert_type=cert_type,
+                tls_file=False,
+            )
 
-        self.charm.tls_events.certs.request_certificate_renewal(
-            old_certificate_signing_request=old_http_csr,
-            new_certificate_signing_request=http_csr,
-        )
-        self.charm.tls_events.certs.request_certificate_renewal(
-            old_certificate_signing_request=old_transport_csr,
-            new_certificate_signing_request=transport_csr,
-        )
+            self.charm.tls_events.certs.request_certificate_renewal(
+                old_certificate_signing_request=old_csr,
+                new_certificate_signing_request=new_csr,
+            )
 
     def request_new_admin_certificate(self) -> None:
         """Request the generation of a new admin certificate."""

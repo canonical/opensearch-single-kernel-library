@@ -18,9 +18,11 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces i
 class LockAppStateModel(PersistentModel, PeerModel):
     """Peer model mapping to the Lock application state."""
 
+    # Juju event id during which the leader granted the lock to itself; the leader may
+    # only use the lock in a *later* event (see grant_lock for the full rationale).
     leader_acquired_lock_after_juju_event_id: str | None = Field(default=None)
+    # Name of the unit currently holding the peer lock, None when the lock is free.
     unit_with_lock: str | None = Field(default=None)
-    lock_granted_after_juju_event_id: str | None = Field(default=None)
 
     @property
     def leader_acquired_after_juju_event_id(self) -> str | None:
@@ -59,13 +61,13 @@ class LockAppStateModel(PersistentModel, PeerModel):
 class LockServerStateModel(PersistentModel, PeerModel):
     """Peer model mapping to the Lock unit state."""
 
+    # Whether this unit is asking the leader for the peer lock.
     lock_requested: bool = Field(default=False)
-    lock_acquired_after_juju_event_id: str | None = Field(default=None)
 
     def trigger_relation_changed(self) -> None:
         """Trigger relation changed event on other units by writing to dummy field."""
-        # Use `JUJU_CONTEXT_ID` only to ensure that the value changes
-        # (Value should never be read)
-        # (If we set the same value that is currently in the databag, a peer relation
-        # changed event will not be triggered)
+        # `trigger` is not a declared field -- it lands in the databag through the
+        # model's extra="allow" config. `JUJU_CONTEXT_ID` is used only as a value that
+        # is guaranteed to differ from the previous one (it is never read back):
+        # rewriting an unchanged value would not emit a peer relation-changed event.
         self.trigger = os.environ.get("JUJU_CONTEXT_ID", "")

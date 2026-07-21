@@ -100,57 +100,65 @@ class PeerClusterOrchestratorManager(BaseManager):
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            local_peer_cluster.initialize_empty_secrets()
-            orchestrators = local_peer_cluster.orchestrators
-            logger.debug(
-                "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
-                local_peer_cluster.relation.app.name,
-                orchestrators,
-                cluster_type,
-                deployment_description.app.to_dict(),
-            )
-
-            if cluster_type == "main":
-                orchestrators.main_app = deployment_description.app if has_units else None
-                orchestrators.main_rel_id = local_peer_cluster.relation.id if has_units else -1
-            else:
-                orchestrators.failover_app = deployment_description.app if has_units else None
-                orchestrators.failover_rel_id = local_peer_cluster.relation.id if has_units else -1
-
-            # in case of demotion update the trigger
-            local_peer_cluster.trigger = cluster_type
-            local_peer_cluster.orchestrators = orchestrators
-
-            # we add the hash of the rel_data to only emit a change event
-            # if the data has actually changed
-            if remote_peer_cluster:
-                local_peer_cluster.apply_rel_data(remote_peer_cluster)
-            logger.debug(
-                f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
-            )
-
-            if self.state.s3_relation and self.state.application.s3:
-                local_peer_cluster.s3 = self.state.application.marshal_s3_secrets()
-            if self.state.azure_relation and self.state.application.azure:
-                local_peer_cluster.azure = self.state.application.marshal_azure_secrets()
-            if self.state.gcs_relation and self.state.application.gcs:
-                local_peer_cluster.gcs = self.state.application.marshal_gcs_secrets()
-
-            # there is no error to broadcast - we clear any previously broadcasted error
-            if not rel_err_data:
+            # Batch this cluster's mutations into a single write: each bare assignment
+            # below re-serializes all secret groups on the model, so without batching a
+            # fleet of N related clusters turns one relation-changed event into N times
+            # several full secret read/write/grant round-trips over (possibly cross-model)
+            # relations.
+            with local_peer_cluster.update():
+                local_peer_cluster.initialize_empty_secrets()
+                orchestrators = local_peer_cluster.orchestrators or PeerClusterOrchestrators()
                 logger.debug(
-                    f"No rel error data to set for {local_peer_cluster.relation.app.name}. Deleting any existing error data."
+                    "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
+                    local_peer_cluster.relation.app.name,
+                    orchestrators,
+                    cluster_type,
+                    deployment_description.app.to_dict(),
                 )
-                del local_peer_cluster.error_data
-            else:
-                logger.debug(
-                    f"Setting rel error data for {local_peer_cluster.relation.app.name} with blocked message: {rel_err_data.blocked_message}"
-                )
-                local_peer_cluster.error_data = rel_err_data
 
-            # if no planned units, delete relation data as it won't get updated
-            if not has_units:
-                del local_peer_cluster.error_data
+                if cluster_type == "main":
+                    orchestrators.main_app = deployment_description.app if has_units else None
+                    orchestrators.main_rel_id = local_peer_cluster.relation.id if has_units else -1
+                else:
+                    orchestrators.failover_app = deployment_description.app if has_units else None
+                    orchestrators.failover_rel_id = (
+                        local_peer_cluster.relation.id if has_units else -1
+                    )
+
+                # in case of demotion update the trigger
+                local_peer_cluster.trigger = cluster_type
+                local_peer_cluster.orchestrators = orchestrators
+
+                # we add the hash of the rel_data to only emit a change event
+                # if the data has actually changed
+                if remote_peer_cluster:
+                    local_peer_cluster.apply_rel_data(remote_peer_cluster)
+                logger.debug(
+                    f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
+                )
+
+                if self.state.s3_relation and self.state.application.s3:
+                    local_peer_cluster.s3 = self.state.application.marshal_s3_secrets()
+                if self.state.azure_relation and self.state.application.azure:
+                    local_peer_cluster.azure = self.state.application.marshal_azure_secrets()
+                if self.state.gcs_relation and self.state.application.gcs:
+                    local_peer_cluster.gcs = self.state.application.marshal_gcs_secrets()
+
+                # there is no error to broadcast - we clear any previously broadcasted error
+                if not rel_err_data:
+                    logger.debug(
+                        f"No rel error data to set for {local_peer_cluster.relation.app.name}. Deleting any existing error data."
+                    )
+                    del local_peer_cluster.error_data
+                else:
+                    logger.debug(
+                        f"Setting rel error data for {local_peer_cluster.relation.app.name} with blocked message: {rel_err_data.blocked_message}"
+                    )
+                    local_peer_cluster.error_data = rel_err_data
+
+                # if no planned units, delete relation data as it won't get updated
+                if not has_units:
+                    del local_peer_cluster.error_data
         return not should_wait
 
     def build_peer_cluster_rel_data(self) -> PeerClusterAppModel | None:
@@ -201,7 +209,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 self.state.unit_name: Node(
                     name=self.state.unit_name,
                     roles=computed_roles,
-                    ip=self.state.host_ip,
+                    ip=self.state.node_host,
                     app=deployment_desc.app,
                     unit_number=self.state.server.unit_id,
                 )
@@ -304,11 +312,6 @@ class PeerClusterOrchestratorManager(BaseManager):
                 )
             )
         elif not self.state.is_tls_full_configured_in_cluster:
-            # During CA rotation tls_configured is transiently cleared on each unit.
-            # Skip writing error-data entirely to avoid blocking sub-clusters; they will
-            # retry on the next peer-changed event once all units restore tls_configured.
-            if not self.state.ca_rotation_complete_in_cluster:
-                return None
             blocked_msg = (
                 PeerClusterErrorDataStatuses.TLS_NOT_FULLY_CONFIGURED.value.message.format(
                     message_suffix=message_suffix
@@ -471,7 +474,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_p_cluster.relation.id,
             )
             # Update the orchestrators
-            orchestrators = local_p_cluster.orchestrators
+            orchestrators = local_p_cluster.orchestrators or PeerClusterOrchestrators()
             orchestrators.failover_app = candidate_failover_app
             local_p_cluster.orchestrators = orchestrators
 

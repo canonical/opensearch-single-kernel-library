@@ -29,6 +29,7 @@ class _StorageRelDataMixin:
 
     @classmethod
     def from_relation(cls, data: dict[str, str]) -> "Self":
+        """Build the model from raw relation data, mapping hyphenated keys to field names."""
         normalized = {k.replace("-", "_"): v for k, v in data.items()}
         return cls.model_validate(normalized)
 
@@ -93,7 +94,7 @@ class AzureRelData(_StorageRelDataMixin, BaseModel):
     connection_protocol: str | None = Field(alias="connection-protocol", default=None)
 
     @model_validator(mode="after")
-    def validate_core_fields(self):  # noqa: N805
+    def validate_core_fields(self):
         """Validate the core fields of the azure relation data."""
         if not self.storage_account or not self.secret_key:
             raise ValueError("Missing fields: storage_account, secret_key")
@@ -138,10 +139,6 @@ class S3RelData(_StorageRelDataMixin, BaseModel):
             raise ValueError("Missing field: bucket")
         if not self.region:
             raise ValueError("Missing field: region")
-        if not self.access_key:
-            raise ValueError("Missing field: access_key")
-        if not self.secret_key:
-            raise ValueError("Missing field: secret_key")
 
         # remove any duplicate, prefix or trailing "/" characters
         if path := self.path:
@@ -152,7 +149,8 @@ class S3RelData(_StorageRelDataMixin, BaseModel):
 
     @field_validator("tls_ca_chain", mode="before", check_fields=False)
     @classmethod
-    def _tls_chain(cls, v):  # noqa: N805
+    def _tls_chain(cls, v):
+        """Normalize the CA chain (bytes, list of certs, or dict) into a single PEM string."""
         if v is None:
             return None
         if isinstance(v, (bytes, bytearray)):
@@ -174,16 +172,6 @@ class S3RelData(_StorageRelDataMixin, BaseModel):
         if isinstance(value, str):
             return value.lower() == "path"
         return bool(value)
-
-    @staticmethod
-    def get_endpoint_protocol(endpoint: str) -> str:
-        """Returns the protocol based on the endpoint."""
-        if not endpoint:
-            return "https"
-
-        if endpoint.startswith("http://"):
-            return "http"
-        return "https"
 
 
 class ObjectStorageConfig(Model):

@@ -180,6 +180,9 @@ class V1ApplicationCharm(CharmBase):
             raise OpenSearchHttpError("No connection data")
 
         response = responses[0]
+        if not response.username or not response.password or not response.endpoints:
+            raise OpenSearchHttpError("No connection data")
+
         host, port = response.endpoints.split(",")[0].split(":")
 
         return self.request(

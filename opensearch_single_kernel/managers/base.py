@@ -39,7 +39,7 @@ class BaseManager(ManagerStatusProtocol):
             self.workload,
             self.state.node_host,
             OPENSEARCH_HTTP_PORT,
-            self.state.application.admin_password,
+            (self.state.application.admin_password or "").strip() or None,
         )
 
     @property
@@ -110,11 +110,10 @@ class BaseManager(ManagerStatusProtocol):
             if "nodes" in response:
                 for obj in response["nodes"].values():
                     # For k8s we need to use the host instead of IP
-                    host = obj["ip"] if self.state.substrate == Substrates.VM else obj["host"]
                     node = Node(
                         name=obj["name"],
                         roles=obj["roles"],
-                        ip=host,
+                        ip=obj["ip"] if self.state.substrate == Substrates.VM else obj["host"],
                         app=App(id=obj["attributes"]["app_id"]),
                         unit_number=int(obj["name"].split(".")[0].split("-")[-1]),
                         temperature=obj.get("attributes", {}).get("temp"),

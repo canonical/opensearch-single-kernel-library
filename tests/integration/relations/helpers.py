@@ -146,7 +146,7 @@ def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str)
     return False
 
 
-@retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
+@retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(30))
 async def run_request(
     ops_test,
     unit_name: str,

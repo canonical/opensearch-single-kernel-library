@@ -10,6 +10,7 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
+from opensearch_single_kernel.common.statuses import GeneralStatuses, HealthStatuses
 from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
 from tests.integration.conftest import (
     CONFIG_OPTS,
@@ -53,6 +54,14 @@ ALL_APPS = [
 ]
 
 NUM_UNITS = 3
+
+# Once scaled down to a single unit, pre-existing indices (created with the default
+# number_of_replicas: 1) can never get their replica shard assigned, so the app legitimately
+# stays blocked/yellow instead of active - that's not a failure to wait out.
+OPENSEARCH_SCALE_DOWN_STATUSES = [
+    GeneralStatuses.ACTIVE_IDLE.value,
+    HealthStatuses.CLUSTER_HEALTH_YELLOW.value,
+]
 
 FIRST_RELATION_NAME = "first-index"
 SECOND_RELATION_NAME = "second-index"
@@ -418,6 +427,8 @@ async def test_multiple_relations(
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME],
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         wait_for_exact_units={OPENSEARCH_APP_NAME: expected_opensearch_units},
         idle_period=70,
     )
@@ -449,6 +460,8 @@ async def test_multiple_relations(
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [name],
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         wait_for_exact_units=units,
         idle_period=70,
         timeout=2000,
@@ -488,6 +501,8 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_na
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [name],
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         idle_period=70,
     )
 
@@ -538,6 +553,8 @@ async def test_admin_relation(ops_test: OpsTest, app_name, substrate):
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [secondary_name],
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         idle_period=70,
     )
 
@@ -700,6 +717,8 @@ async def test_relation_broken(ops_test: OpsTest):
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         idle_period=70,
     )
 
@@ -743,6 +762,8 @@ async def test_relation_broken(ops_test: OpsTest):
                 SECONDARY_CLIENT_APP_NAME,
                 V1_SECONDARY_CLIENT_APP_NAME,
             ],
+            apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+            units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
             idle_period=70,
         ),
     )
@@ -786,6 +807,8 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str
     await wait_until(
         ops_test,
         apps=apps_to_wait,
+        apps_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
+        units_statuses={OPENSEARCH_APP_NAME: OPENSEARCH_SCALE_DOWN_STATUSES},
         idle_period=70,
     )
 

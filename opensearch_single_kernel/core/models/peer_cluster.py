@@ -7,12 +7,11 @@
 
 import logging
 import re
-from typing import Iterator, Literal, Optional
+from typing import Literal, Optional
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from pydantic import (
     Field,
-    RootModel,
     field_serializer,
     field_validator,
     model_serializer,
@@ -30,6 +29,7 @@ from opensearch_single_kernel.core.models.base import (
     PluginsSecretStr,
     UserSecretStr,
     _sort_nested_dicts,
+    stripped_or_none,
 )
 from opensearch_single_kernel.core.models.storage import (
     AzureRelData,
@@ -45,40 +45,35 @@ logger = logging.getLogger(__name__)
 
 
 class PeerClusterRelErrorData(Model):
-    """Model class for the PCluster relation data."""
+    """Error state an orchestrator broadcasts over a peer-cluster relation."""
 
     cluster_name: str | None
+    # Whether the receiving side should break the relation (unrecoverable mismatch).
     should_sever_relation: bool
+    # Whether the receiving side should keep waiting (transient condition).
     should_wait: bool
+    # Human-readable message describing why the relation is blocked/waiting.
     blocked_message: str
     deployment_desc: DeploymentDescription | None
 
     def get_status(self) -> StatusObject | None:
-        """Get the status of the error data."""
-        # We need to find the status based on the blocked_message
-        # and the should_wait which means its a waiting status
-        for status in PeerClusterErrorDataStatuses:
-            escaped_message = re.escape(status.value.message)
-
-            # Substitute the escaped curly brace blocks with non-greedy wildcard
-            # Note the triple backslashes: \\\{ matches the literal string "\{"
-            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
-
-            if re.match(regex_pattern, self.blocked_message):
-                # set message to the original message with placeholders
-                new_status = status.value.model_copy(update={"message": self.blocked_message})
-                return new_status
-        return None
+        """Get the status matching this error's blocked_message."""
+        return self.get_status_from_message(self.blocked_message)
 
     @staticmethod
     def get_status_from_message(message: str) -> StatusObject | None:
-        """Get the status of the error data based on the message."""
+        """Find the known PeerClusterErrorDataStatuses entry matching `message`.
+
+        Status templates contain "{...}" placeholders for dynamic parts; each template
+        is turned into a regex (placeholders become non-greedy wildcards) and matched
+        against the concrete message. The returned status carries the concrete message.
+        """
         for status in PeerClusterErrorDataStatuses:
             escaped_message = re.escape(status.value.message)
+            # Replace the (escaped) "{...}" placeholder blocks with non-greedy wildcards.
             regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
             if re.match(regex_pattern, message):
-                new_status = status.value.model_copy(update={"message": message})
-                return new_status
+                return status.value.model_copy(update={"message": message})
         return None
 
 
@@ -130,24 +125,15 @@ class PeerClusterApp(Model):
         return sorted(set(v))
 
 
-class PeerClusterFleetApps(RootModel[dict[str, PeerClusterApp]]):
-    """Model class for all applications in a large deployment as a dict."""
-
-    def __iter__(self) -> Iterator[str]:
-        """Implements the iter magic method."""
-        return iter(self.root)
-
-    def __getitem__(self, item: str) -> PeerClusterApp:
-        """Implements the getitem magic method."""
-        return self.root[item]
-
-
 class PeerClusterServerModel(PersistentModel, PeerModel):
     """Pydantic model for peer cluster unit-level databag."""
 
+    # Mirror of the unit's CA-rotation flags from the opensearch-peers databag, published
+    # on the peer-cluster relation so other fleet apps can track rotation progress.
     tls_ca_renewing: bool = Field(default=False)
     tls_ca_renewed: bool = Field(default=False)
     tls_configured: bool = Field(default=False)
+    # Hash of the last snapshots (backup) credentials this unit persisted to its keystore.
     snapshots_credentials_saved: str = Field(default="")
 
     @property
@@ -165,17 +151,29 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     """
 
     # Orchestration fields
+    # Whether the requirer app offers itself as a failover-orchestrator candidate.
     is_candidate_failover_orchestrator: bool = Field(default=False)
+    # Which orchestrator role ("main"/"failover") this relation was established for.
     trigger: str = Field(default="")
+    # Whether the requirer has acknowledged/registered the main orchestrator.
     main_orchestrator_registered: Optional[bool] = Field(default=None)
+    # All apps in the fleet as known by the orchestrator, keyed by app id.
     cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
-    orchestrators: Optional[PeerClusterOrchestrators] = Field(
-        default_factory=PeerClusterOrchestrators
-    )
+    # The currently elected main/failover orchestrator pair. None means this relation has
+    # never had orchestrator data written to it; once written, callers overwrite it wholesale
+    # (see peer_cluster_orchestrator.py), so it stays populated (though possibly with both
+    # main_app/failover_app unset) for the life of the relation.
+    orchestrators: Optional[PeerClusterOrchestrators] = Field(default=None)
+    # Object-storage (backup) connection data propagated by the orchestrator so
+    # non-orchestrator apps can reach the shared backup storage.
     s3: Optional[S3RelData] = Field(default=None)
     azure: Optional[AzureRelData] = Field(default=None)
     gcs: Optional[GcsRelData] = Field(default=None)
+    # Hash of the last broadcast payload; lets the orchestrator skip rewriting
+    # unchanged relation data.
     rel_data_hash: str = Field(default="")
+    # Set instead of the regular payload when the orchestrator cannot serve this
+    # relation (misconfiguration, pending bootstrap, ...).
     error_data: Optional[PeerClusterRelErrorData] = Field(default=None)
     security_index_initialised: bool = Field(default=False)
     first_data_node: str = Field(default="")
@@ -266,15 +264,15 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
             # Plugin secrets
             m.plugin_secrets = source.plugin_secrets
             # Admin TLS secrets
-            m.admin_truststore_password = (source.admin_truststore_password or "").strip() or None
-            m.admin_keystore_password = (source.admin_keystore_password or "").strip() or None
-            m.admin_subject = (source.admin_subject or "").strip() or None
-            m.admin_key = (source.admin_key or "").strip() or None
-            m.admin_key_password = (source.admin_key_password or "").strip() or None
-            m.admin_csr = (source.admin_csr or "").strip() or None
-            m.admin_chain = (source.admin_chain or "").strip() or None
-            m.admin_cert = (source.admin_cert or "").strip() or None
-            m.admin_ca_cert = (source.admin_ca_cert or "").strip() or None
+            m.admin_truststore_password = stripped_or_none(source.admin_truststore_password)
+            m.admin_keystore_password = stripped_or_none(source.admin_keystore_password)
+            m.admin_subject = stripped_or_none(source.admin_subject)
+            m.admin_key = stripped_or_none(source.admin_key)
+            m.admin_key_password = stripped_or_none(source.admin_key_password)
+            m.admin_csr = stripped_or_none(source.admin_csr)
+            m.admin_chain = stripped_or_none(source.admin_chain)
+            m.admin_cert = stripped_or_none(source.admin_cert)
+            m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
 
     def clear_rel_data(self) -> None:
         """Reset all orchestrator-broadcast fields to their defaults."""
@@ -301,6 +299,9 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
             m.admin_chain = None
             m.admin_cert = None
             m.admin_ca_cert = None
+            # emptying the secret fields above deletes the backing group secrets, so
+            # drop the marker to let initialize_empty_secrets() re-create them later
+            m.model_extra["pc_secrets_initialized"] = None
 
     def initialize_empty_secrets(self) -> None:
         """Pre-create peer cluster relation secret groups to prevent log spam.

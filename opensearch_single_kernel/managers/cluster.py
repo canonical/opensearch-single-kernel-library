@@ -623,7 +623,10 @@ class ClusterManager(BaseManager):
         """Get the list of the roles assigned to this node."""
         try:
             return self.opensearch_client.get_roles_by_unit_name(
-                self.state.unit_name, self.state.server.unit_id, self.alt_hosts
+                self.state.unit_name,
+                self.state.server.unit_id,
+                self.alt_hosts,
+                self.state.substrate,
             )
         except OpenSearchHttpError:
             return self.yaml_setter.load("opensearch.yml")["node.roles"]
@@ -843,8 +846,6 @@ class ClusterManager(BaseManager):
             is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
         logger.debug(f"get_cluster_first_data_node : data read: {remote_peer_cluster}")
-        # main_rel_id can point to a relation that has since been removed (e.g. the
-        # main orchestrator departed), in which case there's no data to read.
         if not remote_peer_cluster or not remote_peer_cluster.deployment_desc:
             return None
         return remote_peer_cluster.first_data_node

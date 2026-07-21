@@ -1554,7 +1554,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
 
     harness.charm.tls_events._on_certificate_available(event_mock)
 
-    # NOTE: Currently store_new_tls_resources() is invoked twice for 'app-admin' cert.
+    # store_new_tls_resources() is invoked twice for 'app-admin' cert (4 run_cmd calls).
     assert run_cmd.call_count == 4
 
     # Exporting new certs
@@ -1568,6 +1568,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         in run_cmd.call_args_list[1].args[0]
     )
     assert str(harness.charm.workload.paths.certs) in str(tempfile.call_args_list[0][1]["dir"])
+
     assert harness.charm.state.server.tls_ca_renewed
     # Note that the old flag is left intact
     assert harness.charm.state.server.tls_ca_renewing

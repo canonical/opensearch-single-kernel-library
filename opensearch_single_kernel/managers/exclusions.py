@@ -278,7 +278,7 @@ class NodesExclusionsManager(BaseManager):
         node = None
         try:
             node = self.opensearch_client.get_current_node(
-                self.state.unit_name, unit_id, self.alt_hosts
+                self.state.unit_name, unit_id, self.alt_hosts, self.state.substrate
             )
             if not node:
                 node = self.state.node_config

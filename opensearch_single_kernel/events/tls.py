@@ -184,9 +184,11 @@ class TLSEventsHandler(Object):
         if secret_match is None:
             logger.debug("Unknown certificate available.")
             return
-
         scope, cert_type = secret_match
-        logger.debug("%s.%s TLS certificate available.", scope.val, cert_type.val)
+
+        # variables for better readability
+        deployment_desc = self.charm.state.application.deployment_desc
+        is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
         logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
 
@@ -214,14 +216,7 @@ class TLSEventsHandler(Object):
         if current_stored_ca != event.ca:
             if not self.charm.tls_manager.store_new_ca(
                 cert_type,
-                (
-                    self.charm.unit.is_leader()
-                    and (
-                        self.charm.state.application.deployment_desc
-                        and self.charm.state.application.deployment_desc.typ
-                        == DeploymentType.MAIN_ORCHESTRATOR
-                    )
-                ),
+                create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
             ):
                 logger.debug("Could not store new CA certificate.")
                 event.defer()
@@ -333,7 +328,6 @@ class TLSEventsHandler(Object):
         scope, cert_type = secret_match
 
         logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
-
         old_csr = self.charm.tls_manager.get_secret_by_cert(cert_type, "csr").encode("utf-8")
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
             cert_type=cert_type, tls_file=False

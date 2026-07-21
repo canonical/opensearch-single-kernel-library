@@ -219,11 +219,6 @@ class ClusterState(Object):
         """Get peer upgrade relation."""
         return self.model.get_relation(UPGRADE_RELATION)
 
-    def peer_cluster_orchestrator_relation_exists(self, relation_id: int) -> bool:
-        """Check if the relation with id exists"""
-        relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
-        return bool(relation)
-
     def _bind_model_or_default(
         self,
         interface,
@@ -235,7 +230,7 @@ class ClusterState(Object):
         """Bind a model to its relation databag, tolerating a not-yet-created relation.
 
         Before the relation exists, return an unbound default model: reads yield the
-        fields' defaults and writes are dropped, matching the old wrapper behavior.
+        fields' defaults and writes are dropped (there is no databag to persist to).
         """
         if not relation:
             return model_cls()
@@ -296,6 +291,43 @@ class ClusterState(Object):
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 
+    @staticmethod
+    def _peer_cluster_relation_name(is_provider: bool) -> str:
+        """Relation name for the given side: provider = orchestrator, requirer = consumer."""
+        return PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
+
+    def _bind_peer_cluster_app_model(
+        self, relation: Relation, is_provider: bool, remote: bool
+    ) -> PeerClusterAppModel | None:
+        """Bind a PeerClusterAppModel to one peer-cluster relation app databag.
+
+        Returns None when the relation's backing Juju secrets are gone already
+        (e.g. the relation is departing).
+        """
+        interface = (
+            self.peer_cluster_orchestrator_repository
+            if is_provider
+            else self.peer_cluster_data_repository
+        )
+        # The requirer side never manages secrets for this relation -- those are only
+        # created/rotated by the provider (orchestrator) side. See PeerClusterAppModel.
+        write_context = None if is_provider else {"skip_secrets": True}
+        try:
+            return bind_model(
+                interface,
+                relation.id,
+                PeerClusterAppModel,
+                component=relation.app if remote else self.model.app,
+                write_context=write_context,
+                read_only=remote,
+            )
+        except SecretNotFoundError:
+            logger.warning(
+                "Secret not found when reading relation %s model — relation may be departing.",
+                relation.id,
+            )
+            return None
+
     def peer_cluster_by_relation_id(
         self, is_provider: bool, relation_id: int, remote: bool = False
     ) -> PeerClusterAppModel | None:
@@ -307,74 +339,21 @@ class ClusterState(Object):
             remote: whether to return the remote databag (related to current)
               or the local one (current cluster as part of the relation).
         """
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
-        interface = (
-            self.peer_cluster_orchestrator_repository
-            if is_provider
-            else self.peer_cluster_data_repository
-        )
-
+        relation_name = self._peer_cluster_relation_name(is_provider)
         if not (relation := self.model.get_relation(relation_name, relation_id)):
             return None
-
-        component = relation.app if remote else self.model.app
-        # The requirer side never manages secrets for this relation -- those are only
-        # created/rotated by the provider (orchestrator) side. See PeerClusterAppModel.
-        write_context = None if is_provider else {"skip_secrets": True}
-        try:
-            return bind_model(
-                interface,
-                relation_id,
-                PeerClusterAppModel,
-                component=component,
-                write_context=write_context,
-            )
-        except SecretNotFoundError:
-            logger.warning(
-                "Secret not found when reading relation %s model — relation may be departing.",
-                relation_id,
-            )
-            return None
+        return self._bind_peer_cluster_app_model(relation, is_provider, remote)
 
     def peer_clusters(
         self, is_provider: bool, must_have_units: bool = True, remote: bool = False
     ) -> list[PeerClusterAppModel]:
         """Return the list of peer clusters for each relations."""
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
-        interface = (
-            self.peer_cluster_orchestrator_repository
-            if is_provider
-            else self.peer_cluster_data_repository
-        )
-        write_context = None if is_provider else {"skip_secrets": True}
-
-        def get_component(relation):
-            """Get the component for the relation based on the remote flag."""
-            return relation.app if remote else self.model.app
-
         clusters = []
-        for rel in self.model.relations[relation_name]:
+        for rel in self.model.relations[self._peer_cluster_relation_name(is_provider)]:
             if must_have_units and not rel.units:
                 continue
-            try:
-                clusters.append(
-                    bind_model(
-                        interface,
-                        rel.id,
-                        PeerClusterAppModel,
-                        component=get_component(rel),
-                        write_context=write_context,
-                    )
-                )
-            except SecretNotFoundError:
-                logger.warning(
-                    "Secret not found when reading relation %s model — relation may be departing.",
-                    rel.id,
-                )
+            if model := self._bind_peer_cluster_app_model(rel, is_provider, remote):
+                clusters.append(model)
         return clusters
 
     def _peer_clusters_servers(
@@ -387,14 +366,7 @@ class ClusterState(Object):
             remote: whether to return the remote units databags related to current application
                 or the local one which returns only the current unit.
         """
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
-
-        def get_units(relation):
-            """Get the units for the relation based on the remote flag."""
-            return relation.units if remote else [self.model.unit]
-
+        relation_name = self._peer_cluster_relation_name(is_provider)
         return [
             bind_model(
                 RepositoryInterface(
@@ -403,9 +375,10 @@ class ClusterState(Object):
                 rel.id,
                 PeerClusterServerModel,
                 component=unit,
+                read_only=remote,
             )
             for rel in self.model.relations[relation_name]
-            for unit in get_units(rel)
+            for unit in (rel.units if remote else [self.model.unit])
         ]
 
     def local_peer_cluster_server_by_relation_id(
@@ -413,10 +386,8 @@ class ClusterState(Object):
         is_provider: bool,
         relation_id: int,
     ) -> PeerClusterServerModel | None:
-        """Return the peer cluster server for the given relation id."""
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
+        """Return this unit's peer cluster server model for the given relation id."""
+        relation_name = self._peer_cluster_relation_name(is_provider)
         if relation := self.model.get_relation(relation_name, relation_id):
             unit = self.model.unit
             return bind_model(
@@ -439,12 +410,9 @@ class ClusterState(Object):
         self, is_provider: bool, must_have_units: bool = True
     ) -> list[int]:
         """Return the list of related peer cluster relation ids."""
-        relation_name = (
-            PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
-        )
         return [
             rel.id
-            for rel in self.model.relations[relation_name]
+            for rel in self.model.relations[self._peer_cluster_relation_name(is_provider)]
             if not must_have_units or len(rel.units) > 0
         ]
 
@@ -543,7 +511,7 @@ class ClusterState(Object):
             self.lock_unit_interface,
             self.lock_relation.id,
             LockServerStateModel,
-            self.get_unit(lock_unit_name(granted_unit_name)),
+            self.model.get_unit(lock_unit_name(granted_unit_name)),
         )
 
     @property
@@ -577,12 +545,7 @@ class ClusterState(Object):
     @property
     def node_config(self) -> Node | None:
         """Return the current node from 'nodes_config' in application state."""
-        return (
-            new_node_conf
-            if (nodes_config := self.application.nodes_config)
-            and (new_node_conf := nodes_config.get(self.unit_name))
-            else None
-        )
+        return (self.application.nodes_config or {}).get(self.unit_name)
 
     @property
     def node_host(self) -> str:
@@ -642,10 +605,6 @@ class ClusterState(Object):
             if private_address:
                 return str(private_address)
 
-    def get_unit(self, name: str):
-        """Get unit by name"""
-        return self.model.get_unit(name)
-
     @property
     def is_tls_full_configured_in_cluster(self) -> bool:
         """Check if TLS is configured in all the units of the current cluster."""
@@ -677,8 +636,12 @@ class ClusterState(Object):
 
     @property
     def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
-        """Check whether the CA rotation completed in all units."""
-        # Use related_peer_cluster_servers since we are reading remote data.
+        """Check whether the CA and certificates rotation completed in all units.
+
+        A unit counts as complete when its TLS is configured and it is either not
+        rotating its CA at all, or has finished renewing it.
+        """
+        # Includes the remote peer-cluster units since the whole fleet must converge.
         all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
         logger.debug(
             "CA and certs rotation state Units in fleet: %s | \
@@ -689,23 +652,12 @@ class ClusterState(Object):
             [server.tls_configured for server in all_units_in_fleet],
         )
 
-        logger.debug(
-            "CA and certs rotation complete in cluster: %s",
-            all(
-                [
-                    server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
-                    for server in all_units_in_fleet
-                ]
-            ),
+        complete = all(
+            server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
+            for server in all_units_in_fleet
         )
-        # if the current unit is not in the relation.units list
-        # or if tls is not configured or in the middle of rotation, return False
-        return all(
-            [
-                server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
-                for server in all_units_in_fleet
-            ]
-        )
+        logger.debug("CA and certs rotation complete in cluster: %s", complete)
+        return complete
 
     def reset_ca_rotation_state(self) -> None:
         """Handle internal flags during CA rotation routine."""
@@ -728,11 +680,6 @@ class ClusterState(Object):
         self.server.tls_ca_renewed = True
         for peer_cluster_server in peer_cluster_servers:
             peer_cluster_server.tls_ca_renewed = True
-
-    @property
-    def network_ingress_address(self) -> str:
-        """Get the public ip address of the unit."""
-        return str(self.model.get_binding(PEER_RELATION).network.ingress_address)
 
     @property
     def peer_unit_hosts(self) -> set[str]:
@@ -1012,65 +959,89 @@ class ClusterState(Object):
         else:
             return is_main or is_failover
 
+    def is_peer_cluster_consumer(self, of: Literal["main", "failover"] | None = None) -> bool:
+        """Check if the current app is a consumer of the peer-cluster-relation."""
+        if not (deployment_desc := self.application.deployment_desc):
+            return False
+
+        # the current app is not related to any orchestrator app
+        if not self.peer_cluster_relations:
+            return False
+
+        # check if the current app is elected orchestrator
+        if not (orchestrators := self.application.orchestrators):
+            # not populated yet
+            return False
+
+        if orchestrators.main_app and orchestrators.main_app.id == deployment_desc.app.id:
+            # there is a wrong relation happening - where current is the main orchestrator
+            # yet related to another "orchestrator"
+            return False
+
+        of_main = (
+            orchestrators.main_app
+            and self.peer_cluster_by_relation_id(
+                relation_id=orchestrators.main_rel_id,
+                is_provider=False,
+                remote=True,
+            )
+            is not None
+        )
+        of_failover = (
+            orchestrators.failover_app
+            and self.peer_cluster_by_relation_id(
+                is_provider=False, relation_id=orchestrators.failover_rel_id, remote=True
+            )
+            is not None
+        )
+        if of == "main":
+            return of_main
+        elif of == "failover":
+            return of_failover
+        else:
+            return of_main or of_failover
+
     @property
     def main_orchestrator_app(self) -> PeerClusterAppModel | None:
-        """Returns main orchestrator application model"""
+        """Return the main orchestrator's remote app model, or None if not related to one."""
         orchestrators = self.application.orchestrators
         if not orchestrators or orchestrators.main_rel_id == -1:
             return None
-        peer_cluster = self.peer_cluster_by_relation_id(
+        return self.peer_cluster_by_relation_id(
             is_provider=False,
             relation_id=orchestrators.main_rel_id,
             remote=True,
         )
-        return peer_cluster if peer_cluster else None
-
-    def is_peer_cluster_consumer(self, of: str | None = None) -> bool:
-        """Return True if this app is a peer-cluster consumer (requirer side).
-
-        of="main" — True only when connected to the main orchestrator.
-        of=None   — True when connected to any orchestrator.
-        """
-        if of == "main":
-            return self.main_orchestrator_app is not None
-        return bool(self.peer_clusters(is_provider=False, remote=False))
 
     def get_rel_data_from_main_orchestrator(self) -> PeerClusterAppModel | None:
         """Return the PeerClusterAppModel published by the main orchestrator, or None."""
-        app_model = self.main_orchestrator_app
-        return app_model if app_model else None
+        return self.main_orchestrator_app
 
     @property
-    def storage_type(self) -> ObjectStorageType | None:  # noqa: C901
+    def storage_type(self) -> ObjectStorageType | None:
         """Get the active object storage type from relations/peer-cluster.
 
-        Returns:
-            Optional[ObjectStorageType]: the active object storage type.
+        The main orchestrator reads its own storage relations (at most one may be
+        active); every other app reads the storage data the main orchestrator
+        broadcast over the peer-cluster relation.
         """
         if not (deployment_desc := self.application.deployment_desc):
             logger.debug("Deployment description missing; storage type unknown.")
             return None
 
-        if deployment_desc.typ in {DeploymentType.MAIN_ORCHESTRATOR}:
+        if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             active = [
-                r
-                for r in [
-                    self.s3_relation,
-                    self.azure_relation,
-                    self.gcs_relation,
+                storage_type
+                for storage_type, relation in [
+                    (ObjectStorageType.S3, self.s3_relation),
+                    (ObjectStorageType.AZURE, self.azure_relation),
+                    (ObjectStorageType.GCS, self.gcs_relation),
                 ]
-                if r
+                if relation
             ]
-            if len(active) == 0:
+            if not active:
                 return None
-            if len(active) > 1:
-                return ObjectStorageType.CONFLICT
-            if self.s3_relation:
-                return ObjectStorageType.S3
-            if self.azure_relation:
-                return ObjectStorageType.AZURE
-            if self.gcs_relation:
-                return ObjectStorageType.GCS
+            return active[0] if len(active) == 1 else ObjectStorageType.CONFLICT
 
         # non-main orchestrator
         peer_data = self.get_rel_data_from_main_orchestrator()
@@ -1097,6 +1068,7 @@ class ClusterState(Object):
                 if not self.gcs_relation:
                     return {}
                 info = self.gcs_requires.get_storage_connection_info(self.gcs_relation) or {}
+                # gcs-integrator publishes a Juju secret URI; resolve it to the key content.
                 raw = info.get("secret-key", "")
                 if raw and raw.startswith("secret:"):
                     try:
@@ -1109,7 +1081,3 @@ class ClusterState(Object):
                 raise OpenSearchInvalidStorageTypeError(
                     "Unsupported object storage type: %s" % object_storage_type
                 )
-
-    def is_highest_ordinal_unit(self) -> bool:
-        """Check if the current unit is the highest ordinal unit in the application."""
-        return self.server_upgrade.component.name == self.sorted_upgrades_units[0].component.name

@@ -69,7 +69,6 @@ class PeerClusterManager(BaseManager):
                 else GENERATED_ROLES
             ),
         )
-
         local_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=is_provider, relation_id=rel_id, remote=False
         )
@@ -144,14 +143,15 @@ class PeerClusterManager(BaseManager):
         trigger_app = remote_orchestrators.get(f"{trigger}_app") if trigger else None
 
         for loop_cluster in self.state.peer_clusters(is_provider=False, remote=True):
-            if pc_orchestrators := loop_cluster.orchestrators:
-                remote_orchestrators.update(
-                    {
-                        k: v
-                        for k, v in pc_orchestrators.to_dict().items()
-                        if v is not None and v != -1
-                    }
-                )
+            if not loop_cluster.orchestrators:
+                continue
+            remote_orchestrators.update(
+                {
+                    k: v
+                    for k, v in loop_cluster.orchestrators.to_dict().items()
+                    if v is not None and v != -1
+                }
+            )
 
         local_orchestrators = self.state.application.orchestrators.to_dict()
 
@@ -351,6 +351,16 @@ class PeerClusterManager(BaseManager):
 
         return list(cm_nodes.values())
 
+    def is_any_cm_up(self) -> bool:
+        """Check if there is at least one cluster manager node up."""
+        cm_nodes = self.cm_nodes(self.state.application.orchestrators)
+        for node in cm_nodes:
+            # 503 security index not initialised is a valid response,
+            # we just need to check if the node is up
+            if self.opensearch_client.is_node_up(node.ip, any_resp_code=True):
+                return True
+        return False
+
     def reconcile_is_candidate_failover_orchestrator(self, relation_id: int) -> None:
         """Reconcile the is_candidate_failover_orchestrator key in relation data"""
         deployment_desc = self.state.application.deployment_desc
@@ -451,7 +461,6 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
-            self.cleanup_error_in_relation_data()
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 # check if there is an error reported directly by the provider
                 if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):

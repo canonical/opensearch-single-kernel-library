@@ -37,7 +37,6 @@ from opensearch_single_kernel.core.models.peer import (
 from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
-    PeerClusterFleetApps,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
     PeerClusterServerModel,
@@ -89,7 +88,6 @@ __all__ = [
     "PeerClusterApp",
     "PeerClusterAppModel",
     "PeerClusterConfig",
-    "PeerClusterFleetApps",
     "PeerClusterOrchestrators",
     "PeerClusterRelErrorData",
     "PeerClusterServerModel",

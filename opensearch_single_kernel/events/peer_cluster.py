@@ -185,6 +185,7 @@ class PeerClusterEventsHandler(Object):
         ):
             # TODO migrate to _on_start hook instead
             self.handle_joining_data_node()
+
         if not remote_peer_cluster or not remote_peer_cluster.is_candidate_failover_orchestrator:
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
@@ -319,10 +320,7 @@ class PeerClusterEventsHandler(Object):
         remote_peer_cluster = self.charm.state.peer_cluster_by_relation_id(
             relation_id=event.relation.id, is_provider=False, remote=True
         )
-        if not remote_peer_cluster or (
-            not remote_peer_cluster.orchestrators.main_app
-            and not remote_peer_cluster.orchestrators.failover_app
-        ):
+        if not remote_peer_cluster or not remote_peer_cluster.orchestrators:
             logger.warning("No orchestrators found in remote peer cluster data.")
             return
 
@@ -599,8 +597,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         deployment_desc = self.charm.state.application.deployment_desc
-        orchestrators = self.charm.state.application.orchestrators
-        if not orchestrators.main_app and not orchestrators.failover_app:
+        if not (orchestrators := self.charm.state.application.orchestrators):
             return
 
         if orchestrators.failover_app and orchestrators.failover_app.id == deployment_desc.app.id:

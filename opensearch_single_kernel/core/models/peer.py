@@ -29,6 +29,7 @@ from opensearch_single_kernel.core.models.base import (
     TransportSecretStr,
     UserSecretStr,
     _sort_nested_dicts,
+    stripped_or_none,
 )
 from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
@@ -57,13 +58,12 @@ class OpenSearchServerPeerModel(PersistentModel, PeerModel):
 
     # Performance profile ("testing"/"production") applied to this unit's JVM/OpenSearch config.
     # None means "not yet set" -- callers fall back to the profile configured via charm config.
-    # Field renamed internally to `profile_type`; alias pinned to the original databag key
-    # "profile" so existing units aren't migrated, and `profile` below is a property exposing
-    # the resolved OpenSearchProfile instance (matching the pre-refactor call-site API).
+    # Stored under the databag key "profile"; the `profile` property below exposes the value
+    # as a resolved OpenSearchProfile instance.
     profile_type: Optional[PerformanceType] = Field(default=None, alias="profile")
     # Whether this unit was one of the initial seed nodes used to bootstrap the cluster.
-    # Alias pinned to the v0 databag key (no hyphenation) so upgraded units don't leave behind
-    # a stale duplicate under the old key.
+    # Alias pinned to the underscored key deployed databags use (the PeerModel alias
+    # generator would otherwise hyphenate it).
     bootstrap_contributor: bool = Field(default=False, alias="bootstrap_contributor")
     # Whether this unit has been removed from the cluster_manager-eligible role (e.g. scale-down).
     cluster_manager_removed: bool = Field(default=False, alias="cluster_manager_removed")
@@ -241,8 +241,8 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
     """Peer model mapping to the OpenSearch application state."""
 
     # Whether the internal "admin" user has been created in the security index.
-    # Alias pinned to the v0 databag key (no hyphenation) so upgraded units don't leave behind
-    # a stale duplicate under the old key.
+    # Aliases here are pinned to the underscored keys deployed databags use (the PeerModel
+    # alias generator would otherwise hyphenate them).
     admin_user_initialized: bool = Field(default=False, alias="admin_user_initialized")
     # Number of units that took part in the initial cluster bootstrap (seed nodes).
     bootstrap_contributors_count: int = Field(default=0, alias="bootstrap_contributors_count")
@@ -481,7 +481,7 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
         """Get the password for a given user from the client relation users dict."""
         user_m = self.sibling_model(OpenSearchAppPeerUserSecretsModel)
         if user == ADMIN_USER:
-            return ((user_m.admin_password if user_m else "") or "").strip() or None
+            return stripped_or_none(user_m.admin_password if user_m else None)
         elif user == KIBANA_SERVER_USER:
             return user_m.kibana_server_password if user_m else None
         elif user == COS_USER:
@@ -523,25 +523,25 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
             ),
             "deployment_description": self.deployment_description,
         }
-        copied_data["admin_password"] = (user_m.admin_password or "").strip() or None
+        copied_data["admin_password"] = stripped_or_none(user_m.admin_password)
         copied_data["admin_hashed_password"] = user_m.admin_hashed_password
         copied_data["kibana_server_password"] = user_m.kibana_server_password
         copied_data["kibana_server_hashed_password"] = user_m.kibana_server_hashed_password
         copied_data["cos_password"] = user_m.cos_password
         copied_data["cos_hashed_password"] = user_m.cos_hashed_password
-        copied_data["admin_truststore_password"] = (
-            admin_tls_m.admin_truststore_password or ""
-        ).strip() or None
-        copied_data["admin_keystore_password"] = (
-            admin_tls_m.admin_keystore_password or ""
-        ).strip() or None
-        copied_data["admin_subject"] = (admin_tls_m.admin_subject or "").strip() or None
-        copied_data["admin_key"] = (admin_tls_m.admin_key or "").strip() or None
-        copied_data["admin_key_password"] = (admin_tls_m.admin_key_password or "").strip() or None
-        copied_data["admin_csr"] = (admin_tls_m.admin_csr or "").strip() or None
-        copied_data["admin_chain"] = (admin_tls_m.admin_chain or "").strip() or None
-        copied_data["admin_cert"] = (admin_tls_m.admin_cert or "").strip() or None
-        copied_data["admin_ca_cert"] = (admin_tls_m.admin_ca_cert or "").strip() or None
+        copied_data["admin_truststore_password"] = stripped_or_none(
+            admin_tls_m.admin_truststore_password
+        )
+        copied_data["admin_keystore_password"] = stripped_or_none(
+            admin_tls_m.admin_keystore_password
+        )
+        copied_data["admin_subject"] = stripped_or_none(admin_tls_m.admin_subject)
+        copied_data["admin_key"] = stripped_or_none(admin_tls_m.admin_key)
+        copied_data["admin_key_password"] = stripped_or_none(admin_tls_m.admin_key_password)
+        copied_data["admin_csr"] = stripped_or_none(admin_tls_m.admin_csr)
+        copied_data["admin_chain"] = stripped_or_none(admin_tls_m.admin_chain)
+        copied_data["admin_cert"] = stripped_or_none(admin_tls_m.admin_cert)
+        copied_data["admin_ca_cert"] = stripped_or_none(admin_tls_m.admin_ca_cert)
 
         copied_data["security_index_initialised"] = security_index_initialised
         copied_data["first_data_node"] = first_data_node or ""
@@ -565,31 +565,27 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
         user_m = self.sibling_model(OpenSearchAppPeerUserSecretsModel)
         with user_m.update() as u:
             # Passwords
-            u.admin_password = (peer_data.admin_password or "").strip() or None
+            u.admin_password = stripped_or_none(peer_data.admin_password)
             u.admin_hashed_password = peer_data.admin_hashed_password
             u.kibana_server_password = peer_data.kibana_server_password
             u.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
             u.cos_password = peer_data.cos_password
             u.cos_hashed_password = peer_data.cos_hashed_password
-        if (
-            peer_data.admin_password and peer_data.admin_password.strip()
-        ) or peer_data.admin_hashed_password:
+        if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
             self.admin_user_initialized = True
 
         admin_tls_m = self.sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
         with admin_tls_m.update() as a:
             # Admin TLS Secrets
-            a.admin_truststore_password = (
-                peer_data.admin_truststore_password or ""
-            ).strip() or None
-            a.admin_keystore_password = (peer_data.admin_keystore_password or "").strip() or None
-            a.admin_subject = (peer_data.admin_subject or "").strip() or None
-            a.admin_key = (peer_data.admin_key or "").strip() or None
-            a.admin_key_password = (peer_data.admin_key_password or "").strip() or None
-            a.admin_csr = (peer_data.admin_csr or "").strip() or None
-            a.admin_chain = (peer_data.admin_chain or "").strip() or None
-            a.admin_cert = (peer_data.admin_cert or "").strip() or None
-            a.admin_ca_cert = (peer_data.admin_ca_cert or "").strip() or None
+            a.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
+            a.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
+            a.admin_subject = stripped_or_none(peer_data.admin_subject)
+            a.admin_key = stripped_or_none(peer_data.admin_key)
+            a.admin_key_password = stripped_or_none(peer_data.admin_key_password)
+            a.admin_csr = stripped_or_none(peer_data.admin_csr)
+            a.admin_chain = stripped_or_none(peer_data.admin_chain)
+            a.admin_cert = stripped_or_none(peer_data.admin_cert)
+            a.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
 
         if peer_data.plugin_config_info:
             self.plugin_config_info = peer_data.plugin_config_info
@@ -601,22 +597,10 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
         """Return a copy of this model containing only the secret fields."""
         return GcsRelData.model_construct(secret_key=self.gcs.secret_key)
 
-    def unmarshal_gcs_secrets(self, source: GcsRelData) -> None:
-        """Copy secret fields from source into this instance."""
-        current = self.gcs or GcsRelData.model_construct()
-        self.gcs = current.model_copy(update={"secret_key": source.secret_key})
-
     def marshal_azure_secrets(self) -> AzureRelData:
         """Return a copy of this model containing only the secret fields."""
         return AzureRelData.model_construct(
             storage_account=self.azure.storage_account, secret_key=self.azure.secret_key
-        )
-
-    def unmarshal_azure_secrets(self, source: AzureRelData) -> None:
-        """Copy secret fields from source into this instance."""
-        current = self.azure or AzureRelData.model_construct()
-        self.azure = current.model_copy(
-            update={"storage_account": source.storage_account, "secret_key": source.secret_key}
         )
 
     def marshal_s3_secrets(self) -> S3RelData:
@@ -625,17 +609,6 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
             access_key=self.s3.access_key,
             secret_key=self.s3.secret_key,
             tls_ca_chain=self.s3.tls_ca_chain,
-        )
-
-    def unmarshal_s3_secrets(self, source: S3RelData) -> None:
-        """Copy secret fields from source into this instance."""
-        current = self.s3 or S3RelData.model_construct()
-        self.s3 = current.model_copy(
-            update={
-                "access_key": source.access_key,
-                "secret_key": source.secret_key,
-                "tls_ca_chain": source.tls_ca_chain,
-            }
         )
 
 
@@ -653,9 +626,6 @@ class OpenSearchAppPeerUserSecretsModel(PersistentModel, PeerModel):
     kibana_server_hashed_password: UserSecretStr = Field(default="")
     cos_password: UserSecretStr = Field(default="")
     cos_hashed_password: UserSecretStr = Field(default="")
-    # Reserved slot in the "user" secret group for additional relation-user passwords.
-    # Currently unset/unused by any manager or event handler.
-    user_passwords: UserSecretStr = Field(default="")
 
 
 class OpenSearchAppPeerAdminTlsSecretsModel(PersistentModel, PeerModel):
@@ -691,7 +661,7 @@ class OpenSearchAppPeerPluginSecretsModel(PersistentModel, PeerModel):
 
 # Wire up transparent proxying of secret-group fields (see PersistentModel._secret_group_fields):
 # reading/writing e.g. `server.transport_key` or `application.admin_ca_cert` delegates to the
-# dedicated sibling secret model, matching the pre-refactor wrapper API.
+# dedicated sibling secret model, so callers never need to build the secret models themselves.
 OpenSearchServerPeerModel._secret_group_fields = {
     **dict.fromkeys(
         OpenSearchServerPeerTransportSecretsModel.__pydantic_fields__,
