@@ -301,7 +301,6 @@ class ExternalClientsManager(BaseManager):
         if (
             not self.state.server.is_app_leader
             or not (index := relation.data[relation.app].get("index"))
-            or not self.opensearch_client.is_node_up()
             or not (external_client := self.state.external_client_by_relation(relation))
         ):
             return
@@ -316,6 +315,9 @@ class ExternalClientsManager(BaseManager):
             return
 
         try:
+            if not self.opensearch_client.is_node_up():
+                return
+
             if index not in self.opensearch_client.indices():
                 status_list.append(
                     format_status(

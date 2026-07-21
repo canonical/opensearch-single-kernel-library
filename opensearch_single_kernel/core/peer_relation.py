@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any
 
+from ops import ModelError
 from ops.model import Application, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
@@ -595,32 +596,56 @@ class OpenSearchApplication(RelationState):
     @property
     def admin_password(self) -> str | None:
         """Get the admin password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
+        try:
+            return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
+        except ModelError:
+            logger.debug("Admin password not set yet.")
+            return None
 
     @property
     def kibana_server_password(self) -> str | None:
         """Get the kibana server password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
+        try:
+            return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
+        except ModelError:
+            logger.debug("Kibana server password not set yet.")
+            return None
 
     @property
     def cos_password(self) -> str | None:
         """Get the cos user password from the admin secrets."""
-        return self.secrets.get(Scope.APP, password_key(COS_USER))
+        try:
+            return self.secrets.get(Scope.APP, password_key(COS_USER))
+        except ModelError:
+            logger.debug("COS user password not set yet.")
+            return None
 
     @property
     def admin_hashed_password(self) -> str | None:
         """Get the admin hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
+        try:
+            return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
+        except ModelError:
+            logger.debug("Admin hashed password not set yet.")
+            return None
 
     @property
     def kibana_server_hashed_password(self) -> str | None:
         """Get the kibana server hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
+        try:
+            return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
+        except ModelError:
+            logger.debug("Kibana server hashed password not set yet.")
+            return None
 
     @property
     def cos_hashed_password(self) -> str | None:
         """Get the cos user hashed password from the admin secrets."""
-        return self.secrets.get(Scope.APP, hash_key(COS_USER))
+        try:
+            return self.secrets.get(Scope.APP, hash_key(COS_USER))
+        except ModelError:
+            logger.debug("COS user hashed password not set yet.")
+            return None
 
     def get_user_password(self, user: str) -> str | None:
         """Get the password for a given user from the client relation users dict."""
