@@ -304,8 +304,7 @@ class OpenSearchEventsHandler(Object):
                         )
 
         logger.info(
-            "Unit %s is being removed. Starting pre-removal process.",
-            self.charm.unit.name,
+            "Unit %s is being removed. Starting pre-removal process.", self.charm.unit.name
         )
         # if the leader is departing, and this hook fails "leader elected" won't trigger,
         # so we want to re-balance the node roles from here
@@ -969,9 +968,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             logger.warning(e)
             self.charm.state.remove_status_if_present(
-                GeneralStatuses.WAITING_TO_START.value,
-                "unit",
-                self.charm.cluster_manager.name,
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
             )
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
@@ -1060,9 +1057,7 @@ class OpenSearchEventsHandler(Object):
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.started = str(time.time())
         self.charm.state.remove_status_if_present(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            self.charm.cluster_manager.name,
+            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
         )
 
         # Apply OpenSearch upstream recommended settings
@@ -1082,9 +1077,7 @@ class OpenSearchEventsHandler(Object):
 
         # clear waiting to start status
         self.charm.state.remove_status_if_present(
-            GeneralStatuses.SERVICE_START_ERROR.value,
-            "unit",
-            self.charm.cluster_manager.name,
+            GeneralStatuses.SERVICE_START_ERROR.value, "unit", self.charm.cluster_manager.name
         )
         self.charm.state.remove_status_if_present(
             PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
@@ -1498,9 +1491,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.tls_manager.delete_stored_tls_resources()
         if self.charm.state.tls_relation:
             self.charm.state.add_status_if_not_present(
-                TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
-                "unit",
-                self.charm.tls_manager.name,
+                TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value, "unit", self.charm.tls_manager.name
             )
         self.request_new_unit_certificates()
         # since when an IP change happens, "_on_peer_relation_joined" won't be called,
@@ -1516,9 +1507,7 @@ class OpenSearchEventsHandler(Object):
         )
 
     def _handle_change_to_main_orchestrator_if_needed(
-        self,
-        event: ConfigChangedEvent,
-        previous_deployment_desc: DeploymentDescription | None,
+        self, event: ConfigChangedEvent, previous_deployment_desc: DeploymentDescription | None
     ) -> None:
         """Handle when the user changes the roles or init_hold config from True to False."""
         # if the current cluster wasn't already a "main-Orchestrator" and we're now updating

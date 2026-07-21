@@ -215,11 +215,7 @@ class PeerClusterManager(BaseManager):
 
         if rel_error_id == -1:
             rel_error_id = event_rel_id
-
-        return (
-            PeerClusterRelErrorData.from_dict(error) if error else None,
-            rel_error_id,
-        )
+        return (PeerClusterRelErrorData.from_dict(error) if error else None, rel_error_id)
 
     def requirer_errors(  # noqa: C901
         self,
@@ -327,9 +323,7 @@ class PeerClusterManager(BaseManager):
         )
 
         self.state.secrets.put_object(
-            Scope.APP,
-            CertType.APP_ADMIN.val,
-            peer_cluster_rel_data.credentials.admin_tls,
+            Scope.APP, CertType.APP_ADMIN.val, peer_cluster_rel_data.credentials.admin_tls
         )
 
         self.state.application.is_admin_user_initialized = True

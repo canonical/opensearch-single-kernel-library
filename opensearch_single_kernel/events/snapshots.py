@@ -90,8 +90,7 @@ class SnapshotsEventsHandler(Object):
 
         # Custom events
         self.framework.observe(
-            self.charm.verify_snapshots_credentials_event,
-            self._on_verify_snapshots_credentials,
+            self.charm.verify_snapshots_credentials_event, self._on_verify_snapshots_credentials
         )
 
         # actions
@@ -423,8 +422,7 @@ class SnapshotsEventsHandler(Object):
             return
         except OpenSearchPeerClusterDidntSaveCredentialsYetError as e:
             logger.warning(
-                "Not all peer clusters have saved the latest backup credentials yet: %s",
-                e,
+                "Not all peer clusters have saved the latest backup credentials yet: %s", e
             )
             event.defer()
             return
@@ -472,11 +470,7 @@ class SnapshotsEventsHandler(Object):
             logger.warning("Pre-requisites not met for listing backups: %s", error_message)
             event.fail(error_message)
             return
-
-        if (output_format := event.params.get("output", "").lower()) not in {
-            "json",
-            "table",
-        }:
+        if (output_format := event.params.get("output", "").lower()) not in {"json", "table"}:
             logger.error("Invalid output format for listing backups: %s", output_format)
             event.fail("Failed: invalid output format, must be either 'json' or 'table'.")
             return
@@ -613,8 +607,7 @@ class SnapshotsEventsHandler(Object):
         ]:
             if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
-                    "Failed to cleanup keystore credentials for %s.",
-                    object_storage_type,
+                    "Failed to cleanup keystore credentials for %s.", object_storage_type
                 )
 
         # clean S3 CA
@@ -784,9 +777,7 @@ class SnapshotsEventsHandler(Object):
                     secret_key=object_storage_credentials.secret_key, path=temp_path
                 )
                 self.charm.keystore_manager.put_object_storage_credentials(
-                    object_storage_type,
-                    object_storage_credentials,
-                    gcs_file_path=temp_path,
+                    object_storage_type, object_storage_credentials, gcs_file_path=temp_path
                 )
             return
 

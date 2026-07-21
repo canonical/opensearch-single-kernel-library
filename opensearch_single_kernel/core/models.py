@@ -582,12 +582,7 @@ class GcsRelDataCredentials(Model):
             decoded_text = decoded_bytes.decode("utf-8").strip()
             json.loads(decoded_text)
             return decoded_text
-        except (
-            binascii.Error,
-            ValueError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-        ) as e:
+        except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as e:
             raise ValueError("secret-key is not valid JSON (raw or base64-encoded)") from e
 
 
@@ -694,14 +689,10 @@ class PeerClusterRelData(Model):
         credentials = content["credentials"]
 
         credentials["admin_password"] = secrets.resolve_credential(
-            credentials["admin_password"],
-            password_key=ADMIN_USER,
-            peek_secrets=peek_secrets,
+            credentials["admin_password"], password_key=ADMIN_USER, peek_secrets=peek_secrets
         )
         credentials["admin_password_hash"] = secrets.resolve_credential(
-            credentials["admin_password_hash"],
-            hash_key=ADMIN_USER,
-            peek_secrets=peek_secrets,
+            credentials["admin_password_hash"], hash_key=ADMIN_USER, peek_secrets=peek_secrets
         )
 
         credentials["kibana_password"] = secrets.resolve_credential(
@@ -717,9 +708,7 @@ class PeerClusterRelData(Model):
 
         if credentials.get("monitor_password"):
             credentials["monitor_password"] = secrets.resolve_credential(
-                credentials["monitor_password"],
-                password_key=COS_USER,
-                peek_secrets=peek_secrets,
+                credentials["monitor_password"], password_key=COS_USER, peek_secrets=peek_secrets
             )
         else:
             credentials["monitor_password"] = None

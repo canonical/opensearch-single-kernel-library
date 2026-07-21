@@ -341,17 +341,11 @@ class VMWorkload(BaseWorkload):
             output = subprocess.run(command_with_args, **run_kwargs)
             if output.returncode != 0:
                 logger.debug(
-                    "%s:\n Stderr: %s\n Stdout: %s",
-                    command,
-                    output.stderr,
-                    output.stdout,
+                    "%s:\n Stderr: %s\n Stdout: %s", command, output.stderr, output.stdout
                 )
                 raise OpenSearchCmdError(cmd=command, out=output.stdout, err=output.stderr)
             return SimpleNamespace(
-                cmd=command,
-                out=output.stdout,
-                err=output.stderr,
-                returncode=output.returncode,
+                cmd=command, out=output.stdout, err=output.stderr, returncode=output.returncode
             )
         except (TimeoutError, subprocess.TimeoutExpired):
             raise OpenSearchCmdError(cmd=command)
@@ -405,12 +399,6 @@ class VMWorkload(BaseWorkload):
             lines = [line.split() for line in output.split("\n") if line.strip()]
             meminfo = {line[0][:-1]: float(line[1]) for line in lines if len(line) >= 2}
             return meminfo["MemTotal"]
-        except (
-            OpenSearchCmdError,
-            OSError,
-            ValueError,
-            IndexError,
-            AttributeError,
-        ) as e:
+        except (OpenSearchCmdError, OSError, ValueError, IndexError, AttributeError) as e:
             logger.warning("Failed to read meminfo: %s", e)
             raise OpenSearchCmdError(cmd="cat /proc/meminfo", err=str(e))

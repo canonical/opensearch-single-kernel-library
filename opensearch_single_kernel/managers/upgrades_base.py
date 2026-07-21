@@ -375,9 +375,7 @@ class UpgradesManagerBase(BaseManager):
             return True
 
         logger.warning(
-            "Rollback not supported from %s to %s",
-            version_before_override,
-            version_on_disk,
+            "Rollback not supported from %s to %s", version_before_override, version_on_disk
         )
         return False
 

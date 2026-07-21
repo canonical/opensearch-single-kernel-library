@@ -250,9 +250,7 @@ class ExternalClientsEventsHandler(Object):
         )
 
     def update_external_client_endpoints(
-        self,
-        external_client: ExternalOpenSearchClient,
-        omit_endpoints: set | None = None,
+        self, external_client: ExternalOpenSearchClient, omit_endpoints: set | None = None
     ) -> None:
         """Update the external client state with endpoints."""
         if self.charm.unit.is_leader():

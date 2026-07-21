@@ -278,9 +278,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         logger.debug(
-            "PeerClusterRelationChanged from provider %s data: %s",
-            event.relation.app.name,
-            data,
+            "PeerClusterRelationChanged from provider %s data: %s", event.relation.app.name, data
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")

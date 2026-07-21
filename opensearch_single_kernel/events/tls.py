@@ -190,11 +190,7 @@ class TLSEventsHandler(Object):
         deployment_desc = self.charm.state.application.deployment_desc
         is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
-        logger.debug(
-            "Received certificate for scope: %s, cert_type: %s",
-            scope.val,
-            cert_type.val,
-        )
+        logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
 
         if not self.charm.unit.is_leader() and scope == Scope.APP:
             return

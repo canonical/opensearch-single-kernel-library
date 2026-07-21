@@ -116,22 +116,13 @@ class SnapshotsManager(BaseManager):
             )
         if s3_info:
             info_to_save = s3_info
-            object_storage_types_to_clean = [
-                ObjectStorageType.AZURE,
-                ObjectStorageType.GCS,
-            ]
+            object_storage_types_to_clean = [ObjectStorageType.AZURE, ObjectStorageType.GCS]
         elif azure_info:
             info_to_save = azure_info
-            object_storage_types_to_clean = [
-                ObjectStorageType.S3,
-                ObjectStorageType.GCS,
-            ]
+            object_storage_types_to_clean = [ObjectStorageType.S3, ObjectStorageType.GCS]
         elif gcs_info:
             info_to_save = gcs_info
-            object_storage_types_to_clean = [
-                ObjectStorageType.S3,
-                ObjectStorageType.AZURE,
-            ]
+            object_storage_types_to_clean = [ObjectStorageType.S3, ObjectStorageType.AZURE]
         else:
             info_to_save = None
             object_storage_types_to_clean = []

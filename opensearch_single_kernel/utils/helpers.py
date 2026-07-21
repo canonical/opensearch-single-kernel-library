@@ -242,21 +242,7 @@ def build_command_list(command_with_args: str) -> list[str]:
     Returns:
         list[str]: Command list suitable for container.exec().
     """
-    shell_metachars = [
-        "|",
-        ">",
-        "<",
-        "&&",
-        "||",
-        ";",
-        "$(",
-        "${",
-        "`",
-        "2>",
-        ">>",
-        "<<",
-        "&",
-    ]
+    shell_metachars = ["|", ">", "<", "&&", "||", ";", "$(", "${", "`", "2>", ">>", "<<", "&"]
     if any(char in command_with_args for char in shell_metachars):
         return ["sh", "-c", command_with_args]
     if " " in command_with_args:
@@ -339,8 +325,7 @@ def _install_pebble_pump_excepthook() -> None:
                 args.exc_traceback
             ):
                 logger.debug(
-                    "Suppressed expected Pebble exec I/O thread error: %r",
-                    args.exc_value,
+                    "Suppressed expected Pebble exec I/O thread error: %r", args.exc_value
                 )
                 return
             previous_hook(args)

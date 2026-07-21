@@ -517,8 +517,7 @@ class ConfigManager(BaseManager):
         if current_profile is None or current_profile != profile:
             heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
             logger.debug(
-                "Updating JVM heap size to %s KB based on profile requirements",
-                heap_size,
+                "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
             self._update_jvm_heap_size(heap_size)
             self.state.server.profile = profile

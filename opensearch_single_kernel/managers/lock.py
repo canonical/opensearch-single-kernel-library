@@ -272,8 +272,7 @@ class LockManager(PeerLockManager):
             if unit_with_lock:
                 # Another unit has lock
                 logger.debug(
-                    "[Node lock] Not acquired. Unit with opensearch lock: %s",
-                    unit_with_lock,
+                    "[Node lock] Not acquired. Unit with opensearch lock: %s", unit_with_lock
                 )
                 return False
 

@@ -294,13 +294,7 @@ class K8sWorkload(BaseWorkload):
                 file_path.unlink()
             except FileNotFoundError:
                 pass
-            except (
-                PebbleConnectionError,
-                PebbleError,
-                ModelError,
-                OSError,
-                ValueError,
-            ) as e:
+            except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
                 logger.warning("Failed to delete temp file %s: %s", file_path, e)
 
     @override
@@ -390,13 +384,7 @@ class K8sWorkload(BaseWorkload):
                 return False
 
             return service.current == ServiceStatus.ERROR
-        except (
-            PebbleConnectionError,
-            PebbleError,
-            ModelError,
-            KeyError,
-            TypeError,
-        ) as e:
+        except (PebbleConnectionError, PebbleError, ModelError, KeyError, TypeError) as e:
             logger.warning("Failed to check if service is failed: %s", e)
             return False
 
@@ -493,8 +481,7 @@ class K8sWorkload(BaseWorkload):
             violates = current_value > required_value
         else:
             logger.error(
-                "Invalid comparison operator '%s' for kernel property check",
-                comparison_op,
+                "Invalid comparison operator '%s' for kernel property check", comparison_op
             )
             raise ValueError("Invalid comparison operator: %s" % comparison_op)
 
@@ -550,27 +537,15 @@ class K8sWorkload(BaseWorkload):
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
             logger.debug(
-                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0",
-                masked_command,
-                stdout,
-                stderr,
+                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
             )
 
             # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 
-        except (
-            PebbleConnectionError,
-            PebbleError,
-            ModelError,
-            OSError,
-            ValueError,
-        ) as e:
+        except (PebbleConnectionError, PebbleError, ModelError, OSError, ValueError) as e:
             logger.warning(
-                "Error executing command %s: %s: %s",
-                masked_command,
-                type(e).__name__,
-                e,
+                "Error executing command %s: %s: %s", masked_command, type(e).__name__, e
             )
             raise OpenSearchCmdError(cmd=command, out="", err=str(e)) from e
 

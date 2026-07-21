@@ -224,10 +224,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
 
     def _determine_partition(
-        self,
-        units: list[UpgradeServerState],
-        action_event: ops.ActionEvent | None,
-        force: bool,
+        self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
     ) -> int:
         """Determine the new partition to use.
 

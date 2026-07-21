@@ -370,10 +370,7 @@ def _remove_ca_aliases(
         store_path: Path to the trust store.
     """
     aliases_to_remove = _collect_aliases_to_remove(
-        workload=workload,
-        alias_base=alias_base,
-        store_pwd=store_pwd,
-        store_path=store_path,
+        workload=workload, alias_base=alias_base, store_pwd=store_pwd, store_path=store_path
     )
 
     if not aliases_to_remove:

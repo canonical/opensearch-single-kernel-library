@@ -1024,9 +1024,7 @@ class ClusterState(Object):
         of_failover = (
             orchestrators.failover_app
             and self.peer_cluster_by_relation_id(
-                is_provider=False,
-                relation_id=orchestrators.failover_rel_id,
-                remote=True,
+                is_provider=False, relation_id=orchestrators.failover_rel_id, remote=True
             )
             is not None
         )
@@ -1055,8 +1053,7 @@ class ClusterState(Object):
 
         if not self.peer_cluster_orchestrator_relation_exists(orchestrators.main_rel_id):
             logger.info(
-                "relation with id %s not found for main orchestrator",
-                orchestrators.main_rel_id,
+                "relation with id %s not found for main orchestrator", orchestrators.main_rel_id
             )
             return None
 
@@ -1259,9 +1256,7 @@ class ClusterState(Object):
                 self.secrets.put(Scope.APP, "s3-tls-ca-chain", s3_tls_ca_chain)
 
             return S3RelDataCredentials(
-                access_key=access_key,
-                secret_key=secret_key,
-                s3_tls_ca_chain=s3_tls_ca_chain,
+                access_key=access_key, secret_key=secret_key, s3_tls_ca_chain=s3_tls_ca_chain
             )
 
         if not self.secrets.get(Scope.APP, "s3-access-key"):

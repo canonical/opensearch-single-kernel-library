@@ -151,8 +151,7 @@ class ClusterManager(BaseManager):
         if Directive.VALIDATE_CLUSTER_NAME in pending_directives:
             if config.cluster_name != data.cluster_name:
                 deployment_state = DeploymentState(
-                    value=State.BLOCKED_WRONG_RELATED_CLUSTER,
-                    message=PEER_CLUSTER_WRONG_RELATION,
+                    value=State.BLOCKED_WRONG_RELATED_CLUSTER, message=PEER_CLUSTER_WRONG_RELATION
                 )
             elif deployment_state.value in [
                 State.BLOCKED_WRONG_RELATED_CLUSTER,

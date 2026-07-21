@@ -470,8 +470,7 @@ class OpenSearchApplication(RelationState):
     def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]) -> None:
         """Set the cluster fleet applications."""
         self.put_object(
-            "cluster_fleet_apps",
-            {id: app.to_dict() for id, app in cluster_fleet_apps.items()},
+            "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
         )
 
     @property

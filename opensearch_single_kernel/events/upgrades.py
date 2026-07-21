@@ -209,10 +209,7 @@ class UpgradesEventsHandler(Object):
         for status in UpgradesStatuses:
             if status is not unit_status:
                 self.charm.state.remove_status_if_present(
-                    status.value,
-                    "unit",
-                    self.charm.upgrades_manager.name,
-                    interpolated=True,
+                    status.value, "unit", self.charm.upgrades_manager.name, interpolated=True
                 )
             if status is not app_status:
                 self.charm.state.remove_status_if_present(

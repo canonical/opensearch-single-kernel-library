@@ -237,8 +237,7 @@ class PeerClusterErrorDataStatuses(Enum):
         status="waiting", message="'{COS_USER}' user not created yet."
     )
     NO_CLUSTER_MANAGER_ELIGIBLE_NODES = StatusObject(
-        status="waiting",
-        message="No 'cluster_manager' eligible nodes found {message_suffix}",
+        status="waiting", message="No 'cluster_manager' eligible nodes found {message_suffix}"
     )
     COULD_NOT_FETCH_NODES = StatusObject(
         status="waiting", message="Could not fetch nodes {message_suffix}"
@@ -255,8 +254,7 @@ class PeerClusterErrorDataStatuses(Enum):
         message="A cluster can only be related to 1 main and 1 failover-clusters at most.",
     )
     CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME = StatusObject(
-        status="blocked",
-        message="Cannot relate 2 clusters with different 'cluster_name' values.",
+        status="blocked", message="Cannot relate 2 clusters with different 'cluster_name' values."
     )
     CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS = StatusObject(
         status="blocked", message="CA certificate mismatch between clusters."

@@ -100,15 +100,9 @@ class KeystoreManager(BaseManager):
         """
         keystore_entries = []
         if object_storage_type == ObjectStorageType.S3:
-            keystore_entries = [
-                "s3.client.default.access_key",
-                "s3.client.default.secret_key",
-            ]
+            keystore_entries = ["s3.client.default.access_key", "s3.client.default.secret_key"]
         elif object_storage_type == ObjectStorageType.AZURE:
-            keystore_entries = [
-                "azure.client.default.account",
-                "azure.client.default.key",
-            ]
+            keystore_entries = ["azure.client.default.account", "azure.client.default.key"]
         else:
             keystore_entries = ["gcs.client.default.credentials_file"]
 

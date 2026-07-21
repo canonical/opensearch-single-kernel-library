@@ -334,8 +334,7 @@ class ExternalClientsManager(BaseManager):
             ):
                 status_list.append(
                     format_status(
-                        ExternalClientsStatuses.USER_CREATION_FAILED.value,
-                        {"id": relation.id},
+                        ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
                     )
                 )
                 return

@@ -90,11 +90,7 @@ class InternalUsersManager(BaseManager):
             try:
                 self.put_internal_user(user, hashed_pwd)
             except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
-                logger.error(
-                    "An error occurred while updating internal user %s: %s",
-                    user,
-                    str(e),
-                )
+                logger.error("An error occurred while updating internal user %s: %s", user, str(e))
                 return False
 
         # Secrets need to be maintained

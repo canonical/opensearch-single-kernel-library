@@ -169,9 +169,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         secret = self._get_juju_secret(scope, key)
         if not secret:
             logger.warning(
-                "Secret %s:%s can't be deleted as it doesn't exist",
-                str(scope.val),
-                str(key),
+                "Secret %s:%s can't be deleted as it doesn't exist", str(scope.val), str(key)
             )
             return
 

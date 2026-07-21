@@ -49,10 +49,7 @@ def repository_name(object_storage_type: ObjectStorageType) -> str | None:
     """
     if object_storage_type in {ObjectStorageType.S3, ObjectStorageType.S3_PCLUSTER}:
         return S3_REPOSITORY
-    if object_storage_type in {
-        ObjectStorageType.AZURE,
-        ObjectStorageType.AZURE_PCLUSTER,
-    }:
+    if object_storage_type in {ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER}:
         return AZURE_REPOSITORY
     if object_storage_type in {ObjectStorageType.GCS, ObjectStorageType.GCS_PCLUSTER}:
         return GCS_REPOSITORY
@@ -70,10 +67,7 @@ def repository_type(object_storage_type: ObjectStorageType) -> str | None:
     """
     if object_storage_type in {ObjectStorageType.S3, ObjectStorageType.S3_PCLUSTER}:
         return "s3"
-    if object_storage_type in {
-        ObjectStorageType.AZURE,
-        ObjectStorageType.AZURE_PCLUSTER,
-    }:
+    if object_storage_type in {ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER}:
         return "azure"
     if object_storage_type in {ObjectStorageType.GCS, ObjectStorageType.GCS_PCLUSTER}:
         return "gcs"
@@ -208,8 +202,7 @@ def verify_s3_credentials(storage_config: ObjectStorageConfig) -> bool:  # noqa:
 
             if bucket_missing:
                 logger.warning(
-                    "S3 bucket %r not found; attempting to create it.",
-                    storage_config.s3.bucket,
+                    "S3 bucket %r not found; attempting to create it.", storage_config.s3.bucket
                 )
                 create_s3_bucket(s3_params, verify=verify_param)
             else:
@@ -287,10 +280,7 @@ def create_azure_container(azure_parameters: dict[str, str]) -> None:
         logger.info(f"Container {azure_parameters['container']} already exists")
     except AzureError as e:
         logger.error(
-            "Failed to create container %s: %s",
-            azure_parameters["container"],
-            e,
-            exc_info=True,
+            "Failed to create container %s: %s", azure_parameters["container"], e, exc_info=True
         )
         raise
 
@@ -494,11 +484,7 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
         return True
 
     except (ValueError, TypeError, KeyError) as e:
-        logger.error(
-            "GCS credential validation failed: invalid credentials: %s",
-            e,
-            exc_info=True,
-        )
+        logger.error("GCS credential validation failed: invalid credentials: %s", e, exc_info=True)
         return False
 
     except Forbidden as e:

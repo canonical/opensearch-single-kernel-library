@@ -236,11 +236,7 @@ class OpenSearchClient:
             True if snapshot is running else False
         """
         response = self.request(
-            "GET",
-            "_snapshot/_status",
-            alt_hosts=alt_hosts,
-            retries=3,
-            wait_strategy=wait_fixed(3),
+            "GET", "_snapshot/_status", alt_hosts=alt_hosts, retries=3, wait_strategy=wait_fixed(3)
         )
         return len(response.get("snapshots", [])) > 0
 

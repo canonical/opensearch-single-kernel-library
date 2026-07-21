@@ -92,8 +92,7 @@ class PeerCluster(RelationState):
     def cluster_fleet_apps(self, cluster_fleet_apps: dict[str, PeerClusterApp]):
         """Set the cluster fleet applications."""
         self.put_object(
-            "cluster_fleet_apps",
-            {id: app.to_dict() for id, app in cluster_fleet_apps.items()},
+            "cluster_fleet_apps", {id: app.to_dict() for id, app in cluster_fleet_apps.items()}
         )
 
     @cluster_fleet_apps.deleter
@@ -131,8 +130,7 @@ class PeerCluster(RelationState):
         # rel_data with their corresponding secret IDs
         rel_data_redacted_dict = self._protect_secrets_relation_data(rel_data)
         logger.debug(
-            "Setting peer cluster relation data with redacted secrets: %s",
-            rel_data_redacted_dict,
+            "Setting peer cluster relation data with redacted secrets: %s", rel_data_redacted_dict
         )
 
         # grant the secrets inside the rel_data to all the related clusters
