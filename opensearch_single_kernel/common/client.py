@@ -1130,13 +1130,13 @@ class OpenSearchClient:
         """Call the /_nodes API endpoint of opensearch"""
         return self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
 
-    def is_node_up(self, host: str | None = None, accept_all_respo: bool = False) -> bool:
+    def is_node_up(self, host: str | None = None, any_resp_code: bool = False) -> bool:
         """Get status of node.
 
         This assumes OpenSearch is Running
         Args:
             host: host of the node we wish to make a request on, by default current host
-            accept_all_respo: if true, any response code is considered as node being up
+            any_resp_code: if true, any response code is considered as node being up
 
         Returns:
             True if node is up, False otherwise
@@ -1155,7 +1155,7 @@ class OpenSearchClient:
                 resp_status_code=True,
                 timeout=1,
             )
-            return accept_all_respo or (resp_code < 400)
+            return any_resp_code or (resp_code < 400)
         except (OpenSearchHttpError, Exception) as e:
             logger.debug("Error when checking if host %s is up: %s", host, e)
             return False

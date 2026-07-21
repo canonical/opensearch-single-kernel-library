@@ -368,13 +368,13 @@ class PeerClusterManager(BaseManager):
 
         return list(cm_nodes.values())
 
-    def is_cm_up(self) -> bool:
+    def is_any_cm_up(self) -> bool:
         """Check if there is at least one cluster manager node up."""
         cm_nodes = self.cm_nodes(self.state.application.orchestrators)
         for node in cm_nodes:
             # 503 security index not initialised is a valid response,
             # we just need to check if the node is up
-            if self.opensearch_client.is_node_up(node.ip, accept_all_respo=True):
+            if self.opensearch_client.is_node_up(node.ip, any_resp_code=True):
                 return True
         return False
 

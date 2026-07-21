@@ -752,7 +752,11 @@ class OpenSearchEventsHandler(Object):
                 "unit",
                 self.charm.cluster_manager.name,
             )
-            # Needed for non-leader units
+            # Needed for non-leader units to start after a data node joins the cluster
+            # leader node starts via _on_peer_cluster_relation_changed
+            logger.debug(
+                "Main orchestrator cannot start without a data node. Deferring start event."
+            )
             event.defer()
             return
         # We are requesting start of openSearch
@@ -1005,11 +1009,10 @@ class OpenSearchEventsHandler(Object):
             # In small deployment (init_hold=False) the current unit is the CM.
             if (
                 self.charm.state.application.deployment_desc.config.init_hold
-                and not self.charm.peer_cluster_manager.is_cm_up()
+                and not self.charm.peer_cluster_manager.is_any_cm_up()
             ):
                 logger.warning(
-                    "Waiting for a cluster manager node to initialize the security index. \
-Deferring event."
+                    "Deferring event. No cluster manager is up. Cannot initialize security index."
                 )
                 event.defer()
                 return
