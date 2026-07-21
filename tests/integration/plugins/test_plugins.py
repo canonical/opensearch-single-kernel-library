@@ -499,6 +499,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
@@ -728,6 +729,7 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards

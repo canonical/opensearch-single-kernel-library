@@ -153,6 +153,8 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
+# TODO Add when Large deployments is implemented
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_configure_and_use_jwt_large_cluster(
     charm, series, ops_test: OpsTest, substrate
 ) -> None:

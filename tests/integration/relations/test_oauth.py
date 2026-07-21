@@ -303,6 +303,7 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model, substrate):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
@@ -362,6 +363,7 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_model: Model):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
@@ -396,6 +398,7 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_m
 
 
 @pytest.mark.abort_on_fail
+@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
 async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
