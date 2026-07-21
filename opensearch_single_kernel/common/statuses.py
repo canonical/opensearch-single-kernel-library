@@ -98,9 +98,7 @@ class TlsStatuses(Enum):
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
         status="maintenance", message="Waiting for TLS to be fully configured..."
     )
-    TLS_CA_ROTATION = StatusObject(
-        status="maintenance", message="Applying new CA certificate..."
-    )
+    TLS_CA_ROTATION = StatusObject(status="maintenance", message="Applying new CA certificate...")
     TLS_CERTS_EXPIRATION_ERROR = StatusObject(
         status="blocked",
         message="The certificates: {certificates} need to be refreshed.",

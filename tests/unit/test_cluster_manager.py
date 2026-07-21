@@ -29,9 +29,7 @@ class PatchedUnit:
 
 
 user_configs = {
-    "default": PeerClusterConfig(
-        cluster_name="", init_hold=False, roles=[], profile="production"
-    ),
+    "default": PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
     "name": PeerClusterConfig(
         cluster_name="logs", init_hold=False, roles=[], profile="production"
     ),

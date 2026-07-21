@@ -40,9 +40,7 @@ class NodesExclusionsManager(BaseManager):
             if not self._add_voting(scope, node):
                 logger.error("Failed to add voting exclusion: %s.", node.name)
                 if raise_error:
-                    raise OpenSearchExclusionsException(
-                        "Failed to add voting exclusion."
-                    )
+                    raise OpenSearchExclusionsException("Failed to add voting exclusion.")
 
         if allocation and node.is_data():
             try:
@@ -58,13 +56,9 @@ class NodesExclusionsManager(BaseManager):
                 success = False
             finally:
                 if not success:
-                    logger.error(
-                        "Failed to add shard allocation exclusion: %s.", node.name
-                    )
+                    logger.error("Failed to add shard allocation exclusion: %s.", node.name)
                     if raise_error:
-                        raise OpenSearchExclusionsException(
-                            "Failed to add allocation exclusion."
-                        )
+                        raise OpenSearchExclusionsException("Failed to add allocation exclusion.")
 
     def delete_current(
         self,
@@ -79,34 +73,24 @@ class NodesExclusionsManager(BaseManager):
             if not self._delete_voting({node.name}, scope):
                 logger.error("Failed to delete voting exclusion: %s.", node.name)
                 if raise_error:
-                    raise OpenSearchExclusionsException(
-                        "Failed to delete voting exclusion."
-                    )
+                    raise OpenSearchExclusionsException("Failed to delete voting exclusion.")
 
         if allocation and node.is_data():
             if not self._delete_allocations(node):
-                logger.error(
-                    "Failed to delete shard allocation exclusion: %s.", node.name
-                )
+                logger.error("Failed to delete shard allocation exclusion: %s.", node.name)
                 # Load the content of the list, avoiding '' entries
-                state = (
-                    self.state.application if scope == Scope.APP else self.state.server
-                )
+                state = self.state.application if scope == Scope.APP else self.state.server
                 current_allocations = state.allocation_exclusions_to_delete
                 current_allocations.add(node.name)
                 state.allocation_exclusions_to_delete = current_allocations
 
                 if raise_error:
-                    raise OpenSearchExclusionsException(
-                        "Failed to delete allocation exclusion."
-                    )
+                    raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
 
     def cleanup(self, scope: Scope) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
-        units_to_cleanup = self._units_to_cleanup(
-            list(state.voting_exclusions_to_delete)
-        )
+        units_to_cleanup = self._units_to_cleanup(list(state.voting_exclusions_to_delete))
         self._delete_voting(units_to_cleanup, scope)
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(
@@ -122,12 +106,10 @@ class NodesExclusionsManager(BaseManager):
         app-level peer data.
         """
         state = self.state.application if scope == Scope.APP else self.state.server
-        state.allocation_exclusions_to_delete = (
-            state.allocation_exclusions_to_delete.union({unit_name})
-        )
-        state.voting_exclusions_to_delete = state.voting_exclusions_to_delete.union(
+        state.allocation_exclusions_to_delete = state.allocation_exclusions_to_delete.union(
             {unit_name}
         )
+        state.voting_exclusions_to_delete = state.voting_exclusions_to_delete.union({unit_name})
 
     def _units_to_cleanup(self, removable: list[str]) -> set[str] | None:
         """Deletes all units that have left the cluster via Juju.
@@ -141,10 +123,7 @@ class NodesExclusionsManager(BaseManager):
             A set of unit names that should be removed from the voting exclusion list, or None
             if there are no units to remove.
         """
-        if (
-            not (deployment_desc := self.state.application.deployment_desc)
-            or not removable
-        ):
+        if not (deployment_desc := self.state.application.deployment_desc) or not removable:
             return set()
 
         # if self._charm.opensearch_peer_cm.is_provider(typ="main") and (
@@ -169,9 +148,7 @@ class NodesExclusionsManager(BaseManager):
                 to_remove.append(node)
         return set(to_remove)
 
-    def _add_voting(
-        self, scope: Scope, node: Node, exclusions: set[str] | None = None
-    ) -> bool:
+    def _add_voting(self, scope: Scope, node: Node, exclusions: set[str] | None = None) -> bool:
         """Include the current node in the CMs voting exclusions list of nodes.
 
         Args:
@@ -210,9 +187,7 @@ class NodesExclusionsManager(BaseManager):
             A set of unit names that are currently in the voting exclusion list.
         """
         try:
-            return self.opensearch_client.fetch_voting_exclusions_config(
-                alt_hosts=self.alt_hosts
-            )
+            return self.opensearch_client.fetch_voting_exclusions_config(alt_hosts=self.alt_hosts)
         except OpenSearchHttpError as e:
             logger.warning("Failed to fetch voting exclusions: %s", e)
             # no voting exclusion set
@@ -284,9 +259,7 @@ class NodesExclusionsManager(BaseManager):
             True if the operation succeeded, False otherwise.
         """
         try:
-            existing = self.opensearch_client.fetch_allocation_exclusions(
-                alt_hosts=self.alt_hosts
-            )
+            existing = self.opensearch_client.fetch_allocation_exclusions(alt_hosts=self.alt_hosts)
             to_remove = set(allocs if allocs is not None else [node.name])
             res = self.opensearch_client.add_allocation_exclusions(
                 node,

@@ -116,9 +116,7 @@ def microceph() -> ConnectionInformation:
     # socket.gethostbyname() might return `127.0.0.1`,
     # which does not work from inside lxd container
     host_ip = (
-        subprocess.run(
-            ["hostname", "-I"], capture_output=True, check=True, encoding="utf-8"
-        )
+        subprocess.run(["hostname", "-I"], capture_output=True, check=True, encoding="utf-8")
         .stdout.strip()
         .split()[0]
     )
@@ -225,9 +223,7 @@ def microceph_config(microceph: ConnectionInformation) -> dict[str, str]:
     # socket.gethostbyname() might return `127.0.0.1`,
     # which does not work from inside lxd container
     host_ip = (
-        subprocess.run(
-            ["hostname", "-I"], capture_output=True, check=True, encoding="utf-8"
-        )
+        subprocess.run(["hostname", "-I"], capture_output=True, check=True, encoding="utf-8")
         .stdout.strip()
         .split()[0]
     )

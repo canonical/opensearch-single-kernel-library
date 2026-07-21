@@ -130,8 +130,7 @@ async def _build_env(
             resources=charm_resources,
             series=series,
             trust=substrate == "k8s",
-            config={"cluster_name": "upgrades", "init_hold": True, "roles": "data"}
-            | config,
+            config={"cluster_name": "upgrades", "init_hold": True, "roles": "data"} | config,
         ),
     )
 
@@ -160,15 +159,9 @@ async def _build_env(
         timeout=TIMEOUT,
     )
 
-    await ops_test.model.integrate(
-        f"{MAIN_APP}:{REL_ORCHESTRATOR}", f"{APP_NAME}:{REL_PEER}"
-    )
-    await ops_test.model.integrate(
-        f"{MAIN_APP}:{REL_ORCHESTRATOR}", f"{FAILOVER_APP}:{REL_PEER}"
-    )
-    await ops_test.model.integrate(
-        f"{FAILOVER_APP}:{REL_ORCHESTRATOR}", f"{APP_NAME}:{REL_PEER}"
-    )
+    await ops_test.model.integrate(f"{MAIN_APP}:{REL_ORCHESTRATOR}", f"{APP_NAME}:{REL_PEER}")
+    await ops_test.model.integrate(f"{MAIN_APP}:{REL_ORCHESTRATOR}", f"{FAILOVER_APP}:{REL_PEER}")
+    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_ORCHESTRATOR}", f"{APP_NAME}:{REL_PEER}")
 
     await wait_until(
         ops_test,
@@ -303,9 +296,7 @@ async def test_upgrade_from_version_to_local(
 ) -> None:
     """Test upgrade from usptream to local charm."""
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
-        await assert_upgrade_to_local(
-            ops_test, app=app, charm=charm, substrate=substrate
-        )
+        await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
         await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
 
     # continuous writes checks

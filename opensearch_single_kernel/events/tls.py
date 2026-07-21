@@ -50,9 +50,7 @@ class TLSEventsHandler(Object):
         self.charm = charm
 
         # Requirer
-        self.certs = TLSCertificatesRequiresV3(
-            charm, TLS_RELATION, expiry_notification_time=23
-        )
+        self.certs = TLSCertificatesRequiresV3(charm, TLS_RELATION, expiry_notification_time=23)
 
         # Events
         self.framework.observe(
@@ -62,26 +60,16 @@ class TLSEventsHandler(Object):
             self.charm.on[TLS_RELATION].relation_broken, self._on_tls_relation_broken
         )
 
-        self.framework.observe(
-            self.certs.on.certificate_available, self._on_certificate_available
-        )
-        self.framework.observe(
-            self.certs.on.certificate_expiring, self._on_certificate_expiring
-        )
+        self.framework.observe(self.certs.on.certificate_available, self._on_certificate_available)
+        self.framework.observe(self.certs.on.certificate_expiring, self._on_certificate_expiring)
         self.framework.observe(
             self.certs.on.certificate_invalidated, self._on_certificate_invalidated
         )
 
         # Actions
-        self.framework.observe(
-            self.charm.on.set_tls_private_key_action, self._on_set_private_key
-        )
-        self.framework.observe(
-            self.charm.on.set_password_action, self._on_set_password_action
-        )
-        self.framework.observe(
-            self.charm.on.get_password_action, self._on_get_password_action
-        )
+        self.framework.observe(self.charm.on.set_tls_private_key_action, self._on_set_private_key)
+        self.framework.observe(self.charm.on.set_password_action, self._on_set_password_action)
+        self.framework.observe(self.charm.on.get_password_action, self._on_get_password_action)
 
     def _on_set_private_key(self, event: ActionEvent) -> None:
         """Set the TLS private key, which will be used for requesting the certificate."""
@@ -123,9 +111,7 @@ class TLSEventsHandler(Object):
 
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
-        if not (
-            self.charm.workload.workload_present or self.charm.workload.can_connect
-        ):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
             logger.warning("Workload not ready for TLS relation created, deferring.")
             event.defer()
             return
@@ -142,10 +128,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if (
-            self.charm.unit.is_leader()
-            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-        ):
+        if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             # create passwords for both ca trust_store/admin key_store
             self.charm.tls_manager.create_store_pwd_if_not_exists(
                 Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
@@ -158,9 +141,7 @@ class TLSEventsHandler(Object):
             )
             self.certs.request_certificate_creation(certificate_signing_request=csr)
         elif not self.charm.state.application.admin_secrets.get("truststore-password"):
-            logger.debug(
-                "Truststore-password from main-orchestrator not available yet."
-            )
+            logger.debug("Truststore-password from main-orchestrator not available yet.")
             event.defer()
             return
 
@@ -179,12 +160,8 @@ class TLSEventsHandler(Object):
             Scope.UNIT, CertType.UNIT_HTTP
         )
 
-        self.certs.request_certificate_creation(
-            certificate_signing_request=unit_transport_csr
-        )
-        self.certs.request_certificate_creation(
-            certificate_signing_request=unit_http_csr
-        )
+        self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
+        self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
 
     def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
         """Enable TLS when TLS certificate available.
@@ -196,9 +173,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if not (
-            self.charm.workload.workload_present or self.charm.workload.can_connect
-        ):
+        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
             logger.warning("Workload not ready for certificate available, deferring.")
             event.defer()
             return
@@ -259,9 +234,7 @@ class TLSEventsHandler(Object):
             # -> delete both tls_ca_renewing and tls_ca_renewed
             if current_stored_ca:
                 self.charm.state.server.tls_ca_renewing = True
-                peer_clusters_servers = self.charm.state.all_peer_clusters_servers(
-                    remote=False
-                )
+                peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
                 for peer_cluster_server in peer_clusters_servers:
                     peer_cluster_server.tls_ca_renewing = True
                 logger.debug("Restarting opensearch due to CA rotation")
@@ -300,9 +273,7 @@ class TLSEventsHandler(Object):
                     event.defer()
                     return
             else:
-                logger.info(
-                    "Admin certificate not available yet. Waiting for next events."
-                )
+                logger.info("Admin certificate not available yet. Waiting for next events.")
                 event.defer()
                 return
 
@@ -314,16 +285,12 @@ class TLSEventsHandler(Object):
             except KeyError as e:
                 # As we are setting the ca_chain, it should not be likely to happen a KeyError at
                 # update_certs. This logic is left for a very corner case.
-                logger.error(
-                    "Failed to update relation TLS info: missing key %s", str(e)
-                )
+                logger.error("Failed to update relation TLS info: missing key %s", str(e))
                 event.defer()
                 return
 
         # broadcast secret updates for certs and CA to related sub-clusters
-        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(
-            typ="main"
-        ):
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
         renewal = old_ca_present is not None or (
@@ -438,10 +405,7 @@ class TLSEventsHandler(Object):
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
             return
-        if (
-            self.charm.state.application.deployment_desc.typ
-            != DeploymentType.MAIN_ORCHESTRATOR
-        ):
+        if self.charm.state.application.deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             event.fail("The action can only be run on the main orchestrator cluster.")
             return
         if not self.charm.unit.is_leader():
@@ -453,9 +417,7 @@ class TLSEventsHandler(Object):
 
         user_name = event.params.get("username")
         if user_name not in OPENSEARCH_USERS:
-            event.fail(
-                f"Only the {OPENSEARCH_USERS} usernames are allowed for this action."
-            )
+            event.fail(f"Only the {OPENSEARCH_USERS} usernames are allowed for this action.")
             return
 
         password = event.params.get("password") or generate_password()
@@ -486,9 +448,7 @@ class TLSEventsHandler(Object):
 
         user_name = event.params.get("username")
         if user_name not in OPENSEARCH_USERS:
-            event.fail(
-                f"Only the {OPENSEARCH_USERS} username is allowed for this action."
-            )
+            event.fail(f"Only the {OPENSEARCH_USERS} username is allowed for this action.")
             return
 
         if not self.charm.state.application.is_admin_user_initialized:

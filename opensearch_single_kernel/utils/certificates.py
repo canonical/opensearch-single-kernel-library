@@ -122,11 +122,7 @@ def _ca_entry_from_block(block: str) -> tuple[str, int, str] | None:
     """Return chain entry data from an openssl pkcs12 certificate block."""
     start_cert_marker = "-----BEGIN CERTIFICATE-----"
     alias_line = next(
-        (
-            line
-            for line in block.split("\n")
-            if line.strip().startswith("friendlyName:")
-        ),
+        (line for line in block.split("\n") if line.strip().startswith("friendlyName:")),
         None,
     )
     if alias_line is None or start_cert_marker not in block:
@@ -219,9 +215,7 @@ def store_ca_chain(  # noqa: C901
                             (retry_err.out or "") + (retry_err.err or ""),
                         )
                         return False
-                elif ("does not exist" not in msg) and (
-                    "Keystore file does not exist" not in msg
-                ):
+                elif ("does not exist" not in msg) and ("Keystore file does not exist" not in msg):
                     logger.error(
                         "Failed to rename existing alias: %s",
                         msg,
@@ -328,7 +322,9 @@ def remove_ca(
         store_path: Path to the trust store.
         use_sudo: Whether to prefix chmod with sudo. False for K8s where sudo is unavailable.
     """
-    list_cmd = f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    list_cmd = (
+        f"{workload.keytool_cmd} -list -keystore {store_path} -alias {alias} -storetype PKCS12"
+    )
     list_args = f"-storepass {store_pwd}"
     try:
         workload.run_cmd(list_cmd, list_args)
@@ -420,13 +416,9 @@ def _collect_aliases_to_remove(
         List of aliases to remove.
     """
     # Get all aliases from the keystore
-    all_aliases = list_aliases(
-        workload=workload, store_pwd=store_pwd, store_path=store_path
-    )
+    all_aliases = list_aliases(workload=workload, store_pwd=store_pwd, store_path=store_path)
     if all_aliases is None:
-        logger.debug(
-            "Could not list aliases from %s, no aliases to remove.", store_path
-        )
+        logger.debug("Could not list aliases from %s, no aliases to remove.", store_path)
         return []
 
     aliases_to_remove: list[str] = []
@@ -445,9 +437,7 @@ def _collect_aliases_to_remove(
 def split_ca_chain(pem_content: str) -> list[str]:
     """Split PEM chain into individual certificates."""
     end_cert_marker = "-----END CERTIFICATE-----"
-    parts = [
-        part.strip() for part in pem_content.split(end_cert_marker) if part.strip()
-    ]
+    parts = [part.strip() for part in pem_content.split(end_cert_marker) if part.strip()]
     return [f"{part}\n{end_cert_marker}" for part in parts]
 
 
@@ -481,9 +471,7 @@ def normalize_certificate_chain_unordered(chain: str) -> list[str]:
     blocks = _split_pem_chain(chain)
     # Use existing _normalize_certificate_chain on each block to clean whitespace etc.
     normalized_blocks = [
-        _normalize_certificate_chain(block)
-        for block in blocks
-        if block and block.strip()
+        _normalize_certificate_chain(block) for block in blocks if block and block.strip()
     ]
     # Sort so order does not matter
     return sorted(normalized_blocks)
@@ -506,6 +494,5 @@ def _split_pem_chain(chain: str) -> list[str]:
     matches = re.findall(pattern, chain, flags=re.DOTALL)
 
     return [
-        "\n".join(line.strip() for line in cert.splitlines() if line.strip())
-        for cert in matches
+        "\n".join(line.strip() for line in cert.splitlines() if line.strip()) for cert in matches
     ]

@@ -205,9 +205,7 @@ class RelationState:
         self.relation = relation
         self.data_interface = data_interface
         self.unit = component
-        self.relation_data = (
-            self.data_interface.as_dict(self.relation.id) if self.relation else {}
-        )
+        self.relation_data = self.data_interface.as_dict(self.relation.id) if self.relation else {}
 
     def __bool__(self) -> bool:
         """Boolean evaluation based on the existence of self.relation."""
@@ -243,11 +241,7 @@ class RelationState:
 
     def get_object(self, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
-        return (
-            json.loads(data)
-            if (data := self.relation_data.get(key)) is not None
-            else None
-        )
+        return json.loads(data) if (data := self.relation_data.get(key)) is not None else None
 
     def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
         """Put dict / json object into relation data store."""

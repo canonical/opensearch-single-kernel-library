@@ -122,9 +122,7 @@ async def test_replication_across_members(
 
     # create index with r_shards = nodes - 1
     index_name = "test_index"
-    await create_index(
-        ops_test, app, leader_unit_ip, index_name, r_shards=len(units) - 1
-    )
+    await create_index(ops_test, app, leader_unit_ip, index_name, r_shards=len(units) - 1)
 
     # index document
     doc_id = 12
@@ -163,9 +161,7 @@ async def test_kill_db_process_node_with_primary_shard(
     shards = await get_shards_by_index(
         ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME, app=app
     )
-    first_unit_with_primary_shard = [
-        shard.unit_id for shard in shards if shard.is_prim
-    ][0]
+    first_unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -232,9 +228,7 @@ async def test_kill_db_process_node_with_elected_cm(
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # find unit currently elected cluster_manager
-    first_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, leader_unit_ip, app=app
-    )
+    first_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -263,9 +257,7 @@ async def test_kill_db_process_node_with_elected_cm(
     )
 
     # fetch the current elected cluster manager
-    current_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, leader_unit_ip, app=app
-    )
+    current_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
     assert current_elected_cm_unit_id != first_elected_cm_unit_id, (
         "Cluster manager election did not happen."
     )
@@ -293,9 +285,7 @@ async def test_freeze_db_process_node_with_primary_shard(
     shards = await get_shards_by_index(
         ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME, app=app
     )
-    first_unit_with_primary_shard = [
-        shard.unit_id for shard in shards if shard.is_prim
-    ][0]
+    first_unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -362,9 +352,9 @@ async def test_freeze_db_process_node_with_primary_shard(
     )
 
     # verify that the opensearch service is back running on the unit previously hosting the p_shard
-    assert await is_up(
-        ops_test, units_ips[first_unit_with_primary_shard], retries=3, app=app
-    ), "OpenSearch service hasn't restarted."
+    assert await is_up(ops_test, units_ips[first_unit_with_primary_shard], retries=3, app=app), (
+        "OpenSearch service hasn't restarted."
+    )
 
     # fetch unit hosting the new primary shard of the previous index
     shards = await get_shards_by_index(
@@ -395,9 +385,7 @@ async def test_freeze_db_process_node_with_elected_cm(
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # find unit currently elected cluster_manager
-    first_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, leader_unit_ip, app=app
-    )
+    first_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -422,9 +410,7 @@ async def test_freeze_db_process_node_with_elected_cm(
     time.sleep(10)
 
     # verify the unit is not reachable
-    is_node_up = await is_up(
-        ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app
-    )
+    is_node_up = await is_up(ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app)
     assert not is_node_up
 
     await assert_continuous_writes_increasing(c_writes)
@@ -434,9 +420,7 @@ async def test_freeze_db_process_node_with_elected_cm(
     reachable_ip = (await get_reachable_unit_ips(ops_test, app=app))[0]
 
     # fetch the current elected cluster_manager
-    current_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, reachable_ip, app=app
-    )
+    current_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, reachable_ip, app=app)
     assert current_elected_cm_unit_id != first_elected_cm_unit_id, (
         "Cluster manager still assigned to the unit where the service was stopped."
     )
@@ -452,9 +436,9 @@ async def test_freeze_db_process_node_with_elected_cm(
     )
 
     # verify that the opensearch service is back running on the unit previously elected CM unit
-    assert await is_up(
-        ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app
-    ), "OpenSearch service hasn't restarted."
+    assert await is_up(ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app), (
+        "OpenSearch service hasn't restarted."
+    )
 
     # verify the previously elected CM node successfully joined back the rest of the fleet
     assert await check_cluster_formation_successful(
@@ -476,9 +460,7 @@ async def test_restart_db_process_node_with_elected_cm(
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # find unit currently elected cluster manager
-    first_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, leader_unit_ip, app=app
-    )
+    first_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -507,9 +489,7 @@ async def test_restart_db_process_node_with_elected_cm(
     )
 
     # fetch the current elected cluster manager
-    current_elected_cm_unit_id = await get_elected_cm_unit_id(
-        ops_test, leader_unit_ip, app=app
-    )
+    current_elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
     assert current_elected_cm_unit_id != first_elected_cm_unit_id, (
         "Cluster manager election did not happen."
     )
@@ -536,9 +516,7 @@ async def test_restart_db_process_node_with_primary_shard(
     shards = await get_shards_by_index(
         ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME, app=app
     )
-    first_unit_with_primary_shard = [
-        shard.unit_id for shard in shards if shard.is_prim
-    ][0]
+    first_unit_with_primary_shard = [shard.unit_id for shard in shards if shard.is_prim][0]
 
     # Killing the only instance can be disastrous.
     if len(ops_test.model.applications[app].units) < 2:
@@ -633,13 +611,9 @@ async def test_full_cluster_crash(
     logger.info("All kill signals sent. Verifying that all units are down.")
     # check that all units being down at the same time.
     if substrate == "k8s":
-        assert await k8s_all_processes_down(ops_test, app), (
-            "Not all units down at the same time."
-        )
+        assert await k8s_all_processes_down(ops_test, app), "Not all units down at the same time."
     else:
-        assert await all_processes_down(ops_test, app), (
-            "Not all units down at the same time."
-        )
+        assert await all_processes_down(ops_test, app), "Not all units down at the same time."
 
     # Reset restart delay
     logger.info("Resetting restart delay for all units.")
@@ -656,17 +630,13 @@ async def test_full_cluster_crash(
 
     # sleep for restart delay + 45 secs max for the election time + node start + cluster formation
     # around 10 sec enough in a good machine - 45 secs for CI
-    logger.info(
-        "Sleeping for restart delay + 45 seconds to allow cluster to restart and form."
-    )
+    logger.info("Sleeping for restart delay + 45 seconds to allow cluster to restart and form.")
     time.sleep(ORIGINAL_RESTART_DELAY + 45)
 
     # verify all units are up and running
     for unit_id, unit_ip in (await get_application_unit_ids_ips(ops_test, app)).items():
         logger.info("Verifying that unit %s is up after restart.", unit_id)
-        assert await is_up(ops_test, unit_ip), (
-            f"Unit {unit_id} not restarted after cluster crash."
-        )
+        assert await is_up(ops_test, unit_ip), f"Unit {unit_id} not restarted after cluster crash."
 
     # check all nodes successfully joined the same cluster
     assert await check_cluster_formation_successful(
@@ -677,9 +647,7 @@ async def test_full_cluster_crash(
 
     # check that cluster health is green (all primary and replica shards allocated)
     health_resp = await cluster_health(ops_test, leader_ip, app=app)
-    assert health_resp["status"] == "green", (
-        f"Cluster {health_resp['status']} - expected green."
-    )
+    assert health_resp["status"] == "green", f"Cluster {health_resp['status']} - expected green."
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
@@ -723,13 +691,9 @@ async def test_full_cluster_restart(
 
     # check that all units being down at the same time.
     if substrate == "k8s":
-        assert await k8s_all_processes_down(ops_test, app), (
-            "Not all units down at the same time."
-        )
+        assert await k8s_all_processes_down(ops_test, app), "Not all units down at the same time."
     else:
-        assert await all_processes_down(ops_test, app), (
-            "Not all units down at the same time."
-        )
+        assert await all_processes_down(ops_test, app), "Not all units down at the same time."
 
     # Reset restart delay
     for unit_id in get_application_unit_ids(ops_test, app):
@@ -762,9 +726,7 @@ async def test_full_cluster_restart(
 
     # check that cluster health is green (all primary and replica shards allocated)
     health_resp = await cluster_health(ops_test, leader_ip, app=app)
-    assert health_resp["status"] == "green", (
-        f"Cluster {health_resp['status']} - expected green."
-    )
+    assert health_resp["status"] == "green", f"Cluster {health_resp['status']} - expected green."
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])

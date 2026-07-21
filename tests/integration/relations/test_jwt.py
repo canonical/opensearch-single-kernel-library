@@ -128,7 +128,9 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
     logger.info("Access with Basic Auth successful")
 
     logger.info(f"Remove relation with {JWT_APP_NAME}")
-    remove_relation_cmd = f"remove-relation {JWT_APP_NAME}:{JWT_CONFIG_RELATION} {APP_NAME}:{JWT_CONFIG_RELATION}"
+    remove_relation_cmd = (
+        f"remove-relation {JWT_APP_NAME}:{JWT_CONFIG_RELATION} {APP_NAME}:{JWT_CONFIG_RELATION}"
+    )
     await ops_test.juju(*remove_relation_cmd.split(), check=True)
     await wait_until(
         ops_test,
@@ -164,8 +166,7 @@ async def test_configure_and_use_jwt_large_cluster(
             application_name=MAIN_APP,
             num_units=APP_UNITS[MAIN_APP],
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"}
-            | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
             trust=substrate == "k8s",
             resources=charm_resources,
         ),
@@ -200,15 +201,9 @@ async def test_configure_and_use_jwt_large_cluster(
         await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
 
     # integrate large deployment cluster
-    await ops_test.model.integrate(
-        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
-    )
-    await ops_test.model.integrate(
-        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
-    )
-    await ops_test.model.integrate(
-        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
-    )
+    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
 
     await wait_until(
         ops_test,
@@ -216,9 +211,7 @@ async def test_configure_and_use_jwt_large_cluster(
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
     )
 
-    logger.info(
-        f"Integrating {DATA_APP} with {JWT_APP_NAME} - this will result in blocked status"
-    )
+    logger.info(f"Integrating {DATA_APP} with {JWT_APP_NAME} - this will result in blocked status")
     await ops_test.model.integrate(
         f"{JWT_APP_NAME}:{JWT_CONFIG_RELATION}",
         f"{DATA_APP}:{JWT_CONFIG_RELATION}",
@@ -242,7 +235,9 @@ async def test_configure_and_use_jwt_large_cluster(
     logger.info("Access with JWT failed as expected")
 
     logger.info(f"Remove relation with {DATA_APP}")
-    remove_relation_cmd = f"remove-relation {JWT_APP_NAME}:{JWT_CONFIG_RELATION} {DATA_APP}:{JWT_CONFIG_RELATION}"
+    remove_relation_cmd = (
+        f"remove-relation {JWT_APP_NAME}:{JWT_CONFIG_RELATION} {DATA_APP}:{JWT_CONFIG_RELATION}"
+    )
     await ops_test.juju(*remove_relation_cmd.split(), check=True)
 
     await wait_until(

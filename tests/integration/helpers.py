@@ -247,9 +247,7 @@ async def get_application_subordinate_units(
     # `get_unit_ip` should be replaced with `.public_address`
     raw_app = get_raw_application(ops_test, app)
     units = []
-    for principal_unit in get_raw_application(ops_test, principal_app)[
-        "units"
-    ].values():
+    for principal_unit in get_raw_application(ops_test, principal_app)["units"].values():
         u_name, raw_unit = None, None
         for u_name, raw_unit in principal_unit["subordinates"].items():
             if u_name.startswith(f"{app}/"):
@@ -261,9 +259,7 @@ async def get_application_subordinate_units(
             # unit not ready yet...
             continue
 
-        units.append(
-            _get_unit(ops_test, app, raw_app, u_name, raw_unit, subordinate=True)
-        )
+        units.append(_get_unit(ops_test, app, raw_app, u_name, raw_unit, subordinate=True))
     return await asyncio.gather(*units) if units else []
 
 
@@ -368,9 +364,7 @@ async def _is_every_condition_met(
             units = await get_application_units(ops_test, app)
 
         if -1 < expected_units != len(units):
-            logger.info(
-                f"{app} -- expected units: {expected_units} -- current: {len(units)}"
-            )
+            logger.info(f"{app} -- expected units: {expected_units} -- current: {len(units)}")
             return False
 
         if not _is_every_condition_on_app_met(
@@ -533,9 +527,7 @@ async def wait_until_async_condition_on_units(
         raise
 
 
-async def get_application_unit_ids_ips(
-    ops_test: OpsTest, app: str = APP_NAME
-) -> Dict[int, str]:
+async def get_application_unit_ids_ips(ops_test: OpsTest, app: str = APP_NAME) -> Dict[int, str]:
     """List the units of an application by id and corresponding IP.
 
     Args:
@@ -574,9 +566,7 @@ def get_application_unit_ids(ops_test: OpsTest, app: str = APP_NAME) -> List[int
     Returns:
         list of current unit ids of the application
     """
-    return [
-        int(unit.name.split("/")[1]) for unit in ops_test.model.applications[app].units
-    ]
+    return [int(unit.name.split("/")[1]) for unit in ops_test.model.applications[app].units]
 
 
 def get_file_contents(
@@ -653,9 +643,7 @@ def _request_path(endpoint: str) -> str:
 
 def _k8s_unit_fqdn(ops_test: OpsTest, app: str, unit: Unit) -> str:
     """Return the fully qualified domain name for a K8s unit"""
-    return (
-        f"{unit.short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
-    )
+    return f"{unit.short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
 
 
 def _http_request_headers(
@@ -692,9 +680,7 @@ async def run_action(
     if app not in ops_test.model.applications:
         return SimpleNamespace(
             status="failed",
-            response={
-                "error": f"Application {app} not found in model {ops_test.model.info.name}"
-            },
+            response={"error": f"Application {app} not found in model {ops_test.model.info.name}"},
         )
     if unit_id is None:
         online_units = []
@@ -736,9 +722,7 @@ async def run_action(
         if unit.name.endswith(f"/{unit_id}")
     ][0]
 
-    action = await ops_test.model.units.get(unit_name).run_action(
-        action_name, **(params or {})
-    )
+    action = await ops_test.model.units.get(unit_name).run_action(action_name, **(params or {}))
     action = await action.wait()
 
     return SimpleNamespace(
@@ -761,9 +745,7 @@ async def get_secrets(
     """
     # can retrieve from any unit running unit, so we pick the first
     return (
-        await run_action(
-            ops_test, unit_id, "get-password", {"username": username}, app=app
-        )
+        await run_action(ops_test, unit_id, "get-password", {"username": username}, app=app)
     ).response
 
 
@@ -957,9 +939,7 @@ async def get_application_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> Li
 async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
     secrets_raw = await ops_test.juju("list-secrets")
     secret_ids = [
-        secret_line.split()[0]
-        for secret_line in secrets_raw[1].split("\n")[1:]
-        if secret_line
+        secret_line.split()[0] for secret_line in secrets_raw[1].split("\n")[1:] if secret_line
     ]
 
     for secret_id in secret_ids:
@@ -989,9 +969,7 @@ async def check_cluster_formation_successful(
     Returns:
         Whether The cluster formation is successful.
     """
-    response = await http_request(
-        ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app
-    )
+    response = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
     if "_nodes" not in response or "nodes" not in response:
         return False
 
@@ -1034,9 +1012,7 @@ async def cluster_health(
     )
 
 
-async def get_application_unit_ips_names(
-    ops_test: OpsTest, app: str = APP_NAME
-) -> Dict[str, str]:
+async def get_application_unit_ips_names(ops_test: OpsTest, app: str = APP_NAME) -> Dict[str, str]:
     """List the units of an application by name and corresponding IPs.
 
     Args:
@@ -1154,9 +1130,7 @@ async def is_up(
 ) -> bool:
     """Return if node up."""
     try:
-        for attempt in Retrying(
-            stop=stop_after_attempt(retries), wait=wait_fixed(wait=15)
-        ):
+        for attempt in Retrying(stop=stop_after_attempt(retries), wait=wait_fixed(wait=15)):
             with attempt:
                 await http_request(
                     ops_test,
@@ -1186,9 +1160,7 @@ async def get_reachable_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> List
 
 def juju_version_major() -> int:
     """Fetch the juju version."""
-    version = subprocess.run(
-        ["juju", "--version"], check=True, stdout=subprocess.PIPE
-    ).stdout
+    version = subprocess.run(["juju", "--version"], check=True, stdout=subprocess.PIPE).stdout
     return int(version.strip().decode("utf-8").split(".")[0])
 
 
@@ -1200,9 +1172,7 @@ async def get_controller_hostname(ops_test: OpsTest) -> str:
 
     return [
         machine.get("instance-id")
-        for machine in controller[ops_test.controller_name][
-            "controller-machines"
-        ].values()
+        for machine in controller[ops_test.controller_name]["controller-machines"].values()
     ][0]
 
 
@@ -1268,9 +1238,7 @@ async def get_unit_relation_data(
         raise ValueError(f"no unit info could be grabbed for {unit_name}")
     data = yaml.safe_load(raw_data)
     # Filter the data based on the relation name.
-    relation_data = [
-        v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name
-    ]
+    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
     if relation_id:
         # Filter the data based on the relation id.
         relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
@@ -1291,8 +1259,5 @@ async def get_unit_relation_data(
     else:
         return {}
     return (
-        relation_data[idx]["related-units"]
-        .get(target_unit_name, {})
-        .get("data", {})
-        .get(key, {})
+        relation_data[idx]["related-units"].get(target_unit_name, {}).get("data", {}).get(key, {})
     )

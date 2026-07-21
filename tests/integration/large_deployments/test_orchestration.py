@@ -65,8 +65,7 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[MAIN_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"}
-            | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager,data"} | CONFIG_OPTS,
             storage={"opensearch-data": "local,128G,1"} if substrate == "vm" else None,
             trust=substrate == "k8s",
         ),
@@ -150,9 +149,9 @@ async def test_check_orchestrators_in_rel_data(ops_test: OpsTest) -> None:
     assert orchestrators.main_app and orchestrators.main_app.name == MAIN_APP, (
         "Main orchestrator not set correctly"
     )
-    assert (
-        orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP
-    ), "Failover orchestrator not set correctly"
+    assert orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP, (
+        "Failover orchestrator not set correctly"
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -237,9 +236,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
 
     storages = await ops_test.model.list_storage()
     failover_app_storages = [
-        s["storage-tag"]
-        for s in storages
-        if failover_app.units[0].tag in s["attachments"]
+        s["storage-tag"] for s in storages if failover_app.units[0].tag in s["attachments"]
     ]
     logger.info(f"Failover app storages: {failover_app_storages}")
     await failover_app.destroy_unit(failover_app.units[0].name)
@@ -274,9 +271,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_APP_TWO],
         apps_statuses={
-            MAIN_APP: [
-                PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value
-            ],
+            MAIN_APP: [PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value],
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             DATA_APP: [
                 PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value
@@ -313,6 +308,6 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     assert orchestrators.main_app and orchestrators.main_app.name == MAIN_APP, (
         "Main app is supposed to be the main orchestrator"
     )
-    assert (
-        orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP
-    ), "Failover app is supposed to be the failover orchestrator"
+    assert orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP, (
+        "Failover app is supposed to be the failover orchestrator"
+    )

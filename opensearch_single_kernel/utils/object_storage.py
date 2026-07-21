@@ -261,9 +261,7 @@ def get_azure_container_client(azure_parameters: dict[str, str]) -> ContainerCli
         ContainerClient: Client bound to the target container.
     """
     if not (account_url := azure_parameters.get("account-url")):
-        account_url = (
-            f"https://{azure_parameters['storage-account']}.blob.core.windows.net"
-        )
+        account_url = f"https://{azure_parameters['storage-account']}.blob.core.windows.net"
 
     return ContainerClient(
         account_url=account_url,
@@ -473,9 +471,7 @@ def verify_gcs_credentials(object_storage_config: ObjectStorageConfig) -> bool: 
             exists = False
 
         if not exists:
-            logger.warning(
-                "GCS bucket %r not found; attempting to create it.", bucket_name
-            )
+            logger.warning("GCS bucket %r not found; attempting to create it.", bucket_name)
             try:
                 create_gcs_bucket(client, bucket)
             except (Conflict, Forbidden):
@@ -549,13 +545,7 @@ def storage_config_from_connection_info(
         case _:
             return
     try:
-        rel_data = (
-            data_model.from_relation(connection_info) if connection_info else None
-        )
+        rel_data = data_model.from_relation(connection_info) if connection_info else None
     except ValidationError as e:
         raise OpenSearchObjectStorageConfigValidationError(e) from e
-    return (
-        ObjectStorageConfig(**{object_storage_type.value: rel_data})
-        if rel_data
-        else None
-    )
+    return ObjectStorageConfig(**{object_storage_type.value: rel_data}) if rel_data else None

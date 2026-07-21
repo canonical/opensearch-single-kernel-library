@@ -37,9 +37,7 @@ async def check_security_index_initialised(ops_test: OpsTest, unit_ip: str) -> b
     wait=wait_fixed(wait=5) + wait_random(0, 5),
     stop=stop_after_attempt(15),
 )
-async def check_unit_tls_configured(
-    ops_test: OpsTest, unit_ip: str, unit_name: str
-) -> bool:
+async def check_unit_tls_configured(ops_test: OpsTest, unit_ip: str, unit_name: str) -> bool:
     """Returns whether TLS is enabled on the specific OpenSearch unit.
 
     Args:

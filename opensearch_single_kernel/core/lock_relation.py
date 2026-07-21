@@ -67,11 +67,7 @@ class LockAppState(RelationState):
             # `JUJU_CONTEXT_ID` is unique for each Juju event
             # (https://matrix.to/#/!xdClnUGkurzjxqiQcN:ubuntu.com/$yEGjGlDaIPBtCi8uB3fH6ZaXUjN7GF-Y2s9YwvtPM-o?via=ubuntu.com&via=matrix.org&via=cutefunny.art)
             self.relation.data[self.app].update(
-                {
-                    "leader-acquired-lock-after-juju-event-id": os.environ[
-                        "JUJU_CONTEXT_ID"
-                    ]
-                }
+                {"leader-acquired-lock-after-juju-event-id": os.environ["JUJU_CONTEXT_ID"]}
             )
         self.relation.data[self.app].update({"unit-with-lock": value})
 
@@ -79,9 +75,7 @@ class LockAppState(RelationState):
     def unit_with_lock(self) -> None:
         """Remove lock assignment from the units and clear leader_acquired_after_juju_event_id."""
         self.relation.data[self.app].pop("unit-with-lock", None)
-        self.relation.data[self.app].pop(
-            "leader-acquired-lock-after-juju-event-id", None
-        )
+        self.relation.data[self.app].pop("leader-acquired-lock-after-juju-event-id", None)
 
 
 class LockServerState(RelationState):
@@ -115,6 +109,4 @@ class LockServerState(RelationState):
         # (Value should never be read)
         # (If we set the same value that is currently in the databag, a peer relation
         # changed event will not be triggered)
-        self.relation.data[self.unit].update(
-            {"-trigger": os.environ["JUJU_CONTEXT_ID"]}
-        )
+        self.relation.data[self.unit].update({"-trigger": os.environ["JUJU_CONTEXT_ID"]})

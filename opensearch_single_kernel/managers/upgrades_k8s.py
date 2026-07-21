@@ -45,9 +45,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             self.k8s_client.get_partition()
         except ApiError as err:
             if err.status.code == 403:
-                raise OpenSearchK8sDeployedWithoutTrustError(
-                    app_name=self.state.application.name
-                )
+                raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.state.application.name)
             raise
 
     @property

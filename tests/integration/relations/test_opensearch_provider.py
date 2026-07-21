@@ -171,8 +171,7 @@ async def test_index_usage(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 1
     assert (
-        results.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("artist")
-        == "Vulfpeck"
+        results.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("artist") == "Vulfpeck"
     )
 
 
@@ -213,8 +212,7 @@ async def test_bulk_index_usage(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 3
     artists = [
-        hit.get("_source", {}).get("artist")
-        for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -254,9 +252,7 @@ async def test_dashboard_relation(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
-    dashboards_relation = await ops_test.model.integrate(
-        OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME
-    )
+    dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
 
     await wait_until(
@@ -276,9 +272,7 @@ async def test_dashboard_relation(ops_test: OpsTest):
     assert relation_user_name == "kibanaserver"
 
     leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(
-        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
-    )
+    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
     assert relation_user_pwd == result.response.get("password")
 
 
@@ -289,16 +283,10 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Changing Opensearch kibanaserver password
     leader_id = await get_leader_unit_id(ops_test)
-    result = await run_action(
-        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
-    )
+    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
     orig_pwd = result.response.get("password")
-    result = await run_action(
-        ops_test, leader_id, "set-password", {"username": "kibanaserver"}
-    )
-    result = await run_action(
-        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
-    )
+    result = await run_action(ops_test, leader_id, "set-password", {"username": "kibanaserver"})
+    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
     new_pwd = result.response.get("password")
     assert orig_pwd != new_pwd
 
@@ -314,9 +302,7 @@ async def test_dashboard_relation_password_change(ops_test: OpsTest):
     assert relation_user_pwd == new_pwd
 
     # Double-checking
-    result = await run_action(
-        ops_test, leader_id, "get-password", {"username": "kibanaserver"}
-    )
+    result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
     assert relation_user_pwd == result.response.get("password")
 
 
@@ -412,9 +398,7 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm, substrat
     second_client_relation = await ops_test.model.integrate(
         f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}", OPENSEARCH_APP_NAME
     )
-    wait_for_relation_joined_between(
-        ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME
-    )
+    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME)
 
     await wait_until(
         ops_test,
@@ -482,8 +466,7 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest):
     results = json.loads(run_bulk_read_index["results"])
     logging.info(results)
     artists = [
-        hit.get("_source", {}).get("artist")
-        for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -517,8 +500,7 @@ async def test_admin_relation(ops_test: OpsTest):
     results = json.loads(run_bulk_read_index["results"])
     logging.info(results)
     artists = [
-        hit.get("_source", {}).get("artist")
-        for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
 
@@ -561,9 +543,7 @@ async def test_admin_permissions(ops_test: OpsTest):
     first_relation_user_data = await get_secret_data(ops_test, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
-    first_relation_user_endpoint = (
-        f"/_plugins/_security/api/internalusers/{first_relation_user}"
-    )
+    first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
     run_delete_users = await run_request(
         ops_test,
         unit_name=test_unit.name,
@@ -623,9 +603,7 @@ async def test_normal_user_permissions(ops_test: OpsTest):
     first_relation_user_data = await get_secret_data(ops_test, secret_uri)
     first_relation_user = first_relation_user_data.get("username")
 
-    first_relation_user_endpoint = (
-        f"/_plugins/_security/api/internalusers/{first_relation_user}"
-    )
+    first_relation_user_endpoint = f"/_plugins/_security/api/internalusers/{first_relation_user}"
     run_delete_users = await run_request(
         ops_test,
         unit_name=test_unit.name,
@@ -746,7 +724,6 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     assert results.get("timed_out") is False
     assert results.get("hits", {}).get("total", {}).get("value") == 3
     artists = [
-        hit.get("_source", {}).get("artist")
-        for hit in results.get("hits", {}).get("hits", [{}])
+        hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}

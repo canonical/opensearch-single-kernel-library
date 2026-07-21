@@ -70,8 +70,7 @@ class PeerClusterManager(BaseManager):
             app=deployment_desc.app,
             planned_units=self.state.planned_units,
             units=[
-                format_unit_name(unit, app=deployment_desc.app)
-                for unit in self.state.all_units
+                format_unit_name(unit, app=deployment_desc.app) for unit in self.state.all_units
             ],
             roles=(
                 deployment_desc.config.roles
@@ -141,9 +140,7 @@ class PeerClusterManager(BaseManager):
         )
 
         # fetch the (main/failover)-cluster-orchestrator relations
-        for remote_peer_cluster in self.state.peer_clusters(
-            is_provider=False, remote=True
-        ):
+        for remote_peer_cluster in self.state.peer_clusters(is_provider=False, remote=True):
             remote_orchestrators.update(remote_peer_cluster.orchestrators)
 
         local_orchestrators = self.state.application.orchestrators_dict
@@ -197,15 +194,9 @@ class PeerClusterManager(BaseManager):
                 is_provider=False,
                 remote=True,
             )
-            data = (
-                remote_peer_cluster.relation_data.get("data", {})
-                if remote_peer_cluster
-                else {}
-            )
+            data = remote_peer_cluster.relation_data.get("data", {}) if remote_peer_cluster else {}
             error_data = (
-                remote_peer_cluster.get_object("error_data")
-                if remote_peer_cluster
-                else {}
+                remote_peer_cluster.get_object("error_data") if remote_peer_cluster else {}
             )
             if not data and not error_data:  # relation data still incomplete
                 raise OpenSearchPeerClusterRelationDataIncompleteError(
@@ -250,7 +241,9 @@ class PeerClusterManager(BaseManager):
                 provider_app_id in cluster_fleet_apps
                 and cluster_fleet_apps[provider_app_id].planned_units > 0
             ):
-                blocked_msg = PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
+                )
         elif event_rel_id and (
             event_rel_id
             not in [
@@ -369,11 +362,7 @@ class PeerClusterManager(BaseManager):
                     )
                     cm_nodes = {
                         **cm_nodes,
-                        **{
-                            node.name: node
-                            for node in all_nodes
-                            if node.is_cm_eligible()
-                        },
+                        **{node.name: node for node in all_nodes if node.is_cm_eligible()},
                     }
         except RetryError:
             pass
@@ -420,9 +409,7 @@ class PeerClusterManager(BaseManager):
     def cleanup_error_in_relation_data(self) -> None:
         """Clean up the error data in relation data when the error is resolved."""
         for key, _ in self.state.application.relation_data.items():
-            if key.startswith("error_from_provider") or key.startswith(
-                "error_from_requirer"
-            ):
+            if key.startswith("error_from_provider") or key.startswith("error_from_requirer"):
                 # get the relation id from key
                 rel_id = int(key.split("-")[-1])
                 relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
@@ -435,9 +422,7 @@ class PeerClusterManager(BaseManager):
         Only call this method on leader. This will update the planned units.
         """
         deployment_desc = self.state.application.deployment_desc
-        all_relations = [
-            rel for rel in self.state.peer_cluster_relations if len(rel.units) > 0
-        ]
+        all_relations = [rel for rel in self.state.peer_cluster_relations if len(rel.units) > 0]
         for rel in all_relations:
             self.set_current_app_in_cluster_fleet(
                 rel_id=rel.id, deployment_desc=deployment_desc, is_provider=False
@@ -471,9 +456,7 @@ class PeerClusterManager(BaseManager):
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
                     )
-            for peer_cluster in self.state.peer_clusters(
-                remote=True, is_provider=False
-            ):
+            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 # check if there is an error
                 if error_data := peer_cluster.error_data:
                     status_list.append(error_data.get_status())
@@ -485,9 +468,7 @@ class PeerClusterManager(BaseManager):
                         deployment_desc=self.state.application.deployment_desc,
                         peer_cluster_rel_data=data,
                         # only check if we have orchestrators in the data bag
-                        event_rel_id=peer_cluster.relation.id
-                        if orchestrators.main_app
-                        else None,
+                        event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
                     )
                     if requirer_errors and (status := requirer_errors.get_status()):
                         status_list.append(status)

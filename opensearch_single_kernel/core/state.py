@@ -128,12 +128,8 @@ class ClusterState(Object):
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
         # TODO: Add secrets
-        self.peer_app_interface = DataPeerData(
-            model=charm.model, relation_name=PEER_RELATION
-        )
-        self.peer_unit_interface = DataPeerUnitData(
-            model=charm.model, relation_name=PEER_RELATION
-        )
+        self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
+        self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
         self.client_data_interface = OpenSearchProvidesData(
             model=charm.model, relation_name=CLIENT_RELATION
         )
@@ -222,9 +218,7 @@ class ClusterState(Object):
 
     def peer_cluster_orchestrator_relation_exists(self, relation_id: int) -> bool:
         """Check if the relation with id exists"""
-        relation = self.model.get_relation(
-            PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id
-        )
+        relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
         return bool(relation)
 
     # --- Upgrade Relation State Properties ---
@@ -234,9 +228,7 @@ class ClusterState(Object):
         """Get state of lock relation for current unit."""
         return UpgradeServerState(
             relation=self.upgrade_relation,
-            data_interface=DataPeerUnitData(
-                model=self.model, relation_name=UPGRADE_RELATION
-            ),
+            data_interface=DataPeerUnitData(model=self.model, relation_name=UPGRADE_RELATION),
             component=self.model.unit,
         )
 
@@ -245,9 +237,7 @@ class ClusterState(Object):
         """Get application state of upgrade relation."""
         return UpgradeAppState(
             relation=self.upgrade_relation,
-            data_interface=DataPeerData(
-                model=self.model, relation_name=UPGRADE_RELATION
-            ),
+            data_interface=DataPeerData(model=self.model, relation_name=UPGRADE_RELATION),
             component=self.model.app,
         )
 
@@ -370,9 +360,7 @@ class ClusterState(Object):
             return relation.units if remote else [self.model.unit]
 
         return [
-            PeerClusterServer(
-                relation=rel, data_interface=data_interface, component=unit
-            )
+            PeerClusterServer(relation=rel, data_interface=data_interface, component=unit)
             for rel in self.model.relations[relation_name]
             for unit in get_units(rel)
         ]
@@ -398,9 +386,7 @@ class ClusterState(Object):
             )
         return None
 
-    def all_peer_clusters_servers(
-        self, remote: bool = False
-    ) -> list[PeerClusterServer]:
+    def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServer]:
         """Return the list of all peer cluster servers for each relations."""
         return self._peer_clusters_servers(
             is_provider=False, remote=remote
@@ -473,9 +459,7 @@ class ClusterState(Object):
 
         return clients
 
-    def external_client_by_relation(
-        self, relation: Relation
-    ) -> ExternalOpenSearchClient | None:
+    def external_client_by_relation(self, relation: Relation) -> ExternalOpenSearchClient | None:
         """Get external opensearch client by relation."""
         if relation not in self.external_client_relations:
             return None
@@ -494,9 +478,7 @@ class ClusterState(Object):
         """Return the dashboard relations out of all."""
         result = []
         for external_client in self.external_clients:
-            if (
-                roles := external_client.extra_user_roles
-            ) and KIBANA_SERVER_ROLE in roles:
+            if (roles := external_client.extra_user_roles) and KIBANA_SERVER_ROLE in roles:
                 # if any(key.name == "opensearch-dashboards" for key in relation.data.keys()):
                 result.append(external_client)
         return result
@@ -515,9 +497,7 @@ class ClusterState(Object):
         """Get state of lock relation for current unit."""
         return LockServerState(
             relation=self.lock_relation,
-            data_interface=DataPeerUnitData(
-                model=self.model, relation_name=NODE_LOCK_RELATION
-            ),
+            data_interface=DataPeerUnitData(model=self.model, relation_name=NODE_LOCK_RELATION),
             component=self.model.unit,
         )
 
@@ -559,9 +539,7 @@ class ClusterState(Object):
         """Get application state of lock relation."""
         return LockAppState(
             relation=self.lock_relation,
-            data_interface=DataPeerData(
-                model=self.model, relation_name=NODE_LOCK_RELATION
-            ),
+            data_interface=DataPeerData(model=self.model, relation_name=NODE_LOCK_RELATION),
             component=self.model.app,
             unit_name=self.unit_name,
         )
@@ -571,9 +549,7 @@ class ClusterState(Object):
     @property
     def unit_name(self):
         """Name of the current unit."""
-        return format_unit_name(
-            self.model.unit, app=self.application.deployment_desc.app
-        )
+        return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
 
     @property
     def node_config(self) -> Node | None:
@@ -653,10 +629,7 @@ class ClusterState(Object):
         if not self.peer_relation:
             return False
         for unit in self.all_units:
-            if (
-                self.peer_relation.data[unit].get("tls_configured", "").lower()
-                != "true"
-            ):
+            if self.peer_relation.data[unit].get("tls_configured", "").lower() != "true":
                 return False
         return True
 
@@ -664,17 +637,11 @@ class ClusterState(Object):
     def ca_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
         # Use related_peer_cluster_servers since we are reading remote data.
-        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(
-            remote=True
-        )
+        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
 
         # check peer units and current unit
-        rotation_in_progress = any(
-            [server.tls_ca_renewing for server in all_units_in_fleet]
-        )
-        rotation_complete = all(
-            [server.tls_ca_renewed for server in all_units_in_fleet]
-        )
+        rotation_in_progress = any([server.tls_ca_renewing for server in all_units_in_fleet])
+        rotation_complete = all([server.tls_ca_renewed for server in all_units_in_fleet])
 
         logger.debug(
             "CA rotation state CA rotation happening in cluster: %s | \
@@ -689,9 +656,7 @@ class ClusterState(Object):
     def ca_and_certs_rotation_complete_in_cluster(self) -> bool:
         """Check whether the CA rotation completed in all units."""
         # Use related_peer_cluster_servers since we are reading remote data.
-        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(
-            remote=True
-        )
+        all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
         logger.debug(
             "CA and certs rotation state Units in fleet: %s | \
                 CA rotation complete in fleet: %s | \
@@ -705,8 +670,7 @@ class ClusterState(Object):
             "CA and certs rotation complete in cluster: %s",
             all(
                 [
-                    server.tls_configured
-                    and (not server.tls_ca_renewing or server.tls_ca_renewed)
+                    server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
                     for server in all_units_in_fleet
                 ]
             ),
@@ -715,8 +679,7 @@ class ClusterState(Object):
         # or if tls is not configured or in the middle of rotation, return False
         return all(
             [
-                server.tls_configured
-                and (not server.tls_ca_renewing or server.tls_ca_renewed)
+                server.tls_configured and (not server.tls_ca_renewing or server.tls_ca_renewed)
                 for server in all_units_in_fleet
             ]
         )
@@ -729,10 +692,7 @@ class ClusterState(Object):
 
         peer_cluster_servers = self.all_peer_clusters_servers(remote=False)
         # if this flag is set, the CA rotation routine is complete for this unit
-        if (
-            self.server.tls_ca_renewed
-            and self.ca_and_certs_rotation_complete_in_cluster
-        ):
+        if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster:
             # both CA rotation and certs rotation completed in the cluster
             del self.server.tls_ca_renewing
             del self.server.tls_ca_renewed
@@ -762,9 +722,7 @@ class ClusterState(Object):
         for unit in all_units:
             if self.substrate == Substrates.K8S:
                 hosts.add(
-                    k8s_fqdn(
-                        format_unit_name(unit, app=self.application.deployment_desc.app)
-                    )
+                    k8s_fqdn(format_unit_name(unit, app=self.application.deployment_desc.app))
                 )
             else:
                 hosts.add(self.unit_ip(unit))
@@ -805,9 +763,7 @@ class ClusterState(Object):
         return PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.planned_units,
-            units=[
-                format_unit_name(u, app=deployment_desc.app) for u in self.all_units
-            ],
+            units=[format_unit_name(u, app=deployment_desc.app) for u in self.all_units],
             roles=(
                 deployment_desc.config.roles
                 if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
@@ -1006,9 +962,7 @@ class ClusterState(Object):
                 return present_status
         return None
 
-    def is_peer_cluster_provider(
-        self, typ: Literal["main", "failover"] | None = None
-    ) -> bool:
+    def is_peer_cluster_provider(self, typ: Literal["main", "failover"] | None = None) -> bool:
         """Return whether the current app is a related to provider / orchestrator."""
         if not (deployment_desc := self.application.deployment_desc):
             return False
@@ -1029,8 +983,7 @@ class ClusterState(Object):
 
         is_main = orchestrators.main_app and orchestrators.main_app.id == current_app_id
         is_failover = (
-            orchestrators.failover_app
-            and orchestrators.failover_app.id == current_app_id
+            orchestrators.failover_app and orchestrators.failover_app.id == current_app_id
         )
 
         if typ == "main":
@@ -1040,9 +993,7 @@ class ClusterState(Object):
         else:
             return is_main or is_failover
 
-    def is_peer_cluster_consumer(
-        self, of: Literal["main", "failover"] | None = None
-    ) -> bool:
+    def is_peer_cluster_consumer(self, of: Literal["main", "failover"] | None = None) -> bool:
         """Check if the current app is a consumer of the peer-cluster-relation."""
         if not (deployment_desc := self.application.deployment_desc):
             return False
@@ -1056,10 +1007,7 @@ class ClusterState(Object):
             # not populated yet
             return False
 
-        if (
-            orchestrators.main_app
-            and orchestrators.main_app.id == deployment_desc.app.id
-        ):
+        if orchestrators.main_app and orchestrators.main_app.id == deployment_desc.app.id:
             # there is a wrong relation happening - where current is the main orchestrator
             # yet related to another "orchestrator"
             return False
@@ -1101,16 +1049,11 @@ class ClusterState(Object):
         if not self.is_peer_cluster_consumer(of="main"):
             return None
 
-        if (
-            not (orchestrators := self.application.orchestrators)
-            or not orchestrators.main_rel_id
-        ):
+        if not (orchestrators := self.application.orchestrators) or not orchestrators.main_rel_id:
             logger.info("no orchestrators found")
             return None
 
-        if not self.peer_cluster_orchestrator_relation_exists(
-            orchestrators.main_rel_id
-        ):
+        if not self.peer_cluster_orchestrator_relation_exists(orchestrators.main_rel_id):
             logger.info(
                 "relation with id %s not found for main orchestrator",
                 orchestrators.main_rel_id,
@@ -1187,18 +1130,13 @@ class ClusterState(Object):
             case ObjectStorageType.GCS:
                 if not self.gcs_relation:
                     return {}
-                return (
-                    self.gcs_requires.get_storage_connection_info(self.gcs_relation)
-                    or {}
-                )
+                return self.gcs_requires.get_storage_connection_info(self.gcs_relation) or {}
             case _:
                 raise OpenSearchInvalidStorageTypeError(
                     "Unsupported object storage type: %s" % object_storage_type
                 )
 
-    def gcs_credentials(
-        self, connection_info: dict[str, str]
-    ) -> GcsRelDataCredentials | None:
+    def gcs_credentials(self, connection_info: dict[str, str]) -> GcsRelDataCredentials | None:
         """Retrieve GCS storage credentials."""
         deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
@@ -1207,9 +1145,7 @@ class ClusterState(Object):
 
             try:
                 object_storage_config = (
-                    storage_config_from_connection_info(
-                        ObjectStorageType.GCS, connection_info
-                    )
+                    storage_config_from_connection_info(ObjectStorageType.GCS, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:
@@ -1240,9 +1176,7 @@ class ClusterState(Object):
             secret_key=self.secrets.get(Scope.APP, "gcs-secret-key"),
         )
 
-    def azure_credentials(
-        self, connection_info: dict[str, str]
-    ) -> AzureRelDataCredentials | None:
+    def azure_credentials(self, connection_info: dict[str, str]) -> AzureRelDataCredentials | None:
         """Retrieve Azure storage credentials."""
         deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
@@ -1251,9 +1185,7 @@ class ClusterState(Object):
 
             try:
                 object_storage_config = (
-                    storage_config_from_connection_info(
-                        ObjectStorageType.AZURE, connection_info
-                    )
+                    storage_config_from_connection_info(ObjectStorageType.AZURE, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:
@@ -1276,9 +1208,7 @@ class ClusterState(Object):
             self.secrets.put(Scope.APP, "azure-storage-account", storage_account)
             self.secrets.put(Scope.APP, "azure-secret-key", secret_key)
 
-            return AzureRelDataCredentials(
-                storage_account=storage_account, secret_key=secret_key
-            )
+            return AzureRelDataCredentials(storage_account=storage_account, secret_key=secret_key)
 
         if not self.secrets.get(Scope.APP, "azure-storage-account"):
             return None
@@ -1289,9 +1219,7 @@ class ClusterState(Object):
             secret_key=self.secrets.get(Scope.APP, "azure-secret-key"),
         )
 
-    def s3_credentials(
-        self, connection_info: dict[str, str]
-    ) -> S3RelDataCredentials | None:
+    def s3_credentials(self, connection_info: dict[str, str]) -> S3RelDataCredentials | None:
         """Retrieve S3 storage credentials."""
         deployment_desc = self.application.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
@@ -1299,9 +1227,7 @@ class ClusterState(Object):
                 return None
             try:
                 object_storage_config = (
-                    storage_config_from_connection_info(
-                        ObjectStorageType.S3, connection_info
-                    )
+                    storage_config_from_connection_info(ObjectStorageType.S3, connection_info)
                     or ObjectStorageConfig()
                 )
             except OpenSearchObjectStorageConfigValidationError as e:

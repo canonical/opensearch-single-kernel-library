@@ -70,9 +70,7 @@ async def test_build_and_deploy(
     )
     await ops_test.model.integrate(MAIN_APP, TLS_CERTIFICATES_APP_NAME)
 
-    await ops_test.model.wait_for_idle(
-        apps=[MAIN_APP, TLS_CERTIFICATES_APP_NAME], timeout=TIMEOUT
-    )
+    await ops_test.model.wait_for_idle(apps=[MAIN_APP, TLS_CERTIFICATES_APP_NAME], timeout=TIMEOUT)
     main_peer_cluster_orchestrator_offer = f"offer {ops_test.model.info.name}.{MAIN_APP}:{PEER_CLUSTER_ORCHESTRATOR_RELATION} {MAIN_ORCHESTRATOR_OFFER}"
     logger.info("Offering relations in main model...")
     await ops_test.juju(*main_peer_cluster_orchestrator_offer.split())
@@ -104,9 +102,7 @@ async def test_build_and_deploy(
             f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
         )
         logger.info("Integrating certs with failover...\n")
-        await failover_model.integrate(
-            f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}"
-        )
+        await failover_model.integrate(f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}")
         await failover_model.wait_for_idle(
             apps=[FAILOVER_APP],
             timeout=TIMEOUT,

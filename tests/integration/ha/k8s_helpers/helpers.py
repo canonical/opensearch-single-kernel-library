@@ -48,9 +48,7 @@ RESTORE_PEBBLE_RESTART_DELAY_YAML = """services:
 """
 
 
-def k8s_cut_network_from_unit_without_ip_change(
-    model_name: str, machine_name: str
-) -> None:
+def k8s_cut_network_from_unit_without_ip_change(model_name: str, machine_name: str) -> None:
     """Cut network from a k8s pod without causing the change of the unit IP address."""
     # Apply a NetworkChaos file to use chaos-mesh to simulate a network cut.
     with tempfile.NamedTemporaryFile(dir=".") as temp_file:
@@ -196,13 +194,9 @@ def k8s_is_unit_reachable(namespace: str, source_pod_name: str, to_host: str) ->
 
         # Poll the pod status until it completes
         phase = None
-        for attempt in Retrying(
-            stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True
-        ):
+        for attempt in Retrying(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True):
             with attempt:
-                pod_status = v1.read_namespaced_pod(
-                    name=temp_pod_name, namespace=namespace
-                )
+                pod_status = v1.read_namespaced_pod(name=temp_pod_name, namespace=namespace)
                 phase = pod_status.status.phase
 
                 if phase not in ["Succeeded", "Failed"]:
@@ -241,9 +235,7 @@ def k8s_is_unit_reachable(namespace: str, source_pod_name: str, to_host: str) ->
 def _remote_exit_code_from_error(error: subprocess.CalledProcessError) -> int:
     """Return Juju's wrapped remote exit code when present, otherwise local returncode."""
     output = "\n".join(
-        str(stream)
-        for stream in (error.stderr, error.output, error.stdout)
-        if stream is not None
+        str(stream) for stream in (error.stderr, error.output, error.stdout) if stream is not None
     )
     match = re.search(r"exit code (?P<exit_code>\d+)", output)
     if match:
@@ -440,9 +432,7 @@ def delete_pod(pod_name: str, namespace="testing") -> None:
 
     try:
         # Call the API to delete the pod
-        logger.info(
-            "Attempting to delete pod %s in namespace '%s'...", pod_name, namespace
-        )
+        logger.info("Attempting to delete pod %s in namespace '%s'...", pod_name, namespace)
         v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
 
         logger.info("Success! Pod deleted.")
@@ -450,13 +440,9 @@ def delete_pod(pod_name: str, namespace="testing") -> None:
     except ApiException as e:
         # Handle API errors (e.g., pod not found, unauthorized, etc.)
         if e.status == 404:
-            logger.warning(
-                "Error: Pod '%s' not found in namespace '%s'.", pod_name, namespace
-            )
+            logger.warning("Error: Pod '%s' not found in namespace '%s'.", pod_name, namespace)
         else:
-            logger.error(
-                "Exception when calling CoreV1Api->delete_namespaced_pod: %s", e
-            )
+            logger.error("Exception when calling CoreV1Api->delete_namespaced_pod: %s", e)
 
 
 def instance_ip(model: str, instance: str) -> str:
@@ -493,9 +479,7 @@ async def k8s_all_processes_down(
             "-f",
             db_process,
         ]
-        return_code, opensearch_pid, stderr = await ops_test.juju(
-            *get_pid_cmd, check=False
-        )
+        return_code, opensearch_pid, stderr = await ops_test.juju(*get_pid_cmd, check=False)
         if return_code not in (0, 1):
             logger.error(
                 "Failed to check OpenSearch process on unit %s: rc=%s, stderr=%s",

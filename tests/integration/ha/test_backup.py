@@ -229,12 +229,8 @@ def remove_backups(  # noqa C901
             storage_account = cloud_credentials[cloud_name]["storage-account"]
             secret_key = cloud_credentials[cloud_name]["secret-key"]
             connection_string = f"DefaultEndpointsProtocol=https;AccountName={storage_account};AccountKey={secret_key};EndpointSuffix=core.windows.net"
-            blob_service_client = BlobServiceClient.from_connection_string(
-                connection_string
-            )
-            container_client = blob_service_client.get_container_client(
-                config["container"]
-            )
+            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            container_client = blob_service_client.get_container_client(config["container"])
 
             # List and delete blobs with the specified prefix
             blobs_to_delete = container_client.list_blobs(name_starts_with=BackupsPath)
@@ -304,9 +300,7 @@ async def _configure_azure(
     config: Dict[str, str],
     credentials: Dict[str, str],
 ) -> None:
-    logger.info(
-        "Adding Juju secret for secret-key config option for azure-storage-integrator"
-    )
+    logger.info("Adding Juju secret for secret-key config option for azure-storage-integrator")
 
     # Creates a new secret for each test
     local_label = "".join(random.choice(string.ascii_letters) for _ in range(10))
@@ -348,9 +342,7 @@ async def _configure_gcs(
         local_label,
         {"secret-key": credentials["secret-key"]},
     )
-    logger.info(
-        f"Juju secret for GCS credentials added. Secret URI: {credentials_secret_uri}"
-    )
+    logger.info(f"Juju secret for GCS credentials added. Secret URI: {credentials_secret_uri}")
 
     full_cfg = deepcopy(config)
     full_cfg.update({"credentials": credentials_secret_uri})
@@ -521,12 +513,8 @@ async def test_large_deployment_build_and_deploy(
     )
 
     # Large deployment setup
-    await ops_test.model.integrate(
-        "main:peer-cluster-orchestrator", "failover:peer-cluster"
-    )
-    await ops_test.model.integrate(
-        "main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
-    )
+    await ops_test.model.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
+    await ops_test.model.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
     await ops_test.model.integrate(
         "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
     )
@@ -586,9 +574,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
     if cloud_name == "azure":
         bad_config = {"connection-protocol": "abfss", "container": "error", "path": "/"}
         bad_credentials = {"storage-account": "error", "secret-key": "error"}
-        await _configure_azure(
-            ops_test=ops_test, config=bad_config, credentials=bad_credentials
-        )
+        await _configure_azure(ops_test=ops_test, config=bad_config, credentials=bad_credentials)
         logger.info("Azure cloud is selected.")
     elif cloud_name == "gcs":
         bad_config = {"bucket": cloud_configs["gcs"]["bucket"], "path": BackupsPath}
@@ -605,9 +591,7 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
                 }
             )
         }
-        await _configure_gcs(
-            ops_test=ops_test, config=bad_config, credentials=bad_credentials
-        )
+        await _configure_gcs(ops_test=ops_test, config=bad_config, credentials=bad_credentials)
         logger.info("GCS cloud is selected.")
     elif cloud_name == "aws":
         bad_config = {
@@ -692,13 +676,9 @@ async def test_large_setups_relations_with_misconfiguration(  # noqa: C901
             wait_for_exact_units=1,
             idle_period=IDLE_PERIOD,
         )
-        logger.info(
-            "Cleaned up misconfigured backup relation from main; main is active again."
-        )
+        logger.info("Cleaned up misconfigured backup relation from main; main is active again.")
     except Exception:
-        logger.info(
-            "No backup-integrator relation to clean up after misconfiguration test."
-        )
+        logger.info("No backup-integrator relation to clean up after misconfiguration test.")
 
 
 @pytest.mark.parametrize("cloud_name,deploy_type", ALL_DEPLOYMENTS_ALL_CLOUDS)
@@ -736,17 +716,13 @@ async def test_create_backup_and_restore(
     elif cloud_name == "aws":
         await _configure_s3_for_aws(ops_test, config, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(
-            ops_test, config, cloud_credentials[cloud_name]
-        )
+        await _configure_s3_for_microceph(ops_test, config, cloud_credentials[cloud_name])
 
     await wait_until(
         ops_test,
         apps=apps,
         idle_period=IDLE_PERIOD,
-        wait_for_exact_units={
-            ap: len(ops_test.model.applications[ap].units) for ap in apps
-        },
+        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
     )
 
     date_before_backup = datetime.utcnow()
@@ -756,9 +732,7 @@ async def test_create_backup_and_restore(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(
-                ops_test, leader_id, unit_ip=unit_ip, app=app
-            ),
+            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
@@ -812,9 +786,7 @@ async def test_remove_and_readd_backup_relation(
     await wait_until(
         ops_test,
         apps=apps,
-        wait_for_exact_units={
-            ap: len(ops_test.model.applications[ap].units) for ap in apps
-        },
+        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
         idle_period=IDLE_PERIOD,
         timeout=1400,
     )
@@ -825,21 +797,15 @@ async def test_remove_and_readd_backup_relation(
         ops_test,
         apps=apps,
         idle_period=IDLE_PERIOD,
-        wait_for_exact_units={
-            ap: len(ops_test.model.applications[ap].units) for ap in apps
-        },
+        wait_for_exact_units={ap: len(ops_test.model.applications[ap].units) for ap in apps},
         timeout=1400,
     )
 
     logger.info(f"Syncing credentials for {cloud_name}")
     if cloud_name == "azure":
-        await _configure_azure(
-            ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name]
-        )
+        await _configure_azure(ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name])
     elif cloud_name == "gcs":
-        await _configure_gcs(
-            ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name]
-        )
+        await _configure_gcs(ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name])
     elif cloud_name == "aws":
         await _configure_s3_for_aws(
             ops_test, cloud_configs[cloud_name], cloud_credentials[cloud_name]
@@ -856,9 +822,7 @@ async def test_remove_and_readd_backup_relation(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(
-                ops_test, leader_id, unit_ip=unit_ip, app=app
-            ),
+            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
@@ -911,9 +875,7 @@ async def test_restore_to_new_cluster(
     await asyncio.gather(
         ops_test.model.remove_application(backup_integrator, block_until_done=True),
         ops_test.model.remove_application(app, block_until_done=True),
-        ops_test.model.remove_application(
-            TLS_CERTIFICATES_APP_NAME, block_until_done=True
-        ),
+        ops_test.model.remove_application(TLS_CERTIFICATES_APP_NAME, block_until_done=True),
     )
 
     logging.info("Deploying a new cluster")
@@ -959,13 +921,9 @@ async def test_restore_to_new_cluster(
     elif cloud_name == "gcs":
         await _configure_gcs(ops_test, config_cloud, cloud_credentials[cloud_name])
     elif cloud_name == "aws":
-        await _configure_s3_for_aws(
-            ops_test, config_cloud, cloud_credentials[cloud_name]
-        )
+        await _configure_s3_for_aws(ops_test, config_cloud, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(
-            ops_test, config_cloud, cloud_credentials[cloud_name]
-        )
+        await _configure_s3_for_microceph(ops_test, config_cloud, cloud_credentials[cloud_name])
 
     await wait_until(
         ops_test,
@@ -982,9 +940,7 @@ async def test_restore_to_new_cluster(
     count = 0
     for backup_id in backups.keys():
         assert await restore(ops_test, backup_id, unit_ip, leader_id, app=app)
-        count = await index_docs_count(
-            ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
-        )
+        count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
 
         # Ensure we have the same doc count as we had on the original cluster
         assert count == cwrites_backup_doc_count[backup_id]
@@ -1009,9 +965,7 @@ async def test_restore_to_new_cluster(
 
     assert (
         datetime.strptime(
-            backup_id := await create_backup(
-                ops_test, leader_id, unit_ip=unit_ip, app=app
-            ),
+            backup_id := await create_backup(ops_test, leader_id, unit_ip=unit_ip, app=app),
             OPENSEARCH_BACKUP_ID_FORMAT,
         )
         > date_before_backup
@@ -1345,9 +1299,7 @@ async def test_wrong_microceph_credentials(
     if "microceph" in cloud_configs and "microceph" in cloud_credentials:
         provider = "microceph"
     else:
-        pytest.skip(
-            "Microceph config/credentials not available for S3 integrator tests."
-        )
+        pytest.skip("Microceph config/credentials not available for S3 integrator tests.")
 
     app = (await app_name(ops_test)) or APP_NAME
     await _ensure_only_s3_integrator_related(ops_test, app)
@@ -1420,9 +1372,7 @@ async def test_wrong_microceph_ca_blocked(
     if "microceph" not in cloud_configs or "microceph" not in cloud_credentials:
         pytest.skip("No microceph config/credentials available in test config.")
     if "tls-ca-chain" not in cloud_configs["microceph"]:
-        pytest.skip(
-            "No custom CA chain available in test config (microceph not set up)."
-        )
+        pytest.skip("No custom CA chain available in test config (microceph not set up).")
 
     app = (await app_name(ops_test)) or APP_NAME
     await _ensure_only_s3_integrator_related(ops_test, app)
@@ -1472,9 +1422,7 @@ async def test_wrong_microceph_ca_blocked(
         wait_for_exact_units=3,
         idle_period=IDLE_PERIOD,
     )
-    logger.info(
-        "Opensearch all apps and units become active after providing valid S3 CA."
-    )
+    logger.info("Opensearch all apps and units become active after providing valid S3 CA.")
     # check if repo endpoint is reachable now (200 if created, 404 if not yet).
     resp_ok = await http_request(
         ops_test,
@@ -1500,9 +1448,7 @@ async def test_wrong_azure_credentials(
 ) -> None:
     """Verify blocked status and recovery when Azure credentials are wrong."""
     if "azure" not in cloud_configs or "azure" not in cloud_credentials:
-        pytest.skip(
-            "Azure config/credentials not available for Azure integrator tests."
-        )
+        pytest.skip("Azure config/credentials not available for Azure integrator tests.")
 
     app = (await app_name(ops_test)) or APP_NAME
 
@@ -1636,9 +1582,7 @@ async def test_wrong_gcs_credentials(
 @pytest.mark.parametrize(
     "cloud_name",
     [
-        pytest.param(
-            cloud, id=f"all-{cloud}", marks=pytest.mark.group(id=f"all-{cloud}")
-        )
+        pytest.param(cloud, id=f"all-{cloud}", marks=pytest.mark.group(id=f"all-{cloud}"))
         for cloud in ("aws", "microceph")
     ],
 )
@@ -1664,9 +1608,7 @@ async def test_change_config_and_backup_restore(
     )
     # Start the ContinuousWrites here instead of bringing as a fixture because we want to do
     # it for every cloud config we have and we have to stop it before restore, right down.
-    writer: ContinuousWrites = ContinuousWrites(
-        ops_test, app, initial_count=initial_count
-    )
+    writer: ContinuousWrites = ContinuousWrites(ops_test, app, initial_count=initial_count)
 
     # store the global cwrites object
     global global_cwrites
@@ -1680,9 +1622,7 @@ async def test_change_config_and_backup_restore(
     if cloud_name == "aws":
         await _configure_s3_for_aws(ops_test, config, cloud_credentials[cloud_name])
     else:
-        await _configure_s3_for_microceph(
-            ops_test, config, cloud_credentials[cloud_name]
-        )
+        await _configure_s3_for_microceph(ops_test, config, cloud_credentials[cloud_name])
     await wait_until(
         ops_test,
         apps=[app],

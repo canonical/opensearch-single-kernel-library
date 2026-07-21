@@ -70,9 +70,7 @@ class InternalUsersManager(BaseManager):
                 self.save_user_locally(user)
                 return True
             except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
-                logger.error(
-                    "An error occurred while saving internal user %s: %s", user, str(e)
-                )
+                logger.error("An error occurred while saving internal user %s: %s", user, str(e))
                 return False
 
         hashed_pwd, pwd = generate_hashed_password(pwd)
@@ -122,9 +120,7 @@ class InternalUsersManager(BaseManager):
         This is to be used when starting up the charm, to remove unnecessary default users.
         """
         try:
-            internal_users = self.yaml_setter.load(
-                "opensearch-security/internal_users.yml"
-            ).keys()
+            internal_users = self.yaml_setter.load("opensearch-security/internal_users.yml").keys()
         except FileNotFoundError:
             # internal_users.yml hasn't been initialised yet, so skip purging for now.
             return
@@ -136,9 +132,7 @@ class InternalUsersManager(BaseManager):
     def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(
-            user, self.state.application.get_user_hashed_password(user)
-        )
+        self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users.

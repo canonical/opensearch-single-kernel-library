@@ -66,16 +66,12 @@ class UpgradesEventsHandler(Object):
         self.framework.observe(
             self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
         )
-        self.framework.observe(
-            self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action
-        )
+        self.framework.observe(self.charm.on.resume_upgrade_action, self._on_resume_upgrade_action)
         if self.charm.substrate == Substrates.VM:
             self.framework.observe(
                 self.charm.on.force_upgrade_action, self._on_force_upgrade_action
             )
-        self.framework.observe(
-            self.charm.upgrade_opensearch_event, self._upgrade_opensearch
-        )
+        self.framework.observe(self.charm.upgrade_opensearch_event, self._upgrade_opensearch)
 
         self.framework.observe(
             self.charm.on.force_refresh_start_action,
@@ -94,9 +90,7 @@ class UpgradesEventsHandler(Object):
             return
 
         if self.charm.upgrades_manager.in_progress:
-            logger.debug(
-                "Skipping upgrade relation created because upgrade in progress"
-            )
+            logger.debug("Skipping upgrade relation created because upgrade in progress")
             return
 
         self.charm.upgrades_manager.save_upgrades_versions()
@@ -142,9 +136,8 @@ class UpgradesEventsHandler(Object):
             self._set_upgrade_status()
             return
 
-        if (
-            self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED
-            and isinstance(self.charm.upgrades_manager, UpgradesManagerVM)
+        if self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED and isinstance(
+            self.charm.upgrades_manager, UpgradesManagerVM
         ):
             # This is only for VM charms
             try:
@@ -202,13 +195,9 @@ class UpgradesEventsHandler(Object):
         Raises:
             PrecheckFailed: If cluster is not ready to upgrade.
         """
-        health = self.charm.health_manager.get(
-            local_app_only=False, wait_for_green_first=True
-        )
+        health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
         if health != HealthColors.GREEN:
-            raise OpenSearchUpgradePrecheckError(
-                f"Cluster health is {health} instead of green"
-            )
+            raise OpenSearchUpgradePrecheckError(f"Cluster health is {health} instead of green")
         if self.charm.snapshots_manager.is_operation_in_progress:
             raise OpenSearchUpgradePrecheckError("Backup or restore is in progress")
 
@@ -264,10 +253,7 @@ class UpgradesEventsHandler(Object):
             event.fail(message)
             return
 
-        if (
-            not self.charm.state.upgrade_relation
-            or self.charm.upgrades_manager.in_progress
-        ):
+        if not self.charm.state.upgrade_relation or self.charm.upgrades_manager.in_progress:
             message = "Upgrade already in progress"
             logger.debug(f"Pre-upgrade check event failed: {message}")
             event.fail(message)
@@ -293,10 +279,7 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
-        if (
-            not self.charm.state.upgrade_relation
-            or not self.charm.upgrades_manager.in_progress
-        ):
+        if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
             message = "No upgrade in progress"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
@@ -323,10 +306,7 @@ class UpgradesEventsHandler(Object):
             event.fail(message)
             return
 
-        if (
-            not self.charm.state.upgrade_relation
-            or not self.charm.upgrades_manager.in_progress
-        ):
+        if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
             message = "No upgrade in progress"
             logger.debug(f"Force upgrade event failed: {message}")
             event.fail(message)
@@ -368,9 +348,7 @@ class UpgradesEventsHandler(Object):
             if event.ignore_lock:
                 logger.debug("Upgrading without lock")
             else:
-                logger.debug(
-                    "Lock to upgrade opensearch not acquired. Will retry next event"
-                )
+                logger.debug("Lock to upgrade opensearch not acquired. Will retry next event")
                 event.defer()
                 return
         logger.debug("Acquired lock for upgrade")
@@ -436,9 +414,7 @@ class UpgradesEventsHandler(Object):
         )
 
         logger.debug("Starting OpenSearch after upgrade")
-        self.charm.start_opensearch_event.emit(
-            ignore_lock=event.ignore_lock, after_upgrade=True
-        )
+        self.charm.start_opensearch_event.emit(ignore_lock=event.ignore_lock, after_upgrade=True)
 
     def _on_refresh_force_start_action(self, event: ops.ActionEvent) -> None:
         """Handle force-refresh-start action for rollback scenario."""
@@ -465,9 +441,7 @@ class UpgradesEventsHandler(Object):
         if self.charm.substrate == Substrates.VM:
             self.charm.upgrade_opensearch_event.emit(override_version=True)
             event.set_results(
-                {
-                    "result": f"Overrode OpenSearch version on {self.charm.state.unit_name}"
-                }
+                {"result": f"Overrode OpenSearch version on {self.charm.state.unit_name}"}
             )
             logger.debug("Overrode OpenSearch version")
         else:
@@ -489,9 +463,7 @@ class UpgradesEventsHandler(Object):
     def _on_lifecycle_relation_departed(self, event: ops.RelationDepartedEvent) -> None:
         """Handle relation departed event for lifecycle tracking."""
         if event.departing_unit == self.charm.unit:
-            self._unit_tearing_down_and_app_active = (
-                LifecycleUnitTearingDownAndAppActive.TRUE
-            )
+            self._unit_tearing_down_and_app_active = LifecycleUnitTearingDownAndAppActive.TRUE
 
     @property
     def _unit_tearing_down_and_app_active(self) -> LifecycleUnitTearingDownAndAppActive:
@@ -539,17 +511,11 @@ class UpgradesEventsHandler(Object):
         """
         if not self.charm.unit.is_leader():
             return False
-        if (
-            self._unit_tearing_down_and_app_active
-            is LifecycleUnitTearingDownAndAppActive.UNKNOWN
-        ):
+        if self._unit_tearing_down_and_app_active is LifecycleUnitTearingDownAndAppActive.UNKNOWN:
             logger.warning(
                 f"{type(self)}.authorized_leader should not be accessed during *-relation-departed for subordinate relations"
             )
-        return (
-            self._unit_tearing_down_and_app_active
-            is LifecycleUnitTearingDownAndAppActive.FALSE
-        )
+        return self._unit_tearing_down_and_app_active is LifecycleUnitTearingDownAndAppActive.FALSE
 
     def machine_upgrade(self) -> None:
         """On Upgrade charm for machine charms."""
@@ -572,9 +538,7 @@ class UpgradesEventsHandler(Object):
         try:
             self.charm.config_manager.update_opensearch_config()
         except OpenSearchFileOperationError as e:
-            logger.error(
-                "An error occurred while updating opensearch config: %s", str(e)
-            )
+            logger.error("An error occurred while updating opensearch config: %s", str(e))
             event.defer()
             return
 

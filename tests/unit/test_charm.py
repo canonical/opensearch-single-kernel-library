@@ -132,9 +132,7 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 
 def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
-    lock_acquire = mocker.patch(
-        "opensearch_single_kernel.managers.lock.LockManager.acquire"
-    )
+    lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
         new_callable=PropertyMock,
@@ -156,9 +154,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config = mocker.patch(
         "opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config"
     )
-    get_nodes = mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes"
-    )
+    get_nodes = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
     can_service_start = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
     )
@@ -175,9 +171,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
         "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler._post_start_init"
     )
 
-    is_node_up = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up"
-    )
+    is_node_up = mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.is_node_up")
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
     mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started"
@@ -221,9 +215,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_failed",
         return_value=False,
     )
-    start = mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.start"
-    )
+    start = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.start")
     # _get_nodes succeeds
     all_tls_resources_stored.return_value = True
     is_admin_user_initialized.return_value = True
@@ -291,8 +283,7 @@ def test_unit_name(harness, mocker):
 
     app_short_id = deployment_desc().app.short_id
     assert (
-        harness.charm.state.unit_name
-        == f"{harness.charm.state.application.name}-0.{app_short_id}"
+        harness.charm.state.unit_name == f"{harness.charm.state.application.name}-0.{app_short_id}"
     )
 
 

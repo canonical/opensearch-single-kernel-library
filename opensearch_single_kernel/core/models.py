@@ -81,9 +81,7 @@ class Model(ABC, BaseModel):
         """Sort input payloads to avoid rel-changed events for same unordered objects."""
         if isinstance(payload, dict):
             # Sort dictionary by keys
-            return {
-                key: Model.sort_payload(value) for key, value in sorted(payload.items())
-            }
+            return {key: Model.sort_payload(value) for key, value in sorted(payload.items())}
         elif isinstance(payload, list):
             # Sort each item in the list and then sort the list
             sorted_list = [Model.sort_payload(item) for item in payload]
@@ -213,9 +211,7 @@ class PeerClusterConfig(Model):
 
             temp = role.split(".")[1]
             if temp not in allowed_temps:
-                raise ValueError(
-                    f"data.'{temp}' not allowed. Allowed values: {allowed_temps}"
-                )
+                raise ValueError(f"data.'{temp}' not allowed. Allowed values: {allowed_temps}")
 
             input_temps.add(temp)
 
@@ -298,9 +294,7 @@ class OpenSearchProfile(ABC):
 
     def __eq__(self, value: object) -> bool:
         """Check equality with another OpenSearchProfile."""
-        return (
-            self.type == value.type if isinstance(value, OpenSearchProfile) else False
-        )
+        return self.type == value.type if isinstance(value, OpenSearchProfile) else False
 
 
 class ProductionProfile(OpenSearchProfile):
@@ -373,9 +367,7 @@ class S3RelDataCredentials(Model):
 
     access_key: str = Field(alias="access-key", default="")
     secret_key: str = Field(alias="secret-key", default="")
-    s3_tls_ca_chain: str | list[str] | None = Field(
-        default=None, alias="s3-tls-ca-chain"
-    )
+    s3_tls_ca_chain: str | list[str] | None = Field(default=None, alias="s3-tls-ca-chain")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -462,9 +454,7 @@ class S3RelData(Model):
 
         for value in data.dict().values():
             if value.startswith("secret://"):
-                raise ValueError(
-                    f"The secret content must be passed, received {value} instead"
-                )
+                raise ValueError(f"The secret content must be passed, received {value} instead")
         return data
 
     @staticmethod
@@ -548,9 +538,7 @@ class AzureRelData(Model):
 
         for value in data.dict().values():
             if value.startswith("secret://"):
-                raise ValueError(
-                    f"The secret content must be passed, received {value} instead"
-                )
+                raise ValueError(f"The secret content must be passed, received {value} instead")
         return data
 
     @classmethod
@@ -578,9 +566,7 @@ class GcsRelDataCredentials(Model):
         if values is None:
             return None
 
-        content = (
-            values.decode() if isinstance(values, (bytes, bytearray)) else str(values)
-        )
+        content = values.decode() if isinstance(values, (bytes, bytearray)) else str(values)
         if not (content := content.strip()):
             return None
 
@@ -602,9 +588,7 @@ class GcsRelDataCredentials(Model):
             UnicodeDecodeError,
             json.JSONDecodeError,
         ) as e:
-            raise ValueError(
-                "secret-key is not valid JSON (raw or base64-encoded)"
-            ) from e
+            raise ValueError("secret-key is not valid JSON (raw or base64-encoded)") from e
 
 
 class GcsRelData(Model):
@@ -638,21 +622,15 @@ class GcsRelData(Model):
         return self
 
     @field_validator(GCS_CREDENTIALS, mode="before", check_fields=False)
-    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805):
+    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805
         """Ensure the secret content is set."""
         if not conf:
             return None
 
-        data = (
-            conf
-            if isinstance(conf, dict)
-            else conf.dict(by_alias=True, exclude_none=True)
-        )
+        data = conf if isinstance(conf, dict) else conf.dict(by_alias=True, exclude_none=True)
         for v in data.values():
             if isinstance(v, str) and v.startswith("secret://"):
-                raise ValueError(
-                    f"The secret content must be passed, received {v} instead"
-                )
+                raise ValueError(f"The secret content must be passed, received {v} instead")
         return conf
 
     @classmethod
@@ -669,9 +647,7 @@ class GcsRelData(Model):
         return cls.parse_obj(merged)
 
 
-ObjectStorageCredentials = (
-    S3RelDataCredentials | AzureRelDataCredentials | GcsRelDataCredentials
-)
+ObjectStorageCredentials = S3RelDataCredentials | AzureRelDataCredentials | GcsRelDataCredentials
 
 
 class ObjectStorageConfig(Model):
@@ -826,15 +802,11 @@ class PeerClusterRelErrorData(Model):
 
             # Substitute the escaped curly brace blocks with non-greedy wildcard
             # Note the triple backslashes: \\\{ matches the literal string "\{"
-            regex_pattern = (
-                "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
-            )
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
 
             if re.match(regex_pattern, self.blocked_message):
                 # set message to the original message with placeholders
-                new_status = status.value.model_copy(
-                    update={"message": self.blocked_message}
-                )
+                new_status = status.value.model_copy(update={"message": self.blocked_message})
                 return new_status
         return None
 
@@ -843,9 +815,7 @@ class PeerClusterRelErrorData(Model):
         """Get the status of the error data based on the message."""
         for status in PeerClusterErrorDataStatuses:
             escaped_message = re.escape(status.value.message)
-            regex_pattern = (
-                "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
-            )
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
             if re.match(regex_pattern, message):
                 new_status = status.value.model_copy(update={"message": message})
                 return new_status

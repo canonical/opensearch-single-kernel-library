@@ -260,9 +260,7 @@ class ConfigManager(BaseManager):
 
     def _update_static_jvm_options(self) -> None:
         """Update Opensearch JVM config file with the right static options."""
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS, "=logs/", f"={self.workload.paths.logs}/"
-        )
+        self.yaml_setter.replace(self.JVM_OPTIONS, "=logs/", f"={self.workload.paths.logs}/")
         self.yaml_setter.append(
             self.JVM_OPTIONS,
             "-Djdk.tls.client.protocols=TLSv1.2",
@@ -485,9 +483,7 @@ class ConfigManager(BaseManager):
                     [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
                 )
             else:
-                self._update_seeds_file(
-                    [node.ip for node in nodes if node.is_cm_eligible()]
-                )
+                self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
         except OpenSearchFileOperationError as e:
             logger.error("An error occurred while updating seeds config: %s", e)
             return False
@@ -517,9 +513,7 @@ class ConfigManager(BaseManager):
             whether the configuration changed and restart required.
         """
         current_profile = self.state.server.profile
-        logger.debug(
-            "current profile: %s, config profile: %s", current_profile, profile
-        )
+        logger.debug("current profile: %s, config profile: %s", current_profile, profile)
         if current_profile is None or current_profile != profile:
             heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
             logger.debug(

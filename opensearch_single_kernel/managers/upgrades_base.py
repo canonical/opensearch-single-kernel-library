@@ -66,16 +66,14 @@ class UpgradesManagerBase(BaseManager):
         try:
             if (
                 previous_versions.charm_parsed > self.current_versions.charm_parsed
-                or previous_versions.charm_parsed.major
-                != self.current_versions.charm_parsed.major
+                or previous_versions.charm_parsed.major != self.current_versions.charm_parsed.major
             ):
                 logger.debug(
                     f"{previous_versions.charm_parsed=} incompatible with {self.current_versions.charm_parsed=}"
                 )
                 return False
             if (
-                previous_versions.workload_parsed
-                > self.current_versions.workload_parsed
+                previous_versions.workload_parsed > self.current_versions.workload_parsed
                 or previous_versions.workload_parsed.major
                 != self.current_versions.workload_parsed.major
             ):
@@ -88,9 +86,7 @@ class UpgradesManagerBase(BaseManager):
             )
             return True
         except KeyError as exception:
-            logger.debug(
-                f"Version missing from {previous_versions=}", exc_info=exception
-            )
+            logger.debug(f"Version missing from {previous_versions=}", exc_info=exception)
             return False
 
     @property
@@ -171,9 +167,7 @@ class UpgradesManagerBase(BaseManager):
         try:
             deployment_desc = self.state.application.deployment_desc
             if not deployment_desc:
-                raise OpenSearchUpgradePrecheckError(
-                    "Deployment description not available"
-                )
+                raise OpenSearchUpgradePrecheckError("Deployment description not available")
 
             online_nodes = self._nodes(
                 use_localhost=self.opensearch_client.is_node_up(),
@@ -188,13 +182,7 @@ class UpgradesManagerBase(BaseManager):
 
             if (
                 not all_units_started
-                or len(
-                    [
-                        node
-                        for node in online_nodes
-                        if node.app.id == deployment_desc.app.id
-                    ]
-                )
+                or len([node for node in online_nodes if node.app.id == deployment_desc.app.id])
                 < self.state.model.app.planned_units()
             ):
                 raise OpenSearchUpgradePrecheckError(
@@ -221,9 +209,7 @@ class UpgradesManagerBase(BaseManager):
     def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""
         if self.workload.is_service_started():
-            logger.debug(
-                "Service is started. The override version can not be run unless we stop."
-            )
+            logger.debug("Service is started. The override version can not be run unless we stop.")
             return None
 
         # Regex to match the version to be overridden
@@ -247,9 +233,7 @@ class UpgradesManagerBase(BaseManager):
                 )
             else:
                 # Separated the command and passed 'N' via stdin to match the K8s behavior
-                output = self.workload.run_cmd(
-                    "opensearch.node", "override-version", stdin="N\n"
-                )
+                output = self.workload.run_cmd("opensearch.node", "override-version", stdin="N\n")
 
             # Optional: strip() the output if your framework doesn't do it automatically
             if isinstance(output, str):
@@ -271,9 +255,7 @@ class UpgradesManagerBase(BaseManager):
 
             # Check if the error message indicates that the version is already overridden
             if already_overridden_error in str(output):
-                logger.debug(
-                    "Version is already overridden. No need to override again."
-                )
+                logger.debug("Version is already overridden. No need to override again.")
                 return None
 
             # If neither condition is met, re-raise the exception
@@ -283,9 +265,7 @@ class UpgradesManagerBase(BaseManager):
     def override_version(self) -> None:
         """Override the version on disk to allow rollback to proceed."""
         if self.state.substrate == Substrates.K8S:
-            self.workload.run_script(
-                "bin/opensearch-node", "override-version", stdin="y\n"
-            )
+            self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
         else:
             self.workload.run_cmd("opensearch.node", "override-version", stdin="y\n")
 
@@ -306,9 +286,7 @@ class UpgradesManagerBase(BaseManager):
     def compatibility_matrix(self, value: dict[str, set[str]]) -> None:
         """Write compatibility matrix to file."""
         try:
-            content = json.dumps(
-                {key: list(value) for key, value in value.items()}, indent=4
-            )
+            content = json.dumps({key: list(value) for key, value in value.items()}, indent=4)
             self.workload.write_text(content, self.workload.paths.compatibility_matrix)
         except OpenSearchFileOperationError as e:
             logger.debug("Failed to write compatibility matrix file: %s", str(e))
@@ -320,9 +298,7 @@ class UpgradesManagerBase(BaseManager):
         if disk_matrix != current_matrix:
             # deeply fuse dictionaries
             for key, value in current_matrix.items():
-                disk_matrix[key] = disk_matrix.setdefault(key, value) | set(
-                    value
-                )  # union of sets
+                disk_matrix[key] = disk_matrix.setdefault(key, value) | set(value)  # union of sets
             self.compatibility_matrix = disk_matrix
             logger.debug("Reconciled compatibility matrix file")
 
@@ -389,8 +365,7 @@ class UpgradesManagerBase(BaseManager):
 
         if (
             str(version_before_override) in compatibility_matrix
-            and str(version_on_disk)
-            in compatibility_matrix[str(version_before_override)]
+            and str(version_on_disk) in compatibility_matrix[str(version_before_override)]
         ):
             logger.debug(
                 "Rollback supported from %s to %s",
@@ -408,9 +383,7 @@ class UpgradesManagerBase(BaseManager):
 
     def update_grafana_dashboards_title(self, charm_revision: str) -> None:
         """Update the title of the Grafana dashboard file to include the charm revision."""
-        dashboard = json.loads(
-            self.workload.read_text(self.workload.paths.grafana_dashboard)
-        )
+        dashboard = json.loads(self.workload.read_text(self.workload.paths.grafana_dashboard))
 
         old_title = dashboard.get("title", "Charmed OpenSearch")
         title_prefix = old_title.split(" - Rev")[0]

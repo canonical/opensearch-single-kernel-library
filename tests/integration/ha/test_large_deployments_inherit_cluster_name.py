@@ -50,12 +50,8 @@ AUTOGEN_APP_UNITS = {
     DATA_APP_AUTOGEN: 2,
 }
 
-NO_DATA_NODE_STATUS_MESSAGE = (
-    "Missing requirements: At least 1 data nodes are required."
-)
-NO_CM_STATUS_MESSAGE = (
-    "Missing requirements: At least 1 cluster manager nodes are required."
-)
+NO_DATA_NODE_STATUS_MESSAGE = "Missing requirements: At least 1 data nodes are required."
+NO_CM_STATUS_MESSAGE = "Missing requirements: At least 1 cluster manager nodes are required."
 
 
 NO_DATA_NODE_STATUS = StatusObject(
@@ -130,9 +126,7 @@ async def test_build_and_deploy_not_autogen(
         units_statuses={
             INVALID_FAILOVER_APP: [NO_DATA_NODE_STATUS],
         },
-        wait_for_exact_units={
-            app: units for app, units in NON_AUTOGEN_APP_UNITS.items()
-        },
+        wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
         timeout=1800,
     )
@@ -248,9 +242,7 @@ async def test_invalid_inherit_cluster_name_integration(ops_test: OpsTest) -> No
                 TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value,
             ],
         },
-        wait_for_exact_units={
-            app: units for app, units in NON_AUTOGEN_APP_UNITS.items()
-        },
+        wait_for_exact_units={app: units for app, units in NON_AUTOGEN_APP_UNITS.items()},
         idle_period=IDLE_PERIOD,
     )
 
@@ -298,6 +290,4 @@ async def test_cluster_name_inheritence_and_integration(ops_test: OpsTest) -> No
 
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP_AUTOGEN)
     nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP_AUTOGEN)
-    assert len(nodes) == 4, (
-        f"Wrong node count. Expecting 4 online nodes, found: {len(nodes)}."
-    )
+    assert len(nodes) == 4, f"Wrong node count. Expecting 4 online nodes, found: {len(nodes)}."

@@ -68,8 +68,7 @@ async def test_build_and_deploy(
             num_units=1,
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"}
-            | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
@@ -139,9 +138,7 @@ async def test_build_and_deploy(
 @pytest.mark.abort_on_fail
 async def test_correct_startup_after_integration(ops_test: OpsTest) -> None:
     """After integrating the cluster manager with the data application, both should start up."""
-    await ops_test.model.integrate(
-        f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
-    )
+    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
 
     await wait_until(
         ops_test,
@@ -159,20 +156,14 @@ async def test_correct_startup_after_integration(ops_test: OpsTest) -> None:
 
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
     nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
-    assert len(nodes) == 3, (
-        f"Wrong node count. Expecting 3 online nodes, found: {len(nodes)}."
-    )
+    assert len(nodes) == 3, f"Wrong node count. Expecting 3 online nodes, found: {len(nodes)}."
 
 
 @pytest.mark.abort_on_fail
 async def test_integrate_failover(ops_test: OpsTest) -> None:
     """After integrating the failover app to the others, all should be started and fine."""
-    await ops_test.model.integrate(
-        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
-    )
-    await ops_test.model.integrate(
-        f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}"
-    )
+    await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
+    await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{FAILOVER_APP}:{REL_ORCHESTRATOR}")
 
     await wait_until(
         ops_test,
@@ -183,6 +174,4 @@ async def test_integrate_failover(ops_test: OpsTest) -> None:
 
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=MAIN_APP)
     nodes = await all_nodes(ops_test, leader_unit_ip, app=MAIN_APP)
-    assert len(nodes) == 4, (
-        f"Wrong node count. Expecting 4 online nodes, found: {len(nodes)}."
-    )
+    assert len(nodes) == 4, f"Wrong node count. Expecting 4 online nodes, found: {len(nodes)}."

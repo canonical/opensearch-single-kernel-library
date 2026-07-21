@@ -92,9 +92,7 @@ async def test_build_and_deploy_with_manual_tls(
         await os_app.add_unit(1)
 
     # Wait for the new unit to be in maintenance
-    logger.info(
-        "Waiting for the new unit to be in maintenance waiting for certificates"
-    )
+    logger.info("Waiting for the new unit to be in maintenance waiting for certificates")
     await wait_until(
         ops_test,
         apps=[APP_NAME],

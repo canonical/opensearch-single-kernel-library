@@ -95,12 +95,8 @@ class SnapshotsEventsHandler(Object):
         )
 
         # actions
-        self.framework.observe(
-            charm.on.create_backup_action, self._on_create_backup_action
-        )
-        self.framework.observe(
-            charm.on.list_backups_action, self._on_list_backups_action
-        )
+        self.framework.observe(charm.on.create_backup_action, self._on_create_backup_action)
+        self.framework.observe(charm.on.list_backups_action, self._on_list_backups_action)
         self.framework.observe(charm.on.restore_action, self._on_restore_action)
 
     def _on_snapshots_credentials_changed(  # noqa C901
@@ -146,17 +142,13 @@ class SnapshotsEventsHandler(Object):
 
         # Get connection info
         try:
-            connection_info = (
-                self.charm.state.get_storage_connection_info_from_relation(
-                    object_storage_type
-                )
+            connection_info = self.charm.state.get_storage_connection_info_from_relation(
+                object_storage_type
             )
 
             if not (
                 object_storage_config := (
-                    storage_config_from_connection_info(
-                        object_storage_type, connection_info
-                    )
+                    storage_config_from_connection_info(object_storage_type, connection_info)
                 )
             ):
                 self.charm.state.add_status_if_not_present(
@@ -200,9 +192,7 @@ class SnapshotsEventsHandler(Object):
             )
             return
         except OpenSearchBackupCredentialsIncorrectError:
-            logger.warning(
-                "%s object storage credentials not verified.", object_storage_type
-            )
+            logger.warning("%s object storage credentials not verified.", object_storage_type)
             self.charm.state.add_status_if_not_present(
                 SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
                 "app",
@@ -261,8 +251,7 @@ class SnapshotsEventsHandler(Object):
                 self.charm.verify_snapshots_credentials_event.emit()
         except OpenSearchHttpError as e:
             logger.error(
-                "Failed to create/verify snapshot repository for %s. "
-                "Error: %s, response_body=%r",
+                "Failed to create/verify snapshot repository for %s. Error: %s, response_body=%r",
                 object_storage_type,
                 e,
                 getattr(e, "response_body", None),
@@ -286,9 +275,7 @@ class SnapshotsEventsHandler(Object):
             interpolated=True,
         )
         # Refresh peer relations
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-            event.relation.id
-        )
+        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: CredentialsGoneEvent | StorageConnectionInfoGoneEvent
@@ -322,12 +309,8 @@ class SnapshotsEventsHandler(Object):
             interpolated=True,
         )
 
-        if not self.charm.keystore_manager.cleanup_storage_credentials(
-            object_storage_type
-        ):
-            logger.warning(
-                "Cleanup for %s credentials are failed.", object_storage_type
-            )
+        if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
+            logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
             self.charm.state.add_status_if_not_present(
                 SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
                 "app",
@@ -336,9 +319,8 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
-        if (
-            self.charm.unit.is_leader()
-            and not self.charm.snapshots_manager.remove_repository(object_storage_type)
+        if self.charm.unit.is_leader() and not self.charm.snapshots_manager.remove_repository(
+            object_storage_type
         ):
             logger.warning(
                 "Failed to remove snapshot repository for %s during credentials cleanup.",
@@ -389,10 +371,8 @@ class SnapshotsEventsHandler(Object):
 
         # Get connection info
         try:
-            connection_info = (
-                self.charm.state.get_storage_connection_info_from_relation(
-                    object_storage_type
-                )
+            connection_info = self.charm.state.get_storage_connection_info_from_relation(
+                object_storage_type
             )
         except OpenSearchInvalidStorageTypeError as e:
             logger.error(str(e))
@@ -460,9 +440,7 @@ class SnapshotsEventsHandler(Object):
     def _on_create_backup_action(self, event: ActionEvent) -> None:
         """Handler for create backup action event."""
         if error_message := self._action_missing_pre_requisites():
-            logger.warning(
-                "Pre-requisites not met for creating backup: %s", error_message
-            )
+            logger.warning("Pre-requisites not met for creating backup: %s", error_message)
             event.fail(error_message)
             return
 
@@ -490,12 +468,8 @@ class SnapshotsEventsHandler(Object):
 
     def _on_list_backups_action(self, event: ActionEvent) -> None:
         """Handler for list backups changes."""
-        if error_message := self._action_missing_pre_requisites(
-            report_running_operations=False
-        ):
-            logger.warning(
-                "Pre-requisites not met for listing backups: %s", error_message
-            )
+        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
+            logger.warning("Pre-requisites not met for listing backups: %s", error_message)
             event.fail(error_message)
             return
 
@@ -504,9 +478,7 @@ class SnapshotsEventsHandler(Object):
             "table",
         }:
             logger.error("Invalid output format for listing backups: %s", output_format)
-            event.fail(
-                "Failed: invalid output format, must be either 'json' or 'table'."
-            )
+            event.fail("Failed: invalid output format, must be either 'json' or 'table'.")
             return
         try:
             snapshots = self.charm.snapshots_manager.list_snapshots()
@@ -535,9 +507,7 @@ class SnapshotsEventsHandler(Object):
         snapshot_id = event.params.get("backup-id")
 
         if error_message := self._action_missing_pre_requisites():
-            logger.warning(
-                "Pre-requisites not met for restoring backup: %s", error_message
-            )
+            logger.warning("Pre-requisites not met for restoring backup: %s", error_message)
             event.fail(error_message)
             return
 
@@ -614,17 +584,11 @@ class SnapshotsEventsHandler(Object):
                 tls_ca_chain = s3_credentials.get("s3_tls_ca_chain")
             elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.AZURE
-                azure_credentials = (
-                    self.charm.snapshots_manager.azure_info_from_peer_cluster
-                )
-                object_storage_credentials = AzureRelDataCredentials(
-                    **azure_credentials
-                )
+                azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
+                object_storage_credentials = AzureRelDataCredentials(**azure_credentials)
             elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
                 object_storage_type = ObjectStorageType.GCS
-                gcs_credentials = (
-                    self.charm.snapshots_manager.gcs_info_from_peer_cluster
-                )
+                gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
                 object_storage_credentials = GcsRelDataCredentials(**gcs_credentials)
 
             try:
@@ -647,9 +611,7 @@ class SnapshotsEventsHandler(Object):
             ObjectStorageType.AZURE,
             ObjectStorageType.GCS,
         ]:
-            if not self.charm.keystore_manager.cleanup_storage_credentials(
-                object_storage_type
-            ):
+            if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
                     "Failed to cleanup keystore credentials for %s.",
                     object_storage_type,
@@ -673,8 +635,7 @@ class SnapshotsEventsHandler(Object):
         if (
             self.charm.state.application.orchestrators
             and self.charm.state.application.orchestrators.main_app
-            and self.charm.state.application.orchestrators.main_app.name
-            == event.relation.app.name
+            and self.charm.state.application.orchestrators.main_app.name == event.relation.app.name
             and len(event.relation.units) > 0
         ):
             logger.debug(
@@ -692,9 +653,7 @@ class SnapshotsEventsHandler(Object):
             ObjectStorageType.AZURE,
             ObjectStorageType.GCS,
         ]:
-            if not self.charm.keystore_manager.cleanup_storage_credentials(
-                object_storage_type
-            ):
+            if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
                     "Cleanup for %s credentials are failed during peer cluster relation departure.",
                     object_storage_type,
@@ -770,8 +729,7 @@ class SnapshotsEventsHandler(Object):
                 if (
                     not (storage_type := self.charm.state.storage_type)
                     or not (
-                        conn_inf
-                        := self.charm.state.get_storage_connection_info_from_relation(
+                        conn_inf := self.charm.state.get_storage_connection_info_from_relation(
                             storage_type
                         )
                     )
@@ -836,9 +794,7 @@ class SnapshotsEventsHandler(Object):
             object_storage_credentials, S3RelDataCredentials
         ):
             if s3_tls_ca_chain:
-                if not self.charm.snapshots_manager.is_custom_s3_ca_stored(
-                    s3_tls_ca_chain
-                ):
+                if not self.charm.snapshots_manager.is_custom_s3_ca_stored(s3_tls_ca_chain):
                     # Content differs: rotate / store new chain
                     self.charm.snapshots_manager.store_s3_ca(s3_tls_ca_chain)
                     logger.info("S3 CA stored/updated.")

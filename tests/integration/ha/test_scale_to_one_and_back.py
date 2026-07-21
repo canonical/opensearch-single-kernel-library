@@ -107,9 +107,7 @@ async def test_scale_down(
     count = len(juju_app.units)
     while count > 1:
         # find unit currently elected cluster_manager
-        elected_cm_unit_id = await get_elected_cm_unit_id(
-            ops_test, leader_unit_ip, app=app
-        )
+        elected_cm_unit_id = await get_elected_cm_unit_id(ops_test, leader_unit_ip, app=app)
 
         if substrate == "k8s":
             await juju_app.scale(scale_change=-1)

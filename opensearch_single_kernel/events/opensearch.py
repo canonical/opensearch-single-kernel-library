@@ -133,15 +133,9 @@ class OpenSearchEventsHandler(Object):
         )
 
         # --- OpenSearch Custom events ---
-        self.framework.observe(
-            self.charm.start_opensearch_event, self._on_start_opensearch
-        )
-        self.framework.observe(
-            self.charm.restart_opensearch_event, self._on_restart_opensearch
-        )
-        self.framework.observe(
-            self.charm.on.pebble_can_connect, self._on_pebble_can_connect
-        )
+        self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
+        self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
+        self.framework.observe(self.charm.on.pebble_can_connect, self._on_pebble_can_connect)
 
     def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
@@ -236,12 +230,8 @@ class OpenSearchEventsHandler(Object):
         )
 
         if self.charm.unit.is_leader() and unit_data.get("bootstrap_contributor"):
-            contributor_count = (
-                self.charm.state.application.bootstrap_contributors_count
-            )
-            self.charm.state.application.bootstrap_contributors_count = (
-                contributor_count + 1
-            )
+            contributor_count = self.charm.state.application.bootstrap_contributors_count
+            self.charm.state.application.bootstrap_contributors_count = contributor_count + 1
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
@@ -277,9 +267,7 @@ class OpenSearchEventsHandler(Object):
 
         n_units = sum(1 for node in remaining_nodes if node.app.id == current_app.id)
         if n_units == self.charm.app.planned_units():
-            self.charm.cluster_manager.compute_and_broadcast_updated_topology(
-                remaining_nodes
-            )
+            self.charm.cluster_manager.compute_and_broadcast_updated_topology(remaining_nodes)
         else:
             logger.debug(
                 f"Waiting for units to leave: expecting {self.charm.app.planned_units()}, currently {n_units}. Deferring event."
@@ -304,9 +292,7 @@ class OpenSearchEventsHandler(Object):
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
         if planned_units > 0:
-            for attempt in Retrying(
-                stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True
-            ):
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
                 with attempt:
                     if not self.charm.lock_manager.acquire():
                         logger.debug(
@@ -418,9 +404,7 @@ class OpenSearchEventsHandler(Object):
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
-            logger.warning(
-                "Update status: exclusions updated and cluster health is %s.", health
-            )
+            logger.warning("Update status: exclusions updated and cluster health is %s.", health)
 
             if health == HealthColors.UNKNOWN:
                 return
@@ -439,8 +423,7 @@ class OpenSearchEventsHandler(Object):
                 "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
             )
         elif (
-            self.charm.unit.is_leader()
-            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
         ):
             self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
@@ -516,9 +499,7 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.config_manager.update_opensearch_config()
             except OpenSearchFileOperationError as e:
-                logger.error(
-                    "An error occurred while updating opensearch config: %s", str(e)
-                )
+                logger.error("An error occurred while updating opensearch config: %s", str(e))
                 event.defer()
                 return
             # This happens when the unit IP has changed
@@ -532,21 +513,16 @@ class OpenSearchEventsHandler(Object):
                 new_deployment_desc = self.charm.state.application.deployment_desc
                 if (
                     previous_deployment_desc
-                    and previous_deployment_desc.config.roles
-                    != new_deployment_desc.config.roles
+                    and previous_deployment_desc.config.roles != new_deployment_desc.config.roles
                 ):
                     # trigger roles change on the leader, other units will have their
                     # peer-rel-changed event triggered
-                    self.charm.trigger_peer_rel_changed(
-                        on_other_units=False, on_current_unit=True
-                    )
+                    self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
                     config_restart_needed = True
                 self.apply_status_from_deployment_desc(new_deployment_desc)
 
             # This case is when the user change roles on runtime of init_hold / roles.
-            self._handle_change_to_main_orchestrator_if_needed(
-                event, previous_deployment_desc
-            )
+            self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
         try:
             config_profile = self.charm.profiles_manager.get_config_profile()
@@ -611,14 +587,10 @@ class OpenSearchEventsHandler(Object):
                 # Nodes Config updated, we would need to reconfigure and restart
                 try:
                     self.charm.config_manager.update_opensearch_config()
-                    logger.debug(
-                        "Leader election reconfigured node roles; emitting restart."
-                    )
+                    logger.debug("Leader election reconfigured node roles; emitting restart.")
                     self.charm.restart_opensearch_event.emit()
                 except OpenSearchFileOperationError as e:
-                    logger.error(
-                        "An error occurred while updating opensearch config: %s", str(e)
-                    )
+                    logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
             return
 
@@ -629,9 +601,7 @@ class OpenSearchEventsHandler(Object):
         try:
             self.charm.internal_users_manager.purge_initial_default_users()
         except OpenSearchFileOperationError as e:
-            logger.error(
-                "An error occurred while purging initial default users: %s", str(e)
-            )
+            logger.error("An error occurred while purging initial default users: %s", str(e))
             event.defer()
             return
 
@@ -664,10 +634,7 @@ class OpenSearchEventsHandler(Object):
         ):
             self.charm.pebble_observer.start()
 
-        if (
-            self.charm.substrate == Substrates.K8S
-            and self.charm.upgrades_manager.is_rollback
-        ):
+        if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
             logger.debug("Rollback in progress, deferring start event.")
             event.defer()
             return
@@ -707,9 +674,7 @@ class OpenSearchEventsHandler(Object):
                 # We're done here, we can return
                 return
             except OpenSearchStartError as e:
-                logger.warning(
-                    "Machine restart detected but error at service start with: %s", e
-                )
+                logger.warning("Machine restart detected but error at service start with: %s", e)
                 # Defer and retry later
                 event.defer()
                 return
@@ -723,9 +688,7 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.cluster_manager.get_nodes(False)
             except OpenSearchHttpError:
-                logger.warning(
-                    "No Blocking directives, but unable to get nodes. Deferring event."
-                )
+                logger.warning("No Blocking directives, but unable to get nodes. Deferring event.")
                 event.defer()
                 return
         else:
@@ -768,9 +731,7 @@ class OpenSearchEventsHandler(Object):
                 for user in OPENSEARCH_SYSTEM_USERS:
                     self.charm.internal_users_manager.save_user_locally(user)
             except OpenSearchFileOperationError as e:
-                logger.error(
-                    "An error occurred while saving internal users: %s", str(e)
-                )
+                logger.error("An error occurred while saving internal users: %s", str(e))
                 event.defer()
                 return
 
@@ -822,8 +783,7 @@ class OpenSearchEventsHandler(Object):
         ):
             # lock requested
             if not (
-                peer_cluster_rel_data
-                := self.charm.state.get_rel_data_from_main_orchestrator()
+                peer_cluster_rel_data := self.charm.state.get_rel_data_from_main_orchestrator()
             ):
                 # main orchestrator has not chosen the first data node yet
                 logger.debug(
@@ -837,9 +797,7 @@ class OpenSearchEventsHandler(Object):
                     f"Local first data node: {local_first_data_node} - cluster first data node: {peer_cluster_rel_data.first_data_node}"
                 )
                 # this unit is the first data node chosen by the main orchestrator
-                self.charm.start_opensearch_event.emit(
-                    ignore_lock=True, is_first_data_node=True
-                )
+                self.charm.start_opensearch_event.emit(ignore_lock=True, is_first_data_node=True)
                 self.charm.cluster_manager.set_first_data_node(None)
 
         self.charm.start_opensearch_event.emit()
@@ -871,9 +829,7 @@ class OpenSearchEventsHandler(Object):
                 OpenSearchFileOperationError,
             ) as e:
                 # check if cluster should have started but is blocked
-                logger.debug(
-                    "OpenSearch already started, but post-start init failed: %s", e
-                )
+                logger.debug("OpenSearch already started, but post-start init failed: %s", e)
                 if (
                     self.charm.state.application.is_data_role_in_cluster_fleet_apps
                     and self.charm.state.application.bootstrapped
@@ -922,16 +878,12 @@ class OpenSearchEventsHandler(Object):
         # - admin user and security index configured/initialised
         # - cluster health
         if not self.charm.profiles_manager.check_profile_requirements():
-            logger.info(
-                "Conditions not met to start opensearch. Will retry next event."
-            )
+            logger.info("Conditions not met to start opensearch. Will retry next event.")
             event.defer()
             return
 
         if not self.unit_allowed_to_start(event):
-            logger.info(
-                "The unit is not allowed to start, the event need to be retried later."
-            )
+            logger.info("The unit is not allowed to start, the event need to be retried later.")
             event.defer()
             return
 
@@ -983,9 +935,7 @@ class OpenSearchEventsHandler(Object):
                 computed_roles, cm_names, cm_ips
             )
 
-            self.charm.config_manager.update_opensearch_config(
-                cm_names=cm_names, cm_hosts=cm_ips
-            )
+            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_hosts=cm_ips)
         except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
             logger.debug("Error getting the nodes: %s", e)
             self.charm.lock_manager.release()
@@ -1118,9 +1068,7 @@ class OpenSearchEventsHandler(Object):
         # Apply OpenSearch upstream recommended settings
         self.charm.cluster_manager.apply_upstream_fixes()
         # apply cluster health
-        self.charm.apply_health(
-            wait_for_green_first=True, app=self.charm.unit.is_leader()
-        )
+        self.charm.apply_health(wait_for_green_first=True, app=self.charm.unit.is_leader())
 
         if (
             self.charm.unit.is_leader()
@@ -1145,9 +1093,7 @@ class OpenSearchEventsHandler(Object):
         )
 
         if event.after_upgrade:
-            health = self.charm.health_manager.get(
-                local_app_only=False, wait_for_green_first=True
-            )
+            health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
             # Cluster is considered healthy if green or yellow
             # TODO future improvement: try to narrow scope to just green or green + yellow in
             # specific cases
@@ -1177,9 +1123,7 @@ class OpenSearchEventsHandler(Object):
             # If `health_ == HealthColors.YELLOW`, no shards are initializing or relocating
             # (otherwise `health_` would be `HealthColors.YELLOW_TEMP`)
             if health not in (HealthColors.GREEN, HealthColors.YELLOW):
-                logger.error(
-                    "Cluster is not healthy after upgrade. Manual intervention required."
-                )
+                logger.error("Cluster is not healthy after upgrade. Manual intervention required.")
                 event.defer()
                 return
             elif health == HealthColors.YELLOW:
@@ -1210,9 +1154,7 @@ class OpenSearchEventsHandler(Object):
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.lock_manager.name,
             )
-            logger.debug(
-                "Lock to restart opensearch not acquired. Will retry next event"
-            )
+            logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
             return
 
@@ -1259,9 +1201,7 @@ class OpenSearchEventsHandler(Object):
         # opensearch until all shards in other units are in a "started" or "unassigned" state.
         try:
             if (
-                self.charm.apply_health(
-                    wait_for_green_first=True, use_localhost=False, app=False
-                )
+                self.charm.apply_health(wait_for_green_first=True, use_localhost=False, app=False)
                 == HealthColors.YELLOW_TEMP
             ):
                 return False
@@ -1292,8 +1232,7 @@ class OpenSearchEventsHandler(Object):
     ) -> None:
         """Resolve and applies corresponding status from the deployment state."""
         if not (
-            deployment_desc := deployment_desc
-            or self.charm.state.application.deployment_desc
+            deployment_desc := deployment_desc or self.charm.state.application.deployment_desc
         ):
             return
 
@@ -1347,9 +1286,7 @@ class OpenSearchEventsHandler(Object):
         try:
             label_parts = breakdown_label(event.secret.label)
         except ValueError:
-            logging.info(
-                f"Label {event.secret.label} was meaningless for us, returning"
-            )
+            logging.info(f"Label {event.secret.label} was meaningless for us, returning")
             return
         # We need to take action on 5 secret types
         # 1. TLS credentials change
@@ -1393,13 +1330,9 @@ class OpenSearchEventsHandler(Object):
             password = event.secret.get_content()[label_key]
             if sys_user := user_from_hash_key(label_key):
                 try:
-                    self.charm.internal_users_manager.put_internal_user(
-                        sys_user, password
-                    )
+                    self.charm.internal_users_manager.put_internal_user(sys_user, password)
                 except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
-                    logger.error(
-                        "An error occurred while updating internal user: %s", str(e)
-                    )
+                    logger.error("An error occurred while updating internal user: %s", str(e))
                     event.defer()
                     return
 
@@ -1421,9 +1354,7 @@ class OpenSearchEventsHandler(Object):
             return False
 
         # check possibility to start
-        logger.debug(
-            "Checking if cluster can start with deploy desc: %s", deployment_desc
-        )
+        logger.debug("Checking if cluster can start with deploy desc: %s", deployment_desc)
         if not self.charm.cluster_manager.no_blocking_directives(deployment_desc):
             return False
         try:
@@ -1465,9 +1396,7 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.server.update_ts = time_ns()
 
         if on_current_unit:
-            self.charm.on[PEER_RELATION].relation_changed.emit(
-                self.charm.state.peer_relation
-            )
+            self.charm.on[PEER_RELATION].relation_changed.emit(self.charm.state.peer_relation)
 
     def post_start_ca_rotation(self) -> None:
         """Configure TLS CA rotation after OpenSearch is started."""
@@ -1475,10 +1404,7 @@ class OpenSearchEventsHandler(Object):
         self.charm.state.reset_ca_rotation_state()
 
         # request new certificates after rotating the CA
-        if (
-            self.charm.state.server.tls_ca_renewing
-            and self.charm.state.server.tls_ca_renewed
-        ):
+        if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
             self.request_new_unit_certificates()
             if self.charm.unit.is_leader():
                 self.request_new_admin_certificate()
@@ -1552,9 +1478,7 @@ class OpenSearchEventsHandler(Object):
             tls_file=False,
         )
 
-        self.charm.tls_events.certs.request_certificate_creation(
-            certificate_signing_request=csr
-        )
+        self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
 
     def update_external_clients_endpoints(self) -> None:
         """Update the endpoints of all the external clients relations."""
@@ -1620,9 +1544,7 @@ class OpenSearchEventsHandler(Object):
 
         # we check if we need to create the admin user
         if not self.charm.state.application.is_admin_user_initialized:
-            self.charm.internal_users_manager.put_or_update_internal_user_leader(
-                ADMIN_USER
-            )
+            self.charm.internal_users_manager.put_or_update_internal_user_leader(ADMIN_USER)
 
         # we check if we need to generate the admin certificate if missing
         if not self.charm.tls_manager.all_tls_resources_stored():

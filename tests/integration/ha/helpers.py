@@ -57,9 +57,7 @@ def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:
     wait=wait_fixed(wait=15) + wait_random(0, 5),
     stop=stop_after_attempt(25),
 )
-async def get_elected_cm_unit_id(
-    ops_test: OpsTest, unit_ip: str, app: str = APP_NAME
-) -> int:
+async def get_elected_cm_unit_id(ops_test: OpsTest, unit_ip: str, app: str = APP_NAME) -> int:
     """Returns the unit id of the current elected cm node."""
     # get current elected cm node
     resp = await http_request(
@@ -73,9 +71,7 @@ async def get_elected_cm_unit_id(
         return -1
 
     # get all nodes
-    resp = await http_request(
-        ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app
-    )
+    resp = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
     node_name = resp["nodes"][cm_node_id]["name"]
 
     return int(node_name.split(".")[0].split("-")[-1])
@@ -237,14 +233,10 @@ async def assert_continuous_writes_consistency(
     unit_ip = await get_leader_unit_ip(ops_test, apps[0])
 
     # fetch unit ips by unit id by application
-    apps_units_ips = {
-        app: await get_application_unit_ids_ips(ops_test, app) for app in apps
-    }
+    apps_units_ips = {app: await get_application_unit_ids_ips(ops_test, app) for app in apps}
 
     # investigate the data in each shard, primaries and their respective replicas
-    shards = await get_shards_by_index(
-        ops_test, unit_ip, ContinuousWrites.INDEX_NAME, app=apps[0]
-    )
+    shards = await get_shards_by_index(ops_test, unit_ip, ContinuousWrites.INDEX_NAME, app=apps[0])
     shards_by_id = {}
     for shard in shards:
         shards_by_id.setdefault(shard.num, []).append(shard)
@@ -355,9 +347,7 @@ async def send_kill_signal_to_process(
         kill_cmd = f"ssh --container opensearch {unit_name} echo {opensearch_pid} | xargs -r kill -{signal.upper()}"
     return_code, stdout, stderr = await ops_test.juju(*kill_cmd.split(), check=False)
     if return_code != 0:
-        raise Exception(
-            f"{kill_cmd} failed -- rc: {return_code} - out: {stdout} - err: {stderr}"
-        )
+        raise Exception(f"{kill_cmd} failed -- rc: {return_code} - out: {stdout} - err: {stderr}")
 
     return opensearch_pid
 
@@ -381,9 +371,7 @@ async def update_restart_delay(ops_test: OpsTest, app: str, unit_id: int, delay:
     await ops_test.juju(*reload_cmd.split(), check=True)
 
 
-async def cut_network_from_unit_with_ip_change(
-    ops_test: OpsTest, app: str, unit_id: int
-) -> None:
+async def cut_network_from_unit_with_ip_change(ops_test: OpsTest, app: str, unit_id: int) -> None:
     """Cut network from a lxc container, triggering an IP change after restoration."""
     unit_ids_hostnames = await get_application_unit_ids_hostnames(ops_test, app)
     unit_hostname = unit_ids_hostnames[unit_id]
@@ -409,13 +397,9 @@ async def cut_network_from_unit_without_ip_change(
         # Ignore if the interface was already overridden.
         pass
 
-    limit_set_command = (
-        f"lxc config device set {unit_hostname} eth0 limits.egress=0kbit"
-    )
+    limit_set_command = f"lxc config device set {unit_hostname} eth0 limits.egress=0kbit"
     subprocess.check_call(limit_set_command.split())
-    limit_set_command = (
-        f"lxc config device set {unit_hostname} eth0 limits.ingress=1kbit"
-    )
+    limit_set_command = f"lxc config device set {unit_hostname} eth0 limits.ingress=1kbit"
     subprocess.check_call(limit_set_command.split())
     limit_set_command = f"lxc config device set {unit_hostname} eth0 limits.priority=10"
     subprocess.check_call(limit_set_command.split())
@@ -458,9 +442,7 @@ async def is_network_restored_after_ip_change(
     ops_test: OpsTest, app: str, unit_id: int, unit_ip: str, retries: int = 50
 ) -> bool:
     try:
-        for attempt in Retrying(
-            stop=stop_after_attempt(retries), wait=wait_fixed(wait=30)
-        ):
+        for attempt in Retrying(stop=stop_after_attempt(retries), wait=wait_fixed(wait=30)):
             with attempt:
                 logger.error("Network not restored yet, attempting again.")
                 units_ips = await get_application_unit_ids_ips(ops_test, app)
@@ -481,9 +463,7 @@ async def add_juju_secret(
     # pass arguments as list
     kv_args = [f"{k}={v}" for k, v in data.items()]
 
-    return_code, stdout, stderr = await ops_test.juju(
-        "add-secret", secret_label, *kv_args
-    )
+    return_code, stdout, stderr = await ops_test.juju("add-secret", secret_label, *kv_args)
     logger.info(f"Add secret return code={return_code} stdout={stdout} stderr={stderr}")
     if return_code != 0:
         raise AssertionError(
@@ -496,12 +476,8 @@ async def add_juju_secret(
         raise AssertionError("juju add-secret returned empty secret URI")
 
     # grant using the secret URI
-    return_code, stdout, stderr = await ops_test.juju(
-        "grant-secret", secret_uri, charm_name
-    )
-    logger.info(
-        f"Grant secret return code={return_code} stdout={stdout} stderr={stderr}"
-    )
+    return_code, stdout, stderr = await ops_test.juju("grant-secret", secret_uri, charm_name)
+    logger.info(f"Grant secret return code={return_code} stdout={stdout} stderr={stderr}")
     if return_code != 0:
         raise AssertionError(
             f"juju grant-secret failed rc={return_code} stderr={stderr} stdout={stdout}"
@@ -552,9 +528,7 @@ async def assert_start_and_check_continuous_writes(
 
     Closes the writer at the end.
     """
-    initial_count = await index_docs_count(
-        ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
-    )
+    initial_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
     logger.info(
         f"Index {ContinuousWrites.INDEX_NAME} has {initial_count} documents, starting there"
     )
@@ -595,9 +569,7 @@ async def restore(
     return action.status == "completed"
 
 
-async def list_backups(
-    ops_test: OpsTest, leader_id: int, app: str = APP_NAME
-) -> dict[str, str]:
+async def list_backups(ops_test: OpsTest, leader_id: int, app: str = APP_NAME) -> dict[str, str]:
     action = await run_action(
         ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
     )
@@ -609,18 +581,14 @@ async def assert_restore_indices_and_compare_consistency(
     ops_test: OpsTest, app: str, leader_id: int, unit_ip: str, backup_id: str
 ) -> None:
     """Ensures that continuous writes index has at least the value below."""
-    original_count = await index_docs_count(
-        ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
-    )
+    original_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
     # As stated on: https://discuss.elastic.co/t/how-to-parse-snapshot-dat-file/218888,
     # the only way to discover the documents in a backup is to recover it and check
     # on opensearch.
     # The logic below will run over each backup id, restore it and ensure continuous writes
     # index loss is within the "loss" parameter.
     assert await restore(ops_test, backup_id, unit_ip, leader_id, app=app)
-    new_count = await index_docs_count(
-        ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME
-    )
+    new_count = await index_docs_count(ops_test, app, unit_ip, ContinuousWrites.INDEX_NAME)
     logger.info(
         f"Testing restore for {ContinuousWrites.INDEX_NAME} - "
         f"original count pre-restore: {original_count}, and now, new count: {new_count}"

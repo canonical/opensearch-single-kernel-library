@@ -27,9 +27,7 @@ class JwtState(RelationState):
         Returns:
             bool: True if the label corresponds to a JWT relation secret, False otherwise
         """
-        if label and (
-            relation := self.data_interface._relation_from_secret_label(label)
-        ):
+        if label and (relation := self.data_interface._relation_from_secret_label(label)):
             return label == self.data_interface._generate_secret_label(
                 relation.name, relation.id, SecretGroup("extra")
             )

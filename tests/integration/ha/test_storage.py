@@ -128,7 +128,9 @@ async def test_storage_reuse_after_scale_down(
     )
 
     # add unit with storage attached
-    add_unit_cmd = f"add-unit {app} --model={ops_test.model.info.name} --attach-storage={unit_storage_id}"
+    add_unit_cmd = (
+        f"add-unit {app} --model={ops_test.model.info.name} --attach-storage={unit_storage_id}"
+    )
     return_code, _, _ = await ops_test.juju(*add_unit_cmd.split())
     assert return_code == 0, "Failed to add unit with storage"
 
@@ -191,9 +193,7 @@ async def test_storage_reuse_after_scale_to_zero(
     for unit_id in unit_ids:
         add_unit_cmd = f"add-unit {app} --model={ops_test.model.info.name} --attach-storage={storage_ids[unit_id]}"
         return_code, _, _ = await ops_test.juju(*add_unit_cmd.split())
-        assert return_code == 0, (
-            f"Failed to add unit with storage {storage_ids[unit_id]}"
-        )
+        assert return_code == 0, f"Failed to add unit with storage {storage_ids[unit_id]}"
         await ops_test.model.wait_for_idle(apps=[app], timeout=1000)
 
     await wait_until(
@@ -298,7 +298,9 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
 
     # add unit with storage attached
     for unit_storage_id in storage_ids[1:]:
-        add_unit_cmd = f"add-unit {app} --model={ops_test.model.info.name} --attach-storage={unit_storage_id}"
+        add_unit_cmd = (
+            f"add-unit {app} --model={ops_test.model.info.name} --attach-storage={unit_storage_id}"
+        )
         return_code, _, _ = await ops_test.juju(*add_unit_cmd.split())
         assert return_code == 0, f"Failed to add unit with storage {unit_storage_id}"
 

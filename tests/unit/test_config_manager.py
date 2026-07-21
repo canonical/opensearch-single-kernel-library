@@ -81,10 +81,7 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
     security_conf = yaml_conf_setter.load(sec_conf_yml)
 
     # Fixture opensearch.yml does not define plugins.security.ssl.http.clientauth_mode.
-    assert (
-        get_nested_value(opensearch_conf, "plugins.security.ssl.http.clientauth_mode")
-        is None
-    )
+    assert get_nested_value(opensearch_conf, "plugins.security.ssl.http.clientauth_mode") is None
     assert authc()["basic_internal_auth_domain"]["http_enabled"]
     assert authc()["clientcert_auth_domain"]["http_enabled"] is False
     assert authc()["clientcert_auth_domain"]["transport_enabled"] is False
@@ -121,9 +118,7 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
     )
     app = App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name)
     deployment_desc_mock.return_value = DeploymentDescription(
-        config=PeerClusterConfig(
-            cluster_name="opensearch-dev", init_hold=False, roles=[]
-        ),
+        config=PeerClusterConfig(cluster_name="opensearch-dev", init_hold=False, roles=[]),
         start=StartMode.WITH_GENERATED_ROLES,
         pending_directives=[],
         app=app,
@@ -150,9 +145,7 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
 
 
 @pytest.mark.real_fs
-def test_set_node_and_cleanup_if_bootstrapped(
-    harness, mocker, substrate, tmp_config_path
-):
+def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_config_path):
     """Test setting the core config of a node."""
     yaml_conf_setter = YamlConfigSetter(harness.charm.workload)
     yaml_conf_setter.base_path = tmp_config_path
@@ -247,13 +240,8 @@ def test_set_node_and_cleanup_if_bootstrapped(
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     # Base security stuff set by set_node()
     assert get_nested_value(opensearch_conf, "plugins.security.disabled") is False
-    assert (
-        get_nested_value(opensearch_conf, "plugins.security.ssl_cert_reload_enabled")
-        is True
-    )
-    assert get_nested_value(
-        opensearch_conf, "plugins.security.restapi.roles_enabled"
-    ) == [
+    assert get_nested_value(opensearch_conf, "plugins.security.ssl_cert_reload_enabled") is True
+    assert get_nested_value(opensearch_conf, "plugins.security.restapi.roles_enabled") == [
         "all_access",
         "security_rest_api_access",
     ]

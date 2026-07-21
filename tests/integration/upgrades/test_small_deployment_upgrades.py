@@ -100,9 +100,7 @@ async def test_deploy_latest_from_channel(
         # Deploy from the local 2.18 charm to have n-1 version available
         # TODO: Once revision released deploy from channel and remove local charm
         await ops_test.model.set_config(MODEL_CONFIG)
-        charm_resources = {
-            "opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"
-        }
+        charm_resources = {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
         await deploy_opensearch(
             ops_test,
             charm_version_minus_1,

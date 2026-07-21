@@ -83,9 +83,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         unhealthy = first_upgrade_unit.unit_state is not UnitUpgradesState.HEALTHY
         if outdated or unhealthy:
             if outdated:
-                message = (
-                    "Highest number unit has not upgraded yet. Upgrade will not resume."
-                )
+                message = "Highest number unit has not upgraded yet. Upgrade will not resume."
             else:
                 message = "Highest number unit is unhealthy. Upgrade will not resume."
             logger.debug(f"Resume upgrade event failed: {message}")
@@ -122,16 +120,12 @@ class UpgradesManagerVM(UpgradesManagerBase):
                                 alt_hosts=self.alt_hosts,
                             )
                         except OpenSearchHttpError:
-                            logger.exception(
-                                "Failed to re-enable allocation after rollback"
-                            )
+                            logger.exception("Failed to re-enable allocation after rollback")
                     else:
                         # Run pre-upgrade check
                         # (in case user forgot to run pre-upgrade-check action)
                         self.pre_upgrade_check()
-                        logger.debug(
-                            "Pre-upgrade check after `juju refresh` successful"
-                        )
+                        logger.debug("Pre-upgrade check after `juju refresh` successful")
                 elif index == 1:
                     # User confirmation needed to resume upgrade (i.e. upgrade second unit)
                     logger.debug(
@@ -144,9 +138,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
                 or unit.unit_state is not UnitUpgradesState.HEALTHY
             ):
                 # Waiting for higher number units to upgrade
-                logger.debug(
-                    f"Upgrade not authorized. Waiting for {unit.unit.name=} to upgrade"
-                )
+                logger.debug(f"Upgrade not authorized. Waiting for {unit.unit.name=} to upgrade")
                 return False
         return False
 
@@ -174,8 +166,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         for index, server in enumerate(self.state.sorted_upgrades_units):
             if server.unit == self.state.server.unit:
                 is_rollback = (
-                    self.state.application_upgrade.versions.charm
-                    == self.current_versions.charm
+                    self.state.application_upgrade.versions.charm == self.current_versions.charm
                 )
                 return index == 0 and not is_rollback
         return False

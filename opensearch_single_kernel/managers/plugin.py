@@ -51,9 +51,7 @@ class PluginManager(BaseManager):
         for label in add:
             plugin = configs_from_relation[label]
             if plugin.secret_id:
-                self.state.secrets.get_tracked_secret(
-                    plugin.secret_id, Scope.APP, label
-                )
+                self.state.secrets.get_tracked_secret(plugin.secret_id, Scope.APP, label)
                 self.put_plugin_config(
                     scope=Scope.APP,
                     label=label,

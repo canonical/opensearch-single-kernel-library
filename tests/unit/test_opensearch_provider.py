@@ -26,9 +26,7 @@ from opensearch_single_kernel.core.models import (
 DASHBOARDS_CHARM = "opensearch-dashboards"
 
 mock_deployment_desc = DeploymentDescription(
-    config=PeerClusterConfig(
-        cluster_name="", init_hold=False, roles=[], profile="production"
-    ),
+    config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
     start=StartMode.WITH_GENERATED_ROLES,
     pending_directives=[],
     typ=DeploymentType.MAIN_ORCHESTRATOR,

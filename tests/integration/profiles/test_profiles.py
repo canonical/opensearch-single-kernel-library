@@ -48,9 +48,7 @@ MEMORY_NOT_ENOUGH_STATUS = format_status(
 )
 
 
-async def check_heap_size(
-    ops_test: OpsTest, heap_size_in_gb: int, app_name: str = APP_NAME
-):
+async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str = APP_NAME):
     """A dummy test to make pytest happy when all other tests are skipped."""
     os_app = ops_test.model.applications[app_name]
     unit = os_app.units[0]
@@ -71,9 +69,7 @@ async def check_heap_size(
         verify=False,
         auth=("admin", password),
     )
-    assert jvm_response.status_code == 200, (
-        f"Failed to get JVM stats: {jvm_response.text}"
-    )
+    assert jvm_response.status_code == 200, f"Failed to get JVM stats: {jvm_response.text}"
     jvm_info = jvm_response.json()
     assert "nodes" in jvm_info, "No nodes information in JVM stats"
     for node_id, node_info in jvm_info["nodes"].items():
@@ -299,8 +295,6 @@ async def test_large_deployment_cluster(
     )
     data_app = ops_test.model.applications["data"]
     await data_app.add_units(count=2)
-    await wait_until(
-        ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000
-    )
+    await wait_until(ops_test, apps=["main", "data"], wait_for_exact_units=3, timeout=2000)
 
     await check_heap_size(ops_test, 4, app_name="main")

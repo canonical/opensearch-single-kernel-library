@@ -62,9 +62,7 @@ class HealthManager(BaseManager):
             return HealthColors.IGNORE
 
         host = self.state.node_host if use_localhost else None
-        response = self.opensearch_client.get_health(
-            host, wait_for_green_first, self.alt_hosts
-        )
+        response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
         if wait_for_green_first and not response:
             response = self.opensearch_client.get_health(host, False, self.alt_hosts)
 
@@ -130,13 +128,9 @@ class HealthManager(BaseManager):
                 case HealthColors.YELLOW:
                     status_list.append(HealthStatuses.CLUSTER_HEALTH_YELLOW.value)
         elif status == HealthColors.YELLOW and (
-            busy_shards := self.opensearch_client.get_busy_shards_by_unit(
-                alt_hosts=self.alt_hosts
-            )
+            busy_shards := self.opensearch_client.get_busy_shards_by_unit(alt_hosts=self.alt_hosts)
         ):
-            message = sorted(
-                [f"{key}/{','.join(val)}" for key, val in busy_shards.items()]
-            )
+            message = sorted([f"{key}/{','.join(val)}" for key, val in busy_shards.items()])
             status_list.append(
                 format_status(
                     HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value,

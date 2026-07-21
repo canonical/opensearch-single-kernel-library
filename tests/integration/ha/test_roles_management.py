@@ -81,9 +81,7 @@ async def test_set_roles_manually(
 
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
-    cluster_name = (await cluster_health(ops_test, leader_unit_ip, app=app))[
-        "cluster_name"
-    ]
+    cluster_name = (await cluster_health(ops_test, leader_unit_ip, app=app))["cluster_name"]
     nodes = await all_nodes(ops_test, leader_unit_ip, app=app)
     for node in nodes:
         assert sorted(node.roles) == [
@@ -111,9 +109,7 @@ async def test_set_roles_manually(
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
     )
-    new_cluster_name = (await cluster_health(ops_test, leader_unit_ip, app=app))[
-        "cluster_name"
-    ]
+    new_cluster_name = (await cluster_health(ops_test, leader_unit_ip, app=app))["cluster_name"]
     assert new_cluster_name == cluster_name, "Oops - cluster name changed."
 
     nodes = await all_nodes(ops_test, leader_unit_ip, app=app)

@@ -166,10 +166,7 @@ class OpenSearchClient:
             )
             return response["snapshots"][0]
         except OpenSearchHttpError as e:
-            if (
-                e.response_body.get("error", {}).get("type")
-                == "snapshot_missing_exception"
-            ):
+            if e.response_body.get("error", {}).get("type") == "snapshot_missing_exception":
                 return
             raise
 
@@ -228,10 +225,7 @@ class OpenSearchClient:
             )
             return response.get(repo_name) is not None
         except OpenSearchHttpError as e:
-            if (
-                e.response_body.get("error", {}).get("type")
-                == "repository_missing_exception"
-            ):
+            if e.response_body.get("error", {}).get("type") == "repository_missing_exception":
                 return False
             raise
 
@@ -295,9 +289,7 @@ class OpenSearchClient:
         except OpenSearchHttpError as e:
             body = e.response_body or {}
             err_type = (
-                (body.get("error") or {}).get("type")
-                if isinstance(body, dict)
-                else str(body)
+                (body.get("error") or {}).get("type") if isinstance(body, dict) else str(body)
             )
             if "repository_missing_exception" in str(err_type):
                 return
@@ -335,9 +327,7 @@ class OpenSearchClient:
         )
 
         logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
-        logger.debug(
-            "Create snapshot request with id: %s - response: %s", snapshot_id, response
-        )
+        logger.debug("Create snapshot request with id: %s - response: %s", snapshot_id, response)
 
         # This should always pass and is set for documentation purposes
         assert response.get("accepted") is True
@@ -384,8 +374,7 @@ class OpenSearchClient:
         # this only serves as documentation and should always be true if no previous HTTP error
         snapshot_field = restore_resp.get("snapshot")
         assert "accepted" in restore_resp or (
-            isinstance(snapshot_field, dict)
-            and snapshot_field.get("snapshot") == snapshot_id
+            isinstance(snapshot_field, dict) and snapshot_field.get("snapshot") == snapshot_id
         ), f"Unexpected restore response: {restore_resp}"
 
         # sanity check on the restore success
@@ -402,11 +391,7 @@ class OpenSearchClient:
             )
         ]
         restored_indices = set(
-            [
-                recovery["index"]
-                for recovery in snapshot_recoveries
-                if recovery["stage"] == "done"
-            ]
+            [recovery["index"] for recovery in snapshot_recoveries if recovery["stage"] == "done"]
         )
         expected_indices = set(snapshot.get("indices", []))
         return expected_indices - restored_indices
@@ -528,9 +513,7 @@ class OpenSearchClient:
                 and e.response_body.get("error", {}).get("type")
                 == "resource_already_exists_exception"
             ):
-                logger.warning(
-                    "Index failed to be created as it already exists, continuing..."
-                )
+                logger.warning("Index failed to be created as it already exists, continuing...")
             else:
                 raise e
 
@@ -679,9 +662,7 @@ class OpenSearchClient:
             raise OpenSearchHttpError(f"removing user {user_name} failed")
         return resp
 
-    def patch_user(
-        self, user_name: str, patches: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def patch_user(self, user_name: str, patches: list[dict[str, Any]]) -> dict[str, Any]:
         """Applies patches to user.
 
         Args:
@@ -827,9 +808,7 @@ class OpenSearchClient:
             wait_strategy=wait_exponential(min=2),
         )
 
-    def fetch_voting_exclusions_config(
-        self, alt_hosts: list[str] | None = None
-    ) -> set[str]:
+    def fetch_voting_exclusions_config(self, alt_hosts: list[str] | None = None) -> set[str]:
         """Fetch the voting exclusions config."""
         try:
             resp = self.request(
@@ -889,9 +868,7 @@ class OpenSearchClient:
         logger.debug("Added voting exclusions for:  %s", exclusions)
         return True
 
-    def fetch_allocation_exclusions(
-        self, alt_hosts: list[str] | None = None
-    ) -> set[str]:
+    def fetch_allocation_exclusions(self, alt_hosts: list[str] | None = None) -> set[str]:
         """Fetch the registered allocation exclusions."""
         try:
             resp = self.request(
@@ -901,9 +878,9 @@ class OpenSearchClient:
                 retries=3,
                 wait_strategy=wait_exponential(min=2),
             )
-            if exclusions := resp["persistent"]["cluster"]["routing"]["allocation"][
-                "exclude"
-            ]["_name"]:
+            if exclusions := resp["persistent"]["cluster"]["routing"]["allocation"]["exclude"][
+                "_name"
+            ]:
                 return set(exclusions.split(","))
         except KeyError:
             pass
@@ -918,20 +895,12 @@ class OpenSearchClient:
         alt_hosts: list[str] | None = None,
     ) -> bool:
         """Register new allocation exclusions."""
-        existing = (
-            set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        )
-        all_exclusions = existing.union(
-            allocations if allocations is not None else {node.name}
-        )
+        existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
+        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
         response = self.request(
             "PUT",
             "/_cluster/settings",
-            {
-                "persistent": {
-                    "cluster.routing.allocation.exclude._name": ",".join(all_exclusions)
-                }
-            },
+            {"persistent": {"cluster.routing.allocation.exclude._name": ",".join(all_exclusions)}},
             alt_hosts=alt_hosts,
             retries=3,
             wait_strategy=wait_exponential(min=2),
@@ -982,9 +951,7 @@ class OpenSearchClient:
         Returns:
             roles (List[str]): List of opensearch unit roles.
         """
-        node = self.get_current_node(
-            unit_name, unit_id=unit_number, alt_hosts=alt_hosts
-        )
+        node = self.get_current_node(unit_name, unit_id=unit_number, alt_hosts=alt_hosts)
         return node.roles if node else []
 
     def get_shards(
@@ -1026,9 +993,9 @@ class OpenSearchClient:
                         "node": node_name,
                     }
                     if verbose:
-                        shard_info["unassigned.reason"] = shard.get(
-                            "unassigned_info", {}
-                        ).get("reason", None)
+                        shard_info["unassigned.reason"] = shard.get("unassigned_info", {}).get(
+                            "reason", None
+                        )
                     shards_info.append(shard_info)
         return shards_info
 
@@ -1226,13 +1193,9 @@ class OpenSearchClient:
         if self.notification_config_exists(config_id):
             self.update_notification_config(config_id=config_id, config=config)
         else:
-            self.create_notification_config(
-                config_id=config_id, name=name, config=config
-            )
+            self.create_notification_config(config_id=config_id, name=name, config=config)
 
-    def update_notification_config(
-        self, *, config_id: str, config: dict[str, object]
-    ) -> None:
+    def update_notification_config(self, *, config_id: str, config: dict[str, object]) -> None:
         """Update notification config.
 
         Args:
@@ -1240,9 +1203,7 @@ class OpenSearchClient:
             config: Notification Config
         """
         payload = {"config": config}
-        self.request(
-            "PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload
-        )
+        self.request("PUT", f"/_plugins/_notifications/configs/{config_id}", payload=payload)
 
     def delete_notification_config(self, config_id: str) -> None:
         """Delete config by id.
@@ -1271,10 +1232,7 @@ class OpenSearchClient:
         except OpenSearchHttpError as e:
             logger.error("Could not reload secure settings: %s", e)
             return False
-        return (
-            isinstance(response, dict)
-            and response.get("_nodes", {}).get("failed", -1) == 0
-        )
+        return isinstance(response, dict) and response.get("_nodes", {}).get("failed", -1) == 0
 
     def request(  # noqa
         self,
@@ -1315,16 +1273,14 @@ class OpenSearchClient:
             """Performs an HTTP request."""
             random.shuffle(urls)
 
-            retry = retry_if_exception_type(
-                requests.RequestException
-            ) | retry_if_exception_type(urllib3.exceptions.HTTPError)
+            retry = retry_if_exception_type(requests.RequestException) | retry_if_exception_type(
+                urllib3.exceptions.HTTPError
+            )
             for attempt in Retrying(
                 retry=retry,
                 stop=stop_after_attempt(retries),
                 wait=wait_strategy,
-                before_sleep=self.get_log_error_http_retry(
-                    retries, method, urls, payload
-                ),
+                before_sleep=self.get_log_error_http_retry(retries, method, urls, payload),
                 reraise=True,
             ):
                 with attempt, requests.Session() as s:
@@ -1346,9 +1302,7 @@ class OpenSearchClient:
                     }
                     if payload:
                         request_kwargs["data"] = (
-                            json.dumps(payload)
-                            if not isinstance(payload, str)
-                            else payload
+                            json.dumps(payload) if not isinstance(payload, str) else payload
                         )
 
                     response = s.request(**request_kwargs)
@@ -1430,9 +1384,7 @@ class OpenSearchClient:
 
         return log_error
 
-    def get_unit_with_lock(
-        self, host: str | None, alt_hosts: list[str] | None
-    ) -> str | None:
+    def get_unit_with_lock(self, host: str | None, alt_hosts: list[str] | None) -> str | None:
         """Get unit name that has acquired OpenSearch lock."""
         try:
             document_data = self.request(
@@ -1534,9 +1486,7 @@ class OpenSearchClient:
             if e.response_code != 404:
                 raise
 
-    def create_lock_document(
-        self, host: str, alt_hosts: list[str] | None, unit_name: str
-    ) -> bool:
+    def create_lock_document(self, host: str, alt_hosts: list[str] | None, unit_name: str) -> bool:
         """Create lock document in lock index with granted unit name.
 
         Also ensures it propagated all over the cluster. If propagation is failed,
@@ -1560,11 +1510,9 @@ class OpenSearchClient:
                 payload={"unit-name": unit_name},
             )
         except OpenSearchHttpError as e:
-            if (
-                e.response_code == 409
-                and "document already exists"
-                in e.response_body.get("error", {}).get("reason", "")
-            ):
+            if e.response_code == 409 and "document already exists" in e.response_body.get(
+                "error", {}
+            ).get("reason", ""):
                 # Document already created
                 logger.debug(
                     "[Node lock] Another unit acquired OpenSearch lock while this unit attempted "

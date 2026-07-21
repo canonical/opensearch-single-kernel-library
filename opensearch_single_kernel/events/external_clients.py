@@ -51,9 +51,7 @@ class ExternalClientsEventsHandler(Object):
         self.framework.observe(
             charm.on[CLIENT_RELATION].relation_departed, self._on_relation_departed
         )
-        self.framework.observe(
-            charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken
-        )
+        self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
     def _on_index_requested(self, event: IndexRequestedEvent) -> None:  # noqa: C901
         """Handle client index-requested event.
@@ -78,20 +76,11 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if (
-            not self.charm.cluster_manager.opensearch_client.is_node_up()
-            or not event.index
-        ):
+        if not self.charm.cluster_manager.opensearch_client.is_node_up() or not event.index:
             event.defer()
             return
-        if not (
-            external_client := self.charm.state.external_client_by_relation(
-                event.relation
-            )
-        ):
-            logger.error(
-                "No external client found for relation id %d", event.relation.id
-            )
+        if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
+            logger.error("No external client found for relation id %d", event.relation.id)
             return
 
         if not validate_index_name(event.index):
@@ -123,9 +112,7 @@ class ExternalClientsEventsHandler(Object):
         )
 
         try:
-            self.charm.external_clients_manager.opensearch_client.create_index(
-                event.index
-            )
+            self.charm.external_clients_manager.opensearch_client.create_index(event.index)
         except OpenSearchHttpError as e:
             logger.error(
                 f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
@@ -195,9 +182,7 @@ class ExternalClientsEventsHandler(Object):
 
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
-            logger.error(
-                "No external client found for relation id %d", event.relation.id
-            )
+            logger.error("No external client found for relation id %d", event.relation.id)
             return
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.update_external_client_endpoints(external_client)
@@ -210,9 +195,7 @@ class ExternalClientsEventsHandler(Object):
             return
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
-            logger.error(
-                "No external client found for relation id %d", event.relation.id
-            )
+            logger.error("No external client found for relation id %d", event.relation.id)
             return
         # remove departing unit from endpoints available to requirer charm.
         if event.departing_unit.app == self.charm.app:
@@ -251,14 +234,8 @@ class ExternalClientsEventsHandler(Object):
         """Handle client relation-broken event."""
         if not self.charm.unit.is_leader():
             return
-        if not (
-            external_client := self.charm.state.external_client_by_relation(
-                event.relation
-            )
-        ):
-            logger.warning(
-                "No external client found for relation id %d", event.relation.id
-            )
+        if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
+            logger.warning("No external client found for relation id %d", event.relation.id)
             return
         if self.charm.state.server.get_relation_departing(event.relation):
             self.charm.state.server.remove_relation_departing(event.relation)
