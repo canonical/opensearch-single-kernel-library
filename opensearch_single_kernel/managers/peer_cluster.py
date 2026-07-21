@@ -443,13 +443,10 @@ class PeerClusterManager(BaseManager):
             return status_list
 
         if scope == "app":
-            # Only if we are a requirer and we have some orchestrators
             orchestrators = self.state.application.orchestrators
-            if (
-                self.state.is_peer_cluster_consumer()
-                and self.state.peer_clusters(is_provider=False, remote=True)
-                and orchestrators
-            ):
+            # Empty dict means orchestrators were never related
+            # dict with empty ids means orchestrators departed (cleaned on depart event)
+            if self.state.application.orchestrators_dict:
                 if not orchestrators.main_app and orchestrators.failover_app:
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
