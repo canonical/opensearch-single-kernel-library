@@ -137,7 +137,7 @@ def mock_fs_interactions(mocker, substrate: Substrate, request) -> None:
 def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None) -> None:
     """Configure fixture to behave as if S3 is connected, optionally inject a CA."""
     mock_s3_conn = mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3.S3Requirer.get_s3_connection_info",
+        "object_storage.S3Requirer.get_storage_connection_info",
         return_value=DEFAULT_S3_INFO,
     )
 
@@ -150,7 +150,7 @@ def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None)
 def use_azure(mocker, info: dict | None = None) -> None:
     """Configure fixture to behave as if Azure is connected."""
     mock_azure_conn = mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage.AzureStorageRequires.get_azure_storage_connection_info",
+        "object_storage.AzureStorageRequirer.get_storage_connection_info",
         return_value=DEFAULT_AZURE_INFO,
     )
     info = info or DEFAULT_AZURE_INFO
@@ -160,7 +160,7 @@ def use_azure(mocker, info: dict | None = None) -> None:
 def use_gcs(mocker, info: dict | None = None) -> None:
     """Configure fixture to behave as if GCS is connected."""
     mock_gcs_conn = mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage.GcsStorageRequires.get_storage_connection_info",
+        "object_storage.GCSRequirer.get_storage_connection_info",
         return_value=DEFAULT_GCS_INFO,
     )
     info = info or DEFAULT_GCS_INFO

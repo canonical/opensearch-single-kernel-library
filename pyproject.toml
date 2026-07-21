@@ -37,6 +37,7 @@ dependencies = [
   "bcrypt (>=4.3.0,<5.0.0)",                 # smtp_integrator/v0/smtp.py
   "email-validator (>=2.3.0,<3.0)",           # smtp_integrator/v0/smtp.py
   "urllib3 (>=2.7.0,<3.0.0)",
+  "object-storage-charmlib (>=1.0.0,<2.0.0)",
 ]
 
 
