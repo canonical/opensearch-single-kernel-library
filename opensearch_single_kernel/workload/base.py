@@ -357,7 +357,7 @@ class BaseWorkload(ABC):
             return False
 
     @abstractmethod
-    def run_script(self, script_name: str, args: str = None):
+    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
         pass
 

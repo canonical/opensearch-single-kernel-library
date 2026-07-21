@@ -488,21 +488,27 @@ class TlsManager(BaseManager):
             raise
 
         logger.info("TLS certificate for %s stored.", name)
+        return True
 
-    def store_admin_tls_secrets_if_applies(self) -> None:
-        """Store admin TLS resources if available and mark unit as configured if correct."""
+    def store_admin_tls_secrets_if_applies(self) -> bool:
+        """Store admin TLS resources if available and mark unit as configured if correct.
+
+        Returns:
+            whether operation was successful.
+        """
         # In the case of the first units before TLS is initialized,
         # or non-main orchestrator units having not received the secrets from the main yet
         if not (current_secrets := self.state.application.admin_secrets):
-            return
+            return False
 
         # in the case the cluster was bootstrapped with multiple units at the same time
         # and the certificates have not been generated yet
         if not current_secrets.get("cert") or not current_secrets.get("chain"):
-            return
+            return False
 
         # Store the "Admin" certificate, key and CA on the disk of the new unit
-        self.store_new_tls_resources(CertType.APP_ADMIN, current_secrets)
+        if not self.store_new_tls_resources(CertType.APP_ADMIN, current_secrets):
+            return False
 
         # Mark this unit as tls configured
         if self.is_fully_configured():
@@ -510,6 +516,7 @@ class TlsManager(BaseManager):
             peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
                 peer_cluster_server.tls_configured = True
+        return True
 
     def reconcile_k8s_runtime_resources(self) -> None:
         """Prepare the K8s runtime and restore TLS artifacts from secrets.

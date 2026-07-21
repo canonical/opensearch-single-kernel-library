@@ -12,6 +12,7 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Substrates
+from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
@@ -40,6 +41,13 @@ class BaseManager(ManagerStatusProtocol):
             OPENSEARCH_HTTP_PORT,
             self.state.application.admin_password,
         )
+
+    @property
+    def k8s_client(self) -> K8sClient:
+        """Initialize a k8s client."""
+        if self.state.substrate != Substrates.K8S:
+            raise NotImplementedError("K8s client is only available on K8s substrate.")
+        return K8sClient(self.state.pod_name, self.state.namespace)
 
     @property
     def alt_hosts(self) -> list[str] | None:

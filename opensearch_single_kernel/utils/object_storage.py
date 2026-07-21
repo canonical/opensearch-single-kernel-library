@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """Helpers for Cloud storage."""
+
 import json
 import logging
 import os

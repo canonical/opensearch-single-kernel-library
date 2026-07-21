@@ -48,7 +48,9 @@ NO_CM_STATUS = StatusObject(
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resources) -> None:
+async def test_build_and_deploy(
+    ops_test: OpsTest, charm, series, charm_resources, substrate
+) -> None:
     """Build and deploy one unit of OpenSearch."""
     # it is possible for users to provide their own cluster for HA testing.
     # Hence, check if there is a pre-existing cluster.
@@ -67,6 +69,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             series=series,
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -76,6 +79,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -85,6 +89,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, charm_resource
             resources=charm_resources,
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
+            trust=substrate == "k8s",
         ),
     )
 

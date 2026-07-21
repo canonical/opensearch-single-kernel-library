@@ -23,13 +23,11 @@ class StartOpenSearch(EventBase):
         ignore_lock: bool = False,
         after_upgrade: bool = False,
         is_first_data_node: bool = False,
-        override_version: bool = False,
     ) -> None:
         super().__init__(handle)
         self.ignore_lock = ignore_lock
         self.after_upgrade = after_upgrade
         self.is_first_data_node = is_first_data_node
-        self.override_version = override_version
 
     def snapshot(self) -> dict[str, Any]:
         """Snapshot of the event data."""
@@ -37,7 +35,6 @@ class StartOpenSearch(EventBase):
             "ignore_lock": self.ignore_lock,
             "after_upgrade": self.after_upgrade,
             "is_first_data_node": self.is_first_data_node,
-            "override_version": self.override_version,
         }
 
     def restore(self, snapshot: dict[str, Any]) -> None:
@@ -45,7 +42,6 @@ class StartOpenSearch(EventBase):
         self.ignore_lock = snapshot["ignore_lock"]
         self.after_upgrade = snapshot["after_upgrade"]
         self.is_first_data_node = snapshot["is_first_data_node"]
-        self.override_version = snapshot["override_version"]
 
 
 class RestartOpenSearch(EventBase):
@@ -62,8 +58,23 @@ class UpgradeOpenSearch(StartOpenSearch):
     `StartOpenSearch` will be emitted.
     """
 
-    def __init__(self, handle: Handle, *, ignore_lock: bool = False) -> None:
+    def __init__(
+        self, handle: Handle, *, ignore_lock: bool = False, override_version: bool = False
+    ) -> None:
+        """Initialize the UpgradeOpenSearch event."""
         super().__init__(handle, ignore_lock=ignore_lock)
+        self.override_version = override_version
+
+    def snapshot(self) -> dict[str, Any]:
+        """Snapshot of the event data."""
+        snap = super().snapshot()
+        snap.update({"override_version": self.override_version})
+        return snap
+
+    def restore(self, snapshot: dict[str, Any]):
+        """Restore data from Dict."""
+        super().restore(snapshot)
+        self.override_version = snapshot.get("override_version", False)
 
 
 class ReloadKeystoreEvent(EventBase):

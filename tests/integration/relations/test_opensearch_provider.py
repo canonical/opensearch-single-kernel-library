@@ -86,6 +86,7 @@ async def test_create_relation(
             series=series,
             config=CONFIG_OPTS,
             resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
     if substrate == "vm":

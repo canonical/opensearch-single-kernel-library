@@ -22,6 +22,7 @@ from ops import (
     RelationJoinedEvent,
     SecretChangedEvent,
     StartEvent,
+    StopEvent,
     StorageDetachingEvent,
     UpdateStatusEvent,
 )
@@ -75,6 +76,7 @@ from opensearch_single_kernel.events.custom_events import (
     RestartOpenSearch,
     StartOpenSearch,
 )
+from opensearch_single_kernel.managers.upgrades_k8s import UpgradesManagerK8s
 from opensearch_single_kernel.utils.helpers import format_unit_name
 from opensearch_single_kernel.utils.secrets import (
     breakdown_label,
@@ -100,6 +102,7 @@ class OpenSearchEventsHandler(Object):
         # --- OpenSearch charm events ---
         self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
+        self.framework.observe(self.charm.on.stop, self._on_stop)
         self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
         self.framework.observe(
             self.charm.on[NODE_LOCK_RELATION].relation_changed,
@@ -418,7 +421,10 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
-            if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+            if (
+                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                and not self.charm.upgrades_manager.in_progress
+            ):
                 self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
@@ -466,6 +472,16 @@ class OpenSearchEventsHandler(Object):
             component_name=self.charm.cluster_manager.name,
         )
         self.charm.workload.install()
+
+    def _on_stop(self, event: StopEvent) -> None:
+        """Event handler for stop event."""
+        if (
+            self.charm.substrate == Substrates.K8S
+            and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
+            and self.charm.upgrades_manager.in_progress
+        ):
+            self.charm.upgrades_manager.prepare_for_shutdown()
+        self.charm.pebble_observer.stop()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
@@ -618,6 +634,11 @@ class OpenSearchEventsHandler(Object):
         ):
             self.charm.pebble_observer.start()
 
+        if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+            logger.debug("Rollback in progress, deferring start event.")
+            event.defer()
+            return
+
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not yet computed.")
             event.defer()
@@ -674,7 +695,6 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
-        self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
@@ -781,6 +801,15 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
+        # This will block unit to start if it is an upgrade
+        # until the user unblock with `force-refresh-start`
+        if (
+            not event.after_upgrade
+            and self.charm.substrate == Substrates.K8S
+            and self.charm.upgrades_manager.is_rollback
+        ):
+            event.defer()
+            return
         if self.charm.state.is_peer_cluster_consumer():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
@@ -995,7 +1024,7 @@ Deferring event."
                 self.charm.state.application.deployment_desc.typ
                 == DeploymentType.MAIN_ORCHESTRATOR
             ):
-                if self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 ):
                     event.defer()
@@ -1030,7 +1059,9 @@ Deferring event."
 
         if event.after_upgrade:
             try:
-                self.charm.cluster_manager.opensearch_client.enable_shard_allocation()
+                self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
+                    alt_hosts=self.charm.cluster_manager.alt_hosts
+                )
             except OpenSearchHttpError:
                 logger.exception("Failed to re-enable allocation after upgrade")
                 event.defer()
@@ -1069,7 +1100,6 @@ Deferring event."
 
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
-
             # Cluster is considered healthy if green or yellow
             # TODO future improvement: try to narrow scope to just green or green + yellow in
             # specific cases
@@ -1078,22 +1108,23 @@ Deferring event."
             # https://chat.canonical.com/canonical/pl/zaizx3bu3j8ftfcw67qozw9dbo
             # For now, we need to allow yellow because
             # "During a rolling upgrade, primary shards assigned to a node running the new
-            # version cannot have their replicas assigned to a node with the old version. The new
-            # version might have a different data format that is not understood by the old
-            # version.
+            # version cannot have their replicas assigned to a node with the old version.
+            # The new version might have a different data format that is not understood by
+            # the old version.
             #
-            # "If it is not possible to assign the replica shards to another node (there is only
-            # one upgraded node in the cluster), the replica shards remain unassigned and status
-            # stays `yellow`.
+            # "If it is not possible to assign the replica shards to another node (there is
+            # only one upgraded node in the cluster), the replica shards remain unassigned
+            # and status stays `yellow`.
             #
-            # "In this case, you can proceed once there are no initializing or relocating shards
-            # (check the `init` and `relo` columns).
+            # "In this case, you can proceed once there are no initializing or relocating
+            # shards (check the `init` and `relo` columns).
             #
-            # "As soon as another node is upgraded, the replicas can be assigned and the status
-            # will change to `green`."
+            # "As soon as another node is upgraded, the replicas can be assigned and the
+            # status will change to `green`."
             #
             # from
-            # https://www.elastic.co/guide/en/elastic-stack/8.13/upgrading-elasticsearch.html#upgrading-elasticsearch
+            # https://www.elastic.co/guide/en/elastic-stack/8.13/upgrading-elasticsearch.html
+            # #upgrading-elasticsearch
             #
             # If `health_ == HealthColors.YELLOW`, no shards are initializing or relocating
             # (otherwise `health_` would be `HealthColors.YELLOW_TEMP`)
@@ -1109,10 +1140,9 @@ Deferring event."
                     "other than primary shards on upgraded unit & not enough upgraded units available "
                     "for replica shards"
                 )
-
-        self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
-        logger.debug("Set upgrade unit state to healthy")
-        self.charm.upgrade_events._reconcile_upgrade()
+            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+            logger.debug("Set upgrade unit state to healthy")
+            self.charm.upgrade_events._reconcile_upgrade()
 
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
@@ -1212,22 +1242,12 @@ Deferring event."
         ):
             return
 
-        logger.debug(f"We are applying status from deployment desc: {deployment_desc}")
-
         if Directive.SHOW_STATUS not in deployment_desc.pending_directives:
-            logger.debug(
-                "No show status directive in deployment description, skipping status application."
-            )
             return
 
         # remove show_status directive which is applied below
         if show_status_only_once:
-            logger.debug("We are removing show status directive from cluster manager.")
             self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
-
-        logger.debug(
-            "We are applying status from deployment desc: %s", deployment_desc.state.message
-        )
 
         for status in PeerClusterStatuses:
             if status.value.message != deployment_desc.state.message:

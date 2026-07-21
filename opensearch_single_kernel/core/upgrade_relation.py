@@ -113,3 +113,8 @@ class UpgradeServerState(RelationState):
         return (
             poetry_version.Version.parse(self.workload_version) if self.workload_version else None
         )
+
+    @property
+    def unit_number(self) -> int:
+        """Get the unit number."""
+        return int(self.unit.name.split("/")[-1])

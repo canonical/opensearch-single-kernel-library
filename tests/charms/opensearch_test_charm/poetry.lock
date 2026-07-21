@@ -755,18 +755,18 @@ license = ["ukkonen"]
 
 [[package]]
 name = "idna"
-version = "3.10"
+version = "3.15"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
-python-versions = ">=3.6"
+python-versions = ">=3.8"
 groups = ["main", "charm-libs"]
 files = [
-    {file = "idna-3.10-py3-none-any.whl", hash = "sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3"},
-    {file = "idna-3.10.tar.gz", hash = "sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9"},
+    {file = "idna-3.15-py3-none-any.whl", hash = "sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8"},
+    {file = "idna-3.15.tar.gz", hash = "sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc"},
 ]
 
 [package.extras]
-all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
+all = ["mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
 
 [[package]]
 name = "importlib-metadata"
@@ -902,35 +902,37 @@ files = [
 ]
 
 [[package]]
-name = "opensearch-charms-single-kernel"
-version = "0.0.5"
+name = "opensearch-single-kernel-library"
+version = "0.0.1.post6.dev0+744f8cb.dirty"
 description = "Shared and reusable code for OpenSearch charms"
 optional = false
-python-versions = "<4.0,>=3.10"
+python-versions = "^3.10"
 groups = ["main"]
-files = [
-    {file = "opensearch_charms_single_kernel-0.0.5-py3-none-any.whl", hash = "sha256:5fb122a679227d7d389134129dfbad6dd49831dee3f61f23ae3b978a43722e40"},
-    {file = "opensearch_charms_single_kernel-0.0.5.tar.gz", hash = "sha256:531c2fbd338aebcb9d2bdb5d58a23ed8a4eea6c6790ef1cfe18598f96ec700ad"},
-]
+files = []
+develop = false
 
 [package.dependencies]
-azure-storage-blob = ">=12.25.0,<13.0.0"
-boto3 = ">=1.38.36,<2.0.0"
-charmlibs-pathops = ">=1.0.1,<2.0.0"
-cryptography = ">=45.0.4,<46.0.0"
-data-platform-helpers = ">=0.1.7,<0.2.0"
-google-api-core = ">=2.17.0,<3.0.0"
-google-cloud-storage = ">=2.16.0,<3.0.0"
-jsonschema = ">=4.24.0,<5.0.0"
-ops = ">=3.3.0,<4.0.0"
-overrides = ">=7.7.0,<8.0.0"
+azure-storage-blob = "^12.25.0"
+boto3 = "^1.38.36"
+charmlibs-pathops = "^1.0.1"
+cryptography = "^45.0.4"
+data-platform-helpers = "^0.1.7"
+google-api-core = "^2.17.0"
+google-cloud-storage = "^2.16.0"
+jsonschema = "^4.24.0"
+ops = "^3.3.0"
+overrides = "^7.7.0"
 poetry-core = "<2.0.0"
-pre-commit = ">=4.4.0,<5.0.0"
-pydantic = ">=1.0"
+pre-commit = "^4.4.0"
+pydantic = ">= 1.0"
 requests = "2.32.4"
 ruamel-yaml = "0.18.14"
 shortuuid = "1.0.13"
-tenacity = ">=9.1.2,<10.0.0"
+tenacity = "^9.1.2"
+
+[package.source]
+type = "directory"
+url = "opensearch_single_kernel"
 
 [[package]]
 name = "opentelemetry-api"
@@ -1677,21 +1679,21 @@ typing-extensions = ">=4.12.0"
 
 [[package]]
 name = "urllib3"
-version = "2.4.0"
+version = "2.7.0"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "urllib3-2.4.0-py3-none-any.whl", hash = "sha256:4e16665048960a0900c702d4a66415956a584919c03361cac9f1df5c5dd7e813"},
-    {file = "urllib3-2.4.0.tar.gz", hash = "sha256:414bc6535b787febd7567804cc015fee39daab8ad86268f1310a9250697de466"},
+    {file = "urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"},
+    {file = "urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c"},
 ]
 
 [package.extras]
-brotli = ["brotli (>=1.0.9) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=0.8.0) ; platform_python_implementation != \"CPython\""]
+brotli = ["brotli (>=1.2.0) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=1.2.0.0) ; platform_python_implementation != \"CPython\""]
 h2 = ["h2 (>=4,<5)"]
 socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
-zstd = ["zstandard (>=0.18.0)"]
+zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 
 [[package]]
 name = "virtualenv"
@@ -1755,4 +1757,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "b78fe7e42a6eae6962ccdf84c4d3f4bb67837e9b24ff9b56b03458c013a1e98e"
+content-hash = "f1ffae6fbced7404fa5d7ca564e44d6f376441eb77a1c485df14488d259ba4a0"

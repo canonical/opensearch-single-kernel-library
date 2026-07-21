@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 """Unit Tests for config Manager functions."""
+
 import shutil
 from pathlib import Path
 from typing import Any

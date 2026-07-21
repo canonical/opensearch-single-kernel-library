@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 """OpenSearch Machine VM Workload."""
+
 import logging
 import os
 import subprocess
@@ -129,12 +130,13 @@ class VMWorkload(BaseWorkload):
                     raise e
 
     @override
-    def run_script(self, script_name: str, args: str = None):
+    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME.
 
         Args:
             script_name (str): The name of script file to execute.
             args (str): Arguments passed to the script.
+            stdin (str): String input to be passed on the standard input of the subprocess.
         """
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):

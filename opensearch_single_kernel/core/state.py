@@ -4,6 +4,7 @@
 # See LICENSE file for licensing details.
 
 """Object representing the global state of OpenSearch Charm."""
+
 import json
 import logging
 import re
@@ -241,7 +242,7 @@ class ClusterState(Object):
         )
 
     @property
-    def sorted_server_upgrades(self) -> list[UpgradeServerState]:
+    def sorted_upgrades_units(self) -> list[UpgradeServerState]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
@@ -254,13 +255,23 @@ class ClusterState(Object):
                 )
                 for unit in sorted(
                     (self.server.unit, *self.upgrade_relation.units),
-                    key=lambda unit: unit.name.split("/")[1],
+                    key=lambda unit: int(unit.name.split("/")[1]),
                     reverse=True,
                 )
             ]
             if self.upgrade_relation
             else []
         )
+
+    @property
+    def pod_name(self) -> str:
+        """K8S only: The pod name."""
+        return self.model.unit.name.replace("/", "-")
+
+    @property
+    def namespace(self) -> str:
+        """K8S only: The namespace."""
+        return self.model.name
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 
@@ -633,8 +644,7 @@ class ClusterState(Object):
         rotation_complete = all([server.tls_ca_renewed for server in all_units_in_fleet])
 
         logger.debug(
-            "CA rotation state"
-            "CA rotation happening in cluster: %s | \
+            "CA rotation state CA rotation happening in cluster: %s | \
                 rotation complete in cluster: %s |",
             rotation_in_progress,
             rotation_complete,
@@ -648,8 +658,7 @@ class ClusterState(Object):
         # Use related_peer_cluster_servers since we are reading remote data.
         all_units_in_fleet = self.application_servers + self.all_peer_clusters_servers(remote=True)
         logger.debug(
-            "CA and certs rotation state"
-            "Units in fleet: %s | \
+            "CA and certs rotation state Units in fleet: %s | \
                 CA rotation complete in fleet: %s | \
                 TLS configured in fleet: %s",
             [server.unit.name for server in all_units_in_fleet],
@@ -1260,3 +1269,7 @@ class ClusterState(Object):
             secret_key=self.secrets.get(Scope.APP, "s3-secret-key"),
             s3_tls_ca_chain=self.secrets.get(Scope.APP, "s3-tls-ca-chain"),
         )
+
+    def is_highest_ordinal_unit(self) -> bool:
+        """Check if the current unit is the highest ordinal unit in the application."""
+        return self.server_upgrade.unit.name == self.sorted_upgrades_units[0].unit.name
