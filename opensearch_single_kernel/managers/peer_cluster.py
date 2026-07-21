@@ -448,9 +448,15 @@ class PeerClusterManager(BaseManager):
             # dict with empty ids means orchestrators departed (cleaned on depart event)
             if self.state.application.orchestrators_dict:
                 if not orchestrators.main_app and orchestrators.failover_app:
-                    status_list.append(
-                        PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
-                    )
+                    if self.state.should_promote_failover_to_main():
+                        status_list.append(
+                            PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
+                        )
+                    else:
+                        status_list.append(
+                            PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
+                        )
+
                 elif not orchestrators.main_app and not orchestrators.failover_app:
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value

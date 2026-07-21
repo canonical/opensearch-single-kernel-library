@@ -1273,3 +1273,24 @@ class ClusterState(Object):
     def is_highest_ordinal_unit(self) -> bool:
         """Check if the current unit is the highest ordinal unit in the application."""
         return self.server_upgrade.unit.name == self.sorted_upgrades_units[0].unit.name
+
+    def should_promote_failover_to_main(self) -> bool:
+        """Check if majority of related apps are disconnected from main orchestrator.
+
+        This runs on the failover application.
+        """
+        # check how many related apps are disconnected from main orchestrator
+        remote_peer_clusters = self.peer_clusters(is_provider=True, remote=True)
+        n_disconnected = sum(
+            1
+            for p_cluster in remote_peer_clusters
+            if (p_cluster.main_orchestrator_registered.lower() == "false")
+        )
+
+        # check if failover is disconnected from main orchestrator
+        orchestrators = self.application.orchestrators
+        if not orchestrators.main_app:
+            n_disconnected += 1
+
+        # if majority are disconnected, promote failover
+        return n_disconnected > (len(remote_peer_clusters) + 1) // 2

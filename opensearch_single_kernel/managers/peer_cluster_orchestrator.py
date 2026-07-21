@@ -488,27 +488,6 @@ class PeerClusterOrchestratorManager(BaseManager):
             update_cluster_fleet(cluster_fleet_apps_rels, p_cluster_app, key=str(trigger_rel_id))
             self.state.application.cluster_fleet_apps_rels = cluster_fleet_apps_rels
 
-    def should_promote_failover_to_main(self) -> bool:
-        """Check if majority of related apps are disconnected from main orchestrator.
-
-        This runs on the failover application.
-        """
-        # check how many related apps are disconnected from main orchestrator
-        remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
-        n_disconnected = sum(
-            1
-            for p_cluster in remote_peer_clusters
-            if (p_cluster.main_orchestrator_registered.lower() == "false")
-        )
-
-        # check if failover is disconnected from main orchestrator
-        orchestrators = self.state.application.orchestrators
-        if not orchestrators.main_app:
-            n_disconnected += 1
-
-        # if majority are disconnected, promote failover
-        return n_disconnected > (len(remote_peer_clusters) + 1) // 2
-
     def promote_failover(self) -> None:
         """Handle failover promotion to main orchestrator."""
         logger.debug("Promoting unit %s from failover to main", self.state.unit_name)

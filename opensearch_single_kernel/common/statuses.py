@@ -334,6 +334,13 @@ class PeerClusterStatuses(Enum):
         check="Failover promotion after main removal.",
         action="Wait for failover promotion or re-relate main orchestrator.",
     )
+    PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY = StatusObject(
+        status="blocked",
+        message="Main orchestrator removed. Failover cannot be promoted without majority nodes.",
+        short_message="Main removed, no majority",
+        check="Main orchestrator relations with the rest of the cluster.",
+        action="Re-relate main orchestrator or remove its relations with the other apps to allow failover promotion.",
+    )
 
 
 class PeerClusterErrorDataStatuses(Enum):

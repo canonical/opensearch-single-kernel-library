@@ -131,7 +131,9 @@ async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) 
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
         apps_statuses={
-            FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value],
+            FAILOVER_APP: [
+                PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
+            ],
         },
         idle_period=IDLE_PERIOD,
         timeout=1800,
