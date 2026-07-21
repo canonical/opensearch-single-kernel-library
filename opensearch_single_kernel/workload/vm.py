@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -46,10 +47,17 @@ class VMWorkload(BaseWorkload):
     def __init__(self, charm_root: Path):
         super().__init__()
         self.charm_root = charm_root
-        for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(5)):
+
+    @cached_property
+    def opensearch_snap(self) -> snap.Snap:
+        """Return the opensearch snap."""
+        for attempt in Retrying(stop=stop_after_attempt(12), wait=wait_fixed(10), reraise=True):
             with attempt:
-                cache = snap.SnapCache()
-                self.opensearch_snap = cache["opensearch"]
+                opensearch_snap = snap.SnapCache()["opensearch"]
+        logger.debug(
+            f"Snap opensearch fetched after {attempt.retry_state.attempt_number - 1} attempts"
+        )
+        return opensearch_snap
 
     @property
     @override
@@ -79,13 +87,14 @@ class VMWorkload(BaseWorkload):
         """Install the workload."""
         try:
             cache = snap.SnapCache()
-            self.opensearch_snap = cache["opensearch"]
+            opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
-            self.opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
-            self.opensearch_snap.connect("process-control")
-            if not self.opensearch_snap.held:
+            opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
+            opensearch_snap.connect("process-control")
+            self.opensearch_snap = opensearch_snap
+            if not opensearch_snap.held:
                 # hold the snap in charm determined revision
-                self.opensearch_snap.hold()
+                opensearch_snap.hold()
         except snap.SnapError as e:
             logger.error("Failed to install/upgrade opensearch. \n%s", e)
             raise OpenSearchInstallError()
