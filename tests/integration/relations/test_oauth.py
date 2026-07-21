@@ -487,7 +487,9 @@ async def test_oauth_access_large_cluster(
         {oauth_client_id: data_integrator_user}
     )
     await ops_test.model.applications[DATA_APP].set_config(config_with_roles)
-    await ops_test.model.wait_for_idle(status="active")
+    await ops_test.model.wait_for_idle(
+        apps=[MAIN_APP, DATA_APP, FAILOVER_APP], status="active"
+    )
 
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"

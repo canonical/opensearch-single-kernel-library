@@ -275,23 +275,6 @@ class YamlConfigSetter(ConfigSetter):
         self.__dump(target, OutputType.file, config_file)
 
         new_content = path.read_text().strip()
-        logger.debug(f"Old content: {old_content}")
-        logger.debug(f"New content: {new_content}")
-        # Count the diff
-        diff_count = sum(
-            1
-            for a, b in zip(old_content.splitlines(), new_content.splitlines())
-            if a != b
-        )
-        logger.debug(f"Number of lines changed: {diff_count}")
-        # Return the exact added/removed lines count
-        for line in old_content.splitlines():
-            if line not in new_content.splitlines():
-                logger.debug(f"Removed line: {line}")
-        for line in new_content.splitlines():
-            if line not in old_content.splitlines():
-                logger.debug(f"Added line: {line}")
-
         return old_content != new_content
 
     @override

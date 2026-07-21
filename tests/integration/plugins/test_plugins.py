@@ -817,8 +817,12 @@ async def test_knn_training_search(
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_reports_scheduler(
+    ops_test: OpsTest, deploy_type: str, substrate
+) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
+    if substrate == "k8s":
+        pytest.skip("OpenSearch Dashboards is not yet available on k8s")
     # Deploy OpenSearch Dashboards
     await ops_test.model.deploy(
         DASHBOARDS_APP_NAME,

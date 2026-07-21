@@ -19,6 +19,5 @@ rules:
         pypa/gh-action-pypi-publish: ref-pin
         tiobe/tics-github-action: ref-pin
   secrets-inherit:
-    config:
-      ignore:
-        - ".github/workflows/ci.yaml:178:11"
+    ignore:
+      - ci.yaml:178
