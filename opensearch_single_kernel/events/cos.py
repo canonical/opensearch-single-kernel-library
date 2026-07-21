@@ -32,7 +32,6 @@ from opensearch_single_kernel.lib.charms.loki_k8s.v1.loki_push_api import (
 from opensearch_single_kernel.lib.charms.prometheus_k8s.v0.prometheus_scrape import (
     MetricsEndpointProvider,
 )
-from tests.integration.plugins.test_plugins import COS_RELATION_NAME
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -47,7 +46,7 @@ class CosEventsHandler(Object):
         super().__init__(charm, key="cos_events")
         self.charm = charm
         self.framework.observe(
-            self.charm.on[COS_RELATION_NAME].relation_created, self._on_cos_relation_created
+            self.charm.on[COS_RELATION].relation_created, self._on_cos_relation_created
         )
         self.framework.observe(
             self.charm.on[PROMETHEUS_K8S_RELATION].relation_created, self._on_cos_relation_created

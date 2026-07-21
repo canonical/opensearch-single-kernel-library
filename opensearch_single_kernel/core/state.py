@@ -20,6 +20,7 @@ from ops import JujuVersion, Object, Relation, Unit
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     CLIENT_RELATION,
+    COS_RELATION,
     GCS_RELATION,
     GENERATED_ROLES,
     GRAFANA_K8S_RELATION,
@@ -96,7 +97,6 @@ from opensearch_single_kernel.utils.object_storage import (
     storage_config_from_connection_info,
 )
 from opensearch_single_kernel.utils.status import format_status
-from tests.integration.plugins.test_plugins import COS_RELATION_NAME
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -222,7 +222,7 @@ class ClusterState(Object):
     @property
     def cos_agent_relation(self) -> Relation | None:
         """Return the cos-agent relation if present."""
-        return self.model.get_relation(COS_RELATION_NAME)
+        return self.model.get_relation(COS_RELATION)
 
     @property
     def prometheus_relation(self) -> Relation | None:
