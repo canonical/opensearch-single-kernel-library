@@ -123,6 +123,9 @@ class HealthManager(BaseManager):
         """
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
+        if not self.state.application.is_security_index_initialised:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
         status = self.get(wait_for_green_first=recompute)
 
         if scope == "app":
