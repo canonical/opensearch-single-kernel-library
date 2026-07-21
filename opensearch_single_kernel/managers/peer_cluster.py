@@ -368,6 +368,16 @@ class PeerClusterManager(BaseManager):
 
         return list(cm_nodes.values())
 
+    def is_any_cm_up(self) -> bool:
+        """Check if there is at least one cluster manager node up."""
+        cm_nodes = self.cm_nodes(self.state.application.orchestrators)
+        for node in cm_nodes:
+            # 503 security index not initialised is a valid response,
+            # we just need to check if the node is up
+            if self.opensearch_client.is_node_up(node.ip, any_resp_code=True):
+                return True
+        return False
+
     def reconcile_is_candidate_failover_orchestrator(self, relation_id: int) -> None:
         """Reconcile the is_candidate_failover_orchestrator key in relation data"""
         deployment_desc = self.state.application.deployment_desc
