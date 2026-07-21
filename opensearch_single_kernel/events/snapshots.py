@@ -63,14 +63,14 @@ class SnapshotsEventsHandler(Object):
 
         # simple deployments or main orchestrator
         for event in [
-            self.charm.state.s3_requirer.on.credentials_changed,
+            self.charm.state.s3_requirer.on.storage_connection_info_changed,
             self.charm.state.azure_requires.on.storage_connection_info_changed,
             self.charm.state.gcs_requires.on.storage_connection_info_changed,
         ]:
             self.framework.observe(event, self._on_snapshots_credentials_changed)
 
         for event in [
-            self.charm.state.s3_requirer.on.credentials_gone,
+            self.charm.state.s3_requirer.on.storage_connection_info_gone,
             self.charm.state.azure_requires.on.storage_connection_info_gone,
             self.charm.state.gcs_requires.on.storage_connection_info_gone,
         ]:
