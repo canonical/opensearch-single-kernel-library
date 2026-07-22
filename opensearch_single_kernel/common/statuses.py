@@ -49,20 +49,6 @@ class GeneralStatuses(Enum):
     )
 
 
-class CosStatuses(Enum):
-    """Collection of charm statuses related to COS manager."""
-
-    COS_RELATION_IN_K8s = StatusObject(
-        status="blocked",
-        message="The grafana-agent relation is not supported for K8s deployments.",
-    )
-
-    COS_RELATION_IN_VM = StatusObject(
-        status="blocked",
-        message="The grafana-k8s, loki-k8s, prometheus-k8s relation is not supported for VM deployments.",
-    )
-
-
 class HealthStatuses(Enum):
     """Collection of charm statuses related to health manager."""
 

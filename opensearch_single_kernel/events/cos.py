@@ -7,17 +7,14 @@
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import Object, RelationCreatedEvent
+from ops import Object
 
 from opensearch_single_kernel.common.constants import (
     COS_PORT,
     COS_RELATION,
     COS_USER,
-    GRAFANA_K8S_RELATION,
-    LOKI_K8S_RELATION,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
-    PROMETHEUS_K8S_RELATION,
     Substrates,
 )
 from opensearch_single_kernel.lib.charms.grafana_agent.v0.cos_agent import (
@@ -45,18 +42,6 @@ class CosEventsHandler(Object):
     def __init__(self, charm: "OpenSearchBaseCharm"):
         super().__init__(charm, key="cos_events")
         self.charm = charm
-        self.framework.observe(
-            self.charm.on[COS_RELATION].relation_created, self._on_cos_relation_created
-        )
-        self.framework.observe(
-            self.charm.on[PROMETHEUS_K8S_RELATION].relation_created, self._on_cos_relation_created
-        )
-        self.framework.observe(
-            self.charm.on[LOKI_K8S_RELATION].relation_created, self._on_cos_relation_created
-        )
-        self.framework.observe(
-            self.charm.on[GRAFANA_K8S_RELATION].relation_created, self._on_cos_relation_created
-        )
 
         if self.charm.substrate == Substrates.VM:
             # VM
@@ -102,22 +87,6 @@ class CosEventsHandler(Object):
         self.grafana_dashboards = GrafanaDashboardProvider(
             self.charm, relation_name="grafana-dashboard"
         )
-
-    def _on_cos_relation_created(self, event: RelationCreatedEvent) -> None:
-        """Handle the `RelationCreatedEvent` event."""
-        if self.charm.state.substrate == Substrates.VM and (
-            self.charm.state.loki_relation
-            or self.charm.state.grafana_relation
-            or self.charm.state.prometheus_relation
-        ):
-            logger.warning(
-                "grafana-k8s, loki-k8s, prometheus-k8s relation is not possible for vm, use grafana-agent instead"
-            )
-            return
-        if self.charm.state.substrate == Substrates.K8S and self.charm.state.cos_agent_relation:
-            logger.warning(
-                "grafana-agent relation is not possible for k8s, use grafana-k8s, loki-k8s, prometheus-k8s instead"
-            )
 
     def scrape_vm_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config for VM platform."""
