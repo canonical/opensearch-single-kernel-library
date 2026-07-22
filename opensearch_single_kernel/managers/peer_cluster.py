@@ -457,7 +457,13 @@ class PeerClusterManager(BaseManager):
             # Empty dict means orchestrators were never related
             # dict with empty ids means orchestrators departed (cleaned on depart event)
             if self.state.application.orchestrators_dict:
-                if not orchestrators.main_app and orchestrators.failover_app:
+                if (
+                    not orchestrators.main_app
+                    and orchestrators.failover_app
+                    # if result of scale up after 0 the statuses will be set from cluster manager
+                    and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
+                    not in self.state.application.deployment_desc.pending_directives
+                ):
                     if self.state.should_promote_failover_to_main():
                         status_list.append(
                             PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
