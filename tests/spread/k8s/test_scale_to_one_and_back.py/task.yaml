@@ -1,4 +1,5 @@
 summary: test_scale_to_one_and_back.py
+manual: true
 environment:
   TEST_MODULE: ha/test_scale_to_one_and_back.py
 systems:

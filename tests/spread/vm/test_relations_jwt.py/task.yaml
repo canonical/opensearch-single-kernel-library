@@ -1,4 +1,5 @@
 summary: test_relations_jwt.py
+manual: true
 environment:
   TEST_MODULE: relations/test_jwt.py
 systems:

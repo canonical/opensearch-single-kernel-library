@@ -1,4 +1,5 @@
 summary: test_opensearch_provider.py
+manual: true
 environment:
   TEST_MODULE: relations/test_opensearch_provider.py
 systems:

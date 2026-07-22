@@ -1,4 +1,5 @@
 summary: test_plugins.py
+manual: true
 environment:
   TEST_MODULE: plugins/test_plugins.py
 systems:

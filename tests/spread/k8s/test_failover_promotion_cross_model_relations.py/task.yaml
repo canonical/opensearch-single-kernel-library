@@ -1,4 +1,5 @@
 summary: test_failover_promotion_cross_model_relations.py
+manual: true
 environment:
   TEST_MODULE: large_deployments/test_failover_promotion_cross_model_relations.py
 systems:

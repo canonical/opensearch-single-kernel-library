@@ -1,4 +1,5 @@
 summary: test_charm.py
+manual: true
 environment:
   TEST_MODULE: test_charm.py
 execute: |

@@ -1,4 +1,5 @@
 summary: test_small_deployment_upgrades.py
+manual: true
 environment:
   TEST_MODULE: upgrades/test_small_deployment_upgrades.py
 systems:

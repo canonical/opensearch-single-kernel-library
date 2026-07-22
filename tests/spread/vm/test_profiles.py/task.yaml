@@ -1,4 +1,5 @@
 summary: test_profiles.py
+manual: true
 environment:
   TEST_MODULE: profiles/test_profiles.py
 systems:

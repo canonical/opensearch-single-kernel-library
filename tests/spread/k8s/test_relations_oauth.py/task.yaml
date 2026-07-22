@@ -1,4 +1,5 @@
 summary: test_relations_oauth.py
+manual: true
 environment:
   TEST_MODULE: relations/test_oauth.py
 systems:

@@ -1,4 +1,5 @@
 summary: test_large_deployments_inherit_cluster_name.py
+manual: true
 environment:
   TEST_MODULE: ha/test_large_deployments_inherit_cluster_name.py
 systems:

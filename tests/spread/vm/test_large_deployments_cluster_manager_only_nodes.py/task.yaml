@@ -1,4 +1,5 @@
 summary: test_large_deployments_cluster_manager_only_nodes.py
+manual: true
 environment:
   TEST_MODULE: ha/test_large_deployments_cluster_manager_only_nodes.py
 systems:

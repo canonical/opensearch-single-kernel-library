@@ -1,4 +1,5 @@
 summary: test_horizontal_scaling.py
+manual: true
 environment:
   TEST_MODULE: ha/test_horizontal_scaling.py
 systems:

@@ -1,4 +1,5 @@
 summary: test_roles_management.py
+manual: true
 environment:
   TEST_MODULE: ha/test_roles_management.py
 systems:

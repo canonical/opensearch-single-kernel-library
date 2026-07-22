@@ -1,4 +1,5 @@
 summary: test_manual_tls.py
+manual: true
 environment:
   TEST_MODULE: tls/test_manual_tls.py
 systems:

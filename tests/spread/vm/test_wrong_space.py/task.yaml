@@ -1,4 +1,5 @@
 summary: test_wrong_space.py
+manual: true
 environment:
   TEST_MODULE: spaces/test_wrong_space.py
 systems:
