@@ -17,8 +17,15 @@ def _status_enums() -> list[type[Enum]]:
 
 
 def test_long_messages_have_short_message():
-    """short_message is required only when message is longer than 40 characters."""
+    """short_message is required only when message is longer than 40 characters.
+
+    Upgrade statuses are exempt: they are not multi-status-aggregated the same way.
+    """
+    from opensearch_single_kernel.common.statuses import UpgradesStatuses
+
     for enum_cls in _status_enums():
+        if enum_cls is UpgradesStatuses:
+            continue
         for member in enum_cls:
             status = member.value
             if not status.message or len(status.message) <= 40:
