@@ -36,7 +36,6 @@ jobs:
       matrix:
         repo:
           - canonical/opensearch-operator
-          - canonical/opensearch-k8s-operator
 
     permissions:
       contents: read
@@ -105,27 +104,34 @@ jobs:
 
       - name: Update dependency version in pyproject.toml
         run: |
-          poetry remove "${DEP_NAME}"
           VERSION_NUMBER="${VERSION#v}"
 
-          for i in {1..30}; do
-            echo "Attempt $i: adding ${DEP_NAME}==${VERSION_NUMBER}"
+          for dir in . kubernetes machine; do
+            (
+              cd "${dir}"
+              poetry remove "${DEP_NAME}"
 
-            if poetry add "${DEP_NAME}==${VERSION_NUMBER}" --group main && \
-               poetry add "${DEP_NAME}==${VERSION_NUMBER}" --group integration; then
-              echo "Dependency added successfully"
-              exit 0
-            fi
+              for i in {1..30}; do
+                echo "Attempt $i: adding ${DEP_NAME}==${VERSION_NUMBER} in ${dir}"
 
-            echo "Not resolvable yet, sleeping..."
-            sleep 60
+                if poetry add "${DEP_NAME}==${VERSION_NUMBER}"; then
+                  echo "Dependency added successfully in ${dir}"
+                  exit 0
+                fi
+
+                echo "Not resolvable yet, sleeping..."
+                sleep 60
+              done
+
+              echo "Poetry could not resolve ${DEP_NAME}==${VERSION_NUMBER} in ${dir}"
+              exit 1
+            ) || exit 1
           done
-
-          echo "Poetry could not resolve ${DEP_NAME}==${VERSION_NUMBER}"
-          exit 1
-
       - name: Poetry update
-        run: poetry update "${DEP_NAME}"
+        run: |
+          for dir in . kubernetes machine; do
+            (cd "${dir}" && poetry update "${DEP_NAME}")
+          done
 
       - name: Configure git signing
         env:
@@ -150,7 +156,7 @@ jobs:
           fi
 
           git checkout -b "${PR_BRANCH}"
-          git add pyproject.toml poetry.lock
+          git add pyproject.toml poetry.lock kubernetes/pyproject.toml kubernetes/poetry.lock machine/pyproject.toml machine/poetry.lock
           git commit -m "Bump ${DEP_NAME} to version ${VERSION}"
 
       - name: Push branch
@@ -174,7 +180,7 @@ jobs:
           PR_URL=$(gh pr create \
             --title "patch: Bump ${DEP_NAME} to ${VERSION}" \
             --body "${BODY}" \
-            --base "${BASE_BRANCH}" \
+            --base "${BASE_BRANCH}"  \
             --head "${PR_BRANCH}" \
             --reviewer "${REVIEWERS}"
           )
