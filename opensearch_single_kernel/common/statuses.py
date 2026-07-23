@@ -29,7 +29,7 @@ class GeneralStatuses(Enum):
     SECURITY_INDEX_INIT_IN_PROGRESS = StatusObject(
         status="maintenance",
         message="Initializing the security index...",
-        check="Security index bootstrap completion.",
+        check="Security index initialization in progress.",
         running="async",
     )
     WAITING_TO_START = StatusObject(
@@ -75,23 +75,21 @@ class HealthStatuses(Enum):
     CLUSTER_HEALTH_YELLOW = StatusObject(
         status="blocked",
         message="1 or more 'replica' shards are not assigned, please scale your application up.",
-        short_message="Replica shards unassigned",
+        short_message="Replica shards unassigned.",
         check="Cluster health API (yellow, permanent).",
         action="Scale the application up so replica shards can be assigned.",
     )
     WAITING_FOR_BUSY_SHARDS = StatusObject(
         status="maintenance",
         message="Some shards are still initializing / relocating.",
-        short_message="Shards relocating",
+        short_message="Shards initializing or relocating",
         check="Initializing or relocating shard counts.",
-        action="Wait for shard activity to finish.",
     )
     WAITING_FOR_SPECIFIC_BUSY_SHARDS = StatusObject(
         status="waiting",
         message="The shards {shards} need to complete building",
-        short_message="Waiting on specific shards",
-        check="Per-unit busy shard list.",
-        action="Wait for the listed shards to finish building.",
+        short_message="Waiting for local shards to build",
+        check="Shards initializing/relocating.",
     )
 
 
@@ -142,13 +140,11 @@ class TlsStatuses(Enum):
         message="Waiting for TLS to be fully configured...",
         short_message="TLS not fully configured",
         check="TLS certificates and keystores on disk.",
-        action="Wait for certificates to be issued, or check the TLS provider.",
     )
     TLS_CA_ROTATION = StatusObject(
         status="maintenance",
         message="Applying new CA certificate...",
         check="CA rotation / renewal flags.",
-        action="Wait for CA rotation to complete on all units.",
     )
     TLS_CERTS_EXPIRATION_ERROR = StatusObject(
         status="blocked",
@@ -166,7 +162,6 @@ class LockStatuses(Enum):
         status="waiting",
         message="Requesting lock on operation: start",
         check="Peer / OpenSearch start lock ownership.",
-        action="Wait for the start lock; another unit may be starting.",
         running="async",
     )
 
@@ -189,7 +184,6 @@ class NotificationsStatuses(Enum):
         ),
         short_message="SMTP waiting recipients",
         check="SMTP relation data includes recipients.",
-        action="Configure recipients on smtp-integrator.",
     )
     SMTP_NO_RELATION_DATA = StatusObject(
         status="blocked",
@@ -332,7 +326,6 @@ class PeerClusterStatuses(Enum):
         message="Main-cluster-orchestrator removed, waiting for failover promotion.",
         short_message="Waiting failover promotion",
         check="Failover promotion after main removal.",
-        action="Wait for failover promotion or re-relate main orchestrator.",
     )
     PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY = StatusObject(
         status="blocked",
@@ -351,7 +344,6 @@ class PeerClusterErrorDataStatuses(Enum):
         message="'main/failover'-orchestrators not configured yet.",
         short_message="Orchestrators not ready",
         check="Main/failover configuration on provider.",
-        action="Wait until main/failover orchestrators finish configuring.",
     )
     RELATED_TO_NON_MAIN_OR_FAILOVER = StatusObject(
         status="blocked",
@@ -365,7 +357,6 @@ class PeerClusterErrorDataStatuses(Enum):
         message="Waiting for peer cluster relation to be created {message_suffix}.",
         short_message="Wait peer relation",
         check="Peer-cluster relation creation on provider side.",
-        action="Ensure peer-cluster relations are established.",
     )
     CANNOT_HAVE_TWO_FAILOVERS = StatusObject(
         status="blocked",
@@ -379,7 +370,6 @@ class PeerClusterErrorDataStatuses(Enum):
         message="Admin user not fully configured {message_suffix}.",
         short_message="Admin user incomplete",
         check="Admin user fully initialized on provider.",
-        action="Wait for admin user configuration on the orchestrator.",
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
         status="blocked",
@@ -393,42 +383,36 @@ class PeerClusterErrorDataStatuses(Enum):
         message="Security index not initialized {message_suffix}.",
         short_message="Security index not ready",
         check="Security index initialization on provider.",
-        action="Wait for security index initialization.",
     )
     WAITING_FOR_EVERY_UNIT_TO_START = StatusObject(
         status="waiting",
         message="Waiting for every unit {message_suffix} to start.",
         short_message="Waiting remote units",
         check="All units of the related cluster started.",
-        action="Wait for all units of the related application to start.",
     )
     COS_USER_NOT_CREATED = StatusObject(
         status="waiting",
         message="'{COS_USER}' user not created yet.",
         short_message="COS user missing",
         check="COS monitoring user existence.",
-        action="Wait for the COS user to be created on the orchestrator.",
     )
     NO_CLUSTER_MANAGER_ELIGIBLE_NODES = StatusObject(
         status="waiting",
         message="No 'cluster_manager' eligible nodes found {message_suffix}",
         short_message="No CM-eligible nodes",
         check="Presence of cluster_manager eligible nodes.",
-        action="Add cluster_manager capable nodes to the deployment.",
     )
     COULD_NOT_FETCH_NODES = StatusObject(
         status="waiting",
         message="Could not fetch nodes {message_suffix}",
         short_message="Could not fetch nodes",
         check="OpenSearch nodes API reachability.",
-        action="Check OpenSearch health and network connectivity.",
     )
     COULD_NOT_FETCH_NODES_IN_RELATED_CLUSTER = StatusObject(
         status="waiting",
         message="Could not fetch nodes in related {deployment_desc.typ} sub-cluster.",
         short_message="Related cluster unreachable",
         check="Node fetch against related sub-cluster.",
-        action="Check connectivity and health of the related sub-cluster.",
     )
     PEER_CLUSTER_MAIN_IS_REQUIRER = StatusObject(
         status="blocked",
@@ -571,14 +555,12 @@ class UpgradesStatuses(Enum):
             "OpenSearch {workload_version} running; Snap rev {snap_revision}; "
             "Charmed operator {charm_version}"
         ),
-        short_message="OpenSearch running",
         check="Installed workload and charm versions.",
         approved_critical_component=True,
     )
     K8S_UPGRADES_ACTIVE = StatusObject(
         status="active",
         message="OpenSearch {workload_version} running; Charmed operator {charm_version}",
-        short_message="OpenSearch running",
         check="Installed workload and charm versions.",
         approved_critical_component=True,
     )
@@ -588,9 +570,7 @@ class UpgradesStatuses(Enum):
             "OpenSearch {workload_version} running (restart pending); "
             "Charmed operator {charm_version}"
         ),
-        short_message="Restart pending",
         check="Kubernetes controller revision currency.",
-        action="Wait for the unit to restart on refresh, or force if stuck.",
         approved_critical_component=True,
     )
     UPGRADES_ACTIVE_OUTDATED = StatusObject(
@@ -599,9 +579,7 @@ class UpgradesStatuses(Enum):
             "OpenSearch {workload_version} running; Snap rev {snap_revision} (outdated); "
             "Charmed operator {charm_version}"
         ),
-        short_message="Snap rev outdated",
         check="Snap revision currency.",
-        action="Plan a refresh when ready.",
         approved_critical_component=True,
     )
     UPGRADES_UPGRADING = StatusObject(
@@ -613,7 +591,6 @@ class UpgradesStatuses(Enum):
     UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
         message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
-        short_message="Resume upgrade needed",
         check="User confirmation to resume rolling upgrade.",
         action="Verify the highest unit is healthy, then run resume-upgrade.",
         approved_critical_component=True,
@@ -621,7 +598,6 @@ class UpgradesStatuses(Enum):
     UPGRADES_INCOMPATIBLE = StatusObject(
         status="blocked",
         message="Upgrade incompatible. Rollback to previous revision with `juju refresh`.",
-        short_message="Upgrade incompatible",
         check="Version compatibility matrix.",
         action="Rollback with `juju refresh` to the previous revision.",
         approved_critical_component=True,
@@ -629,7 +605,6 @@ class UpgradesStatuses(Enum):
     UPGRADES_UNHEALTHY = StatusObject(
         status="blocked",
         message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
-        short_message="Unhealthy after upgrade",
         check="Unit health after upgrade.",
         action="Rollback to previous revision with `juju refresh`.",
         approved_critical_component=True,
@@ -637,9 +612,8 @@ class UpgradesStatuses(Enum):
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
         status="blocked",
         message="Pre upgrade check failed: {message}",
-        short_message="Pre-upgrade check failed",
         check="Pre-upgrade health and topology checks.",
-        action="Fix issues in the logs, then re-run pre-upgrade-check.",
+        action="Fix issues in the logs, then re-run `pre-upgrade-check`.",
         approved_critical_component=True,
     )
     UPGRADES_ROLLBACK_UNSUPPORTED = StatusObject(
@@ -647,7 +621,6 @@ class UpgradesStatuses(Enum):
         message=(
             "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
         ),
-        short_message="Rollback unsupported",
         check="Rollback support for current versions.",
         action="Refresh to a newer revision or follow recovery documentation.",
         approved_critical_component=True,
@@ -655,19 +628,17 @@ class UpgradesStatuses(Enum):
     UPGRADES_ROLLBACK_INCOMPATIBLE = StatusObject(
         status="blocked",
         message=(
-            "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with "
+            "Rollback incompatible. Run `juju run <unit> force-refresh-start` with "
             "`check-compatibility` set to false to override node version and attempt "
-            "startup procedure"
+            "startup procedure."
         ),
-        short_message="Rollback incompatible",
         check="Rollback compatibility.",
-        action="Run force-refresh-start with check-compatibility=false if you accept risk.",
+        action="Run `force-refresh-start` with `check-compatibility=false` if you accept risk. Or bootstrap a new cluster and restore from backup.",
         approved_critical_component=True,
     )
     K8S_DEPLOYED_WITHOUT_TRUST = StatusObject(
         status="blocked",
         message="Run `juju trust {charm_app} --scope=cluster`. Needed for in-place refreshes",
-        short_message="Missing juju trust",
         check="Kubernetes app trusted for cluster-scoped refresh ops.",
         action="Run `juju trust {charm_app} --scope=cluster`.",
         approved_critical_component=True,
