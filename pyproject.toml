@@ -168,6 +168,7 @@ opensearch-py = "^2.8.0"
 # Azure integration tests
 azure-identity = "^1.23.0"
 
+
 [build-system]
 requires = ["poetry-core>=2.4.1", "poetry-dynamic-versioning>=1.10.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
