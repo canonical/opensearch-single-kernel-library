@@ -102,6 +102,8 @@ class SnapshotsEventsHandler(Object):
         self, event: CredentialsChangedEvent | StorageConnectionInfoChangedEvent
     ) -> None:
         """Handler for backup credentials changed event."""
+        self.charm.state.server.azure_configured = False
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
@@ -232,7 +234,13 @@ class SnapshotsEventsHandler(Object):
         # Reload keystore
         self.charm.reload_keystore_event.emit()
 
+        self.charm.state.server.azure_configured = True
+
         if not self.charm.unit.is_leader():
+            return
+
+        if not self.charm.state.azure_configured_everywhere:
+            event.defer()
             return
 
         if (

@@ -1273,3 +1273,7 @@ class ClusterState(Object):
     def is_highest_ordinal_unit(self) -> bool:
         """Check if the current unit is the highest ordinal unit in the application."""
         return self.server_upgrade.unit.name == self.sorted_upgrades_units[0].unit.name
+
+    @property
+    def azure_configured_everywhere(self) -> bool:
+        return all([server.azure_configured for server in self.application_servers])

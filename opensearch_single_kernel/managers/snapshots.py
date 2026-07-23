@@ -671,10 +671,15 @@ class SnapshotsManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+        # if not recompute:
+        #     return self.state.statuses.get(scope, self.name).root or [
+        #         GeneralStatuses.ACTIVE_IDLE.value
+        #     ]
+        if (
+            any([server.azure_configured for server in self.state.application_servers])
+            and not self.state.azure_configured_everywhere
+        ):
+            return [SnapshotsStatuses.AZURE_ROTATION.value]
 
         pcluster_types = {
             ObjectStorageType.S3_PCLUSTER,

@@ -298,6 +298,10 @@ class SnapshotsStatuses(Enum):
         message="Restore in progress...",
         running="blocking",
     )
+    AZURE_ROTATION = StatusObject(
+        status="waiting",
+        message="Azure migration",
+    )
 
 
 class OAuthStatuses(Enum):

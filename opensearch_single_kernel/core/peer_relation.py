@@ -333,6 +333,24 @@ class OpenSearchServer(RelationState):
         """Get the keystore-password of HTTP TLS cert from the TLS cert_secret."""
         return self.http_secrets.get("keystore-password")
 
+    @property
+    def azure_configured(self) -> bool:
+        """Return whether oauth relation broken event should be skipped.
+
+        When current leader is unit oauth relation isn't breaking
+        even if unit receives oauth relation broken event.
+        """
+        return self.relation_data.get("azure_configured", "").lower() == "true"
+
+    @azure_configured.setter
+    def azure_configured(self, value: bool) -> None:
+        """Set whether oauth relation broken event should be skipped.
+
+        When current leader is unit oauth relation isn't breaking
+        even if unit receives oauth relation broken event.
+        """
+        self.update({"azure_configured": str(value)})
+
     def get_relation_departing(self, relation: Relation) -> bool:
         """Return whether relation broken event should be skipped."""
         return (
