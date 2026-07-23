@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import random
+import re
 import shlex
 import socket
 import subprocess
@@ -47,6 +48,8 @@ logger = logging.getLogger(__name__)
 
 # Keep the existing connect/read timeout used by http_request.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
+_OPENSEARCH_LOG_EXCERPT_LINES = 10000
+_OPENSEARCH_LOG_CONTEXT_LINES = 2400
 EmptyBlockedStatus = StatusObject(
     status="blocked",
     message="",
@@ -143,6 +146,108 @@ def _dump_juju_logs(model: str, unit: Optional[str] = None, lines: int = 500) ->
     logger.error("Dumping juju logs for %s:", unit if unit else "all")
     logger.error(subprocess.check_output(cmd, shell=True).decode("utf-8"))
     logger.error("\n\n")
+
+
+def _opensearch_log_globs(app: str, model: str) -> list[str]:
+    """Return known OpenSearch server log locations for K8s and VM substrates."""
+    return [
+        "/var/log/opensearch/*.log",
+        "/var/snap/opensearch/common/var/log/opensearch/*.log",
+        f"/var/snap/opensearch/common/logs/{app}-{model}.log",
+    ]
+
+
+def _opensearch_log_excerpt_command(
+    app: str,
+    model: str,
+    search_terms: Optional[list[str]] = None,
+    *,
+    lines: int = _OPENSEARCH_LOG_EXCERPT_LINES,
+    context: int = _OPENSEARCH_LOG_CONTEXT_LINES,
+) -> str:
+    """Build a shell command that prints relevant OpenSearch server log excerpts."""
+    log_globs = " ".join(_opensearch_log_globs(app, model))
+    terms = [term for term in search_terms or [] if term]
+    grep_pattern = "|".join(re.escape(term) for term in terms)
+
+    if grep_pattern:
+        print_command = (
+            f"grep -n -E -C {context} {shlex.quote(grep_pattern)} \"$f\" "
+            f"| tail -n {lines} || true"
+        )
+    else:
+        print_command = f"tail -n {lines} \"$f\" || true"
+
+    return (
+        "found=0; "
+        f"for f in {log_globs}; do "
+        '[ -f "$f" ] || continue; '
+        "found=1; "
+        'echo "===== $f ====="; '
+        f"{print_command}; "
+        "done; "
+        'if [ "$found" -eq 0 ]; then '
+        'echo "No OpenSearch server log files found in expected paths."; '
+        "find /var/log/opensearch /var/snap/opensearch -maxdepth 5 "
+        "-type f -name '*.log' 2>/dev/null | sort | head -50 || true; "
+        "fi"
+    )
+
+
+async def dump_opensearch_server_logs(
+    ops_test: OpsTest,
+    app: str = APP_NAME,
+    search_terms: Optional[list[str]] = None,
+    *,
+    lines: int = _OPENSEARCH_LOG_EXCERPT_LINES,
+    context: int = _OPENSEARCH_LOG_CONTEXT_LINES,
+) -> None:
+    """Print OpenSearch JVM log excerpts from every unit for backup/restore debugging."""
+    substrate = ops_test.request.config.option.substrate
+    model = _model_name(ops_test)
+    command = _opensearch_log_excerpt_command(
+        app, model, search_terms=search_terms, lines=lines, context=context
+    )
+
+    for unit_id in get_application_unit_ids(ops_test, app):
+        unit = f"{app}/{unit_id}"
+        if substrate == "k8s":
+            juju_cmd = ("ssh", "--container", "opensearch", unit, "sh", "-lc", command)
+        else:
+            juju_cmd = ("ssh", unit, "sudo", "sh", "-lc", command)
+
+        logger.error("Dumping OpenSearch server logs for %s matching %s", unit, search_terms)
+        return_code, stdout, stderr = await ops_test.juju(*juju_cmd)
+        logger.error(
+            "OpenSearch server logs for %s rc=%s\nstdout:\n%s\nstderr:\n%s",
+            unit,
+            return_code,
+            stdout,
+            stderr,
+        )
+
+
+def _backup_log_search_terms(backup_id: Optional[str] = None) -> list[str]:
+    """Return terms that identify snapshot/repository failures in OpenSearch server logs."""
+    failure_terms = [
+        "RepositoryException",
+        "SnapshotException",
+        "SnapshotShardFailure",
+        "failed to create snapshot",
+        "failed to snapshot",
+        "failed to update snapshot",
+        "Blob",
+        "Azure",
+    ]
+    if backup_id:
+        return [backup_id, *failure_terms]
+
+    return [
+        "snapshot",
+        "Snapshot",
+        "azure-repository",
+        *failure_terms,
+    ]
 
 
 def _progress_line(units: List[Unit]) -> str:

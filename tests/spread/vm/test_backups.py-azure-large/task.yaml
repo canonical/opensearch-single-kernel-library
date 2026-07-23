@@ -1,6 +1,7 @@
 summary: test_backups.py
 environment:
   TEST_MODULE: ha/test_backup.py
+  OPENSEARCH_DUMP_SERVER_LOGS_ON_BACKUP: "1"
 systems:
   - self-hosted-linux-amd64-noble-xlarge
 execute: |

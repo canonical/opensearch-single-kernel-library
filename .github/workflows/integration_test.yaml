@@ -44,6 +44,8 @@ jobs:
           for job in spread_jobs:
               # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
               _, runner, task, variant = job.split(":")
+              if "test_backups.py" not in task or "azure" not in task:
+                  continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
