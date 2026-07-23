@@ -282,12 +282,7 @@ class ExternalClientsManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute external-client statuses pure from state / read-only checks.
-
-        Running statuses (e.g. NEW_INDEX_REQUESTED) come from
-        ``set_running_status`` and are merged from the cache.
-        ``recompute`` is accepted for protocol compatibility.
-        """
+        """Compute external-client statuses from state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit":

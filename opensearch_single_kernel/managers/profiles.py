@@ -145,11 +145,7 @@ class ProfilesManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute profile statuses pure from state / local checks.
-
-        ``recompute`` is accepted for protocol compatibility; computation always
-        derives from current config and machine resources.
-        """
+        """Compute profile statuses from current config and local checks."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.current_peer_cluster_app:

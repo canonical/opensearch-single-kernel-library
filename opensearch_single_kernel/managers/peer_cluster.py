@@ -443,7 +443,7 @@ class PeerClusterManager(BaseManager):
 
         This runs on the failover application.
         """
-        # check how many related apps are disconnected from main orchestrator
+        # Count related apps that have lost the main orchestrator.
         remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
         n_disconnected = sum(
             1
@@ -451,23 +451,19 @@ class PeerClusterManager(BaseManager):
             if (p_cluster.main_orchestrator_registered.lower() == "false")
         )
 
-        # check if failover is disconnected from main orchestrator
+        # The failover app itself may also be disconnected.
         orchestrators = self.state.application.orchestrators
         if not orchestrators.main_app:
             n_disconnected += 1
 
-        # if majority are disconnected, promote failover
+        # Promote only once a majority is cut off.
         return n_disconnected > (len(remote_peer_clusters) + 1) // 2
 
     @override
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute peer-cluster statuses pure from orchestrator and relation state.
-
-        Orchestrator-removed / failover-waiting statuses are plain blocked/waiting
-        (not running). ``recompute`` is accepted for protocol compatibility.
-        """
+        """Compute peer-cluster statuses from orchestrator and relation state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.deployment_desc:
@@ -477,13 +473,12 @@ class PeerClusterManager(BaseManager):
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         orchestrators = self.state.application.orchestrators
-        # Empty dict means orchestrators were never related
-        # dict with empty ids means orchestrators departed (cleaned on depart event)
+        # Empty dict = never related; empty ids = departed.
         if self.state.application.orchestrators_dict:
             if (
                 not orchestrators.main_app
                 and orchestrators.failover_app
-                # if result of scale up after 0 the statuses will be set from cluster manager
+                # On scale-up from 0, cluster manager owns these statuses.
                 and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
                 not in self.state.application.deployment_desc.pending_directives
             ):

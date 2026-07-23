@@ -66,16 +66,11 @@ class OAuthEventsHandler(Object):
         )
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
-        """Handler for `relation_created` event.
-
-        Invalid OAuth placement status is pure-computed by ClusterManager.get_statuses.
-        """
+        """Handler for `relation_created` event."""
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            logger.warning(
-                "OAuth relation created on non-main orchestrator; status is derived purely."
-            )
+            logger.warning("OAuth relation created on non-main orchestrator.")
 
     def _on_oauth_relation_changed(self, event: EventBase) -> None:
         """Handler for `_on_oauth_relation_changed` event.
@@ -85,7 +80,6 @@ class OAuthEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # Status computed by ClusterManager.get_statuses
             return
 
         if not (relation := self.charm.state.oauth_relation):

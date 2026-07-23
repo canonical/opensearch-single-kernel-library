@@ -277,9 +277,7 @@ class PeerClusterEventsHandler(Object):
         # fetch the trigger of this event
         trigger = data.get("trigger")
 
-        # reject before mutating any state if this relation is trying to claim a
-        # main/failover role already held by a different relation.
-        # get_statuses will set CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER for it.
+        # Reject conflicting main/failover claims before mutating state.
         if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
             trigger, event.relation.id
         ):
@@ -483,10 +481,7 @@ class PeerClusterEventsHandler(Object):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
 
     def check_credentials_with_missing_relations(self) -> None:
-        """Track whether credentials exist for plugins/backups without a relation.
-
-        Status is pure-computed by PluginManager / SnapshotsManager.get_statuses.
-        """
+        """Track whether credentials exist for plugins/backups without a relation."""
         if not self.charm.unit.is_leader():
             return
 
@@ -502,7 +497,6 @@ class PeerClusterEventsHandler(Object):
     def handle_joining_data_node(self) -> None:
         """Start Opensearch on a cluster-manager node when a data-node is joining"""
         if self.charm.state.server.started:
-            # PEER_CLUSTER_NO_DATA_NODE is pure-computed by cluster get_statuses
             return
 
         try:
@@ -523,11 +517,7 @@ class PeerClusterEventsHandler(Object):
     def reconcile_peer_cluster_errors(
         self, label: str, error: PeerClusterRelErrorData | None
     ) -> None:
-        """Store peer-cluster error labels for relation synchronization.
-
-        Displayed statuses are pure-computed from relation error_data by
-        PeerClusterManager.get_statuses.
-        """
+        """Store peer-cluster error labels for relation synchronization."""
         if error:
             self.charm.state.application.update({label: error.blocked_message})
         else:

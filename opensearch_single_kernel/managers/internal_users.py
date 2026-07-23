@@ -55,13 +55,7 @@ class InternalUsersManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Return cached running statuses only.
-
-        ``ADMIN_USER_INIT_IN_PROGRESS`` is an async running status set via
-        ``StatusHandler.set_running_status`` during admin init and cleared
-        explicitly when init completes. ``recompute`` is accepted for protocol
-        compatibility.
-        """
+        """Return cached running statuses only."""
         return running_statuses(self.state.statuses, scope, self.name) or [
             GeneralStatuses.ACTIVE_IDLE.value
         ]

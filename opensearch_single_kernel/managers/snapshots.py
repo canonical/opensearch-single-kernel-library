@@ -675,15 +675,7 @@ class SnapshotsManager(BaseManager):
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute snapshot statuses pure from relation / config state.
-
-        Running statuses (backup/restore in progress) come from
-        ``set_running_status`` and are merged from the cache.
-        Episodic repository/cleanup failures written by the apply path are
-        re-merged from the status cache (notifications-style).
-        ``recompute`` is accepted for protocol compatibility; validation always
-        derives from current relation data (read-only).
-        """
+        """Compute snapshot statuses from relation / config state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope != "app":
@@ -703,7 +695,7 @@ class SnapshotsManager(BaseManager):
         if not deployment_desc:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        # Non-main apps in multi-app topologies must not take direct backup relations.
+        # Non-main apps shouldn't take direct backup relations.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
             self.state.is_peer_cluster_consumer() or self.state.is_peer_cluster_provider()
         ):
@@ -713,7 +705,7 @@ class SnapshotsManager(BaseManager):
 
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        # MAIN_ORCHESTRATOR validates backup relation and data
+        # Main orchestrator: validate backup relation and data.
         if object_storage_type := self.state.storage_type:
             if object_storage_type == ObjectStorageType.CONFLICT:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value)

@@ -52,7 +52,7 @@ class GeneralStatuses(Enum):
         running="blocking",
     )
 
-    # Blocking directive is pure-computed from deployment_desc.state when not ACTIVE.
+    # Derived from deployment_desc.state when not ACTIVE.
     BLOCKING_DIRECTIVE = StatusObject(
         status="blocked",
         message="{directive}",

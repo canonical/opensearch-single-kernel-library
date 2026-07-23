@@ -133,7 +133,6 @@ class UpgradesEventsHandler(Object):
             self.charm.state.substrate == Substrates.VM
             and not self.charm.upgrades_manager.is_compatible
         ):
-            # Status pure-computed by UpgradesManager.get_statuses / unit_status
             return
 
         if self.charm.upgrades_manager.unit_state is UnitUpgradesState.OUTDATED and isinstance(
@@ -170,7 +169,6 @@ class UpgradesEventsHandler(Object):
                 logger.info(
                     "Upgrade incompatible. If you accept potential *data loss* and *downtime*, you can continue with resume-upgrade"
                 )
-                # Status pure-computed by UpgradesManager.get_statuses / unit_status
                 return
 
         if self.charm.state.substrate == Substrates.K8S:
@@ -360,7 +358,6 @@ class UpgradesEventsHandler(Object):
                     logger.error(
                         "Rollback unsupported. Refresh to a newer revision or consult the recovery documentation"
                     )
-                    # Status pure-computed by UpgradesManagerVM.unit_status
                     # https://canonical-charmed-opensearch.readthedocs-hosted.com/2/how-to/upgrade/#recovering-from-a-rollback
                     self.charm.lock_manager.release()
                     return
@@ -369,7 +366,6 @@ class UpgradesEventsHandler(Object):
                     logger.warning(
                         "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
                     )
-                    # Status pure-computed by UpgradesManagerVM.unit_status
                     self.charm.lock_manager.release()
                     return
         self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
@@ -521,7 +517,6 @@ class UpgradesEventsHandler(Object):
 
         if not self.charm.upgrades_manager.is_compatible:
             logger.error("Refresh is incompatible")
-            # Status pure-computed by UpgradesManagerK8s.unit_status
             return
 
         if self.charm.upgrades_manager.is_rollback:
@@ -529,7 +524,6 @@ class UpgradesEventsHandler(Object):
             logger.warning(
                 "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
             )
-            # Status pure-computed by UpgradesManagerK8s.unit_status
             event.defer()
             return
 

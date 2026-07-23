@@ -200,12 +200,7 @@ class UpgradesManagerBase(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute upgrade statuses pure from upgrade state.
-
-        Episodic precheck failures are written by the apply/event path into the
-        status cache and re-merged here (same pattern as SMTP configuration
-        errors). ``recompute`` is accepted for protocol compatibility.
-        """
+        """Compute upgrade statuses from upgrade state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
         if scope == "unit":
             status_list.extend(

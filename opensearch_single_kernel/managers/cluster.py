@@ -912,17 +912,11 @@ class ClusterManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses (pure for app/unit role and deployment state).
-
-        ``recompute`` is accepted for protocol compatibility. Non-running
-        statuses are derived from charm config and deployment description so
-        they survive ``update-status`` / status-detail recompute (e.g. DPE #75).
-        """
+        """Compute statuses from roles and deployment state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit":
-            # Start errors are event-set into the status cache; re-merge so they
-            # survive update-status without status-only databag flags.
+            # Keep cached start errors across update-status.
             status_list.extend(
                 cached_non_running_statuses(
                     self.state.statuses,
@@ -964,12 +958,12 @@ class ClusterManager(BaseManager):
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
-        # Pure validation of current juju `roles` config (DPE #75).
+        # Validate current juju `roles` config (DPE #75).
         user_roles = self._user_config().roles
         if "cluster_manager" in user_roles and "voting_only" in user_roles:
             status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
 
-        # Cheap pure removal checks against last applied roles (no HTTP).
+        # Flag forbidden role removals against last applied roles.
         prev_roles = set(deployment_desc.config.roles or [])
         new_roles = set(user_roles)
         if user_roles and prev_roles != new_roles:

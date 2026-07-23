@@ -84,7 +84,6 @@ class ExternalClientsEventsHandler(Object):
             return
 
         if not validate_index_name(event.index):
-            # Status pure-computed by ExternalClientsManager.get_statuses
             logger.error(
                 "Invalid index name %s on client relation %s",
                 event.index,
@@ -110,7 +109,6 @@ class ExternalClientsEventsHandler(Object):
             logger.error(
                 f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
             )
-            # Status pure-computed by ExternalClientsManager.get_statuses
             event.defer()
             return
 
@@ -120,7 +118,6 @@ class ExternalClientsEventsHandler(Object):
             )
         except OpenSearchUserMgmtError as err:
             logger.error(err)
-            # Status pure-computed by ExternalClientsManager.get_statuses
             event.defer()
             return
         try:

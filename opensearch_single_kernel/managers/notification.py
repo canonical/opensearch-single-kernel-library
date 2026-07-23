@@ -250,18 +250,9 @@ class NotificationsManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute statuses from state / relation data only (no OpenSearch writes).
-
-        Apply paths live in ``events/notifications.py`` (and the put_* helpers).
-        ``recompute`` is accepted for protocol compatibility; computation is
-        always pure for validation statuses.
-
-        Cached SMTP configuration-error statuses (written by the apply path on
-        HTTP/keystore failure) are merged so they remain visible until the next
-        successful apply clears them.
-        """
+        """Compute SMTP statuses from relation data."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
-        # Apply-path SMTP configuration errors (events/notifications.py).
+        # Keep cached apply failures until the next successful apply.
         status_list.extend(
             cached_non_running_statuses(
                 self.state.statuses,
@@ -287,7 +278,7 @@ class NotificationsManager(BaseManager):
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
     def _relation_statuses(self, relation: Relation) -> list[StatusObject]:
-        """Pure validation statuses for one SMTP relation (no OpenSearch writes)."""
+        """Validate one SMTP relation and return its statuses."""
         try:
             if not (
                 smtp_data := self.state.smtp_requires.get_relation_data_from_relation(relation)
@@ -299,7 +290,6 @@ class NotificationsManager(BaseManager):
                     )
                 ]
 
-            # Validates required parameters; raises if incomplete.
             self.get_smtp_config(smtp_data, relation.id)
 
             if not smtp_data.recipients:

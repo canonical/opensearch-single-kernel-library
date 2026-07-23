@@ -855,10 +855,7 @@ class TlsManager(BaseManager):
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute TLS statuses pure from state / cert store (no databag writes).
-
-        ``recompute`` is accepted for protocol compatibility.
-        """
+        """Compute TLS statuses from state and the cert store (read-only)."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.tls_relation:

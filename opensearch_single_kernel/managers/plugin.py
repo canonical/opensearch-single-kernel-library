@@ -182,11 +182,7 @@ class PluginManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute statuses from plugin credentials / relations (no side effects).
-
-        ``recompute`` is accepted for protocol compatibility; computation always
-        derives missing plugin relations from cluster state.
-        """
+        """Compute plugin statuses from credentials / relations (no side effects)."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "app" and (missing_relations := self.missing_plugins_relations()):

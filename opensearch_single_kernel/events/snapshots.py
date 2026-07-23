@@ -107,8 +107,7 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
 
-        # Non-main apps in multi-app topologies must not take direct backup relations.
-        # Status pure-computed by SnapshotsManager.get_statuses.
+        # Non-main apps: status is handled by SnapshotsManager.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
             self.charm.state.is_peer_cluster_consumer()
             or self.charm.state.is_peer_cluster_provider()
@@ -226,7 +225,7 @@ class SnapshotsEventsHandler(Object):
             logger.debug("The object storage type could not be determined.")
             return
 
-        # Clear repository misconfigured flag when credentials leave
+        # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):

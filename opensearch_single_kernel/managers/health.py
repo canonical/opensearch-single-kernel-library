@@ -115,12 +115,7 @@ class HealthManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute health statuses from OpenSearch health API (read-only).
-
-        Merges running statuses from cache. ``recompute=True`` allows waiting
-        for green briefly (expensive path for update-status / status-detail).
-        Default collect-status uses a non-blocking health check.
-        """
+        """Compute health statuses. ``recompute=True`` may wait briefly for green."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.is_security_index_initialised:

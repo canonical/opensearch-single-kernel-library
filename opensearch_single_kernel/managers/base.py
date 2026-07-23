@@ -125,31 +125,17 @@ class BaseManager(ManagerStatusProtocol):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Return the manager's statuses for advanced-status display.
+        """Return this manager's statuses.
 
-        Contract (Valkey-style pure-compute, DA161):
-        - Prefer deriving non-running statuses from cluster state (and optional
-          read-only queries). Do not mutate OpenSearch, relations, or databags
-          other than via explicit business-logic paths outside this method.
-        - Merge cached running statuses (``running="blocking"|"async"``) so
-          mid-hook / background operations can survive across events. Use
-          :func:`~opensearch_single_kernel.utils.status.running_statuses` for
-          that merge in overrides.
-        - Merge apply-path episodic non-running failures via
-          :func:`~opensearch_single_kernel.utils.status.cached_non_running_statuses`
-          (do not invent databag flags solely to hold statuses).
-        - Never invent ``ACTIVE_IDLE`` by discarding non-running statuses that
-          were not recomputed from state.
-        - ``recompute`` may allow expensive read-only probes in subclasses.
+        Non-running statuses should come from state (read-only). Merge cached
+        running statuses and apply-path failures via
+        :func:`~opensearch_single_kernel.utils.status.running_statuses` and
+        :func:`~opensearch_single_kernel.utils.status.cached_non_running_statuses`.
+        Don't write to OpenSearch/relations/databags here.
 
-        Base implementation notes:
-        - ``recompute=False`` (collect-status path): return the full status
-          cache so dual-path managers still surface event-written statuses
-          until pure-compute overrides land.
-        - ``recompute=True``: ``StatusHandler`` clears the component cache
-          before calling this. Return remaining running statuses if any, else
-          ``ACTIVE_IDLE``. Subclasses must override and pure-compute all
-          non-running statuses so recompute repopulates the cache correctly.
+        ``recompute=False`` returns the full cache. ``recompute=True`` clears the
+        component cache first — recompute non-running statuses, keep running ones,
+        else return ``ACTIVE_IDLE``.
         """
         if not recompute:
             return self.state.statuses.get(scope, self.name).root or [

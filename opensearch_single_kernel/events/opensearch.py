@@ -435,7 +435,6 @@ class OpenSearchEventsHandler(Object):
             return
 
         # handle when/if certificates are expired
-        # TLS expiration status is pure-computed by TlsManager.get_statuses.
         if certs := self.charm.tls_manager.check_certs_expiration():
             # stop opensearch in case the Node-transport certificate expires.
             if certs.get(CertType.UNIT_TRANSPORT):
@@ -699,8 +698,6 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.tls_manager.all_tls_resources_stored():
             event.defer()
             return
-
-        # PEER_CLUSTER_NO_RELATION status is pure-computed by ClusterManager.get_statuses.
 
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
@@ -1012,7 +1009,7 @@ class OpenSearchEventsHandler(Object):
             else:
                 # notify the main orchestrator that the security index is initialized
                 self.charm.peer_cluster_manager.set_security_index_initialised()
-            # Drop async bag entry before the long wait_for_opensearch_up().
+            # Drop the async status entry before we block on wait_for_opensearch_up().
             self.charm.state.remove_status_if_present(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
                 "unit",
@@ -1073,7 +1070,6 @@ class OpenSearchEventsHandler(Object):
         self.charm.state.remove_status_if_present(
             GeneralStatuses.SERVICE_START_ERROR.value, "unit", self.charm.cluster_manager.name
         )
-        # PEER_CLUSTER_NO_DATA_NODE pure-computed; no imperative clear needed.
 
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
@@ -1207,12 +1203,7 @@ class OpenSearchEventsHandler(Object):
         deployment_desc: DeploymentDescription | None = None,
         show_status_only_once: bool = True,
     ) -> None:
-        """Clear SHOW_STATUS directive after deployment state has been set.
-
-        Blocked/waiting messages from deployment_desc are pure-computed by
-        ClusterManager.get_statuses (including BLOCKING_DIRECTIVE and peer/role
-        statuses). This method only consumes the one-shot SHOW_STATUS directive.
-        """
+        """Clear the one-shot SHOW_STATUS directive after deployment state is set."""
         if not (
             deployment_desc := deployment_desc or self.charm.state.application.deployment_desc
         ):
@@ -1449,7 +1440,6 @@ class OpenSearchEventsHandler(Object):
     def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
         """Triggered when the unit IP is changed."""
         self.charm.tls_manager.delete_stored_tls_resources()
-        # TLS_NOT_FULLY_CONFIGURED pure-computed by TlsManager.get_statuses
         self.request_new_unit_certificates()
         # since when an IP change happens, "_on_peer_relation_joined" won't be called,
         # we need to alert the leader that it must recompute the node roles for any unit whose

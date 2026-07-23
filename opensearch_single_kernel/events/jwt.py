@@ -49,18 +49,12 @@ class JWTEventsHandler(Object):
         )
 
     def _on_jwt_relation_created(self, _: RelationCreatedEvent) -> None:
-        """Handle relation creation.
-
-        JWT statuses (invalid on non-main, invalid auth config) are pure-computed by
-        ``ClusterManager.get_statuses``; no imperative status writes here.
-        """
+        """Handle relation creation."""
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # Large deployments: only main should apply JWT security configuration.
-            logger.warning(
-                "JWT relation created on non-main orchestrator; status is derived purely."
-            )
+            # Only the main orchestrator applies JWT config.
+            logger.warning("JWT relation created on non-main orchestrator.")
 
     def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle changed relation data."""
@@ -98,7 +92,6 @@ class JWTEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # Status computed by ClusterManager.get_statuses
             return
 
         if not self.charm.state.application.is_security_index_initialised:

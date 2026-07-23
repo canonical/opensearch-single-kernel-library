@@ -18,13 +18,7 @@ def running_statuses(
     scope: AdvancedStatusesScope,
     component: str,
 ) -> list[StatusObject]:
-    """Return a copy of cached running (blocking/async) statuses for a component.
-
-    Used by managers that pure-compute non-running statuses and must preserve
-    mid-operation running statuses set via ``set_running_status``.
-
-    Always returns a new list so callers can append without mutating the cache.
-    """
+    """Copy of cached running (blocking/async) statuses. Returns a new list."""
     return list(statuses.get(scope, component, running_status_only=True).root)
 
 
@@ -36,16 +30,7 @@ def cached_non_running_statuses(
     matches: list[StatusObject] | None = None,
     message_contains: list[str] | None = None,
 ) -> list[StatusObject]:
-    """Return non-running statuses written by apply/event paths (cache re-merge).
-
-    Episodic failures that cannot be derived from relations alone (SMTP apply
-    errors, precheck failures, repository registration failures, start errors)
-    are stored in the advanced-status cache by the event/apply path and merged
-    back here so pure ``get_statuses`` reasserts them without status-only
-    databag flags.
-
-    Match by exact ``StatusObject`` equality and/or message substring.
-    """
+    """Cached event/apply failures, filtered by status match or message substring."""
     if matches is None:
         matches = []
     if message_contains is None:
