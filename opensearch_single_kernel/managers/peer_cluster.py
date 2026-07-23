@@ -438,6 +438,27 @@ class PeerClusterManager(BaseManager):
                 rel_id=rel.id, deployment_desc=deployment_desc, is_provider=False
             )
 
+    def should_promote_failover_to_main(self) -> bool:
+        """Check if majority of related apps are disconnected from main orchestrator.
+
+        This runs on the failover application.
+        """
+        # check how many related apps are disconnected from main orchestrator
+        remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
+        n_disconnected = sum(
+            1
+            for p_cluster in remote_peer_clusters
+            if (p_cluster.main_orchestrator_registered.lower() == "false")
+        )
+
+        # check if failover is disconnected from main orchestrator
+        orchestrators = self.state.application.orchestrators
+        if not orchestrators.main_app:
+            n_disconnected += 1
+
+        # if majority are disconnected, promote failover
+        return n_disconnected > (len(remote_peer_clusters) + 1) // 2
+
     @override
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
@@ -464,7 +485,7 @@ class PeerClusterManager(BaseManager):
                     and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
                     not in self.state.application.deployment_desc.pending_directives
                 ):
-                    if self.state.should_promote_failover_to_main():
+                    if self.should_promote_failover_to_main():
                         status_list.append(
                             PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
                         )

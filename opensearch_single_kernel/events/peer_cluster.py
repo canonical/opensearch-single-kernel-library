@@ -117,7 +117,7 @@ class PeerClusterEventsHandler(Object):
         if (
             deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
             and self.charm.tls_manager.is_fully_configured()
-            and self.charm.state.should_promote_failover_to_main()
+            and self.charm.peer_cluster_manager.should_promote_failover_to_main()
         ):
             self.charm.cluster_manager.promote_deployment_type()
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
@@ -460,7 +460,7 @@ class PeerClusterEventsHandler(Object):
                 self.charm.peer_cluster_manager.update_main_orchestrator_registered(
                     orchestrators.failover_rel_id, value=False
                 )
-            elif self.charm.state.should_promote_failover_to_main():
+            elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
