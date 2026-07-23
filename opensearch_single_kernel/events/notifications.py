@@ -116,7 +116,7 @@ class NotificationsEvents(Object):
                     config.smtp_account_id,
                     str(e),
                 )
-                self._set_smtp_configuration_error(
+                self._set_smtp_configuration_error_status(
                     self.charm.notifications_manager.name, event.relation.id
                 )
                 event.defer()
@@ -132,7 +132,7 @@ class NotificationsEvents(Object):
                 )
             except OpenSearchCmdError as e:
                 logger.error("Failed to write SMTP credentials to keystore: %s", e)
-                self._set_smtp_configuration_error(
+                self._set_smtp_configuration_error_status(
                     self.charm.notifications_manager.name, event.relation.id
                 )
                 event.defer()
@@ -173,13 +173,13 @@ class NotificationsEvents(Object):
                     config.group_id,
                     str(e),
                 )
-                self._set_smtp_configuration_error(
+                self._set_smtp_configuration_error_status(
                     self.charm.notifications_manager.name, event.relation.id
                 )
                 event.defer()
                 return
 
-        self._clear_smtp_configuration_error(
+        self._clear_smtp_configuration_error_status(
             self.charm.notifications_manager.name, event.relation.id
         )
 
@@ -246,7 +246,7 @@ class NotificationsEvents(Object):
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
 
-    def _set_smtp_configuration_error(self, component: str, relation_id: int) -> None:
+    def _set_smtp_configuration_error_status(self, component: str, relation_id: int) -> None:
         """Cache blocked status for a failed SMTP apply (apply path only)."""
         self.charm.state.add_status_if_not_present(
             NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
@@ -256,7 +256,7 @@ class NotificationsEvents(Object):
             search_parameters={"id": relation_id},
         )
 
-    def _clear_smtp_configuration_error(self, component: str, relation_id: int) -> None:
+    def _clear_smtp_configuration_error_status(self, component: str, relation_id: int) -> None:
         """Clear blocked status after a successful SMTP apply."""
         self.charm.state.remove_status_if_present(
             NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,

@@ -204,11 +204,11 @@ class SnapshotsEventsHandler(Object):
                 e,
                 getattr(e, "response_body", None),
             )
-            self._set_repository_misconfigured(object_storage_type)
+            self._set_repository_misconfigured_status(object_storage_type)
             event.defer()
             return
 
-        self._clear_repository_misconfigured()
+        self._clear_repository_misconfigured_status()
         # Refresh peer relations
         self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
@@ -227,11 +227,11 @@ class SnapshotsEventsHandler(Object):
             return
 
         # Clear repository misconfigured flag when credentials leave
-        self._clear_repository_misconfigured()
+        self._clear_repository_misconfigured_status()
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
-            self._set_credentials_cleanup_failed(True)
+            self._set_credentials_cleanup_failed_status(True)
             event.defer()
             return None
 
@@ -242,7 +242,7 @@ class SnapshotsEventsHandler(Object):
                 "Failed to remove snapshot repository for %s during credentials cleanup.",
                 object_storage_type,
             )
-            self._set_credentials_cleanup_failed(True)
+            self._set_credentials_cleanup_failed_status(True)
             event.defer()
             return None
 
@@ -258,7 +258,7 @@ class SnapshotsEventsHandler(Object):
                 event.relation.id if hasattr(event, "relation") else None
             )
 
-        self._set_credentials_cleanup_failed(False)
+        self._set_credentials_cleanup_failed_status(False)
 
         self.charm.reload_keystore_event.emit()
 
@@ -297,7 +297,7 @@ class SnapshotsEventsHandler(Object):
                 object_storage_type, object_storage_config
             )
         except OpenSearchHttpError as e:
-            self._set_repository_misconfigured(object_storage_type)
+            self._set_repository_misconfigured_status(object_storage_type)
             logger.error(
                 "Failed to verify snapshot repository after credentials verification. "
                 "Error: %s, response_body=%r",
@@ -313,7 +313,7 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
 
-        self._clear_repository_misconfigured()
+        self._clear_repository_misconfigured_status()
         logger.info("Backup credentials verified successfully.")
 
     def _on_create_backup_action(self, event: ActionEvent) -> None:
@@ -437,10 +437,10 @@ class SnapshotsEventsHandler(Object):
                         "Cleanup for %s credentials are failed during peer cluster relation change.",
                         object_storage_type,
                     )
-                    self._set_credentials_cleanup_failed(True)
+                    self._set_credentials_cleanup_failed_status(True)
                     event.defer()
                     return None
-            self._set_credentials_cleanup_failed(False)
+            self._set_credentials_cleanup_failed_status(False)
 
             tls_ca_chain = None
             if self.charm.snapshots_manager.s3_info_from_peer_cluster:
@@ -523,11 +523,11 @@ class SnapshotsEventsHandler(Object):
                     "Cleanup for %s credentials are failed during peer cluster relation departure.",
                     object_storage_type,
                 )
-                self._set_credentials_cleanup_failed(True)
+                self._set_credentials_cleanup_failed_status(True)
                 event.defer()
                 return
 
-        self._set_credentials_cleanup_failed(False)
+        self._set_credentials_cleanup_failed_status(False)
 
         # clean S3 CA
         if self.charm.snapshots_manager.is_custom_s3_ca_stored():
@@ -622,7 +622,7 @@ class SnapshotsEventsHandler(Object):
 
         return None
 
-    def _set_repository_misconfigured(self, object_storage_type: ObjectStorageType) -> None:
+    def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
         """Cache blocked status for repository registration failure (apply path only)."""
         self.charm.state.add_status_if_not_present(
             SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
@@ -634,7 +634,7 @@ class SnapshotsEventsHandler(Object):
             },
         )
 
-    def _clear_repository_misconfigured(self) -> None:
+    def _clear_repository_misconfigured_status(self) -> None:
         """Clear repository setup failure status after a successful apply."""
         self.charm.state.remove_status_if_present(
             SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
@@ -643,7 +643,7 @@ class SnapshotsEventsHandler(Object):
             interpolated=True,
         )
 
-    def _set_credentials_cleanup_failed(self, failed: bool) -> None:
+    def _set_credentials_cleanup_failed_status(self, failed: bool) -> None:
         """Cache or clear credentials/repository cleanup failure status (apply path only)."""
         if failed:
             self.charm.state.add_status_if_not_present(
