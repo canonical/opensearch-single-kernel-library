@@ -138,7 +138,7 @@ jobs:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       - name: Setup tmate dependencies
         if: ${{ failure() }}
-        run: sudo apt-get install -y tmate
+        run: apt-get install -y tmate
       - name: Setup tmate session
         if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
