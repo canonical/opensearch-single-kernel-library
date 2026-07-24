@@ -17,9 +17,9 @@ from tests.helpers import Substrate
 from tests.integration.conftest import CLIENT_CHARM
 from tests.integration.helpers import (
     _find_k8s_unit_for_endpoint,
-    _k8s_unit_fqdn,
     get_secrets,
     http_request,
+    k8s_unit_fqdn,
     run_action,
 )
 
@@ -116,7 +116,7 @@ async def create_dummy_docs(
             action_name="create-dummy-docs",
             params={
                 "count": count,
-                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "host": k8s_unit_fqdn(ops_test, app, k8s_unit.short_name),
                 "username": "admin",
                 "password": admin_secrets["password"],
                 "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
@@ -219,7 +219,7 @@ async def bulk_insert_generated(
                 "index-names": json.dumps(index_names),
                 "docs-count": docs_count,
                 "blob-size": blob_size,
-                "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+                "host": k8s_unit_fqdn(ops_test, app, k8s_unit.short_name),
                 "username": "admin",
                 "password": admin_secrets["password"],
                 "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
