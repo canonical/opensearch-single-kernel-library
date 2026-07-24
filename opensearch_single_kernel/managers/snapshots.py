@@ -137,7 +137,7 @@ class SnapshotsManager(BaseManager):
         """Set in the peer relation data that credentials have been saved."""
         orchestrators = self.state.application.orchestrators
 
-        if not orchestrators or orchestrators.main_app is None or orchestrators.main_rel_id == -1:
+        if not orchestrators or orchestrators.main_app is None:
             return
 
         # set the credentials_saved in the unit data bag with the main orchestrator
@@ -616,7 +616,6 @@ class SnapshotsManager(BaseManager):
             if not (data.s3.access_key and data.s3.secret_key):
                 logger.warning("no access key or secret key found.")
                 return None
-            logger.debug("S3 CA secret: %s", data.s3.tls_ca_chain)
             return data.s3
 
         if object_storage_type == ObjectStorageType.AZURE:

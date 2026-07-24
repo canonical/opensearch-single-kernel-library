@@ -5,8 +5,10 @@
 
 """Models for the peer-cluster / peer-cluster-orchestrator relations."""
 
+import json
 import logging
 import re
+from hashlib import sha1
 from typing import Literal, Optional
 
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -134,7 +136,7 @@ class PeerClusterServerModel(PersistentModel, PeerModel):
     tls_ca_renewed: bool = Field(default=False)
     tls_configured: bool = Field(default=False)
     # Hash of the last snapshots (backup) credentials this unit persisted to its keystore.
-    snapshots_credentials_saved: str = Field(default="")
+    snapshots_credentials_saved: Optional[str] = Field(default=None)
 
     @property
     def unit(self):
@@ -154,9 +156,13 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     # Whether the requirer app offers itself as a failover-orchestrator candidate.
     is_candidate_failover_orchestrator: bool = Field(default=False)
     # Which orchestrator role ("main"/"failover") this relation was established for.
-    trigger: str = Field(default="")
+    trigger: Optional[str] = Field(default=None)
     # Whether the requirer has acknowledged/registered the main orchestrator.
     main_orchestrator_registered: Optional[bool] = Field(default=None)
+    # The current app's own identity/roles/unit-count on this relation. Written and read as a
+    # single dedicated fast-path, decoupled from cluster_fleet_apps: identifying who is on the
+    # other end of a relation must not depend on the fleet-wide merge below having succeeded.
+    app: Optional[PeerClusterApp] = Field(default=None)
     # All apps in the fleet as known by the orchestrator, keyed by app id.
     cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
     # The currently elected main/failover orchestrator pair. None means this relation has
@@ -171,12 +177,12 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     gcs: Optional[GcsRelData] = Field(default=None)
     # Hash of the last broadcast payload; lets the orchestrator skip rewriting
     # unchanged relation data.
-    rel_data_hash: str = Field(default="")
+    rel_data_hash: Optional[str] = Field(default=None)
     # Set instead of the regular payload when the orchestrator cannot serve this
     # relation (misconfiguration, pending bootstrap, ...).
     error_data: Optional[PeerClusterRelErrorData] = Field(default=None)
     security_index_initialised: bool = Field(default=False)
-    first_data_node: str = Field(default="")
+    first_data_node: Optional[str] = Field(default=None)
 
     # App-state fields from OpenSearchAppPeerModel, shared cross-cluster
     cluster_name: str = Field(default="")
@@ -219,9 +225,9 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     )
     @classmethod
     def coerce_to_str(cls, v):
-        """Ensure fields are always strings, even if the databag parses them as bool/float/int."""
+        """Ensure non-None values are always strings, even if the databag parses them as bool/float/int."""
         if v is None:
-            return ""
+            return None
         return str(v)
 
     @model_serializer(mode="wrap")
@@ -273,6 +279,11 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
             m.admin_chain = stripped_or_none(source.admin_chain)
             m.admin_cert = stripped_or_none(source.admin_cert)
             m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
+
+            digest_source = source.model_dump(mode="json", context={"skip_secrets": True})
+            m.rel_data_hash = sha1(
+                json.dumps(digest_source, sort_keys=True).encode()
+            ).hexdigest()
 
     def clear_rel_data(self) -> None:
         """Reset all orchestrator-broadcast fields to their defaults."""

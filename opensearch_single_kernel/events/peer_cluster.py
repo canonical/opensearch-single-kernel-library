@@ -164,11 +164,7 @@ class PeerClusterEventsHandler(Object):
         remote_peer_cluster = self.charm.state.peer_cluster_by_relation_id(
             is_provider=True, relation_id=event.relation.id, remote=True
         )
-        fleet_apps = remote_peer_cluster.cluster_fleet_apps if remote_peer_cluster else {}
-        related_peer_cluster_app = next(
-            (app for app in fleet_apps.values() if app.app.name == event.app.name),
-            None,
-        )
+        related_peer_cluster_app = remote_peer_cluster.app if remote_peer_cluster else None
         if not related_peer_cluster_app:
             return
         self.charm.peer_cluster_orchestrator_manager.save_cluster_fleet_apps(

@@ -73,9 +73,11 @@ class PeerClusterManager(BaseManager):
             is_provider=is_provider, relation_id=rel_id, remote=False
         )
         if local_peer_cluster:
-            fleet_apps = local_peer_cluster.cluster_fleet_apps
-            fleet_apps[deployment_desc.app.id] = current_app
-            local_peer_cluster.cluster_fleet_apps = fleet_apps
+            with local_peer_cluster.update() as m:
+                m.app = current_app
+                fleet_apps = m.cluster_fleet_apps
+                fleet_apps[deployment_desc.app.id] = current_app
+                m.cluster_fleet_apps = fleet_apps
 
         # update content of fleet in the current app's peer databag
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
@@ -466,9 +468,11 @@ class PeerClusterManager(BaseManager):
                 if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
                     status_list.append(status)
 
-                # requirer errors: only computable once the provider has posted its
-                # deployment description in the databag
-                if peer_cluster.deployment_desc is not None:
+
+                if (
+                    peer_cluster.deployment_desc is not None
+                    and peer_cluster.admin_hashed_password
+                ):
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
                         deployment_desc=self.state.application.deployment_desc,

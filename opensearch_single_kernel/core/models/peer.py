@@ -67,9 +67,9 @@ class OpenSearchServerPeerModel(PersistentModel, PeerModel):
     bootstrap_contributor: bool = Field(default=False, alias="bootstrap_contributor")
     # Whether this unit has been removed from the cluster_manager-eligible role (e.g. scale-down).
     cluster_manager_removed: bool = Field(default=False, alias="cluster_manager_removed")
-    # Timestamp (str(time.time())) set once the unit's OpenSearch service has started; empty
-    # string means "not started". Used elsewhere as a truthy started/not-started flag.
-    started: str = Field(default="")
+    # Timestamp (str(time.time())) set once the unit's OpenSearch service has started; unset
+    # means "not started". Used elsewhere as a truthy started/not-started flag.
+    started: Optional[str] = Field(default=None)
     # Whether this unit is currently mid CA-rotation (new CA generated but not yet fully rolled).
     tls_ca_renewing: bool = Field(default=False, alias="tls_ca_renewing")
     # Whether this unit has finished renewing to the new CA.
@@ -118,10 +118,18 @@ class OpenSearchServerPeerModel(PersistentModel, PeerModel):
         """Validator for allocation_exclusions_to_delete, delete_voting_exclusions"""
         return ",".join(sorted(v))
 
-    @field_validator("started", "update_ts", mode="before")
+    @field_validator("started", mode="before")
     @classmethod
     def coerce_to_str(cls, v):
-        """Ensure fields is always a string, even if the databag returns a float/int."""
+        """Ensure non-None values are always strings, even if the databag returns a float/int."""
+        if v is None:
+            return None
+        return str(v)
+
+    @field_validator("update_ts", mode="before")
+    @classmethod
+    def coerce_update_ts_to_str(cls, v):
+        """Ensure the field is always a string, even if the databag returns a float/int."""
         if v is None:
             return ""
         return str(v)
@@ -269,7 +277,7 @@ class OpenSearchAppPeerModel(PersistentModel, PeerModel):
         default_factory=PeerClusterOrchestrators
     )
     # Name of the first unit in this application to take on the "data" role.
-    first_data_node: str = Field(default="", alias="first_data_node")
+    first_data_node: Optional[str] = Field(default=None, alias="first_data_node")
     # Last time this application's databag was updated; used to force relation-changed observers
     # to notice a change even when no other field differs.
     update_ts: str = Field(default="")
