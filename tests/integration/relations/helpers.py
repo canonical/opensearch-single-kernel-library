@@ -138,6 +138,28 @@ def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str)
     return False
 
 
+def wait_for_relation_removed_between(
+    ops_test: OpsTest, endpoint_one: str, endpoint_two: str
+) -> None:
+    """Wait for a relation to be fully removed before re-adding it.
+
+    Juju keeps a removed relation in a "dying" state for a while; re-adding the
+    relation during that window fails with "relation ... is dying, but not yet
+    removed".
+
+    Args:
+        ops_test: running OpsTest instance
+        endpoint_one: one endpoint of the relation. Doesn't matter if it's provider or requirer.
+        endpoint_two: the other endpoint of the relation.
+    """
+    try:
+        for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
+            with attempt:
+                assert not new_relation_joined(ops_test, endpoint_one, endpoint_two)
+    except RetryError:
+        assert False, "Relation failed to be removed after 3 minutes."
+
+
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(15))
 async def run_request(
     ops_test,

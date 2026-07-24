@@ -31,6 +31,7 @@ from tests.integration.relations.helpers import (
     ip_to_url,
     run_request,
     wait_for_relation_joined_between,
+    wait_for_relation_removed_between,
 )
 from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
@@ -685,6 +686,10 @@ async def test_relation_broken(ops_test: OpsTest):
 @pytest.mark.abort_on_fail
 async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     """Verify that if we recreate a relation, we can access the same index."""
+    # The relation removed in the previous test may still be in a "dying" state;
+    # re-adding it right away fails with "relation ... is dying, but not yet removed".
+    wait_for_relation_removed_between(ops_test, CLIENT_RELATION, FIRST_RELATION_NAME)
+
     client_relation = await ops_test.model.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
     )
