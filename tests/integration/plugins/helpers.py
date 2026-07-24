@@ -28,9 +28,9 @@ from tests.integration.conftest import CLIENT_CHARM
 from ..ha.helpers_data import bulk_insert, create_index
 from ..helpers import (
     _find_k8s_unit_for_endpoint,
-    _k8s_unit_fqdn,
     get_secrets,
     http_request,
+    k8s_unit_fqdn,
     run_action,
 )
 
@@ -64,7 +64,7 @@ async def k8s_generate_bulk_training_data(
             "docs-count": docs_count,
             "dimensions": dimensions,
             "has-result": has_result,
-            "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+            "host": k8s_unit_fqdn(ops_test, app, k8s_unit.short_name),
             "username": "admin",
             "password": admin_secrets["password"],
             "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),

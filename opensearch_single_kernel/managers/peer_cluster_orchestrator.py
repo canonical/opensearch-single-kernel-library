@@ -230,7 +230,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 Node(
                     name=self.state.unit_name,
                     roles=computed_roles,
-                    ip=self.state.host_ip,
+                    ip=self.state.node_host,
                     app=deployment_desc.app,
                     unit_number=self.state.server.unit_id,
                 )

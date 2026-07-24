@@ -31,6 +31,7 @@ from opensearch_single_kernel.common.constants import (
     USER_ROLE_ENDPOINT,
     USER_ROLESMAPPING_ENDPOINT,
     ObjectStorageType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
@@ -904,7 +905,11 @@ class OpenSearchClient:
         return "acknowledged" in response
 
     def get_current_node(
-        self, unit_name: str, unit_id: int, alt_hosts: list[str] | None
+        self,
+        unit_name: str,
+        unit_id: int,
+        alt_hosts: list[str] | None,
+        substrate: Substrates,
     ) -> Node | None:
         """Get the current OpenSearch node information.
 
@@ -912,6 +917,7 @@ class OpenSearchClient:
             unit_name: The name of opensearch unit.
             unit_id: The id of the unit.
             alt_hosts: (Optional[List[str]]): List of alternative hosts.
+            substrate: The substrate type.
 
         Returns:
             node (Node | None): Current opensearch node information.
@@ -928,7 +934,7 @@ class OpenSearchClient:
                 return Node(
                     name=node["name"],
                     roles=node["roles"],
-                    ip=node["ip"],
+                    ip=node["ip"] if substrate == Substrates.VM else node["host"],
                     app=App(id=node.get("attributes", {}).get("app_id")),
                     unit_number=unit_id,
                     temperature=node.get("attributes", {}).get("temp"),
@@ -936,7 +942,7 @@ class OpenSearchClient:
         return None
 
     def get_roles_by_unit_name(
-        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None
+        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None, substrate: Substrates
     ) -> list[str]:
         """Get the list of the roles assigned to this node.
 
@@ -947,7 +953,9 @@ class OpenSearchClient:
         Returns:
             roles (List[str]): List of opensearch unit roles.
         """
-        node = self.get_current_node(unit_name, unit_id=unit_number, alt_hosts=alt_hosts)
+        node = self.get_current_node(
+            unit_name, unit_id=unit_number, alt_hosts=alt_hosts, substrate=substrate
+        )
         return node.roles if node else []
 
     def get_shards(
@@ -1122,10 +1130,16 @@ class OpenSearchClient:
         """Call the /_nodes API endpoint of opensearch"""
         return self.request("GET", "/_nodes", host=host, alt_hosts=alt_hosts, retries=3)
 
-    def is_node_up(self, host: str | None = None) -> bool:
+    def is_node_up(self, host: str | None = None, any_resp_code: bool = False) -> bool:
         """Get status of node.
 
-        This assumes OpenSearch is Running. Defaults to this unit
+        This assumes OpenSearch is Running
+        Args:
+            host: host of the node we wish to make a request on, by default current host
+            any_resp_code: if true, any response code is considered as node being up
+
+        Returns:
+            True if node is up, False otherwise
         """
         # This function needs to give us a quick response
         host = host or self.host
@@ -1141,7 +1155,7 @@ class OpenSearchClient:
                 resp_status_code=True,
                 timeout=1,
             )
-            return resp_code < 400
+            return any_resp_code or (resp_code < 400)
         except (OpenSearchHttpError, Exception) as e:
             logger.debug("Error when checking if host %s is up: %s", host, e)
             return False

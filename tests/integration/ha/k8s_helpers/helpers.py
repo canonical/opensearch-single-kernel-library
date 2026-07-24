@@ -9,7 +9,6 @@ import string
 import subprocess
 import tarfile
 import tempfile
-import time
 from datetime import datetime
 from logging import getLogger
 
@@ -18,7 +17,6 @@ from kubernetes import client, config, stream
 from kubernetes.client.rest import ApiException
 from tenacity import (
     Retrying,
-    stop_after_attempt,
     stop_after_delay,
     wait_fixed,
 )
@@ -93,11 +91,27 @@ def k8s_restore_network_to_unit(model_name: str) -> None:
     """
     env = os.environ
     env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
-    subprocess.check_output(
-        f"sudo k8s kubectl -n {model_name} delete networkchaos network-loss-primary",
-        shell=True,
-        env=env,
+    delete_cmd = (
+        f"sudo k8s kubectl -n {model_name} delete networkchaos network-loss-primary "
+        f"--ignore-not-found --wait=false"
     )
+    try:
+        subprocess.check_output(delete_cmd, shell=True, env=env, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as err:
+        logger.warning(
+            "Failed to delete networkchaos (will force-clear finalizers): %s",
+            err.output,
+        )
+
+    patch_cmd = (
+        f"sudo k8s kubectl -n {model_name} patch networkchaos network-loss-primary "
+        f'--type=merge -p \'{{"metadata":{{"finalizers":[]}}}}\''
+    )
+    try:
+        subprocess.check_output(patch_cmd, shell=True, env=env, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as err:
+        if b"NotFound" not in (err.output or b"") and err.returncode != 1:
+            logger.warning("Failed to patch networkchaos finalizers: %s", err.output)
 
 
 def deploy_chaos_mesh(namespace: str) -> None:
@@ -136,100 +150,55 @@ def destroy_chaos_mesh(namespace: str) -> None:
     )
 
 
-def k8s_is_unit_reachable(namespace: str, source_pod_name: str, to_host: str) -> bool:
-    """Test network reachability to a unit in k8s from a temporary pod."""
-    # ---------------------------------------------------------
-    # 1. Setup Client and Bypass SSL (for local/testing clusters)
-    # ---------------------------------------------------------
-    config.load_kube_config()
+def k8s_is_unit_reachable(
+    model_name: str,
+    source_unit: str,
+    to_host: str,
+    port: int = 9200,
+    timeout: float = 2.0,
+) -> bool:
+    """Test TCP reachability to a unit FQDN:port from a peer unit via juju ssh + python.
 
-    configuration = client.Configuration.get_default_copy()
-    configuration.verify_ssl = False
-    client.Configuration.set_default(configuration)
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    v1 = client.CoreV1Api()
-
-    # ---------------------------------------------------------
-    # 2. Fetch Labels from the Source Pod
-    # ---------------------------------------------------------
-    try:
-        source_pod = v1.read_namespaced_pod(name=source_pod_name, namespace=namespace)
-        source_labels = source_pod.metadata.labels or {}
-        logger.info(f"Fetched labels from {source_pod_name}: {source_labels}")
-    except ApiException as e:
-        logger.error(f"Failed to read source pod {source_pod_name}: {e}")
-        return False
-
-    # ---------------------------------------------------------
-    # 3. Define the Temporary Test Pod
-    # ---------------------------------------------------------
-    temp_pod_name = f"netshoot-test-{int(time.time())}"
-
-    pod_manifest = client.V1Pod(
-        metadata=client.V1ObjectMeta(
-            name=temp_pod_name,
-            namespace=namespace,
-            labels=source_labels,  # <--- Injecting the source pod's labels here
-        ),
-        spec=client.V1PodSpec(
-            restart_policy="Never",
-            containers=[
-                client.V1Container(
-                    name="netshoot",
-                    image="nicolaka/netshoot",
-                    # Ping five times (-c 5), wait up to 2 seconds for a response (-W 2)
-                    command=["ping", "-c", "5", "-W", "2", to_host],
-                )
-            ],
-        ),
+    Uses the charm container (default juju ssh target), which shares the pod network
+    namespace with the workload. Avoids ephemeral probe pods and juju ssh -c quoting issues
+    by feeding the Python script on stdin.
+    """
+    script = (
+        "import socket, sys\n"
+        "try:\n"
+        f"    socket.create_connection(({to_host!r}, {port}), {timeout})\n"
+        "except OSError as exc:\n"
+        "    print(exc, file=sys.stderr)\n"
+        "    sys.exit(1)\n"
     )
-
-    # ---------------------------------------------------------
-    # 4. Execute and Wait for Results
-    # ---------------------------------------------------------
-    try:
-        logger.info(f"Creating test pod '{temp_pod_name}' to ping {to_host}...")
-        v1.create_namespaced_pod(namespace=namespace, body=pod_manifest)
-
-        # Poll the pod status until it completes
-        phase = None
-        for attempt in Retrying(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True):
-            with attempt:
-                pod_status = v1.read_namespaced_pod(name=temp_pod_name, namespace=namespace)
-                phase = pod_status.status.phase
-
-                if phase not in ["Succeeded", "Failed"]:
-                    logger.info(
-                        f"Pod '{temp_pod_name}' is in phase '{phase}'. Waiting for completion..."
-                    )
-                    raise ValueError("Pod not completed yet")
-
-        # Optional: Fetch the actual ping output logs for debugging
-        logs = v1.read_namespaced_pod_log(name=temp_pod_name, namespace=namespace)
-        logger.info(f"Ping Output:\n{logs.strip()}")
-
-        # If phase is Succeeded, the ping command returned exit code 0
-        is_reachable = phase == "Succeeded"
-
-        if is_reachable:
-            logger.info(f"Success: {to_host} is reachable from {source_pod_name}.")
-        else:
-            logger.error(f"Failure: {to_host} is NOT reachable from {source_pod_name}.")
-
-        return is_reachable
-
-    except ApiException as e:
-        logger.error(f"Exception during pod creation/execution: {e}")
-        return False
-
-    finally:
-        logger.info(f"Cleaning up pod '{temp_pod_name}'...")
-        try:
-            v1.delete_namespaced_pod(name=temp_pod_name, namespace=namespace)
-            logger.info(f"Pod '{temp_pod_name}' deleted successfully.")
-        except ApiException as e:
-            logger.error(f"Failed to delete temporary pod {temp_pod_name}: {e}")
+    logger.info(
+        "Checking reachability from %s to %s:%s (model=%s)",
+        source_unit,
+        to_host,
+        port,
+        model_name,
+    )
+    result = subprocess.run(
+        ["juju", "ssh", f"--model={model_name}", source_unit, "python3"],
+        input=script,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "JUJU_MODEL": model_name},
+        check=False,
+    )
+    is_reachable = result.returncode == 0
+    if is_reachable:
+        logger.info("Success: %s is reachable from %s.", to_host, source_unit)
+    else:
+        logger.info(
+            "Failure: %s is NOT reachable from %s (rc=%s stderr=%s stdout=%s)",
+            to_host,
+            source_unit,
+            result.returncode,
+            result.stderr.strip(),
+            result.stdout.strip(),
+        )
+    return is_reachable
 
 
 def _remote_exit_code_from_error(error: subprocess.CalledProcessError) -> int:

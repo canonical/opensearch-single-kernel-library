@@ -42,6 +42,7 @@ from tests.integration.helpers import (
     get_controller_hostname,
     get_leader_unit_ip,
     is_up,
+    k8s_unit_fqdn,
     wait_until,
 )
 from tests.integration.tls.conftest import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
@@ -363,11 +364,12 @@ async def test_full_network_cut_without_ip_change_node_with_elected_cm(
         await cut_network_from_unit_without_ip_change(ops_test, app, first_elected_cm_unit_id)
 
     # verify machine not reachable from / to peer units
+    target_fqdn = k8s_unit_fqdn(ops_test, app, first_elected_cm_unit_hostname)
     for unit_id, unit_hostname in unit_ids_hostnames.items():
         if unit_id != first_elected_cm_unit_id:
             if substrate == "k8s":
                 assert not k8s_is_unit_reachable(
-                    ops_test.model_name, unit_hostname, first_elected_cm_unit_hostname
+                    ops_test.model_name, f"{app}/{unit_id}", target_fqdn
                 ), "Unit is still reachable from other units."
             else:
                 assert not is_unit_reachable(
@@ -476,13 +478,12 @@ async def test_full_network_cut_without_ip_change_node_with_primary_shard(
         await cut_network_from_unit_without_ip_change(ops_test, app, first_unit_with_primary_shard)
 
     # verify machine not reachable from / to peer units
+    target_fqdn = k8s_unit_fqdn(ops_test, app, first_unit_with_primary_shard_hostname)
     for unit_id, unit_hostname in unit_ids_hostnames.items():
         if unit_id != first_unit_with_primary_shard:
             if substrate == "k8s":
                 assert not k8s_is_unit_reachable(
-                    ops_test.model_name,
-                    unit_hostname,
-                    first_unit_with_primary_shard_hostname,
+                    ops_test.model_name, f"{app}/{unit_id}", target_fqdn
                 ), "Unit is still reachable from other units."
             else:
                 assert not is_unit_reachable(

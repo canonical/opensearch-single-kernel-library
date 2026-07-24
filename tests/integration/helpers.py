@@ -641,9 +641,9 @@ def _request_path(endpoint: str) -> str:
     return f"{path}?{parsed_endpoint.query}" if parsed_endpoint.query else path
 
 
-def _k8s_unit_fqdn(ops_test: OpsTest, app: str, unit: Unit) -> str:
-    """Return the fully qualified domain name for a K8s unit"""
-    return f"{unit.short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
+def k8s_unit_fqdn(ops_test: OpsTest, app: str, short_name: str) -> str:
+    """Return the fully qualified domain name for a K8s unit short name."""
+    return f"{short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
 
 
 def _http_request_headers(
@@ -789,12 +789,12 @@ async def http_request(  # noqa: C901
         # K8s requests that start from a pod IP are executed from inside the
         # cluster so they can use the stable unit service DNS name with strict TLS.
         logger.info(
-            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {_k8s_unit_fqdn(ops_test, app, k8s_unit)} route: {_request_path(endpoint)}"
+            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {k8s_unit_fqdn(ops_test, app, k8s_unit.short_name)} route: {_request_path(endpoint)}"
         )
         params: dict[str, Any] = {
             "method": method,
             "route": _request_path(endpoint),
-            "host": _k8s_unit_fqdn(ops_test, app, k8s_unit),
+            "host": k8s_unit_fqdn(ops_test, app, k8s_unit.short_name),
             "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
             "timeout": int(timeout),
         }
