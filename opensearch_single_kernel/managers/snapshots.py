@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     S3_CREDENTIALS,
     S3_RELATION,
     STORE_PASSWORD,
+    DeploymentType,
     ObjectStorageType,
     Scope,
     Substrates,
@@ -680,6 +681,17 @@ class SnapshotsManager(BaseManager):
             and not self.state.azure_configured_everywhere
         ):
             return [SnapshotsStatuses.AZURE_ROTATION.value]
+
+        # Non-main orchestrators must not carry a direct backup-integrator relation: they
+        # receive object storage config through the peer-cluster relation instead.
+        if (
+            scope == "app"
+            and (deployment_desc := self.state.application.deployment_desc)
+            and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
+            and (self.state.is_peer_cluster_consumer() or self.state.is_peer_cluster_provider())
+            and (self.state.s3_relation or self.state.azure_relation or self.state.gcs_relation)
+        ):
+            return [SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value]
 
         pcluster_types = {
             ObjectStorageType.S3_PCLUSTER,
