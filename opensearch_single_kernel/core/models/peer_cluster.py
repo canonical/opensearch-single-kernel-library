@@ -21,17 +21,19 @@ from pydantic import (
 
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 from opensearch_single_kernel.core.models.base import (
-    AdminSecretStr,
     App,
     DeploymentDescription,
     Model,
     Node,
-    PersistentModel,
     PluginConfigInfo,
-    PluginsSecretStr,
-    UserSecretStr,
     _sort_nested_dicts,
     stripped_or_none,
+)
+from opensearch_single_kernel.core.models.persistent import (
+    AdminSecretStr,
+    PersistentModel,
+    PluginsSecretStr,
+    UserSecretStr,
 )
 from opensearch_single_kernel.core.models.storage import (
     AzureRelData,
@@ -225,7 +227,7 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     )
     @classmethod
     def coerce_to_str(cls, v):
-        """Ensure non-None values are always strings, even if the databag parses them as bool/float/int."""
+        """Ensure non-None values are always strings"""
         if v is None:
             return None
         return str(v)
@@ -281,9 +283,7 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
             m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
 
             digest_source = source.model_dump(mode="json", context={"skip_secrets": True})
-            m.rel_data_hash = sha1(
-                json.dumps(digest_source, sort_keys=True).encode()
-            ).hexdigest()
+            m.rel_data_hash = sha1(json.dumps(digest_source, sort_keys=True).encode()).hexdigest()
 
     def clear_rel_data(self) -> None:
         """Reset all orchestrator-broadcast fields to their defaults."""

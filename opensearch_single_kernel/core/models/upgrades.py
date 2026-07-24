@@ -12,7 +12,8 @@ from typing import Optional
 import poetry.core.constraints.version as poetry_version
 from pydantic import Field, field_validator
 
-from opensearch_single_kernel.core.models.base import Model, PersistentModel
+from opensearch_single_kernel.core.models.base import Model
+from opensearch_single_kernel.core.models.persistent import PersistentModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )

@@ -260,7 +260,7 @@ def test_app_peers_data(harness):
 
 def test_unit_peers_data(harness):
     """Test getting data from the unit relation data bag."""
-    assert harness.charm.state.server.started == ""
+    assert harness.charm.state.server.started is None
     harness.charm.state.server.started = "yeses"
     assert harness.charm.state.server.started == "yeses"
 

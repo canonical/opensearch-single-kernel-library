@@ -468,11 +468,7 @@ class PeerClusterManager(BaseManager):
                 if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
                     status_list.append(status)
 
-
-                if (
-                    peer_cluster.deployment_desc is not None
-                    and peer_cluster.admin_hashed_password
-                ):
+                if peer_cluster.deployment_desc is not None and peer_cluster.admin_hashed_password:
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
                         deployment_desc=self.state.application.deployment_desc,

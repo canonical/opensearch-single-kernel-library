@@ -9,7 +9,7 @@ import os
 
 from pydantic import Field
 
-from opensearch_single_kernel.core.models.base import PersistentModel
+from opensearch_single_kernel.core.models.persistent import PersistentModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )

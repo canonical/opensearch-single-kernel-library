@@ -27,7 +27,9 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStopError,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
+    SystemdError,
     service_failed,
+    service_restart,
     service_running,
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
@@ -69,6 +71,24 @@ class VMWorkload(BaseWorkload):
         except KeyError:
             return False
 
+    def _ensure_snap_reexec(self) -> None:
+        """Append SNAP_REEXEC=force to /etc/environment and restart snapd if needed."""
+        env_path = Path("/etc/environment")
+        snap_reexec_line = "SNAP_REEXEC=force"
+        try:
+            content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+        except OSError:
+            content = ""
+
+        if snap_reexec_line in content.splitlines():
+            return
+
+        if content and not content.endswith("\n"):
+            content += "\n"
+        env_path.write_text(f"{content}{snap_reexec_line}\n", encoding="utf-8")
+        logger.info("Appended %s to %s; restarting snapd", snap_reexec_line, env_path)
+        service_restart("snapd")
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -78,6 +98,7 @@ class VMWorkload(BaseWorkload):
     def install(self) -> None:
         """Install the workload."""
         try:
+            self._ensure_snap_reexec()
             cache = snap.SnapCache()
             self.opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
@@ -86,7 +107,7 @@ class VMWorkload(BaseWorkload):
             if not self.opensearch_snap.held:
                 # hold the snap in charm determined revision
                 self.opensearch_snap.hold()
-        except snap.SnapError as e:
+        except (snap.SnapError, SystemdError, OSError) as e:
             logger.error("Failed to install/upgrade opensearch. \n%s", e)
             raise OpenSearchInstallError()
 

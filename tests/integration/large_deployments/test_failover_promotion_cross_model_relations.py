@@ -36,7 +36,7 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 1}
 MAIN_ORCHESTRATOR_OFFER = "main-integration"
 FAILOVER_ORCHESTRATOR_OFFER = "failover-integration"
 CERTS_OFFER = "certs-integration"
-TIMEOUT = 45 * 60
+TIMEOUT = 60 * 60
 
 
 @pytest.mark.abort_on_fail

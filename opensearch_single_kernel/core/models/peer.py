@@ -19,15 +19,9 @@ from opensearch_single_kernel.common.constants import (
     PerformanceType,
 )
 from opensearch_single_kernel.core.models.base import (
-    AdminSecretStr,
     DeploymentDescription,
-    HttpSecretStr,
     Node,
-    PersistentModel,
     PluginConfigInfo,
-    PluginsSecretStr,
-    TransportSecretStr,
-    UserSecretStr,
     _sort_nested_dicts,
     stripped_or_none,
 )
@@ -35,6 +29,14 @@ from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
+)
+from opensearch_single_kernel.core.models.persistent import (
+    AdminSecretStr,
+    HttpSecretStr,
+    PersistentModel,
+    PluginsSecretStr,
+    TransportSecretStr,
+    UserSecretStr,
 )
 from opensearch_single_kernel.core.models.profiles import (
     OpenSearchProfile,

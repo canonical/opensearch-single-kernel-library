@@ -148,6 +148,14 @@ class ClusterState(Object):
         self.azure_requires = azure_requires
         self.gcs_requires = gcs_requires
 
+        # Per-hook cache of parsed databag models. Keyed by (model_cls, relation_name,
+        # relation_id, component_name) so every accessor that resolves to the same logical
+        # databag returns the *same* bound instance for the lifetime of this ClusterState --
+        # which, since Juju runs a fresh process per event, is exactly one hook. This both
+        # avoids re-running pydantic validation on every access and keeps in-memory mutations
+        # (these models self-persist on write) consistent across all read paths in the hook.
+        self._model_cache: dict = {}
+
     # -- Relations
 
     @property
@@ -219,6 +227,46 @@ class ClusterState(Object):
         """Get peer upgrade relation."""
         return self.model.get_relation(UPGRADE_RELATION)
 
+    @staticmethod
+    def _model_key(model_cls: type, relation: Relation | None, component) -> tuple:
+        """Cache key identifying the logical databag a model maps to.
+
+        Two accessors that resolve to the same (class, relation, component) share one
+        cached instance -- e.g. `server` and this unit's entry in `application_servers`.
+        """
+        return (
+            model_cls,
+            relation.name if relation else None,
+            relation.id if relation else None,
+            getattr(component, "name", None),
+        )
+
+    def _cached_model(self, key: tuple, factory):
+        """Return the per-hook cached model for `key`, building it via `factory` on a miss.
+
+        `None` results (e.g. a departing peer-cluster relation whose secrets are gone) are
+        cached too, so a miss isn't re-attempted for the rest of the hook.
+        """
+        cache = self._model_cache
+        if key not in cache:
+            cache[key] = factory()
+        return cache[key]
+
+    def invalidate(self, *model_classes: type) -> None:
+        """Drop cached parsed models so the next access re-reads the databag.
+
+        Not needed for writes through these models (the cached instance is already
+        up to date). Call this only after a databag is written by a path that bypasses
+        them, or when a genuinely fresh re-read is required within the same hook. With
+        no arguments, clears the whole per-hook cache.
+        """
+        if not model_classes:
+            self._model_cache.clear()
+            return
+        targets = set(model_classes)
+        for key in [k for k in self._model_cache if k[0] in targets]:
+            del self._model_cache[key]
+
     def _bind_model_or_default(
         self,
         interface,
@@ -231,10 +279,16 @@ class ClusterState(Object):
 
         Before the relation exists, return an unbound default model: reads yield the
         fields' defaults and writes are dropped (there is no databag to persist to).
+        The result is memoized per hook (see `_model_cache`).
         """
-        if not relation:
-            return model_cls()
-        return bind_model(interface, relation.id, model_cls, component, write_context)
+        return self._cached_model(
+            self._model_key(model_cls, relation, component),
+            lambda: (
+                bind_model(interface, relation.id, model_cls, component, write_context)
+                if relation
+                else model_cls()
+            ),
+        )
 
     # --- Upgrade Relation State Properties ---
 
@@ -263,11 +317,14 @@ class ClusterState(Object):
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
-                bind_model(
-                    self.upgrade_unit_interface,
-                    self.upgrade_relation.id,
-                    UpgradeServerModel,
-                    component=unit,
+                self._cached_model(
+                    self._model_key(UpgradeServerModel, self.upgrade_relation, unit),
+                    lambda unit=unit: bind_model(
+                        self.upgrade_unit_interface,
+                        self.upgrade_relation.id,
+                        UpgradeServerModel,
+                        component=unit,
+                    ),
                 )
                 for unit in sorted(
                     (self.model.unit, *self.upgrade_relation.units),
@@ -312,21 +369,28 @@ class ClusterState(Object):
         # The requirer side never manages secrets for this relation -- those are only
         # created/rotated by the provider (orchestrator) side. See PeerClusterAppModel.
         write_context = None if is_provider else {"skip_secrets": True}
-        try:
-            return bind_model(
-                interface,
-                relation.id,
-                PeerClusterAppModel,
-                component=relation.app if remote else self.model.app,
-                write_context=write_context,
-                read_only=remote,
-            )
-        except SecretNotFoundError:
-            logger.warning(
-                "Secret not found when reading relation %s model — relation may be departing.",
-                relation.id,
-            )
-            return None
+        component = relation.app if remote else self.model.app
+
+        def factory():
+            try:
+                return bind_model(
+                    interface,
+                    relation.id,
+                    PeerClusterAppModel,
+                    component=component,
+                    write_context=write_context,
+                    read_only=remote,
+                )
+            except SecretNotFoundError:
+                logger.warning(
+                    "Secret not found when reading relation %s model — relation may be departing.",
+                    relation.id,
+                )
+                return None
+
+        return self._cached_model(
+            self._model_key(PeerClusterAppModel, relation, component), factory
+        )
 
     def peer_cluster_by_relation_id(
         self, is_provider: bool, relation_id: int, remote: bool = False
@@ -368,14 +432,21 @@ class ClusterState(Object):
         """
         relation_name = self._peer_cluster_relation_name(is_provider)
         return [
-            bind_model(
-                RepositoryInterface(
-                    self.model, relation_name, unit, OpsRelationRepository, PeerClusterServerModel
+            self._cached_model(
+                self._model_key(PeerClusterServerModel, rel, unit),
+                lambda rel=rel, unit=unit: bind_model(
+                    RepositoryInterface(
+                        self.model,
+                        relation_name,
+                        unit,
+                        OpsRelationRepository,
+                        PeerClusterServerModel,
+                    ),
+                    rel.id,
+                    PeerClusterServerModel,
+                    component=unit,
+                    read_only=remote,
                 ),
-                rel.id,
-                PeerClusterServerModel,
-                component=unit,
-                read_only=remote,
             )
             for rel in self.model.relations[relation_name]
             for unit in (rel.units if remote else [self.model.unit])
@@ -390,13 +461,20 @@ class ClusterState(Object):
         relation_name = self._peer_cluster_relation_name(is_provider)
         if relation := self.model.get_relation(relation_name, relation_id):
             unit = self.model.unit
-            return bind_model(
-                RepositoryInterface(
-                    self.model, relation_name, unit, OpsRelationRepository, PeerClusterServerModel
+            return self._cached_model(
+                self._model_key(PeerClusterServerModel, relation, unit),
+                lambda: bind_model(
+                    RepositoryInterface(
+                        self.model,
+                        relation_name,
+                        unit,
+                        OpsRelationRepository,
+                        PeerClusterServerModel,
+                    ),
+                    relation.id,
+                    PeerClusterServerModel,
+                    component=unit,
                 ),
-                relation.id,
-                PeerClusterServerModel,
-                component=unit,
             )
         return None
 
@@ -432,8 +510,14 @@ class ClusterState(Object):
     def application_servers(self) -> list[OpenSearchServerPeerModel]:
         """Return all opensearch servers using peer relation."""
         return [
-            bind_model(
-                self.peer_unit_interface, self.peer_relation.id, OpenSearchServerPeerModel, unit
+            self._cached_model(
+                self._model_key(OpenSearchServerPeerModel, self.peer_relation, unit),
+                lambda unit=unit: bind_model(
+                    self.peer_unit_interface,
+                    self.peer_relation.id,
+                    OpenSearchServerPeerModel,
+                    unit,
+                ),
             )
             for unit in self.all_units
         ]
@@ -482,16 +566,22 @@ class ClusterState(Object):
         relation = self.jwt_relation
         if not relation or not relation.app:
             return None
-        repository = OpsRelationRepository(self.model, relation, component=relation.app)
-        version = repository.get_field("version") or "v0"
-        try:
-            if version == "v0":
-                return build_model(repository, JWTAuthConfiguration)
-            contract = build_model(repository, DataContractV1[JWTAuthConfiguration])
-            return contract.requests[0] if contract.requests else None
-        except ValidationError as e:
-            logger.error(f"failed to validate jwt: {e}")
-            return None
+
+        def factory():
+            repository = OpsRelationRepository(self.model, relation, component=relation.app)
+            version = repository.get_field("version") or "v0"
+            try:
+                if version == "v0":
+                    return build_model(repository, JWTAuthConfiguration)
+                contract = build_model(repository, DataContractV1[JWTAuthConfiguration])
+                return contract.requests[0] if contract.requests else None
+            except ValidationError as e:
+                logger.error(f"failed to validate jwt: {e}")
+                return None
+
+        return self._cached_model(
+            self._model_key(JWTAuthConfiguration, relation, relation.app), factory
+        )
 
     @property
     def server_lock(self) -> LockServerStateModel:
@@ -507,11 +597,15 @@ class ClusterState(Object):
         if not granted_unit_name:
             return None
 
-        return bind_model(
-            self.lock_unit_interface,
-            self.lock_relation.id,
-            LockServerStateModel,
-            self.model.get_unit(lock_unit_name(granted_unit_name)),
+        granted_unit = self.model.get_unit(lock_unit_name(granted_unit_name))
+        return self._cached_model(
+            self._model_key(LockServerStateModel, self.lock_relation, granted_unit),
+            lambda: bind_model(
+                self.lock_unit_interface,
+                self.lock_relation.id,
+                LockServerStateModel,
+                granted_unit,
+            ),
         )
 
     @property
@@ -519,8 +613,14 @@ class ClusterState(Object):
         """Get state of lock relation for all units in it."""
         return (
             [
-                bind_model(
-                    self.lock_unit_interface, self.lock_relation.id, LockServerStateModel, unit
+                self._cached_model(
+                    self._model_key(LockServerStateModel, self.lock_relation, unit),
+                    lambda unit=unit: bind_model(
+                        self.lock_unit_interface,
+                        self.lock_relation.id,
+                        LockServerStateModel,
+                        unit,
+                    ),
                 )
                 for unit in [self.model.unit, *self.lock_relation.units]
             ]

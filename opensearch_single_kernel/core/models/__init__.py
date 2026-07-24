@@ -16,9 +16,7 @@ from opensearch_single_kernel.core.models.base import (
     Model,
     Node,
     PeerClusterConfig,
-    PersistentModel,
     PluginConfigInfo,
-    bind_model,
 )
 from opensearch_single_kernel.core.models.jwt import JWTAuthConfiguration
 from opensearch_single_kernel.core.models.lock import (
@@ -40,6 +38,10 @@ from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
     PeerClusterServerModel,
+)
+from opensearch_single_kernel.core.models.persistent import (
+    PersistentModel,
+    bind_model,
 )
 from opensearch_single_kernel.core.models.profiles import (
     ClusterTopologyRequirements,
