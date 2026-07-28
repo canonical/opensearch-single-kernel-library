@@ -267,6 +267,16 @@ class ClusterState(Object):
         for key in [k for k in self._model_cache if k[0] in targets]:
             del self._model_cache[key]
 
+    def _new_model(self, *args, **kwargs):
+        """Build a bound model, wiring in cache invalidation on write.
+
+        Thin wrapper over `bind_model` that injects `on_persist=self.invalidate`: when the
+        returned model writes itself back to a databag, it drops this hook's parsed-model cache
+        so a subsequent read re-reads fresh state (read-your-writes) rather than a stale parse.
+        """
+        kwargs.setdefault("on_persist", self.invalidate)
+        return bind_model(*args, **kwargs)
+
     def _bind_model_or_default(
         self,
         interface,
@@ -284,7 +294,7 @@ class ClusterState(Object):
         return self._cached_model(
             self._model_key(model_cls, relation, component),
             lambda: (
-                bind_model(interface, relation.id, model_cls, component, write_context)
+                self._new_model(interface, relation.id, model_cls, component, write_context)
                 if relation
                 else model_cls()
             ),
@@ -319,7 +329,7 @@ class ClusterState(Object):
             [
                 self._cached_model(
                     self._model_key(UpgradeServerModel, self.upgrade_relation, unit),
-                    lambda unit=unit: bind_model(
+                    lambda unit=unit: self._new_model(
                         self.upgrade_unit_interface,
                         self.upgrade_relation.id,
                         UpgradeServerModel,
@@ -373,7 +383,7 @@ class ClusterState(Object):
 
         def factory():
             try:
-                return bind_model(
+                return self._new_model(
                     interface,
                     relation.id,
                     PeerClusterAppModel,
@@ -434,7 +444,7 @@ class ClusterState(Object):
         return [
             self._cached_model(
                 self._model_key(PeerClusterServerModel, rel, unit),
-                lambda rel=rel, unit=unit: bind_model(
+                lambda rel=rel, unit=unit: self._new_model(
                     RepositoryInterface(
                         self.model,
                         relation_name,
@@ -463,7 +473,7 @@ class ClusterState(Object):
             unit = self.model.unit
             return self._cached_model(
                 self._model_key(PeerClusterServerModel, relation, unit),
-                lambda: bind_model(
+                lambda: self._new_model(
                     RepositoryInterface(
                         self.model,
                         relation_name,
@@ -512,7 +522,7 @@ class ClusterState(Object):
         return [
             self._cached_model(
                 self._model_key(OpenSearchServerPeerModel, self.peer_relation, unit),
-                lambda unit=unit: bind_model(
+                lambda unit=unit: self._new_model(
                     self.peer_unit_interface,
                     self.peer_relation.id,
                     OpenSearchServerPeerModel,
@@ -600,7 +610,7 @@ class ClusterState(Object):
         granted_unit = self.model.get_unit(lock_unit_name(granted_unit_name))
         return self._cached_model(
             self._model_key(LockServerStateModel, self.lock_relation, granted_unit),
-            lambda: bind_model(
+            lambda: self._new_model(
                 self.lock_unit_interface,
                 self.lock_relation.id,
                 LockServerStateModel,
@@ -615,7 +625,7 @@ class ClusterState(Object):
             [
                 self._cached_model(
                     self._model_key(LockServerStateModel, self.lock_relation, unit),
-                    lambda unit=unit: bind_model(
+                    lambda unit=unit: self._new_model(
                         self.lock_unit_interface,
                         self.lock_relation.id,
                         LockServerStateModel,

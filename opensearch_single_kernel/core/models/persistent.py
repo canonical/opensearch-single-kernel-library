@@ -74,6 +74,11 @@ class PersistentModel(BaseModel):
     _write_context: dict | None = PrivateAttr(default=None)
     _suspend_persist_depth: int = PrivateAttr(default=0)
     _read_only: bool = PrivateAttr(default=False)
+    # Called after this instance successfully writes itself back to the databag. Lets the owning
+    # ClusterState drop its parsed-model cache so a read later in the same hook re-reads the
+    # databag/Juju secret instead of returning a now-stale cached parse (read-your-writes). Set at
+    # bind time and propagated to sibling models so a sibling's write invalidates the cache too.
+    _on_persist: Any = PrivateAttr(default=None)
     # Cache of secret-group sibling models keyed by their class (see `sibling_model`). Lazily
     # created. Because ClusterState caches the parent instance for the whole hook, caching the
     # sibling on the parent makes each secret-group model parse once per hook as well, and keeps
@@ -90,16 +95,21 @@ class PersistentModel(BaseModel):
         repository: AbstractRepository,
         write_context: dict | None = None,
         read_only: bool = False,
+        on_persist: Any = None,
     ) -> "PersistentModel":
         """Attach the repository this instance should persist itself through.
 
         `read_only` is for models loaded from a databag the charm cannot write
         (a remote app's or remote unit's): field assignments then only mutate the
         in-memory instance instead of triggering a persist.
+
+        `on_persist` is an optional zero-arg callable invoked after a successful
+        write (see `_on_persist`); ClusterState passes its cache-invalidation hook.
         """
         self._repository = repository
         self._write_context = write_context
         self._read_only = read_only
+        self._on_persist = on_persist
         return self
 
     @property
@@ -128,7 +138,8 @@ class PersistentModel(BaseModel):
             return cache[model_cls]
         model = _lib_build_model(self._repository, model_cls)
         if isinstance(model, PersistentModel):
-            model.bind(self._repository, self._write_context)
+            # Propagate on_persist so a write through the sibling invalidates the cache too.
+            model.bind(self._repository, self._write_context, on_persist=self._on_persist)
         cache[model_cls] = model
         return model
 
@@ -290,6 +301,13 @@ class PersistentModel(BaseModel):
         finally:
             self._suspend_persist_depth -= 1
 
+        # The databag/Juju secret changed. Drop cached sibling parses and ask ClusterState to
+        # drop its parsed-model cache so any read later in this hook re-reads fresh state instead
+        # of a now-stale cached parse. Skipped implicitly while suspended (we return above).
+        self._sibling_cache = None
+        if self._on_persist is not None:
+            self._on_persist()
+
     def _write_non_secret_fields(self, repository: Any) -> None:
         """Write the model's plain databag fields, leaving Juju secrets untouched.
 
@@ -315,6 +333,7 @@ def bind_model(
     component: Any | None = None,
     write_context: dict | None = None,
     read_only: bool = False,
+    on_persist: Any = None,
 ) -> Any:
     """Build a model through `interface` and bind it to its repository for self-writes.
 
@@ -325,9 +344,12 @@ def bind_model(
 
     Pass `read_only=True` when `component` is a remote app/unit whose databag this
     charm cannot write -- field assignments then stay in-memory.
+
+    `on_persist` is forwarded to the model so a successful write can invalidate the
+    caller's parsed-model cache (see PersistentModel._on_persist).
     """
     repository = interface.repository(relation_id, component)
     model = _lib_build_model(repository, model_cls)
     if isinstance(model, PersistentModel):
-        model.bind(repository, write_context, read_only=read_only)
+        model.bind(repository, write_context, read_only=read_only, on_persist=on_persist)
     return model
