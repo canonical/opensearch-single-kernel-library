@@ -423,10 +423,18 @@ class TlsManager(BaseManager):
         """Add key and cert to keystore.
 
         Returns:
-            True on success, False if a filesystem or command error occurred.
+            True once the resources are stored. False if the caller should defer and
+            retry: either a fleet-wide CA rotation is still in progress (certs must not
+            be written until it completes), or a filesystem/command error occurred.
         """
+        # During a fleet-wide CA rotation, certificates must not be written to the
+        # keystores until every unit has finished renewing the CA. Return False so the
+        # caller defers and retries once the rotation completes. Returning True here would
+        # make the caller treat the cert as stored and drop the event; for a cert type
+        # issued only once during the rotation window (e.g. unit-http on the leader) it
+        # would then never be stored, and the fleet would never converge.
         if not self.state.ca_rotation_complete_in_cluster:
-            return True
+            return False
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         self.create_store_pwd_if_not_exists(cert_type, StoreType.KEYSTORE)

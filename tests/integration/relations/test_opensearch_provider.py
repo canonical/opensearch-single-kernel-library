@@ -8,6 +8,7 @@ import re
 
 import pytest
 from pytest_operator.plugin import OpsTest
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
 from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
@@ -772,17 +773,23 @@ async def test_relation_broken(ops_test: OpsTest):
         ),
     )
 
+    # The leader removes client users asynchronously in its relation-broken handler (and, as a
+    # backstop, on update-status). A juju-idle wait does not guarantee that cleanup has completed,
+    # so poll OpenSearch until the users are actually gone rather than asserting on a single
+    # snapshot. The timeout covers the ~5-min update-status backstop in case relation-broken was
+    # skipped (e.g. the leader's node was briefly down during the break).
     leader_ip = await get_leader_unit_ip(ops_test)
-    users = await http_request(
-        ops_test,
-        "GET",
-        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/internalusers/",
-        verify=False,
-    )
-
-    for user in users_to_check:
-        logger.info(f"Checking removal of user: {user}")
-        assert user not in users.keys(), f"User {user!r} was not removed after relation break"
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(15)):
+        with attempt:
+            users = await http_request(
+                ops_test,
+                "GET",
+                f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/internalusers/",
+                verify=False,
+            )
+            lingering = [user for user in users_to_check if user in users.keys()]
+            logger.info(f"Checking removal of users {users_to_check}; still present: {lingering}")
+            assert not lingering, f"Users {lingering!r} were not removed after relation break"
 
 
 @pytest.mark.abort_on_fail

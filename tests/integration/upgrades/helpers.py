@@ -119,8 +119,12 @@ def refresh(
 def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
     if substrate == "k8s":
-        cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        # Run from within OPENSEARCH_HOME: the launcher applies jvm.options that
+        # include a relative gc-log path (-Xlog:...:file=logs/gc.log). Executed
+        # from an arbitrary ssh working directory that `logs/` dir does not exist,
+        # so the JVM fails to start and `--version` exits non-zero.
+        cmd = f"juju ssh --model {model} --container opensearch {unit} 'cd $OPENSEARCH_HOME && $OPENSEARCH_BIN/opensearch --version'"
+        shell = True
     else:
         # opensearch.opensearch-bin not exposed in older snap revisions
         cmd = [
@@ -139,7 +143,12 @@ def get_version_on_unit(unit: str, model: str, substrate):
             "-c",
             "$OPENSEARCH_BIN/opensearch --version",
         ]
-        output = subprocess.check_output(cmd, text=True)
+        shell = False
+
+    # Retry to absorb transient `juju ssh`/`juju exec` connection flakiness.
+    for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+        with attempt:
+            output = subprocess.check_output(cmd, shell=shell, text=True).strip()
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 

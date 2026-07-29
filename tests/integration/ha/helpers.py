@@ -14,6 +14,7 @@ from tenacity import (
     Retrying,
     retry,
     stop_after_attempt,
+    stop_after_delay,
     wait_fixed,
     wait_random,
 )
@@ -214,11 +215,22 @@ async def get_shards_by_index(
 async def assert_continuous_writes_increasing(
     c_writes: ContinuousWrites,
 ) -> None:
-    """Asserts that the continuous writes are increasing."""
+    """Asserts that the continuous writes are increasing.
+
+    Polls rather than taking a single fixed-window sample: right after events that churn
+    connections (e.g. a rolling upgrade that changes k8s pod IPs) the background writer needs
+    time to reconnect, and a hard 20s sample can catch it mid-recovery even though the cluster
+    is healthy. Re-push the current hosts/password each attempt so a writer wedged on stale
+    endpoints picks up fresh ones, and pass as soon as the count moves.
+    """
     writes_count = await c_writes.count()
-    await asyncio.sleep(20)
-    more_writes = await c_writes.count()
-    assert more_writes > writes_count, "Writes not continuing to DB"
+    for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(5)):
+        with attempt:
+            # Refresh the writer's endpoints in case IPs changed (e.g. post-upgrade on k8s).
+            await c_writes.update()
+            await asyncio.sleep(5)
+            more_writes = await c_writes.count()
+            assert more_writes > writes_count, "Writes not continuing to DB"
 
 
 async def assert_continuous_writes_consistency(
@@ -549,18 +561,48 @@ async def assert_start_and_check_continuous_writes(
     await writer.clear()
 
 
+# Terminal snapshot states in which the backup is incomplete and cannot be
+# restored (restore fails with "index ... wasn't fully snapshotted").
+NON_RESTORABLE_SNAPSHOT_STATES = {"partial", "failed", "incompatible"}
+BACKUP_CREATE_ATTEMPTS = 3
+
+
 async def create_backup(
     ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
 ) -> str:
-    """Runs the backup of the cluster."""
-    action = await run_action(ops_test, leader_id, "create-backup", app=app)
-    logger.debug(f"create-backup output: {action}")
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
-    assert action.status == "completed"
-    st = str(action.response.get("status", ""))
-    assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
-    assert action.response.get("backup-id"), "backup-id is missing in response"
-    return action.response["backup-id"]
+    """Runs the backup of the cluster.
+
+    Retries creation if the snapshot settles into a non-restorable state (e.g.
+    ``partial``). That can happen as a transient race between the snapshot and
+    the ongoing continuous writes, even while the cluster is green, and would
+    otherwise surface much later as an opaque HTTP 500 at restore time.
+    """
+    last_state = None
+    for attempt in range(1, BACKUP_CREATE_ATTEMPTS + 1):
+        action = await run_action(ops_test, leader_id, "create-backup", app=app)
+        logger.debug(f"create-backup output: {action}")
+        assert action.status == "completed"
+        st = str(action.response.get("status", ""))
+        assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
+        backup_id = action.response.get("backup-id")
+        assert backup_id, "backup-id is missing in response"
+
+        await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+
+        backups = await list_backups(ops_test, leader_id, app=app)
+        last_state = str(backups.get(backup_id, {}).get("state", "unknown")).lower()
+        if last_state not in NON_RESTORABLE_SNAPSHOT_STATES:
+            return backup_id
+
+        logger.warning(
+            f"Backup {backup_id} settled in non-restorable state '{last_state}' "
+            f"(attempt {attempt}/{BACKUP_CREATE_ATTEMPTS}); retrying."
+        )
+
+    raise AssertionError(
+        f"Backup never reached a restorable state after {BACKUP_CREATE_ATTEMPTS} "
+        f"attempts; last observed state: {last_state}"
+    )
 
 
 async def restore(
