@@ -21,6 +21,7 @@ import logging
 import os
 import random
 import string
+import subprocess
 import time
 import uuid
 from copy import deepcopy
@@ -860,6 +861,41 @@ async def test_restore_to_new_cluster(
     1) At each backup restored, check our track of doc count vs. current index count
     2) Try to write to that new index.
     """
+
+    logging.info("Saving logs")
+    assert ops_test.model
+    for unit in ops_test.model.applications[APP_NAME].units:
+        if substrate == "vm":
+            await unit.ssh(
+                "sudo tar -czf logs.tar.xz /var/snap/opensearch/common/var/log/opensearch"
+            )
+            await unit.scp_from("logs.tar.xz", f"{unit.name.replace('/','-')}-logs.tar.xz")
+        else:
+            subprocess.check_output(
+                [
+                    "juju",
+                    "ssh",
+                    "-m",
+                    ops_test.model.name,
+                    "--container",
+                    "opensearch",
+                    unit.name,
+                    "cd /tmp && tar -czf logs.tar.xz /var/log/opensearch",
+                ]
+            )
+            subprocess.check_output(
+                [
+                    "juju",
+                    "scp",
+                    "-m",
+                    ops_test.model.name,
+                    "--container",
+                    "opensearch",
+                    f"{unit.name}:/tmp/logs.tar.xz",
+                    f"{unit.name.replace('/','-')}-logs.tar.xz",
+                ]
+            )
+
     app = (await app_name(ops_test) or APP_NAME) if deploy_type == "small" else "main"
     if cloud_name == "azure":
         backup_integrator = AZURE_INTEGRATOR
