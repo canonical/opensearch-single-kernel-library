@@ -37,11 +37,11 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
     SnapshotsStatuses,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.peer_cluster import PeerClusterAppModel
+from opensearch_single_kernel.core.models.storage import (
     AzureRelData,
     GcsRelData,
     ObjectStorageConfig,
-    PeerClusterAppModel,
     S3RelData,
 )
 from opensearch_single_kernel.core.state import ClusterState
@@ -396,6 +396,32 @@ class SnapshotsManager(BaseManager):
             alt_hosts=self.alt_hosts,
         )
         status = str(snapshot.get("state", "unknown")).lower()
+
+        # For non-restorable terminal states, log the per-shard failure reasons
+        # OpenSearch reports so the cause is visible in the logs (shard relocated,
+        # node left, object-storage upload error, ...). These fields are only
+        # populated once the snapshot has settled, not while it is in progress.
+        if status in {"partial", "failed", "incompatible"}:
+            shards = snapshot.get("shards", {})
+            failures = snapshot.get("failures", [])
+            logger.error(
+                "Snapshot %s ended in %s state: %s/%s shards failed.",
+                snapshot_id,
+                status,
+                shards.get("failed"),
+                shards.get("total"),
+            )
+            for failure in failures:
+                logger.error(
+                    "Snapshot %s shard failure: index=%s shard=%s node=%s status=%s reason=%s",
+                    snapshot_id,
+                    failure.get("index"),
+                    failure.get("shard_id"),
+                    failure.get("node_id"),
+                    failure.get("status"),
+                    failure.get("reason"),
+                )
+
         return status
 
     def list_snapshots(self) -> dict[Any, dict[str, Any]]:
@@ -657,7 +683,7 @@ class SnapshotsManager(BaseManager):
         }
         if (
             scope == "app"
-            and self.state.application.deployment_desc
+            and self.state.application.deployment_description
             and (object_storage_type := self.state.storage_type)
             and object_storage_type not in pcluster_types
         ):

@@ -34,12 +34,14 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     TlsStatuses,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.peer_cluster import (
+    PeerClusterAppModel,
+    PeerClusterRelErrorData,
+)
+from opensearch_single_kernel.core.models.peer_secrets import (
     OpenSearchAppPeerAdminTlsSecretsModel,
     OpenSearchServerPeerHttpSecretsModel,
     OpenSearchServerPeerTransportSecretsModel,
-    PeerClusterAppModel,
-    PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
@@ -281,7 +283,7 @@ class TlsManager(BaseManager):
             password = password.encode("utf-8")
 
         subject = self._get_certificate_subject(cert_type)
-        organization = self.state.application.deployment_desc.config.cluster_name
+        organization = self.state.application.deployment_description.config.cluster_name
         csr = generate_csr(
             add_unique_id_to_subject_name=False,
             private_key=key,
@@ -825,7 +827,7 @@ class TlsManager(BaseManager):
             should_sever_relation=should_sever_relation,
             should_wait=not should_sever_relation,
             blocked_message=blocked_msg,
-            deployment_desc=self.state.application.deployment_desc,
+            deployment_desc=self.state.application.deployment_description,
         )
 
     def get_secret_by_cert(self, cert: CertType, secret_name: str) -> str:
@@ -886,8 +888,9 @@ class TlsManager(BaseManager):
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
             if (
-                self.state.application.deployment_desc
-                and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                self.state.application.deployment_description
+                and self.state.application.deployment_description.typ
+                == DeploymentType.MAIN_ORCHESTRATOR
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list
@@ -907,7 +910,7 @@ class TlsManager(BaseManager):
             # Even the failover
             if (
                 (
-                    (deployment_desc := self.state.application.deployment_desc)
+                    (deployment_desc := self.state.application.deployment_description)
                     and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 )
                 or (
@@ -930,7 +933,7 @@ class TlsManager(BaseManager):
 
         if scope == "app":
             if (
-                deployment_desc := self.state.application.deployment_desc
+                deployment_desc := self.state.application.deployment_description
             ) and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 if not self.all_tls_resources_stored():
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)

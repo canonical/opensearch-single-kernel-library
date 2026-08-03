@@ -19,7 +19,10 @@ from tenacity import (
     wait_random,
 )
 
-from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.models.plain_base import (
+    App,
+    Node,
+)
 from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count

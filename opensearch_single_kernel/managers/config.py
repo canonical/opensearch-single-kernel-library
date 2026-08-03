@@ -13,7 +13,8 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
-from opensearch_single_kernel.core.models import Node, OpenSearchProfile
+from opensearch_single_kernel.core.models.plain_base import Node
+from opensearch_single_kernel.core.models.profiles import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -152,12 +153,12 @@ class ConfigManager(BaseManager):
             if public_ip := self.workload.get_host_public_ip():
                 publish_hosts.append(public_ip)
         return {
-            "cluster.name": self.state.application.deployment_desc.config.cluster_name,
+            "cluster.name": self.state.application.deployment_description.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
             "http.publish_host": publish_hosts,
             "node.roles": sorted(roles),
-            "node.attr.app_id": self.state.application.deployment_desc.app.id,
+            "node.attr.app_id": self.state.application.deployment_description.app.id,
             "path.data": self.workload.paths.data.as_posix(),
             "path.logs": self.workload.paths.logs.as_posix(),
             "path.home": self.workload.paths.home.as_posix(),
@@ -185,9 +186,7 @@ class ConfigManager(BaseManager):
             {
                 "cluster.initial_cluster_manager_nodes": sorted(cm_names),
             }
-            if cm_names
-            and "cluster_manager" in roles
-            and self.state.server.is_bootstrap_contributor
+            if cm_names and "cluster_manager" in roles and self.state.server.bootstrap_contributor
             else {}
         )
 
@@ -239,7 +238,7 @@ class ConfigManager(BaseManager):
 
         return (
             deployment_desc.config.data_temperature
-            if (deployment_desc := self.state.application.deployment_desc)
+            if (deployment_desc := self.state.application.deployment_description)
             else None
         )
 
@@ -249,7 +248,7 @@ class ConfigManager(BaseManager):
         if node := self.state.node_config:
             return node.roles
 
-        if self.state.application.deployment_desc:
+        if self.state.application.deployment_description:
             return self.state.computed_roles()
 
         return []
@@ -513,7 +512,7 @@ class ConfigManager(BaseManager):
         Returns:
             whether the configuration changed and restart required.
         """
-        current_profile = self.state.server.profile
+        current_profile = self.state.server.opensearch_profile
         logger.debug("current profile: %s, config profile: %s", current_profile, profile)
         if current_profile is None or current_profile != profile:
             heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
@@ -521,7 +520,7 @@ class ConfigManager(BaseManager):
                 "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
             self._update_jvm_heap_size(heap_size)
-            self.state.server.profile = profile
+            self.state.server.opensearch_profile = profile
             return True
         return False
 

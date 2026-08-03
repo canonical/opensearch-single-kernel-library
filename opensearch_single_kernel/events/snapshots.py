@@ -29,7 +29,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
-from opensearch_single_kernel.core.models import AzureRelData, GcsRelData, S3RelData
+from opensearch_single_kernel.core.models.storage import (
+    AzureRelData,
+    GcsRelData,
+    S3RelData,
+)
 from opensearch_single_kernel.events.custom_events import (
     VerifySnapshotsCredentialsEvent,
 )
@@ -97,7 +101,7 @@ class SnapshotsEventsHandler(Object):
         self, event: CredentialsChangedEvent | StorageConnectionInfoChangedEvent
     ) -> None:
         """Handler for backup credentials changed event."""
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_description):
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return
@@ -535,7 +539,7 @@ class SnapshotsEventsHandler(Object):
 
     def _on_peer_clusters_relation_changed_for_snapshots(self, event) -> None:  # noqa C901
         """Apply snapshots config when the orchestrator broadcasts over peer-clusters."""
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return None
@@ -610,7 +614,7 @@ class SnapshotsEventsHandler(Object):
 
     def _on_peer_clusters_relation_departed_for_snapshots(self, event) -> None:  # noqa C901
         """Cleanup snapshot config if the orchestrator we depended on is gone."""
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return
@@ -682,7 +686,7 @@ class SnapshotsEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return "Backup/Restore related actions must be run on the juju leader unit."
 
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             return "Deployment not ready."
 
         if self.charm.upgrades_manager.in_progress:

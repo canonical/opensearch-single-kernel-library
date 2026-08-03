@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchLockError,
 )
 from opensearch_single_kernel.common.statuses import LockStatuses
-from opensearch_single_kernel.core.models import DeploymentDescription
+from opensearch_single_kernel.core.models.plain_base import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -75,7 +75,7 @@ class PeerLockManager(BaseManager):
 
         if (
             self.state.server.is_app_leader
-            and self.state.application_lock.leader_acquired_after_juju_event_id
+            and self.state.application_lock.leader_acquired_lock_after_juju_event_id
             == os.environ["JUJU_CONTEXT_ID"]
         ):
             # `unit-with-lock` was set in this Juju event
@@ -127,11 +127,11 @@ class PeerLockManager(BaseManager):
         if not self.state.lock_relation:
             raise OpenSearchLockError("Failed to refresh lock due to lock relation absence")
 
-        if not (deployment_desc := self.state.application.deployment_desc):
+        if not (deployment_desc := self.state.application.deployment_description):
             return
 
         if not self.state.server.is_app_leader:
-            if self.state.application_lock.leader_acquired_after_juju_event_id:
+            if self.state.application_lock.leader_acquired_lock_after_juju_event_id:
                 # Trigger peer relation changed event on leader unit
                 # Without this, the leader unit might not receive another event (to use the lock it
                 # holds) until the next update status event
@@ -176,7 +176,7 @@ class LockManager(PeerLockManager):
             )
             and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
             and (
-                not self.state.application.is_security_index_initialised
+                not self.state.application.security_index_initialised
                 or (
                     # in case all data-nodes are powered down after being previously started
                     # ignore the lock to get a data-node started, as it holds security index
@@ -239,7 +239,7 @@ class LockManager(PeerLockManager):
                 # Acquire opensearch lock
                 # Create index if it doesn't exist
                 if not self.opensearch_client.create_lock_index_if_needed(
-                    host, alt_hosts, self.state.application.app.planned_units() > 1
+                    host, alt_hosts, self.state.application.component.planned_units() > 1
                 ):
                     logger.debug("[Node lock] Failed to create lock index")
                     return False
@@ -297,7 +297,7 @@ class LockManager(PeerLockManager):
         logger.debug("[Node lock] Releasing lock")
 
         # fetch current app description
-        current_app = self.state.application.deployment_desc.app
+        current_app = self.state.application.deployment_description.app
 
         host = self.state.node_host if self.opensearch_client.is_node_up() else None
         alt_hosts = self.alt_hosts

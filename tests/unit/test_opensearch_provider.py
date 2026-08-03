@@ -13,7 +13,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.plain_base import (
     App,
     DeploymentDescription,
     DeploymentState,
@@ -236,7 +236,8 @@ def test_create_opensearch_users(
         "opensearch_single_kernel.common.client.OpenSearchClient.patch_user",
     )
     client_users_dict = mocker.patch(
-        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.client_users_dict",
+        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.client_relation_users",
+        create=True,
         new_callable=PropertyMock,
         return_value={},
     )

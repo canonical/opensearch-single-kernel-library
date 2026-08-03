@@ -209,6 +209,14 @@ COS_ROLE = "readall_and_monitor"
 OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
+# Maps an internal user to its (password, hashed_password) field names on
+# OpenSearchAppPeerUserSecretsModel.
+USER_SECRET_FIELDS: dict[str, tuple[str, str]] = {
+    ADMIN_USER: ("admin_password", "admin_hashed_password"),
+    KIBANA_SERVER_USER: ("kibana_server_password", "kibana_server_hashed_password"),
+    COS_USER: ("cos_password", "cos_hashed_password"),
+}
+
 GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
 
 # OpenSearch indices
@@ -312,6 +320,12 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
+# Secret fields to propagate per object-storage cloud, keyed by field name.
+OBJECT_STORAGE_SECRET_FIELDS: dict[str, tuple[str, ...]] = {
+    "s3": ("access_key", "secret_key", "tls_ca_chain"),
+    "azure": ("storage_account", "secret_key"),
+    "gcs": ("secret_key",),
+}
 S3_CA_ALIAS = "s3-snapshots-gateway"
 STORE_PASSWORD = "changeit"
 S3_REPOSITORY = "s3-repository"

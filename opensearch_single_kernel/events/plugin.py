@@ -50,7 +50,7 @@ class PluginEventsHandler(Object):
                 continue
 
             # start locally tracking secret and write transferred keys to keystore
-            content = self.charm.state.application.get_plugin_secret(label)
+            content = self.charm.plugin_manager.get_plugin_secret(label)
             keys_to_add = content.get("keys")
 
             self.charm.keystore_manager.put_entries(keys_to_add)

@@ -26,13 +26,15 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import (
-    DeploymentDescription,
-    Node,
+from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
+)
+from opensearch_single_kernel.core.models.plain_base import (
+    DeploymentDescription,
+    Node,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -206,7 +208,9 @@ class PeerClusterManager(BaseManager):
                 is_provider=False,
                 remote=True,
             )
-            has_data = remote_peer_cluster and remote_peer_cluster.deployment_desc is not None
+            has_data = (
+                remote_peer_cluster and remote_peer_cluster.deployment_description is not None
+            )
             error_data = remote_peer_cluster.error_data if remote_peer_cluster else None
             if not has_data and not error_data:  # relation data still incomplete
                 raise OpenSearchPeerClusterRelationDataIncompleteError(
@@ -247,7 +251,7 @@ class PeerClusterManager(BaseManager):
     ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
         blocked_msg = None
-        provider_deployment_desc = peer_cluster_rel_data.deployment_desc
+        provider_deployment_desc = peer_cluster_rel_data.deployment_description
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR and (
             provider_deployment_desc.promotion_time is None
             or deployment_desc.promotion_time > provider_deployment_desc.promotion_time
@@ -366,7 +370,7 @@ class PeerClusterManager(BaseManager):
 
     def reconcile_is_candidate_failover_orchestrator(self, relation_id: int) -> None:
         """Reconcile the is_candidate_failover_orchestrator key in relation data"""
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.state.application.deployment_description
         if not deployment_desc:
             return
 
@@ -429,7 +433,7 @@ class PeerClusterManager(BaseManager):
 
         Only call this method on leader. This will update the planned units.
         """
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.state.application.deployment_description
         all_relations = [rel for rel in self.state.peer_cluster_relations if len(rel.units) > 0]
         for rel in all_relations:
             self.set_current_app_in_cluster_fleet(
@@ -445,7 +449,7 @@ class PeerClusterManager(BaseManager):
             scope, self.name, running_status_only=True
         ).root
 
-        if not self.state.application.deployment_desc:
+        if not self.state.application.deployment_description:
             return status_list
 
         if scope == "app":
@@ -469,8 +473,8 @@ class PeerClusterManager(BaseManager):
                     )
             elif (
                 has_no_orchestrators
-                and self.state.application.deployment_desc.typ == DeploymentType.OTHER
-                and self.state.application.deployment_desc.state.value == State.ACTIVE
+                and self.state.application.deployment_description.typ == DeploymentType.OTHER
+                and self.state.application.deployment_description.state.value == State.ACTIVE
                 and not self.state.peer_clusters(is_provider=False, remote=True)
             ):
                 # A data-only (consumer) app whose orchestrators have all been removed. Once the
@@ -489,10 +493,13 @@ class PeerClusterManager(BaseManager):
                 if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
                     status_list.append(status)
 
-                if peer_cluster.deployment_desc is not None and peer_cluster.admin_hashed_password:
+                if (
+                    peer_cluster.deployment_description is not None
+                    and peer_cluster.admin_hashed_password
+                ):
                     requirer_errors = self.requirer_errors(
                         orchestrators=orchestrators,
-                        deployment_desc=self.state.application.deployment_desc,
+                        deployment_desc=self.state.application.deployment_description,
                         peer_cluster_rel_data=peer_cluster,
                         # only check if we have orchestrators in the data bag
                         event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,

@@ -22,7 +22,11 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import PluginConfigInfo, SmtpConfig
+from opensearch_single_kernel.core.models.peer_secrets import (
+    OpenSearchAppPeerPluginSecretsModel,
+)
+from opensearch_single_kernel.core.models.plain_base import PluginConfigInfo
+from opensearch_single_kernel.core.models.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import diff
@@ -137,7 +141,7 @@ class PluginManager(BaseManager):
             label: label of the secret to store
             relation_name: name of the relation from which the secret content came
         """
-        self.state.application.add_plugin_secret(label, json.dumps(content))
+        self.add_plugin_secret(label, json.dumps(content))
         self.put_plugin_config(Scope.APP, label=label, relation_name=relation_name)
 
     def remove_plugin_secret(self, label: str) -> None:
@@ -146,8 +150,58 @@ class PluginManager(BaseManager):
         Args:
             label: label of the secret to remove
         """
-        self.state.application.delete_plugin_secret(label)
+        self.delete_plugin_secret(label)
         self.remove_plugin_config(Scope.APP, label)
+
+    def _load_plugin_secrets(
+        self,
+    ) -> tuple[OpenSearchAppPeerPluginSecretsModel | None, dict]:
+        """Return the plugins sibling secret model and its decoded contents.
+
+        Returns (None, {}) when the sibling model is unavailable.
+        """
+        plugin_m = self.state.application.sibling_model(OpenSearchAppPeerPluginSecretsModel)
+        if not plugin_m:
+            return None, {}
+        return plugin_m, (json.loads(plugin_m.plugin_secrets) if plugin_m.plugin_secrets else {})
+
+    def _plugin_secret_name(self, plugin_name: str) -> str | None:
+        """Return the configured secret_name for a plugin, or None if it has none."""
+        config = self.state.application.plugin_config_info.get(plugin_name)
+        return config.secret_name if config and config.secret_name else None
+
+    def add_plugin_secret(self, plugin_name: str, secret_content: str) -> None:
+        """Add or overwrite a plugin's secret in the plugins Juju secret group."""
+        if not (secret_name := self._plugin_secret_name(plugin_name)):
+            logger.warning(f"No secret_name defined for plugin {plugin_name}")
+            return
+        plugin_m, secrets = self._load_plugin_secrets()
+        if not plugin_m:
+            return
+        secrets[secret_name] = secret_content
+        plugin_m.plugin_secrets = json.dumps(secrets)
+
+    def get_plugin_secret(self, plugin_name: str) -> str | None:
+        """Return the stored secret content for a plugin, or None if not set."""
+        if not (secret_name := self._plugin_secret_name(plugin_name)):
+            return None
+        _, secrets = self._load_plugin_secrets()
+        return secrets.get(secret_name)
+
+    def delete_plugin_secret(self, plugin_name: str) -> None:
+        """Delete a plugin's secret from the plugins Juju secret group."""
+        if not (secret_name := self._plugin_secret_name(plugin_name)):
+            logger.warning(
+                f"Cannot delete secret: no secret_name defined for plugin {plugin_name}"
+            )
+            return
+        plugin_m, secrets = self._load_plugin_secrets()
+        if not plugin_m:
+            return
+        if secrets.pop(secret_name, None) is not None:
+            plugin_m.plugin_secrets = json.dumps(secrets)
+        else:
+            logger.debug(f"Secret for plugin {plugin_name} was not found, nothing to delete.")
 
     def missing_plugins_relations(self) -> list[str]:
         """Get the cureent missing plugins relations."""

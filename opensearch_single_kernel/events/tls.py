@@ -75,7 +75,7 @@ class TLSEventsHandler(Object):
 
     def _on_set_private_key(self, event: ActionEvent) -> None:
         """Set the TLS private key, which will be used for requesting the certificate."""
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             event.fail("The action can only be run once the deployment is complete.")
             return
         if self.charm.upgrades_manager.in_progress:
@@ -90,7 +90,7 @@ class TLSEventsHandler(Object):
         scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
         if scope == Scope.APP and not (
             self.charm.unit.is_leader()
-            and self.charm.state.application.deployment_desc.typ
+            and self.charm.state.application.deployment_description.typ
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
             event.fail(
@@ -126,7 +126,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_description):
             event.defer()
             return
 
@@ -168,7 +168,7 @@ class TLSEventsHandler(Object):
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.
         """
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             logger.debug("Deployment description not yet computed, deferring event.")
             event.defer()
             return
@@ -187,7 +187,7 @@ class TLSEventsHandler(Object):
         scope, cert_type = secret_match
 
         # variables for better readability
-        deployment_desc = self.charm.state.application.deployment_desc
+        deployment_desc = self.charm.state.application.deployment_description
         is_main_orchestrator = deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
 
         logger.debug("Received certificate for scope: %s, cert_type: %s", scope.val, cert_type.val)
@@ -381,7 +381,7 @@ class TLSEventsHandler(Object):
             return
 
         # In case of renewal of the unit transport layer cert - restart opensearch
-        if not renewal or not self.charm.state.application.is_admin_user_initialized:
+        if not renewal or not self.charm.state.application.admin_user_initialized:
             return
 
         if not self.charm.tls_manager.is_fully_configured():
@@ -406,10 +406,13 @@ class TLSEventsHandler(Object):
 
     def _on_set_password_action(self, event: ActionEvent) -> None:
         """Set new admin password from user input or generate if not passed."""
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             event.fail("The action can only be run once the deployment is complete.")
             return
-        if self.charm.state.application.deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if (
+            self.charm.state.application.deployment_description.typ
+            != DeploymentType.MAIN_ORCHESTRATOR
+        ):
             event.fail("The action can only be run on the main orchestrator cluster.")
             return
         if not self.charm.unit.is_leader():
@@ -445,7 +448,7 @@ class TLSEventsHandler(Object):
 
     def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             event.fail("The action can only be run once the deployment is complete.")
             return
 
@@ -454,7 +457,7 @@ class TLSEventsHandler(Object):
             event.fail(f"Only the {OPENSEARCH_USERS} username is allowed for this action.")
             return
 
-        if not self.charm.state.application.is_admin_user_initialized:
+        if not self.charm.state.application.admin_user_initialized:
             event.fail(f"{user_name} user not configured yet.")
             return
 
@@ -462,7 +465,7 @@ class TLSEventsHandler(Object):
             event.fail("TLS certificates not configured yet.")
             return
 
-        password = self.charm.state.application.get_user_password(user_name)
+        password = self.charm.state.application.get_user_secret(user_name)
 
         event.set_results(
             {

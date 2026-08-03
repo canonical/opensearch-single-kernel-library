@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing_extensions import Annotated, Self
 
 from opensearch_single_kernel.common.constants import SECRET_BACKUPS
-from opensearch_single_kernel.core.models.base import Model
+from opensearch_single_kernel.core.models.plain_base import PlainModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     OptionalSecretStr,
 )
@@ -174,7 +174,7 @@ class S3RelData(_StorageRelDataMixin, BaseModel):
         return bool(value)
 
 
-class ObjectStorageConfig(Model):
+class ObjectStorageConfig(PlainModel):
     """Model class for the object storage config - for all clouds."""
 
     s3: S3RelData | None = None

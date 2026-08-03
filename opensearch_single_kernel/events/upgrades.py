@@ -32,7 +32,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.upgrades import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
 )
@@ -180,7 +180,7 @@ class UpgradesEventsHandler(Object):
 
         if self.charm.state.substrate == Substrates.K8S:
             if (
-                self.charm.state.application.deployment_desc
+                self.charm.state.application.deployment_description
                 and self.charm.upgrades_manager.opensearch_client.is_node_up()
             ):
                 try:

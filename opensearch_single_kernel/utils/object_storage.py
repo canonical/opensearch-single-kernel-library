@@ -28,7 +28,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.storage import (
     AzureRelData,
     GcsRelData,
     ObjectStorageConfig,

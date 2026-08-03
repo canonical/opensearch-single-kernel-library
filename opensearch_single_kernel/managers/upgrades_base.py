@@ -31,7 +31,10 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
+from opensearch_single_kernel.core.models.upgrades import (
+    UnitUpgradesState,
+    UpgradeVersions,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.status import format_status
@@ -165,7 +168,7 @@ class UpgradesManagerBase(BaseManager):
         logger.debug("Running pre-upgrade checks")
 
         try:
-            deployment_desc = self.state.application.deployment_desc
+            deployment_desc = self.state.application.deployment_description
             if not deployment_desc:
                 raise OpenSearchUpgradePrecheckError("Deployment description not available")
 

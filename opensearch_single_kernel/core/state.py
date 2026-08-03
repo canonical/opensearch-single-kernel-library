@@ -44,19 +44,23 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
-from opensearch_single_kernel.core.models import (
-    JWTAuthConfiguration,
+from opensearch_single_kernel.core.models.jwt import JWTAuthConfiguration
+from opensearch_single_kernel.core.models.lock import (
     LockAppStateModel,
     LockServerStateModel,
-    Node,
-    OpenSearchAppPeerModel,
-    OpenSearchServerPeerModel,
+)
+from opensearch_single_kernel.core.models.peer_app import OpenSearchAppPeerModel
+from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterServerModel,
+)
+from opensearch_single_kernel.core.models.peer_unit import OpenSearchServerPeerModel
+from opensearch_single_kernel.core.models.plain_base import Node
+from opensearch_single_kernel.core.models.relation_base import bind_model
+from opensearch_single_kernel.core.models.upgrades import (
     UpgradeAppModel,
     UpgradeServerModel,
-    bind_model,
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
     AzureStorageRequires,
@@ -650,7 +654,7 @@ class ClusterState(Object):
     @property
     def unit_name(self):
         """Name of the current unit."""
-        return format_unit_name(self.model.unit, app=self.application.deployment_desc.app)
+        return format_unit_name(self.model.unit, app=self.application.deployment_description.app)
 
     @property
     def node_config(self) -> Node | None:
@@ -802,7 +806,9 @@ class ClusterState(Object):
         for unit in all_units:
             if self.substrate == Substrates.K8S:
                 hosts.add(
-                    k8s_fqdn(format_unit_name(unit, app=self.application.deployment_desc.app))
+                    k8s_fqdn(
+                        format_unit_name(unit, app=self.application.deployment_description.app)
+                    )
                 )
             else:
                 hosts.add(self.unit_ip(unit))
@@ -820,7 +826,7 @@ class ClusterState(Object):
     def all_unit_names(self) -> list[str]:
         """Fetch the list of unit names for the current app."""
         return [
-            format_unit_name(unit, app=self.application.deployment_desc.app)
+            format_unit_name(unit, app=self.application.deployment_description.app)
             for unit in self.all_units
         ]
 
@@ -832,7 +838,7 @@ class ClusterState(Object):
     @property
     def current_peer_cluster_app(self) -> PeerClusterApp | None:
         """Return the current peer cluster App."""
-        deployment_desc = self.application.deployment_desc
+        deployment_desc = self.application.deployment_description
         if not deployment_desc:
             return None
         logger.info("Current deployment desc %s", deployment_desc)
@@ -870,7 +876,7 @@ class ClusterState(Object):
     def computed_roles(self) -> list[str]:
         """Return computed_roles"""
         if (
-            deployment_desc := self.application.deployment_desc
+            deployment_desc := self.application.deployment_description
         ).start == StartMode.WITH_PROVIDED_ROLES:
             computed_roles = deployment_desc.config.roles.copy()
         else:
@@ -883,9 +889,9 @@ class ClusterState(Object):
         if (
             self.model.unit.is_leader()
             and self.is_failover_and_sole_data_app
-            and not self.application.is_security_index_initialised
+            and not self.application.security_index_initialised
         ):
-            self.server.is_cluster_manager_removed = True
+            self.server.cluster_manager_removed = True
             if "cluster_manager" in computed_roles:
                 computed_roles.remove("cluster_manager")
 
@@ -896,7 +902,7 @@ class ClusterState(Object):
     @property
     def is_failover_and_sole_data_app(self) -> bool:
         """Check if the current node is a failover and the only data node in the cluster."""
-        deployment_desc = self.application.deployment_desc
+        deployment_desc = self.application.deployment_description
         cluster_fleet_apps = self.application.cluster_fleet_apps or {}
         return (
             # data node in a failover orchestrator deployment
@@ -1040,7 +1046,7 @@ class ClusterState(Object):
 
     def is_peer_cluster_provider(self, typ: Literal["main", "failover"] | None = None) -> bool:
         """Return whether the current app is a related to provider / orchestrator."""
-        if not (deployment_desc := self.application.deployment_desc):
+        if not (deployment_desc := self.application.deployment_description):
             return False
 
         if deployment_desc.typ == DeploymentType.OTHER:
@@ -1071,7 +1077,7 @@ class ClusterState(Object):
 
     def is_peer_cluster_consumer(self, of: Literal["main", "failover"] | None = None) -> bool:
         """Check if the current app is a consumer of the peer-cluster-relation."""
-        if not (deployment_desc := self.application.deployment_desc):
+        if not (deployment_desc := self.application.deployment_description):
             return False
 
         # the current app is not related to any orchestrator app
@@ -1135,7 +1141,7 @@ class ClusterState(Object):
         active); every other app reads the storage data the main orchestrator
         broadcast over the peer-cluster relation.
         """
-        if not (deployment_desc := self.application.deployment_desc):
+        if not (deployment_desc := self.application.deployment_description):
             logger.debug("Deployment description missing; storage type unknown.")
             return None
 

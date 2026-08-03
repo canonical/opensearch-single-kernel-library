@@ -59,7 +59,7 @@ class InternalUsersManager(BaseManager):
             True if the user was created or updated, False if an error occurred.
         """
         # Leader is to set new password and hash, others populate existing hash locally
-        password_secret = self.state.application.get_user_password(user)
+        password_secret = self.state.application.get_user_secret(user)
         if password_secret and not update:
             try:
                 self.save_user_locally(user)
@@ -95,7 +95,7 @@ class InternalUsersManager(BaseManager):
         if user == ADMIN_USER:
             self.state.application.admin_password = pwd
             self.state.application.admin_hashed_password = hashed_pwd
-            self.state.application.is_admin_user_initialized = True
+            self.state.application.admin_user_initialized = True
             self.state.remove_status_if_present(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
@@ -126,7 +126,7 @@ class InternalUsersManager(BaseManager):
     def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
+        self.put_internal_user(user, self.state.application.get_user_secret(user, hashed=True))
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users.

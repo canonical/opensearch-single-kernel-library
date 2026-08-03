@@ -333,7 +333,7 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
-        deployment_desc = self.charm.state.application.deployment_desc
+        deployment_desc = self.charm.state.application.deployment_description
         if not deployment_desc:
             return
 
@@ -350,7 +350,7 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
-        deployment_desc = self.charm.state.application.deployment_desc
+        deployment_desc = self.charm.state.application.deployment_description
         if not deployment_desc:
             return
 

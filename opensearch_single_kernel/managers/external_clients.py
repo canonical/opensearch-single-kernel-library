@@ -27,7 +27,7 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
-from opensearch_single_kernel.core.models import Node
+from opensearch_single_kernel.core.models.plain_base import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     ResourceProviderModel,
@@ -141,7 +141,7 @@ class ExternalClientsManager(BaseManager):
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
-        users = self.state.application.client_users_dict
+        users = self.state.application.client_relation_users
 
         if users.get(str(relation_id)):
             logger.warning(
@@ -162,7 +162,7 @@ class ExternalClientsManager(BaseManager):
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
         users[str(relation_id)] = user
-        self.state.application.client_users_dict = users
+        self.state.application.client_relation_users = users
 
     def get_relation_endpoints(
         self,
@@ -172,7 +172,7 @@ class ExternalClientsManager(BaseManager):
         """Calculates the active network endpoints for external clients."""
         if (
             not self.opensearch_client.is_node_up()
-            or not self.state.application.is_security_index_initialised
+            or not self.state.application.security_index_initialised
         ):
             return ""
 
@@ -196,7 +196,7 @@ class ExternalClientsManager(BaseManager):
         """
         if not self.opensearch_client.is_node_up():
             return
-        relation_users = self.state.application.client_users_dict
+        relation_users = self.state.application.client_relation_users
 
         if departed_relation and (
             not relation_users or str(departed_relation.id) not in relation_users.keys()
@@ -239,7 +239,7 @@ class ExternalClientsManager(BaseManager):
                 # update-status) retries the cleanup instead of orphaning the user.
                 if removed:
                     del relation_users[rel_id]
-        self.state.application.client_users_dict = relation_users
+        self.state.application.client_relation_users = relation_users
 
     def update_relations_roles_mapping(self) -> None:
         """Updates all the relations roles mapping due to config change.
@@ -255,7 +255,7 @@ class ExternalClientsManager(BaseManager):
             raise OpenSearchUserMgmtError(
                 "Cannot update relations roles mapping as node is not active."
             )
-        users = self.state.application.client_users_dict
+        users = self.state.application.client_relation_users
         for _, user in users.items():
             self.opensearch_client.create_user_role_mapping(
                 user, self.state.get_relation_mapped_users(user)

@@ -71,7 +71,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         """Handler for `relation_created` event."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             # in large deployments, OAuth config must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
@@ -88,7 +88,7 @@ class OAuthEventsHandler(Object):
         Updates the security config.yml with the OIDC info and update the cluster.
         """
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             # in large deployments, OAuth config must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
@@ -107,7 +107,7 @@ class OAuthEventsHandler(Object):
             logger.debug("Oauth relation not yet set up")
             return
 
-        if not self.charm.state.application.is_security_index_initialised:
+        if not self.charm.state.application.security_index_initialised:
             logger.debug("Deferring oauth relation changed event as cluster is not ready yet")
             event.defer()
             return
@@ -142,7 +142,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.remove_status_if_present(
@@ -154,7 +154,7 @@ class OAuthEventsHandler(Object):
 
         if (
             self.charm.state.server.unit_dying
-            or not self.charm.state.application.is_security_index_initialised
+            or not self.charm.state.application.security_index_initialised
         ):
             return
 

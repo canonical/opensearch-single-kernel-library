@@ -20,19 +20,19 @@ from pydantic import (
 )
 
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
-from opensearch_single_kernel.core.models.base import (
+from opensearch_single_kernel.core.models.plain_base import (
     App,
     DeploymentDescription,
-    Model,
     Node,
+    PlainModel,
     PluginConfigInfo,
     _sort_nested_dicts,
     stripped_or_none,
 )
-from opensearch_single_kernel.core.models.persistent import (
+from opensearch_single_kernel.core.models.relation_base import (
     AdminSecretStr,
-    PersistentModel,
     PluginsSecretStr,
+    RelationModel,
     UserSecretStr,
 )
 from opensearch_single_kernel.core.models.storage import (
@@ -48,7 +48,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces i
 logger = logging.getLogger(__name__)
 
 
-class PeerClusterRelErrorData(Model):
+class PeerClusterRelErrorData(PlainModel):
     """Error state an orchestrator broadcasts over a peer-cluster relation."""
 
     cluster_name: str | None
@@ -81,7 +81,7 @@ class PeerClusterRelErrorData(Model):
         return None
 
 
-class PeerClusterOrchestrators(Model):
+class PeerClusterOrchestrators(PlainModel):
     """Model class for the PClusters registered main/failover clusters."""
 
     _TYPES = Literal["main", "failover"]
@@ -114,7 +114,7 @@ class PeerClusterOrchestrators(Model):
         ) not in [-1, relation_id]
 
 
-class PeerClusterApp(Model):
+class PeerClusterApp(PlainModel):
     """Model class for representing an application part of a large deployment."""
 
     app: App
@@ -129,7 +129,7 @@ class PeerClusterApp(Model):
         return sorted(set(v))
 
 
-class PeerClusterServerModel(PersistentModel, PeerModel):
+class PeerClusterServerModel(RelationModel, PeerModel):
     """Pydantic model for peer cluster unit-level databag."""
 
     # Mirror of the unit's CA-rotation flags from the opensearch-peers databag, published
@@ -146,7 +146,7 @@ class PeerClusterServerModel(PersistentModel, PeerModel):
         return self.component
 
 
-class PeerClusterAppModel(PersistentModel, BaseCommonModel):
+class PeerClusterAppModel(RelationModel, BaseCommonModel):
     """Pydantic model for peer cluster application-level databag.
 
     Inherits from BaseCommonModel so that secret fields are stored as Juju Secret URIs
@@ -172,8 +172,8 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     # (see peer_cluster_orchestrator.py), so it stays populated (though possibly with both
     # main_app/failover_app unset) for the life of the relation.
     orchestrators: Optional[PeerClusterOrchestrators] = Field(default=None)
-    # Object-storage (backup) connection data propagated by the orchestrator so
-    # non-orchestrator apps can reach the shared backup storage.
+    # Backup storage credentials (unset clouds are dropped from the databag on serialize;
+    # see drop_empty_backups in serialize_model below).
     s3: Optional[S3RelData] = Field(default=None)
     azure: Optional[AzureRelData] = Field(default=None)
     gcs: Optional[GcsRelData] = Field(default=None)
@@ -216,6 +216,7 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
 
     @field_serializer("cluster_fleet_apps", "nodes_config", "plugin_config_info")
     def _sort_dict_fields(self, value: dict) -> dict:
+        """Sort nested dicts so serialized databag output is stable and order-independent."""
         return _sort_nested_dicts(value)
 
     @field_validator(
@@ -227,14 +228,14 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
     )
     @classmethod
     def coerce_to_str(cls, v):
-        """Ensure non-None values are always strings"""
+        """Ensure non-None values are always strings, even if the databag returns a float/int."""
         if v is None:
             return None
         return str(v)
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler, info):
-        """Serializes the model, but skip empty backups data"""
+        """Serialize the model, skipping secret resolution on request and dropping empty backups"""
         if info.context and info.context.get("skip_secrets"):
             data = handler(self)
         else:
@@ -243,15 +244,6 @@ class PeerClusterAppModel(PersistentModel, BaseCommonModel):
             if data.get(field) is None:
                 data.pop(field, None)
         return data
-
-    @property
-    def deployment_desc(self) -> Optional[DeploymentDescription]:
-        """Alias of `deployment_description`."""
-        return self.deployment_description
-
-    @deployment_desc.setter
-    def deployment_desc(self, value: Optional[DeploymentDescription]) -> None:
-        self.deployment_description = value
 
     def apply_rel_data(self, source: "PeerClusterAppModel") -> None:
         """Copy orchestrator-broadcast fields from source into this relation's databag."""

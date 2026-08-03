@@ -12,17 +12,17 @@ from opensearch_single_kernel.common.constants import (
     MAX_HEAP_SIZE_IN_KB,
     PerformanceType,
 )
-from opensearch_single_kernel.core.models.base import Model
+from opensearch_single_kernel.core.models.plain_base import PlainModel
 
 
-class ProfileMemoryRequirements(Model):
+class ProfileMemoryRequirements(PlainModel):
     """Memory requirements for a profile"""
 
     memory_size: int | None = None
     jvm_heap_percentage: float | None = None
 
 
-class ClusterTopologyRequirements(Model):
+class ClusterTopologyRequirements(PlainModel):
     """Cluster Topology requirements for a profile"""
 
     cluster_managers: int = 1

@@ -32,7 +32,8 @@ def _mock_backup(
 ):
     # Mocks
     mocker.patch(
-        "opensearch_single_kernel.core.models.peer.OpenSearchAppPeerModel.deployment_desc",
+        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
         return_value=deployment_desc_return_value,
     )

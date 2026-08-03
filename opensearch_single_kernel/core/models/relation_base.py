@@ -5,12 +5,12 @@
 """Persistence machinery for relation-backed models.
 
 Includes:
-    - PersistentModel: mixin for models fetched from a relation databag through
+    - RelationModel: mixin for models fetched from a relation databag through
       ClusterState, which can write themselves back to that databag.
     - bind_model: build a model through an interface and bind it for self-writes.
     - Secret-group field markers shared by the databag models.
 
-Kept separate from `base.Model` (plain value objects): the two do different jobs
+Kept separate from `plain_base.PlainModel` (plain value objects): the two do different jobs
 and share no code -- value objects carry value semantics, these carry a databag
 persistence lifecycle -- so nothing here is inherited by ordinary nested models.
 """
@@ -61,7 +61,7 @@ UserSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), 
 PluginsSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_PLUGIN]
 
 
-class PersistentModel(BaseModel):
+class RelationModel(BaseModel):
     """Mixin for models fetched from a relation databag through ClusterState.
 
     Once a model instance is bound (see ClusterState / bind_model), setting any
@@ -85,7 +85,7 @@ class PersistentModel(BaseModel):
     # a secret field's reads/writes flowing through a single shared instance.
     _sibling_cache: dict | None = PrivateAttr(default=None)
 
-    # Maps field name -> sibling PersistentModel class, for fields split out into a dedicated
+    # Maps field name -> sibling RelationModel class, for fields split out into a dedicated
     # secret-group model (e.g. TLS/user secrets split out of a plain peer model). Overridden by
     # subclasses (see `peer.py`); empty here means "no delegation, this model is self-contained".
     _secret_group_fields: ClassVar[dict[str, type]] = {}
@@ -96,7 +96,7 @@ class PersistentModel(BaseModel):
         write_context: dict | None = None,
         read_only: bool = False,
         on_persist: Any = None,
-    ) -> "PersistentModel":
+    ) -> "RelationModel":
         """Attach the repository this instance should persist itself through.
 
         `read_only` is for models loaded from a databag the charm cannot write
@@ -137,7 +137,7 @@ class PersistentModel(BaseModel):
         if model_cls in cache:
             return cache[model_cls]
         model = _lib_build_model(self._repository, model_cls)
-        if isinstance(model, PersistentModel):
+        if isinstance(model, RelationModel):
             # Propagate on_persist so a write through the sibling invalidates the cache too.
             model.bind(self._repository, self._write_context, on_persist=self._on_persist)
         cache[model_cls] = model
@@ -188,7 +188,7 @@ class PersistentModel(BaseModel):
         setattr(self, name, default)
 
     @contextmanager
-    def update(self) -> Iterator["PersistentModel"]:
+    def update(self) -> Iterator["RelationModel"]:
         """Batch several field mutations into a single write.
 
         Also required for changes that mutate a field's value in place (e.g.
@@ -339,17 +339,17 @@ def bind_model(
 
     `interface` is one of the `*RepositoryInterface` classes (e.g.
     OpsPeerRepositoryInterface, OpsPeerUnitRepositoryInterface, ...). If the built
-    model is a PersistentModel, it is bound so that setting any of its fields (or
+    model is a RelationModel, it is bound so that setting any of its fields (or
     using `.update()`) writes it straight back to the relation databag.
 
     Pass `read_only=True` when `component` is a remote app/unit whose databag this
     charm cannot write -- field assignments then stay in-memory.
 
     `on_persist` is forwarded to the model so a successful write can invalidate the
-    caller's parsed-model cache (see PersistentModel._on_persist).
+    caller's parsed-model cache (see RelationModel._on_persist).
     """
     repository = interface.repository(relation_id, component)
     model = _lib_build_model(repository, model_cls)
-    if isinstance(model, PersistentModel):
+    if isinstance(model, RelationModel):
         model.bind(repository, write_context, read_only=read_only, on_persist=on_persist)
     return model

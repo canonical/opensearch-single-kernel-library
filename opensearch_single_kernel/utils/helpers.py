@@ -29,7 +29,10 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
-from opensearch_single_kernel.core.models import App, PeerClusterConfig
+from opensearch_single_kernel.core.models.plain_base import (
+    App,
+    PeerClusterConfig,
+)
 
 logger = logging.getLogger(__name__)
 

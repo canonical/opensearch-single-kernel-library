@@ -16,7 +16,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.plain_base import (
     App,
     DeploymentDescription,
     DeploymentState,

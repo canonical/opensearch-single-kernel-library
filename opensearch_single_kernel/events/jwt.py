@@ -19,7 +19,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
 )
 from opensearch_single_kernel.common.statuses import JwtStatuses
-from opensearch_single_kernel.core.models import JWTAuthConfiguration
+from opensearch_single_kernel.core.models.jwt import JWTAuthConfiguration
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     RequirerCommonModel,
     ResourceRequirerEventHandler,
@@ -60,7 +60,7 @@ class JWTEventsHandler(Object):
     def _on_jwt_relation_created(self, _: RelationCreatedEvent) -> None:
         """Handle relation creation."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             # in large deployments, JWT configuration must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
@@ -74,7 +74,7 @@ class JWTEventsHandler(Object):
     def _on_jwt_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle the removal of the relation."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.remove_status_if_present(
@@ -109,7 +109,7 @@ class JWTEventsHandler(Object):
     def _validate_and_apply_jwt_auth_config(self, event: RelationChangedEvent) -> None:
         """Check the provided configuration and apply, if valid."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             if self.charm.unit.is_leader():
                 self.charm.state.add_status_if_not_present(
@@ -124,7 +124,7 @@ class JWTEventsHandler(Object):
                 )
             return
 
-        if not self.charm.state.application.is_security_index_initialised:
+        if not self.charm.state.application.security_index_initialised:
             logger.debug("Deferring jwt event as security index not initialised yet")
             event.defer()
             return

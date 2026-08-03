@@ -12,15 +12,15 @@ from typing import Optional
 import poetry.core.constraints.version as poetry_version
 from pydantic import Field, field_validator
 
-from opensearch_single_kernel.core.models.base import Model
-from opensearch_single_kernel.core.models.persistent import PersistentModel
+from opensearch_single_kernel.core.models.plain_base import PlainModel
+from opensearch_single_kernel.core.models.relation_base import RelationModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
-class UpgradeVersions(Model):
+class UpgradeVersions(PlainModel):
     """Model class for the charm & workload versions used for upgrades."""
 
     charm: str
@@ -37,7 +37,7 @@ class UpgradeVersions(Model):
         return poetry_version.Version.parse(self.workload)
 
 
-class UpgradeAppModel(PersistentModel, PeerModel):
+class UpgradeAppModel(RelationModel, PeerModel):
     """Pydantic model for the upgrade application-level databag."""
 
     # Charm/workload versions the app is upgrading to.
@@ -66,7 +66,7 @@ class UpgradeAppModel(PersistentModel, PeerModel):
             m.upgrade_resumed = value
 
 
-class UpgradeServerModel(PersistentModel, PeerModel):
+class UpgradeServerModel(RelationModel, PeerModel):
     """Pydantic model for the upgrade unit-level databag."""
 
     state: Optional[str] = Field(default=None)

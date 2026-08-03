@@ -12,7 +12,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.core.models import Node
+from opensearch_single_kernel.core.models.plain_base import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -123,7 +123,7 @@ class NodesExclusionsManager(BaseManager):
             A set of unit names that should be removed from the voting exclusion list, or None
             if there are no units to remove.
         """
-        if not (deployment_desc := self.state.application.deployment_desc) or not removable:
+        if not (deployment_desc := self.state.application.deployment_description) or not removable:
             return set()
 
         # if self._charm.opensearch_peer_cm.is_provider(typ="main") and (

@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterAppModel,
     PeerClusterRelErrorData,
 )
@@ -81,7 +81,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Node not a leader. Skipping refresh relation data")
             return
 
-        if not self.charm.state.application.deployment_desc:
+        if not self.charm.state.application.deployment_description:
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
@@ -112,7 +112,7 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Node not a provider. Skipping refresh relation data")
             return
 
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_description):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
@@ -176,7 +176,7 @@ class PeerClusterEventsHandler(Object):
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             and "data" in related_peer_cluster_app.roles
-            and self.charm.state.application.is_admin_user_initialized
+            and self.charm.state.application.admin_user_initialized
             and self.charm.tls_manager.is_fully_configured()
         ):
             # TODO migrate to _on_start hook instead
@@ -236,7 +236,7 @@ class PeerClusterEventsHandler(Object):
             return
 
         self.charm.peer_cluster_orchestrator_manager.save_cluster_fleet_apps(
-            deployment_desc=self.charm.state.application.deployment_desc,
+            deployment_desc=self.charm.state.application.deployment_description,
             p_cluster_app=trigger_app,
             trigger_rel_id=event.relation.id,
         )
@@ -260,7 +260,7 @@ class PeerClusterEventsHandler(Object):
     def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster relation changed event."""
         logger.debug("Peer cluster relation changed: %s", event)
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_description):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
             return
@@ -304,7 +304,7 @@ class PeerClusterEventsHandler(Object):
         )
         # set the main orchestrator registered flag for this relation
         if (
-            self.charm.state.application.is_admin_user_initialized
+            self.charm.state.application.admin_user_initialized
             and self.charm.tls_manager.is_fully_configured()
         ):
             self.charm.peer_cluster_manager.update_main_orchestrator_registered(
@@ -364,7 +364,10 @@ class PeerClusterEventsHandler(Object):
 
         if reconcile_deployment_desc:
             # check if valid data is present if so update the seed hosts
-            if remote_peer_cluster is not None and remote_peer_cluster.deployment_desc is not None:
+            if (
+                remote_peer_cluster is not None
+                and remote_peer_cluster.deployment_description is not None
+            ):
                 # In case the main orchestrator was scaled down to 0 and back
                 # we need to update the seed hosts with the data from the relation
                 # to pick up the new IPs and enable the data node see it
@@ -410,7 +413,7 @@ class PeerClusterEventsHandler(Object):
         self.apply_orchestrator_status()
 
         if remote_peer_cluster.security_index_initialised:
-            self.charm.state.application.is_security_index_initialised = True
+            self.charm.state.application.security_index_initialised = True
 
         # let the charm know this is an already bootstrapped cluster
         self.charm.state.application.bootstrapped = True
@@ -443,7 +446,7 @@ class PeerClusterEventsHandler(Object):
 
         self._clean_main_orchestrator_is_requirer_status(event.relation)
         # fetch current deployment_desc
-        deployment_desc = self.charm.state.application.deployment_desc
+        deployment_desc = self.charm.state.application.deployment_description
 
         orchestrators = self.charm.state.application.orchestrators
 
@@ -476,7 +479,7 @@ class PeerClusterEventsHandler(Object):
 
         # we leave in case not an orchestrator
         if (
-            self.charm.state.application.deployment_desc.typ == DeploymentType.OTHER
+            self.charm.state.application.deployment_description.typ == DeploymentType.OTHER
             or deployment_desc.app.id
             not in [app.id for app in (orchestrators.main_app, orchestrators.failover_app) if app]
         ):
@@ -551,7 +554,7 @@ class PeerClusterEventsHandler(Object):
             config_profile.get_jvm_heap_size(self.charm.workload.memtotal())
         )
         # store profile in unit state
-        self.charm.state.server.profile = config_profile
+        self.charm.state.server.opensearch_profile = config_profile
         self.charm.start_opensearch_event.emit(ignore_lock=True)
 
     def reconcile_peer_cluster_errors(
@@ -592,7 +595,7 @@ class PeerClusterEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        deployment_desc = self.charm.state.application.deployment_desc
+        deployment_desc = self.charm.state.application.deployment_description
         if not (orchestrators := self.charm.state.application.orchestrators):
             return
 
@@ -648,7 +651,7 @@ class PeerClusterEventsHandler(Object):
         """Clean the status if there are no more peer cluster requirer relations."""
         if (
             not self.charm.unit.is_leader()
-            or not (deployment_desc := self.charm.state.application.deployment_desc)
+            or not (deployment_desc := self.charm.state.application.deployment_description)
             or deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
         ):
             return
@@ -671,5 +674,5 @@ class PeerClusterEventsHandler(Object):
         self.charm.cluster_manager.reconcile_cluster_config_with_relation_data(data)
         self.charm.config_manager.update_seeds_config(list(data.nodes_config.values()))
         self.charm.opensearch_events.apply_status_from_deployment_desc(
-            self.charm.state.application.deployment_desc
+            self.charm.state.application.deployment_description
         )

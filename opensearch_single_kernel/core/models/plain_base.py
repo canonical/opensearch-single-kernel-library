@@ -5,11 +5,11 @@
 """Base model classes shared across all core models.
 
 Includes:
-    - Model: base class for plain (non relation-backed) value objects.
+    - PlainModel: base class for plain (non relation-backed) value objects.
     - Common cluster-wide value objects (App, Node, DeploymentDescription, ...).
 
-The relation-backed persistence machinery (PersistentModel, bind_model, secret-group
-field markers) lives in the sibling `persistent` module -- it does a different job and
+The relation-backed persistence machinery (RelationModel, bind_model, secret-group
+field markers) lives in the sibling `relation_base` module -- it does a different job and
 shares no code with the value objects here.
 """
 
@@ -55,7 +55,7 @@ def stripped_or_none(value: str | None) -> str | None:
     return (value or "").strip() or None
 
 
-class Model(ABC, BaseModel):
+class PlainModel(ABC, BaseModel):
     """Base model class."""
 
     def to_dict(self, by_alias: bool = False) -> dict[str, Any]:
@@ -85,7 +85,7 @@ class Model(ABC, BaseModel):
         return equal
 
 
-class App(Model):
+class App(PlainModel):
     """Data class representing an application."""
 
     id: str | None = None
@@ -114,7 +114,7 @@ class App(Model):
         return self
 
 
-class Node(Model):
+class Node(PlainModel):
     """Data class representing a node in a cluster."""
 
     name: str
@@ -147,7 +147,7 @@ class Node(Model):
         return False
 
 
-class DeploymentState(Model):
+class DeploymentState(PlainModel):
     """Full state of a deployment, along with the juju status."""
 
     value: State
@@ -164,7 +164,7 @@ class DeploymentState(Model):
         return self
 
 
-class PeerClusterConfig(Model):
+class PeerClusterConfig(PlainModel):
     """Model class for the multi-clusters related config set by the user."""
 
     cluster_name: str
@@ -203,7 +203,7 @@ class PeerClusterConfig(Model):
         return self
 
 
-class DeploymentDescription(Model):
+class DeploymentDescription(PlainModel):
     """Model class describing the current state of a deployment / sub-cluster."""
 
     app: App
@@ -224,7 +224,7 @@ class DeploymentDescription(Model):
         return self
 
 
-class PluginConfigInfo(Model):
+class PluginConfigInfo(PlainModel):
     """Model class for representing data needed to add or remove plugin configuration"""
 
     relation_name: str | None = None
@@ -233,6 +233,7 @@ class PluginConfigInfo(Model):
 
     @field_serializer("cleanup")
     def _sort_cleanup(self, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        """Sort nested dicts so serialized databag output is stable and order-independent."""
         return _sort_nested_dicts(value)
 
     def add_cleanup_items(self, cleanup: dict[str, list[str]]) -> None:

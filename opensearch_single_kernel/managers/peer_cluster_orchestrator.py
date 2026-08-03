@@ -15,13 +15,15 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
-from opensearch_single_kernel.core.models import (
-    DeploymentDescription,
-    Node,
+from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
+)
+from opensearch_single_kernel.core.models.plain_base import (
+    DeploymentDescription,
+    Node,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -53,7 +55,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             whether the operation was completed. In case of negative result retry is preferred.
         """
         # get deployment descriptor of current app
-        deployment_description = self.state.application.deployment_desc
+        deployment_description = self.state.application.deployment_description
 
         # compute the data that needs to be broadcast to all related clusters (success or error)
         remote_peer_cluster = self.build_peer_cluster_rel_data()
@@ -137,12 +139,15 @@ class PeerClusterOrchestratorManager(BaseManager):
                     f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
                 )
 
-                if self.state.s3_relation and self.state.application.s3:
-                    local_peer_cluster.s3 = self.state.application.marshal_s3_secrets()
-                if self.state.azure_relation and self.state.application.azure:
-                    local_peer_cluster.azure = self.state.application.marshal_azure_secrets()
-                if self.state.gcs_relation and self.state.application.gcs:
-                    local_peer_cluster.gcs = self.state.application.marshal_gcs_secrets()
+                for cloud in ("s3", "azure", "gcs"):
+                    if getattr(self.state, f"{cloud}_relation") and getattr(
+                        self.state.application, cloud
+                    ):
+                        setattr(
+                            local_peer_cluster,
+                            cloud,
+                            self.state.application.marshal_storage_secrets(cloud),
+                        )
 
                 # there is no error to broadcast - we clear any previously broadcasted error
                 if not rel_err_data:
@@ -166,12 +171,12 @@ class PeerClusterOrchestratorManager(BaseManager):
         # returns None if this cluster is not fully ready, or if the admin user
         # is not initialized
 
-        deployment_description = self.state.application.deployment_desc
+        deployment_description = self.state.application.deployment_description
         if not deployment_description:
             logger.debug("Cluster not ready to populate relation data")
             return None
 
-        if not self.state.application.is_admin_user_initialized:
+        if not self.state.application.admin_user_initialized:
             logger.debug("Admin user not initialized. Relation data not ready")
             return None
 
@@ -183,7 +188,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 f"Could not fetch nodes in related {deployment_description.typ} sub-cluster"
             )
 
-        return self.state.application.peer_cluster_rel_data_from_application_model(
+        return self.state.application.to_peer_cluster_rel_data(
             cm_nodes=cm_nodes,
             security_index_initialised=self.is_security_index_initialised_in_all_clusters,
             first_data_node=self.first_data_node_in_all_clusters,
@@ -232,7 +237,7 @@ class PeerClusterOrchestratorManager(BaseManager):
     @property
     def is_security_index_initialised_in_all_clusters(self) -> bool:
         """Check if the security index is initialised."""
-        if self.state.application.is_security_index_initialised:
+        if self.state.application.security_index_initialised:
             return True
 
         # check all other clusters if they have initialised the security index
@@ -268,7 +273,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             current_app_nodes = [
                 node
                 for node in self._nodes(self.opensearch_client.is_node_up())
-                if node.app.id == self.state.application.deployment_desc.app.id
+                if node.app.id == self.state.application.deployment_description.app.id
             ]
             return len(current_app_nodes) == self.state.planned_units
         except OpenSearchHttpError:
@@ -305,7 +310,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         ):
             should_sever_relation, should_retry = True, False
             blocked_msg = PeerClusterErrorDataStatuses.CANNOT_HAVE_TWO_FAILOVERS.value.message
-        elif not self.state.application.is_admin_user_initialized:
+        elif not self.state.application.admin_user_initialized:
             blocked_msg = (
                 PeerClusterErrorDataStatuses.ADMIN_USER_NOT_FULLY_CONFIGURED.value.message.format(
                     message_suffix=message_suffix
@@ -322,13 +327,13 @@ class PeerClusterOrchestratorManager(BaseManager):
             "data" in deployment_desc.config.roles
             or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
         ):
-            if not self.state.application.is_security_index_initialised:
+            if not self.state.application.security_index_initialised:
                 blocked_msg = PeerClusterErrorDataStatuses.SECURITY_INDEX_NOT_INITIALIZED.value.message.format(
                     message_suffix=message_suffix
                 )
         elif (
             self.state.application.is_data_role_in_cluster_fleet_apps
-            and self.state.application.is_security_index_initialised
+            and self.state.application.security_index_initialised
         ):
             # Requirer units should start after all provider units have started,
             # and only if the security index has already been initialized by a data node.
@@ -462,7 +467,7 @@ class PeerClusterOrchestratorManager(BaseManager):
     def reconcile_security_index_initialised(self) -> None:
         """Check if security index is initialised in any cluster and update state."""
         if self.is_security_index_initialised_in_all_clusters:
-            self.state.application.is_security_index_initialised = True
+            self.state.application.security_index_initialised = True
             # clean up the first data node attribute when security index is initialised
             del self.state.application.first_data_node
 
@@ -497,6 +502,5 @@ class PeerClusterOrchestratorManager(BaseManager):
             del local_peer_cluster.cluster_fleet_apps
             del local_peer_cluster.orchestrators
             del local_peer_cluster.trigger
-            del local_peer_cluster.gcs
-            del local_peer_cluster.azure
-            del local_peer_cluster.s3
+            for cloud in ("gcs", "azure", "s3"):
+                delattr(local_peer_cluster, cloud)
