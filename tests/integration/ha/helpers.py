@@ -218,14 +218,7 @@ async def get_shards_by_index(
 async def assert_continuous_writes_increasing(
     c_writes: ContinuousWrites,
 ) -> None:
-    """Asserts that the continuous writes are increasing.
-
-    Polls rather than taking a single fixed-window sample: right after events that churn
-    connections (e.g. a rolling upgrade that changes k8s pod IPs) the background writer needs
-    time to reconnect, and a hard 20s sample can catch it mid-recovery even though the cluster
-    is healthy. Re-push the current hosts/password each attempt so a writer wedged on stale
-    endpoints picks up fresh ones, and pass as soon as the count moves.
-    """
+    """Asserts that the continuous writes are increasing."""
     writes_count = await c_writes.count()
     for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(5)):
         with attempt:
@@ -564,6 +557,7 @@ async def assert_start_and_check_continuous_writes(
     await writer.clear()
 
 
+# TODO: remove then snapshots bug is fixed
 # Terminal snapshot states in which the backup is incomplete and cannot be
 # restored (restore fails with "index ... wasn't fully snapshotted").
 NON_RESTORABLE_SNAPSHOT_STATES = {"partial", "failed", "incompatible"}

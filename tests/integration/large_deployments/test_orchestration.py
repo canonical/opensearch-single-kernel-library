@@ -40,11 +40,6 @@ NO_CM_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 cluster manager nodes are required.",
 )
-# A freshly re-added failover unit relays its own "not ready yet" error to its
-# requirers via the still-live peer-cluster relation.
-# Depending on how quickly the requirer's own orchestrator bookkeeping
-# reconciles, either this relayed status or CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER
-# may be observed, both are legitimate, so callers should accept either.
 FAILOVER_NOT_READY_STATUS = StatusObject(
     status="waiting",
     message=PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value.message.format(

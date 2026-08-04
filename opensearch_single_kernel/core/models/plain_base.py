@@ -7,10 +7,6 @@
 Includes:
     - PlainModel: base class for plain (non relation-backed) value objects.
     - Common cluster-wide value objects (App, Node, DeploymentDescription, ...).
-
-The relation-backed persistence machinery (RelationModel, bind_model, secret-group
-field markers) lives in the sibling `relation_base` module -- it does a different job and
-shares no code with the value objects here.
 """
 
 from abc import ABC
@@ -45,13 +41,7 @@ def _sort_nested_dicts(obj: Any) -> Any:
 
 
 def stripped_or_none(value: str | None) -> str | None:
-    """Collapse empty or whitespace-only values to None.
-
-    Secret fields use a single-space placeholder to force creation of their backing
-    Juju secret (see the models: `initialize_empty_secrets`)
-    this normalizes such placeholders and genuinely empty values to None
-    before they are copied around or handed to callers.
-    """
+    """Collapse empty or whitespace-only values to None."""
     return (value or "").strip() or None
 
 
@@ -67,7 +57,7 @@ class PlainModel(ABC, BaseModel):
         """Create a new instance of this class from a json/dict repr."""
         if not input_dict:  # to handle when classes defined defaults
             return cls()
-        return cls(**input_dict)
+        return cls.model_validate(input_dict)
 
     def __eq__(self, other) -> bool:
         """Compare field-by-field, treating list fields as unordered."""
@@ -107,9 +97,10 @@ class App(PlainModel):
             full_id_split = self.id.split("/")
             self.name = full_id_split[-1]
             self.model_uuid = full_id_split[0]
+            app_id = self.id
         else:
-            self.id = f"{self.model_uuid}/{self.name}"
-        self.short_id = md5(self.id.encode()).hexdigest()[:3]
+            app_id = self.id = f"{self.model_uuid}/{self.name}"
+        self.short_id = md5(app_id.encode()).hexdigest()[:3]
 
         return self
 
@@ -171,8 +162,7 @@ class PeerClusterConfig(PlainModel):
     init_hold: bool
     roles: list[str]
     # Derived from a "data.<temperature>" role by the validator below; None when no
-    # data-temperature role is configured (also the case for databags written by
-    # charm revisions that predate this field).
+    # data-temperature role is configured
     data_temperature: str | None = None
 
     @model_validator(mode="after")
@@ -204,7 +194,7 @@ class PeerClusterConfig(PlainModel):
 
 
 class DeploymentDescription(PlainModel):
-    """Model class describing the current state of a deployment / sub-cluster."""
+    """Model class describing the current state of a deployment."""
 
     app: App
     config: PeerClusterConfig

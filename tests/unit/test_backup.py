@@ -183,6 +183,11 @@ def test_list_backups_when_json_requested_then_json_is_returned(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
     )
+    # A "failed" snapshot makes list_snapshots fetch its per-shard failure reasons.
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
+        return_value={"snapshot": "2025-01-01T09:00:00Z", "state": "FAILED"},
+    )
     _mock_backup(mocker)
     backend, rels = backend_setup
 

@@ -9,9 +9,6 @@ Each of these models splits a Juju secret group out of a plain peer model
 plain field doesn't also resolve the secret group. The plain models wire these up
 via `_secret_group_fields` (see RelationModel), so callers transparently read/write
 e.g. `application.admin_ca_cert` without building the secret model themselves.
-
-Kept in a dedicated module so they are defined before the plain models import them,
-letting the plain models declare `_secret_group_fields` in their class body.
 """
 
 from pydantic import Field
@@ -79,18 +76,14 @@ class OpenSearchServerPeerTransportSecretsModel(RelationModel, PeerModel):
     server field doesn't also resolve the "unit-transport" Juju secret group.
     """
 
-    # Transport TLS Secrets (node-to-node/transport layer; grouped under the "unit-transport"
-    # secret group so they're stored as a single Juju secret rather than plaintext).
-    transport_key: TransportSecretStr = Field(default="")  # Private key (PEM).
-    transport_key_password: TransportSecretStr = Field(default="")  # Password for the key.
-    transport_csr: TransportSecretStr = Field(default="")  # Certificate signing request.
-    transport_chain: TransportSecretStr = Field(default="")  # Full certificate chain.
-    transport_cert: TransportSecretStr = Field(default="")  # Signed leaf certificate.
-    transport_ca_cert: TransportSecretStr = Field(default="")  # CA certificate.
-    # Password protecting the transport truststore (holds trusted CA certs).
+    transport_key: TransportSecretStr = Field(default="")
+    transport_key_password: TransportSecretStr = Field(default="")
+    transport_csr: TransportSecretStr = Field(default="")
+    transport_chain: TransportSecretStr = Field(default="")
+    transport_cert: TransportSecretStr = Field(default="")
+    transport_ca_cert: TransportSecretStr = Field(default="")
     transport_truststore_password: TransportSecretStr = Field(default="")
-    transport_subject: TransportSecretStr = Field(default="")  # Certificate subject/DN.
-    # Password protecting the transport keystore (holds the unit's private key/cert).
+    transport_subject: TransportSecretStr = Field(default="")
     transport_keystore_password: TransportSecretStr = Field(default="")
 
 
@@ -101,15 +94,12 @@ class OpenSearchServerPeerHttpSecretsModel(RelationModel, PeerModel):
     server field doesn't also resolve the "unit-http" Juju secret group.
     """
 
-    # HTTP TLS Secrets (client-facing REST layer; grouped under the "unit-http" secret group).
-    # Password protecting the HTTP keystore.
     http_keystore_password: HttpSecretStr = Field(default="")
-    http_key: HttpSecretStr = Field(default="")  # Private key (PEM).
-    http_key_password: HttpSecretStr = Field(default="")  # Password for the key.
-    http_csr: HttpSecretStr = Field(default="")  # Certificate signing request.
-    http_chain: HttpSecretStr = Field(default="")  # Full certificate chain.
-    http_cert: HttpSecretStr = Field(default="")  # Signed leaf certificate.
-    http_ca_cert: HttpSecretStr = Field(default="")  # CA certificate.
-    # Password protecting the HTTP truststore.
+    http_key: HttpSecretStr = Field(default="")
+    http_key_password: HttpSecretStr = Field(default="")
+    http_csr: HttpSecretStr = Field(default="")
+    http_chain: HttpSecretStr = Field(default="")
+    http_cert: HttpSecretStr = Field(default="")
+    http_ca_cert: HttpSecretStr = Field(default="")
     http_truststore_password: HttpSecretStr = Field(default="")
-    http_subject: HttpSecretStr = Field(default="")  # Certificate subject/DN.
+    http_subject: HttpSecretStr = Field(default="")

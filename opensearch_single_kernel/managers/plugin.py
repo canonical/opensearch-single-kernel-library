@@ -160,7 +160,7 @@ class PluginManager(BaseManager):
 
         Returns (None, {}) when the sibling model is unavailable.
         """
-        plugin_m = self.state.application.sibling_model(OpenSearchAppPeerPluginSecretsModel)
+        plugin_m = self.state.application.build_sibling_model(OpenSearchAppPeerPluginSecretsModel)
         if not plugin_m:
             return None, {}
         return plugin_m, (json.loads(plugin_m.plugin_secrets) if plugin_m.plugin_secrets else {})

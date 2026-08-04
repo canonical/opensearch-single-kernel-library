@@ -32,10 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 class OpenSearchServerPeerModel(RelationModel, PeerModel):
-    """Peer model mapping to the OpenSearch unit state."""
+    """Peer model to the OpenSearch unit state."""
 
-    # Transparent proxying of secret-group fields (see RelationModel._secret_group_fields):
-    # reading/writing e.g. `server.transport_key` delegates to the dedicated sibling secret model,
+    # Proxy of secret-group fields (see RelationModel._secret_group_fields)
     # so callers never need to build the secret models themselves.
     _secret_group_fields: ClassVar[dict[str, type]] = {
         **dict.fromkeys(
@@ -48,47 +47,43 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
         ),
     }
 
+    # Aliases here are pinned to the underscored keys deployed databags use,
+    # so upgrade works correctly
+
     # Performance profile ("testing"/"production") applied to this unit's JVM/OpenSearch config.
     # None means "not yet set" callers fall back to the profile configured via charm config.
-    # Stored under the databag key "profile"; the `opensearch_profile` property below exposes the
-    # value as a resolved OpenSearchProfile instance.
-    profile: Optional[PerformanceType] = Field(default=None, alias="profile")
+    profile: Optional[PerformanceType] = Field(default=None)
     # Whether this unit was one of the initial seed nodes used to bootstrap the cluster.
-    # Alias pinned to the underscored key deployed databags use (the PeerModel alias
-    # generator would otherwise hyphenate it).
     bootstrap_contributor: bool = Field(default=False, alias="bootstrap_contributor")
-    # Whether this unit has been removed from the cluster_manager-eligible role (e.g. scale-down).
+    # Whether this unit has been removed from the cluster_manager-eligible role.
     cluster_manager_removed: bool = Field(default=False, alias="cluster_manager_removed")
-    # Timestamp (str(time.time())) set once the unit's OpenSearch service has started; unset
-    # means "not started". Used elsewhere as a truthy started/not-started flag.
+    # Timestamp set once the unit's OpenSearch service has started; unset
+    # means "not started".
     started: Optional[str] = Field(default=None)
-    # Whether this unit is currently mid CA-rotation (new CA generated but not yet fully rolled).
+    # Whether this unit is currently mid CA-rotation
     tls_ca_renewing: bool = Field(default=False, alias="tls_ca_renewing")
     # Whether this unit has finished renewing to the new CA.
     tls_ca_renewed: bool = Field(default=False, alias="tls_ca_renewed")
-    # Whether this unit's TLS certificates (transport/HTTP) are fully configured.
+    # Whether this unit's TLS certificates are fully configured.
     tls_configured: bool = Field(default=False, alias="tls_configured")
-    # Last time this unit's databag was updated; used to force relation-changed observers to
-    # notice a change even when no other field differs.
+    # Last time application's databag was updated; used to force relation-changed hook
     update_ts: str = Field(default="")
     # Timestamp of the last time this unit checked its certificates for upcoming expiry.
     certs_exp_checked_at: str = Field(default="1970-01-01 00:00:00", alias="certs_exp_checked_at")
-    # Allocation-exclusion entries (node names/IDs) this unit still needs to remove from the
-    # cluster's shard allocation exclusion settings.
+    # Allocation-exclusion entries application still needs to remove from the cluster
+    # shard allocation exclusion settings.
     allocation_exclusions_to_delete: set[str] = Field(default_factory=set)
-    # Voting-exclusion entries this unit still needs to remove from the cluster's voting config.
+    # Voting-exclusion entries application still needs to remove from the cluster voting config.
     delete_voting_exclusions: set[str] = Field(default_factory=set)
-    # Last known IP address of this unit; used to detect IP changes across reconciliation.
+    # Last known IP address of this unit.
     last_host_ip: str = Field(default="", alias="last_host_ip")
-    # Plugin configuration/cleanup metadata this unit is responsible for, keyed by plugin label.
+    # Plugin configuration metadata unit is responsible for, key is plugin label
     plugin_config_info: dict[str, PluginConfigInfo] = Field(
         default_factory=dict, alias="plugin_config_info"
     )
-    # OAuth OpenID Connect URL configured on this unit (if an oauth relation is active).
     oauth_openid_connect_url: str = Field(default="", alias="oauth_openid_connect_url")
-    # Set when this specific unit is departing/scaling down (as opposed to a related app or an
-    # external relation being removed). Used to skip relation-broken side effects triggered by
-    # the unit's own removal.
+    # Set when this specific unit is departing/scaling down. Used to skip relation-broken
+    # triggered by the unit's own removal.
     unit_dying: bool = Field(default=False)
     # PID of this unit's running pebble-observer subprocess, or None if not started/stopped.
     pebble_observer_pid: Optional[int] = Field(default=None)
@@ -159,9 +154,9 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
     def initialize_empty_secrets(self) -> None:
         """Initialize empty unit-level secrets to prevent log spam."""
         # Use truthy placeholders only for fields whose secrets don't exist yet
-        if transport_m := self.sibling_model(OpenSearchServerPeerTransportSecretsModel):
+        if transport_m := self.build_sibling_model(OpenSearchServerPeerTransportSecretsModel):
             if not transport_m.transport_key_password:
                 transport_m.transport_key_password = " "
-        if http_m := self.sibling_model(OpenSearchServerPeerHttpSecretsModel):
+        if http_m := self.build_sibling_model(OpenSearchServerPeerHttpSecretsModel):
             if not http_m.http_key_password:
                 http_m.http_key_password = " "

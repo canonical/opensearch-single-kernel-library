@@ -119,10 +119,6 @@ def refresh(
 def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
     if substrate == "k8s":
-        # Run from within OPENSEARCH_HOME: the launcher applies jvm.options that
-        # include a relative gc-log path (-Xlog:...:file=logs/gc.log). Executed
-        # from an arbitrary ssh working directory that `logs/` dir does not exist,
-        # so the JVM fails to start and `--version` exits non-zero.
         cmd = f"juju ssh --model {model} --container opensearch {unit} 'cd $OPENSEARCH_HOME && $OPENSEARCH_BIN/opensearch --version'"
         shell = True
     else:

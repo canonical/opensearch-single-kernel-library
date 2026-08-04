@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -21,7 +20,7 @@ from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
 class UpgradeVersions(PlainModel):
-    """Model class for the charm & workload versions used for upgrades."""
+    """Model class for the charm and workload versions used for upgrades."""
 
     charm: str
     workload: str
@@ -46,18 +45,9 @@ class UpgradeAppModel(RelationModel, PeerModel):
     upgrade_resumed: bool = Field(default=False)
     # Write-only timestamp bumped alongside `upgrade_resumed` so a repeated resume with
     # the same value still changes the databag and re-triggers relation-changed on peers.
-    # The databag key's "-unused-" prefix signals that the value itself is never read.
     upgrade_resume_last_updated: Optional[str] = Field(
         default=None, alias="-unused-timestamp-upgrade-resume-last-updated"
     )
-
-    @field_validator("upgrade_resume_last_updated", mode="before")
-    @classmethod
-    def coerce_to_str(cls, v):
-        """Coerce numeric timestamp stored as float in legacy databags to str."""
-        if v is None:
-            return None
-        return str(v)
 
     def set_upgrade_resumed(self, value: bool) -> None:
         """Set whether user has resumed upgrade with Juju action."""
@@ -67,7 +57,7 @@ class UpgradeAppModel(RelationModel, PeerModel):
 
 
 class UpgradeServerModel(RelationModel, PeerModel):
-    """Pydantic model for the upgrade unit-level databag."""
+    """Model for the upgrade unit-level databag."""
 
     state: Optional[str] = Field(default=None)
     snap_revision: Optional[str] = Field(default=None)

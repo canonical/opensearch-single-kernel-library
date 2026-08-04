@@ -259,9 +259,7 @@ class UpgradesEventsHandler(Object):
         """Migrate secrets from v0 (colon-separated labels) to v1 (dot-separated labels).
 
         In the v0 charm, secrets were created with labels like '{app}:app:{key}'.
-        The new v1 data_interfaces library uses '{relation}.{app}.app.{group}' labels.
-        During upgrade, the new code cannot find old secrets, causing admin_password to be
-        None and health checks to return UNKNOWN.
+        The v1 data_interfaces library uses '{relation}.{app}.app.{group}' labels.
         """
         app_name = self.charm.app.name
 
@@ -339,13 +337,7 @@ class UpgradesEventsHandler(Object):
                 logger.warning("Failed to migrate v0 admin TLS secret %s: %s", admin_label, e)
 
     def _migrate_v0_unit_tls_secrets(self) -> None:
-        """Migrate unit-level TLS secrets from v0 to v1 for this unit.
-
-        In v0, unit TLS secrets used labels '{app}:unit:{unit_id}:unit-transport'
-        and '{app}:unit:{unit_id}:unit-http'. The v1 library cannot read these, so
-        after upgrade the keystore passwords are lost and opensearch.yml gets no TLS
-        config, causing the service to fail to start.
-        """
+        """Migrate unit-level TLS secrets from v0 to v1 for this unit."""
         app_name = self.charm.app.name
         unit_id = self.charm.state.server.unit_id
 

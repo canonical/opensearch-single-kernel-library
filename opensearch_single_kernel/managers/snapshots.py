@@ -64,6 +64,12 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
+# TODO: remove then snapshots bug is fixed
+# Terminal snapshot states in which the backup is incomplete and cannot be
+# restored. The per-shard failure reasons are only populated once the snapshot
+# has settled into one of these states, not while it is still in progress.
+NON_RESTORABLE_SNAPSHOT_STATES = {"partial", "failed", "incompatible"}
+
 
 class SnapshotsManager(BaseManager):
     """OpenSearch Snapshots Manager.
@@ -396,32 +402,6 @@ class SnapshotsManager(BaseManager):
             alt_hosts=self.alt_hosts,
         )
         status = str(snapshot.get("state", "unknown")).lower()
-
-        # For non-restorable terminal states, log the per-shard failure reasons
-        # OpenSearch reports so the cause is visible in the logs (shard relocated,
-        # node left, object-storage upload error, ...). These fields are only
-        # populated once the snapshot has settled, not while it is in progress.
-        if status in {"partial", "failed", "incompatible"}:
-            shards = snapshot.get("shards", {})
-            failures = snapshot.get("failures", [])
-            logger.error(
-                "Snapshot %s ended in %s state: %s/%s shards failed.",
-                snapshot_id,
-                status,
-                shards.get("failed"),
-                shards.get("total"),
-            )
-            for failure in failures:
-                logger.error(
-                    "Snapshot %s shard failure: index=%s shard=%s node=%s status=%s reason=%s",
-                    snapshot_id,
-                    failure.get("index"),
-                    failure.get("shard_id"),
-                    failure.get("node_id"),
-                    failure.get("status"),
-                    failure.get("reason"),
-                )
-
         return status
 
     def list_snapshots(self) -> dict[Any, dict[str, Any]]:
@@ -437,9 +417,45 @@ class SnapshotsManager(BaseManager):
             OpenSearchListBackupsError: If the snapshot listing fails.
         """
         object_storage_type = self.state.storage_type
-        return self.opensearch_client.list_snapshots(
+        snapshots = self.opensearch_client.list_snapshots(
             object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
         )
+
+        # TODO: remove then snapshots bug is fixed
+        for snapshot_id, info in snapshots.items():
+            if str(info.get("state", "")).lower() not in NON_RESTORABLE_SNAPSHOT_STATES:
+                continue
+            snapshot = self.opensearch_client.get_snapshot(
+                object_storage_type=object_storage_type,
+                snapshot_id=snapshot_id,
+                alt_hosts=self.alt_hosts,
+            )
+            if snapshot:
+                self._log_snapshot_failure_reasons(snapshot_id, snapshot)
+
+        return snapshots
+
+    # TODO: remove then snapshots bug is fixed
+    def _log_snapshot_failure_reasons(self, snapshot_id: str, snapshot: dict) -> None:
+        """Log the per-shard failure reasons for a settled, non-restorable snapshot."""
+        shards = snapshot.get("shards", {})
+        logger.error(
+            "Snapshot %s ended in %s state: %s/%s shards failed.",
+            snapshot_id,
+            str(snapshot.get("state", "unknown")).lower(),
+            shards.get("failed"),
+            shards.get("total"),
+        )
+        for failure in snapshot.get("failures", []):
+            logger.error(
+                "Snapshot %s shard failure: index=%s shard=%s node=%s status=%s reason=%s",
+                snapshot_id,
+                failure.get("index"),
+                failure.get("shard_id"),
+                failure.get("node_id"),
+                failure.get("status"),
+                failure.get("reason"),
+            )
 
     def restore_snapshot(self, snapshot_id: str) -> None:
         """Restore a snapshot from the repository for the given storage type.
@@ -629,7 +645,7 @@ class SnapshotsManager(BaseManager):
         self, object_storage_type: ObjectStorageType
     ) -> S3RelData | AzureRelData | GcsRelData | None:
         """Returns storage relation data from main orchestrator"""
-        data = self.state.get_rel_data_from_main_orchestrator()
+        data = self.state.main_orchestrator_app
         if not data:
             logger.warning("no relation data from orchestrator found.")
             return None

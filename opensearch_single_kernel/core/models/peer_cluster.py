@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Models for the peer-cluster / peer-cluster-orchestrator relations."""
+"""Models for the peer-cluster relations."""
 
 import json
 import logging
@@ -49,16 +48,11 @@ logger = logging.getLogger(__name__)
 
 
 class PeerClusterRelErrorData(PlainModel):
-    """Error state an orchestrator broadcasts over a peer-cluster relation."""
+    """Error state model an orchestrator broadcasts over a peer-cluster relation."""
 
-    cluster_name: str | None
-    # Whether the receiving side should break the relation (unrecoverable mismatch).
     should_sever_relation: bool
-    # Whether the receiving side should keep waiting (transient condition).
     should_wait: bool
-    # Human-readable message describing why the relation is blocked/waiting.
     blocked_message: str
-    deployment_desc: DeploymentDescription | None
 
     def get_status(self) -> StatusObject | None:
         """Get the status matching this error's blocked_message."""
@@ -73,11 +67,12 @@ class PeerClusterRelErrorData(PlainModel):
         against the concrete message. The returned status carries the concrete message.
         """
         for status in PeerClusterErrorDataStatuses:
-            escaped_message = re.escape(status.value.message)
+            status_value: StatusObject = status.value
+            escaped_message = re.escape(status_value.message)
             # Replace the (escaped) "{...}" placeholder blocks with non-greedy wildcards.
-            regex_pattern = "^" + re.sub(r"\\\{.*?\\\}", r"(?s:.*?)", escaped_message) + "$"
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\}", r"(?s:.*?)", escaped_message) + "$"
             if re.match(regex_pattern, message):
-                return status.value.model_copy(update={"message": message})
+                return status_value.model_copy(update={"message": message})
         return None
 
 
@@ -130,10 +125,8 @@ class PeerClusterApp(PlainModel):
 
 
 class PeerClusterServerModel(RelationModel, PeerModel):
-    """Pydantic model for peer cluster unit-level databag."""
+    """Model for peer cluster unit-level databag."""
 
-    # Mirror of the unit's CA-rotation flags from the opensearch-peers databag, published
-    # on the peer-cluster relation so other fleet apps can track rotation progress.
     tls_ca_renewing: bool = Field(default=False)
     tls_ca_renewed: bool = Field(default=False)
     tls_configured: bool = Field(default=False)
@@ -142,55 +135,47 @@ class PeerClusterServerModel(RelationModel, PeerModel):
 
     @property
     def unit(self):
-        """The ops.Unit this model is bound to (alias of `component`)."""
+        """The ops.Unit this model is bound to."""
         return self.component
 
 
 class PeerClusterAppModel(RelationModel, BaseCommonModel):
-    """Pydantic model for peer cluster application-level databag.
+    """Model for peer cluster application-level databag.
 
     Inherits from BaseCommonModel so that secret fields are stored as Juju Secret URIs
     in the relation databag and automatically granted to remote applications, enabling
-    cross-cluster (cross-application) sharing.
+    cross-cluster sharing.
     """
 
-    # Orchestration fields
     # Whether the requirer app offers itself as a failover-orchestrator candidate.
     is_candidate_failover_orchestrator: bool = Field(default=False)
     # Which orchestrator role ("main"/"failover") this relation was established for.
     trigger: Optional[str] = Field(default=None)
     # Whether the requirer has acknowledged/registered the main orchestrator.
     main_orchestrator_registered: Optional[bool] = Field(default=None)
-    # The current app's own identity/roles/unit-count on this relation. Written and read as a
-    # single dedicated fast-path, decoupled from cluster_fleet_apps: identifying who is on the
-    # other end of a relation must not depend on the fleet-wide merge below having succeeded.
+    # The current app's own identity/roles/unit-count on this relation.
     app: Optional[PeerClusterApp] = Field(default=None)
     # All apps in the fleet as known by the orchestrator, keyed by app id.
     cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
     # The currently elected main/failover orchestrator pair. None means this relation has
-    # never had orchestrator data written to it; once written, callers overwrite it wholesale
-    # (see peer_cluster_orchestrator.py), so it stays populated (though possibly with both
-    # main_app/failover_app unset) for the life of the relation.
+    # never had orchestrator data written to it.
     orchestrators: Optional[PeerClusterOrchestrators] = Field(default=None)
-    # Backup storage credentials (unset clouds are dropped from the databag on serialize;
-    # see drop_empty_backups in serialize_model below).
+    # Backup storage credentials
     s3: Optional[S3RelData] = Field(default=None)
     azure: Optional[AzureRelData] = Field(default=None)
     gcs: Optional[GcsRelData] = Field(default=None)
-    # Hash of the last broadcast payload; lets the orchestrator skip rewriting
-    # unchanged relation data.
+    # Hash of the last broadcast payload
     rel_data_hash: Optional[str] = Field(default=None)
-    # Set instead of the regular payload when the orchestrator cannot serve this
-    # relation (misconfiguration, pending bootstrap, ...).
     error_data: Optional[PeerClusterRelErrorData] = Field(default=None)
     security_index_initialised: bool = Field(default=False)
     first_data_node: Optional[str] = Field(default=None)
-
-    # App-state fields from OpenSearchAppPeerModel, shared cross-cluster
     cluster_name: str = Field(default="")
     nodes_config: dict[str, Node] = Field(default_factory=dict)
     deployment_description: Optional[DeploymentDescription] = Field(default=None)
     plugin_config_info: dict[str, PluginConfigInfo] = Field(default_factory=dict)
+    # Marker that the peer-cluster relation secret groups have been pre-created; see
+    # initialize_empty_secrets().
+    pc_secrets_initialized: bool = Field(default=False)
 
     # User secrets
     admin_password: UserSecretStr = Field(default="")
@@ -219,24 +204,10 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
         """Sort nested dicts so serialized databag output is stable and order-independent."""
         return _sort_nested_dicts(value)
 
-    @field_validator(
-        "main_orchestrator_registered",
-        "trigger",
-        "rel_data_hash",
-        "first_data_node",
-        mode="before",
-    )
-    @classmethod
-    def coerce_to_str(cls, v):
-        """Ensure non-None values are always strings, even if the databag returns a float/int."""
-        if v is None:
-            return None
-        return str(v)
-
     @model_serializer(mode="wrap")
     def serialize_model(self, handler, info):
         """Serialize the model, skipping secret resolution on request and dropping empty backups"""
-        if info.context and info.context.get("skip_secrets"):
+        if (info.context or {}).get("skip_secrets"):
             data = handler(self)
         else:
             data = BaseCommonModel.serialize_model(self, handler, info)
@@ -304,7 +275,7 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             m.admin_ca_cert = None
             # emptying the secret fields above deletes the backing group secrets, so
             # drop the marker to let initialize_empty_secrets() re-create them later
-            m.model_extra["pc_secrets_initialized"] = None
+            m.pc_secrets_initialized = False
 
     def initialize_empty_secrets(self) -> None:
         """Pre-create peer cluster relation secret groups to prevent log spam.
@@ -315,11 +286,11 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
         write a placeholder truthy value to one field per group to force creation, only
         if the group is not already populated.
         """
-        if self.model_extra.get("pc_secrets_initialized"):
+        if self.pc_secrets_initialized:
             return
 
         with self.update() as m:
             m.admin_password = m.admin_password or " "
             m.admin_cert = m.admin_cert or " "
             m.plugin_secrets = m.plugin_secrets or " "
-            m.model_extra["pc_secrets_initialized"] = "true"
+            m.pc_secrets_initialized = True

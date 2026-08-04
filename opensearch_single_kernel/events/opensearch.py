@@ -71,7 +71,7 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.core.models.peer_unit import OpenSearchServerPeerModel
 from opensearch_single_kernel.core.models.plain_base import DeploymentDescription
-from opensearch_single_kernel.core.models.relation_base import bind_model
+from opensearch_single_kernel.core.models.relation_base import bind_model_to_repository
 from opensearch_single_kernel.core.models.upgrades import UnitUpgradesState
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
@@ -217,7 +217,7 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        event_server = bind_model(
+        event_server = bind_model_to_repository(
             self.charm.state.peer_unit_interface,
             event.relation.id,
             OpenSearchServerPeerModel,
@@ -766,9 +766,7 @@ class OpenSearchEventsHandler(Object):
             and (local_first_data_node := self.charm.state.get_local_first_data_node())
         ):
             # lock requested
-            if not (
-                peer_cluster_rel_data := self.charm.state.get_rel_data_from_main_orchestrator()
-            ):
+            if not (peer_cluster_rel_data := self.charm.state.main_orchestrator_app):
                 # main orchestrator has not chosen the first data node yet
                 logger.debug(
                     f"Local first data node: {local_first_data_node} - cluster first data node: not set"
@@ -1331,16 +1329,7 @@ class OpenSearchEventsHandler(Object):
             )
 
     def _on_secret_remove(self, event: SecretRemoveEvent) -> None:
-        """Prune obsolete revisions of the charm's own peer secrets.
-
-        The v1 data_interfaces library observes secret-remove but only handles
-        secrets matching its own label scheme (`<relation>.<relation-id>...`).
-        Our internal peer secret labels (`<peer-relation>.<app>.<scope>.<group>`)
-        fail to parse there, so without this handler the obsolete revision is
-        never removed and Juju keeps re-delivering secret-remove indefinitely.
-        The v0 data_interfaces library did not observe secret-remove at all, so
-        this handler was not needed before the v1 migration.
-        """
+        """Prune obsolete revisions of the charm's own peer secrets."""
         if not event.secret.label:
             return
 

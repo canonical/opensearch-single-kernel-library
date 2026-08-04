@@ -294,11 +294,9 @@ class PeerClusterManager(BaseManager):
 
         if blocked_msg:
             return PeerClusterRelErrorData(
-                cluster_name=peer_cluster_rel_data.cluster_name,
                 should_sever_relation=True,
                 should_wait=False,
                 blocked_message=blocked_msg,
-                deployment_desc=deployment_desc,
             )
         else:
             return None
@@ -477,16 +475,6 @@ class PeerClusterManager(BaseManager):
                 and self.state.application.deployment_description.state.value == State.ACTIVE
                 and not self.state.peer_clusters(is_provider=False, remote=True)
             ):
-                # A data-only (consumer) app whose orchestrators have all been removed. Once the
-                # last orchestrator app is gone, both is_peer_cluster_consumer() and the remote
-                # peer-cluster list go empty, so the block above can no longer fire; without this
-                # the status would decay back to active on the next update-status recompute even
-                # though the app is still missing its orchestrators. The final `not peer_clusters`
-                # guard distinguishes "orchestrators removed" from a consumer that is still
-                # bootstrapping (relation present, orchestrator data not yet published). The
-                # `state == ACTIVE` guard distinguishes it from a freshly-deployed data app that
-                # never had orchestrators (init_hold, still BLOCKED_WAITING_FOR_RELATION) — that
-                # case must surface PEER_CLUSTER_NO_RELATION, not "orchestrators removed".
                 status_list.append(PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value)
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
                 # check if there is an error reported directly by the provider

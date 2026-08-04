@@ -474,20 +474,12 @@ async def test_multiple_relations(
     logging.info(results)
     assert "403 Client Error: Forbidden for url:" in results[0], results
 
-    # Restore the unit removed above so OpenSearch returns to full size before the next test.
-    # This test is parametrized over [application, v1-application] and the scale-down has no
-    # matching scale-up, so without this the removals stack across parameters and leave OpenSearch
-    # on a single node. On one node every client index (default number_of_replicas=1) has an
-    # unassignable replica, so the cluster stays yellow/blocked and later relation provisioning
-    # races against run_request's retry budget.
     logger.info("Restoring 1 unit after CI scale-down..")
     if substrate == "k8s":
         await ops_test.model.applications[OPENSEARCH_APP_NAME].scale(scale_change=1)
     else:
         await ops_test.model.applications[OPENSEARCH_APP_NAME].add_unit(count=1)
 
-    # No SCALE_DOWN_STATUSES override here: wait for OpenSearch to return to *active* (green) with
-    # replicas reassigned, so the next test starts from a healthy cluster.
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [name],
@@ -508,9 +500,6 @@ async def test_multiple_relations_accessing_same_index(ops_test: OpsTest, app_na
 
     relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, f"{name}:{relation_name}")
 
-    # test_multiple_relations restores OpenSearch to full size, so require *active* (green) here
-    # rather than tolerating scale-down statuses: only proceed once the cluster is healthy and the
-    # new relation's credentials are actually provisioned.
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [name],
@@ -773,11 +762,6 @@ async def test_relation_broken(ops_test: OpsTest):
         ),
     )
 
-    # The leader removes client users asynchronously in its relation-broken handler (and, as a
-    # backstop, on update-status). A juju-idle wait does not guarantee that cleanup has completed,
-    # so poll OpenSearch until the users are actually gone rather than asserting on a single
-    # snapshot. The timeout covers the ~5-min update-status backstop in case relation-broken was
-    # skipped (e.g. the leader's node was briefly down during the break).
     leader_ip = await get_leader_unit_ip(ops_test)
     for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(15)):
         with attempt:

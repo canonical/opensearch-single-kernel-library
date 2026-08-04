@@ -429,12 +429,6 @@ class TlsManager(BaseManager):
             retry: either a fleet-wide CA rotation is still in progress (certs must not
             be written until it completes), or a filesystem/command error occurred.
         """
-        # During a fleet-wide CA rotation, certificates must not be written to the
-        # keystores until every unit has finished renewing the CA. Return False so the
-        # caller defers and retries once the rotation completes. Returning True here would
-        # make the caller treat the cert as stored and drop the event; for a cert type
-        # issued only once during the rotation window (e.g. unit-http on the leader) it
-        # would then never be stored, and the fleet would never converge.
         if not self.state.ca_rotation_complete_in_cluster:
             return False
 
@@ -823,11 +817,9 @@ class TlsManager(BaseManager):
             return None
 
         return PeerClusterRelErrorData(
-            cluster_name=peer_cluster_rel_data.cluster_name,
             should_sever_relation=should_sever_relation,
             should_wait=not should_sever_relation,
             blocked_message=blocked_msg,
-            deployment_desc=self.state.application.deployment_description,
         )
 
     def get_secret_by_cert(self, cert: CertType, secret_name: str) -> str:

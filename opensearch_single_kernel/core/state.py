@@ -57,7 +57,7 @@ from opensearch_single_kernel.core.models.peer_cluster import (
 )
 from opensearch_single_kernel.core.models.peer_unit import OpenSearchServerPeerModel
 from opensearch_single_kernel.core.models.plain_base import Node
-from opensearch_single_kernel.core.models.relation_base import bind_model
+from opensearch_single_kernel.core.models.relation_base import bind_model_to_repository
 from opensearch_single_kernel.core.models.upgrades import (
     UpgradeAppModel,
     UpgradeServerModel,
@@ -152,12 +152,6 @@ class ClusterState(Object):
         self.azure_requires = azure_requires
         self.gcs_requires = gcs_requires
 
-        # Per-hook cache of parsed databag models. Keyed by (model_cls, relation_name,
-        # relation_id, component_name) so every accessor that resolves to the same logical
-        # databag returns the *same* bound instance for the lifetime of this ClusterState --
-        # which, since Juju runs a fresh process per event, is exactly one hook. This both
-        # avoids re-running pydantic validation on every access and keeps in-memory mutations
-        # (these models self-persist on write) consistent across all read paths in the hook.
         self._model_cache: dict = {}
 
     # -- Relations
@@ -233,11 +227,7 @@ class ClusterState(Object):
 
     @staticmethod
     def _model_key(model_cls: type, relation: Relation | None, component) -> tuple:
-        """Cache key identifying the logical databag a model maps to.
-
-        Two accessors that resolve to the same (class, relation, component) share one
-        cached instance -- e.g. `server` and this unit's entry in `application_servers`.
-        """
+        """Cache key identifying the logical databag a model maps to."""
         return (
             model_cls,
             relation.name if relation else None,
@@ -246,24 +236,14 @@ class ClusterState(Object):
         )
 
     def _cached_model(self, key: tuple, factory):
-        """Return the per-hook cached model for `key`, building it via `factory` on a miss.
-
-        `None` results (e.g. a departing peer-cluster relation whose secrets are gone) are
-        cached too, so a miss isn't re-attempted for the rest of the hook.
-        """
+        """Return the per-hook cached model for `key`, building it via `factory` on a miss."""
         cache = self._model_cache
         if key not in cache:
             cache[key] = factory()
         return cache[key]
 
     def invalidate(self, *model_classes: type) -> None:
-        """Drop cached parsed models so the next access re-reads the databag.
-
-        Not needed for writes through these models (the cached instance is already
-        up to date). Call this only after a databag is written by a path that bypasses
-        them, or when a genuinely fresh re-read is required within the same hook. With
-        no arguments, clears the whole per-hook cache.
-        """
+        """Drop cached parsed models so the next access re-reads the databag."""
         if not model_classes:
             self._model_cache.clear()
             return
@@ -272,14 +252,9 @@ class ClusterState(Object):
             del self._model_cache[key]
 
     def _new_model(self, *args, **kwargs):
-        """Build a bound model, wiring in cache invalidation on write.
-
-        Thin wrapper over `bind_model` that injects `on_persist=self.invalidate`: when the
-        returned model writes itself back to a databag, it drops this hook's parsed-model cache
-        so a subsequent read re-reads fresh state (read-your-writes) rather than a stale parse.
-        """
-        kwargs.setdefault("on_persist", self.invalidate)
-        return bind_model(*args, **kwargs)
+        """Build a bound model, wiring in cache invalidation on write."""
+        kwargs.setdefault("after_write", self.invalidate)
+        return bind_model_to_repository(*args, **kwargs)
 
     def _bind_model_or_default(
         self,
@@ -289,12 +264,7 @@ class ClusterState(Object):
         component,
         write_context: dict | None = None,
     ):
-        """Bind a model to its relation databag, tolerating a not-yet-created relation.
-
-        Before the relation exists, return an unbound default model: reads yield the
-        fields' defaults and writes are dropped (there is no databag to persist to).
-        The result is memoized per hook (see `_model_cache`).
-        """
+        """Bind a model to its relation databag, tolerating a not-yet-created relation."""
         return self._cached_model(
             self._model_key(model_cls, relation, component),
             lambda: (
@@ -370,18 +340,12 @@ class ClusterState(Object):
     def _bind_peer_cluster_app_model(
         self, relation: Relation, is_provider: bool, remote: bool
     ) -> PeerClusterAppModel | None:
-        """Bind a PeerClusterAppModel to one peer-cluster relation app databag.
-
-        Returns None when the relation's backing Juju secrets are gone already
-        (e.g. the relation is departing).
-        """
+        """Bind a PeerClusterAppModel to one peer-cluster relation app databag."""
         interface = (
             self.peer_cluster_orchestrator_repository
             if is_provider
             else self.peer_cluster_data_repository
         )
-        # The requirer side never manages secrets for this relation -- those are only
-        # created/rotated by the provider (orchestrator) side. See PeerClusterAppModel.
         write_context = None if is_provider else {"skip_secrets": True}
         component = relation.app if remote else self.model.app
 
@@ -1129,10 +1093,6 @@ class ClusterState(Object):
             remote=True,
         )
 
-    def get_rel_data_from_main_orchestrator(self) -> PeerClusterAppModel | None:
-        """Return the PeerClusterAppModel published by the main orchestrator, or None."""
-        return self.main_orchestrator_app
-
     @property
     def storage_type(self) -> ObjectStorageType | None:
         """Get the active object storage type from relations/peer-cluster.
@@ -1160,7 +1120,7 @@ class ClusterState(Object):
             return active[0] if len(active) == 1 else ObjectStorageType.CONFLICT
 
         # non-main orchestrator
-        peer_data = self.get_rel_data_from_main_orchestrator()
+        peer_data = self.main_orchestrator_app
         if not peer_data:
             return None
         if peer_data.s3:

@@ -102,11 +102,6 @@ class PeerClusterOrchestratorManager(BaseManager):
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            # Batch this cluster's mutations into a single write: each bare assignment
-            # below re-serializes all secret groups on the model, so without batching a
-            # fleet of N related clusters turns one relation-changed event into N times
-            # several full secret read/write/grant round-trips over (possibly cross-model)
-            # relations.
             with local_peer_cluster.update():
                 local_peer_cluster.initialize_empty_secrets()
                 orchestrators = local_peer_cluster.orchestrators or PeerClusterOrchestrators()
@@ -130,9 +125,6 @@ class PeerClusterOrchestratorManager(BaseManager):
                 # in case of demotion update the trigger
                 local_peer_cluster.trigger = cluster_type
                 local_peer_cluster.orchestrators = orchestrators
-
-                # we add the hash of the rel_data to only emit a change event
-                # if the data has actually changed
                 if remote_peer_cluster:
                     local_peer_cluster.apply_rel_data(remote_peer_cluster)
                 logger.debug(
@@ -368,11 +360,9 @@ class PeerClusterOrchestratorManager(BaseManager):
             return None
 
         return PeerClusterRelErrorData(
-            cluster_name=deployment_desc.config.cluster_name if deployment_desc else None,
             should_sever_relation=should_sever_relation,
             should_wait=should_retry,
             blocked_message=blocked_msg,
-            deployment_desc=deployment_desc,
         )
 
     def set_peer_cluster_err_data_if_wrong_integration(

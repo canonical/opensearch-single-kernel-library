@@ -175,13 +175,13 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         callers strip the value before use so the placeholder is never
         mistaken for real data.
         """
-        if plugin_m := self.sibling_model(OpenSearchAppPeerPluginSecretsModel):
+        if plugin_m := self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel):
             if not plugin_m.plugin_secrets:
                 plugin_m.plugin_secrets = "{}"
-        if user_m := self.sibling_model(OpenSearchAppPeerUserSecretsModel):
+        if user_m := self.build_sibling_model(OpenSearchAppPeerUserSecretsModel):
             if not user_m.admin_password:
                 user_m.admin_password = " "
-        if admin_tls_m := self.sibling_model(OpenSearchAppPeerAdminTlsSecretsModel):
+        if admin_tls_m := self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel):
             if not admin_tls_m.admin_key_password:
                 admin_tls_m.admin_key_password = " "
 
@@ -192,7 +192,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             raise ValueError(f"User {user} is not an internal user.")
 
         field_name = fields[1] if hashed else fields[0]
-        user_m = self.sibling_model(OpenSearchAppPeerUserSecretsModel)
+        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
         value = getattr(user_m, field_name) if user_m else None
         # admin_password may hold a single-space placeholder to force secret
         # creation (see initialize_empty_secrets)
@@ -217,8 +217,8 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             self.deployment_description is not None
             and self.deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
         )
-        user_m = self.sibling_model(OpenSearchAppPeerUserSecretsModel)
-        admin_tls_m = self.sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
+        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
+        admin_tls_m = self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
         copied_data: dict = {
             "cluster_name": (
                 self.deployment_description.config.cluster_name
@@ -246,7 +246,10 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             "nodes_config": cm_nodes,
             "plugin_config_info": self.plugin_config_info if is_main_orchestrator else {},
             "plugin_secrets": (
-                (self.sibling_model(OpenSearchAppPeerPluginSecretsModel).plugin_secrets or "")
+                (
+                    self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel).plugin_secrets
+                    or ""
+                )
                 if is_main_orchestrator
                 else ""
             ),
@@ -261,7 +264,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             m.first_data_node = peer_data.first_data_node
             m.nodes_config = peer_data.nodes_config
 
-        user_m = self.sibling_model(OpenSearchAppPeerUserSecretsModel)
+        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
         with user_m.update() as u:
             u.admin_password = stripped_or_none(peer_data.admin_password)
             u.admin_hashed_password = peer_data.admin_hashed_password
@@ -272,7 +275,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
             self.admin_user_initialized = True
 
-        admin_tls_m = self.sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
+        admin_tls_m = self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
         with admin_tls_m.update() as a:
             a.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
             a.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
@@ -287,5 +290,5 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         if peer_data.plugin_config_info:
             self.plugin_config_info = peer_data.plugin_config_info
         if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
-            plugin_m = self.sibling_model(OpenSearchAppPeerPluginSecretsModel)
+            plugin_m = self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel)
             plugin_m.plugin_secrets = peer_data.plugin_secrets

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -24,18 +23,18 @@ BackupSecretKeyStr = Annotated[
 ]
 
 
-class _StorageRelDataMixin:
-    """Mixin providing from_relation for storage relation data models."""
+class _BaseStorage(BaseModel):
+    """Base storage model providing from_relation for storage relation data models."""
 
     @classmethod
-    def from_relation(cls, data: dict[str, str]) -> "Self":
+    def from_relation(cls, data: dict[str, str]) -> Self:
         """Build the model from raw relation data, mapping hyphenated keys to field names."""
         normalized = {k.replace("-", "_"): v for k, v in data.items()}
         return cls.model_validate(normalized)
 
 
-class GcsRelData(_StorageRelDataMixin, BaseModel):
-    """Pydantic model for GCS relation data."""
+class GcsRelData(_BaseStorage):
+    """Model for GCS relation data."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
     secret_key: BackupSecretKeyStr = Field(default=None)
@@ -80,8 +79,8 @@ class GcsRelData(_StorageRelDataMixin, BaseModel):
         return self
 
 
-class AzureRelData(_StorageRelDataMixin, BaseModel):
-    """Pydantic model for Azure relation data."""
+class AzureRelData(_BaseStorage):
+    """Model for Azure relation data."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -107,8 +106,8 @@ class AzureRelData(_StorageRelDataMixin, BaseModel):
         return self
 
 
-class S3RelData(_StorageRelDataMixin, BaseModel):
-    """Pydantic model for S3 relation data."""
+class S3RelData(_BaseStorage):
+    """Model for S3 relation data."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -175,7 +174,7 @@ class S3RelData(_StorageRelDataMixin, BaseModel):
 
 
 class ObjectStorageConfig(PlainModel):
-    """Model class for the object storage config - for all clouds."""
+    """Model class for the object storage config for all clouds."""
 
     s3: S3RelData | None = None
     azure: AzureRelData | None = None

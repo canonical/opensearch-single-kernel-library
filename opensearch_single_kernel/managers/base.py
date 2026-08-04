@@ -60,7 +60,7 @@ class BaseManager(ManagerStatusProtocol):
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.update([node.ip for node in nodes_conf.values()])
 
-        if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
+        if peer_cm_rel_data := self.state.main_orchestrator_app:
             all_hosts.update([node.ip for node in peer_cm_rel_data.nodes_config.values()])
 
         if not all_hosts:

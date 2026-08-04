@@ -235,8 +235,6 @@ class ExternalClientsManager(BaseManager):
                     logger.error("failed to remove role mapping for %s", username)
                     removed = False
 
-                # Keep the bookkeeping entry on failure so the next call (e.g. from
-                # update-status) retries the cleanup instead of orphaning the user.
                 if removed:
                     del relation_users[rel_id]
         self.state.application.client_relation_users = relation_users
