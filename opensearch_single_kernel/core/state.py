@@ -1119,15 +1119,16 @@ class ClusterState(Object):
                 return None
             return active[0] if len(active) == 1 else ObjectStorageType.CONFLICT
 
-        # non-main orchestrator
+        # non-main orchestrator: the main broadcasts credentials over the peer-cluster
+        # relation as top-level backup secrets (see backup_reldata).
         peer_data = self.main_orchestrator_app
         if not peer_data:
             return None
-        if peer_data.s3:
+        if peer_data.backup_reldata("s3"):
             return ObjectStorageType.S3_PCLUSTER
-        if peer_data.azure:
+        if peer_data.backup_reldata("azure"):
             return ObjectStorageType.AZURE_PCLUSTER
-        if peer_data.gcs:
+        if peer_data.backup_reldata("gcs"):
             return ObjectStorageType.GCS_PCLUSTER
         return None
 

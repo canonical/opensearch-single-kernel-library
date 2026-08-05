@@ -27,6 +27,7 @@ from typing_extensions import Annotated
 
 from opensearch_single_kernel.common.constants import (
     SECRET_APP_ADMIN,
+    SECRET_BACKUPS,
     SECRET_PLUGIN,
     SECRET_UNIT_HTTP,
     SECRET_UNIT_TRANSPORT,
@@ -52,6 +53,7 @@ HttpSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), 
 AdminSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_APP_ADMIN]
 UserSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_USERS]
 PluginsSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_PLUGIN]
+BackupSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_BACKUPS]
 
 
 class RelationModel(BaseModel):

@@ -182,6 +182,10 @@ class TLSEventsHandler(Object):
             event.certificate_signing_request, "csr"
         )
         if secret_match is None:
+            if not self.charm.state.ca_rotation_complete_in_cluster:
+                logger.debug("Certificate CSR unmatched during CA rotation, deferring event.")
+                event.defer()
+                return
             logger.debug("Unknown certificate available.")
             return
         scope, cert_type = secret_match
@@ -315,6 +319,13 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
+        if self.charm.state.server.tls_ca_renewing:
+            logger.debug(
+                "CA rotation in progress; skipping certificate renewal request "
+                "(handled by post_start_ca_rotation)."
+            )
+            return
+
         del self.charm.state.server.tls_configured
 
         peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)

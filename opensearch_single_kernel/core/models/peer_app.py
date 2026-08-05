@@ -7,11 +7,10 @@
 import logging
 from typing import ClassVar, Optional
 
-from pydantic import Field, field_serializer, field_validator, model_serializer
+from pydantic import Field, field_serializer, field_validator
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
-    OBJECT_STORAGE_SECRET_FIELDS,
     USER_SECRET_FIELDS,
     DeploymentType,
 )
@@ -33,11 +32,6 @@ from opensearch_single_kernel.core.models.plain_base import (
     stripped_or_none,
 )
 from opensearch_single_kernel.core.models.relation_base import RelationModel
-from opensearch_single_kernel.core.models.storage import (
-    AzureRelData,
-    GcsRelData,
-    S3RelData,
-)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )
@@ -114,11 +108,6 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         default_factory=dict, alias="plugin_config_info"
     )
 
-    # Backup storage credentials
-    s3: Optional[S3RelData] = Field(default=None)
-    azure: Optional[AzureRelData] = Field(default=None)
-    gcs: Optional[GcsRelData] = Field(default=None)
-
     @field_validator("allocation_exclusions_to_delete", "delete_voting_exclusions", mode="before")
     @classmethod
     def parse_comma_separated_strings(cls, v):
@@ -142,15 +131,6 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     def _sort_dict_fields(self, value: dict) -> dict:
         """Sort nested dicts so serialized databag output is stable and order-independent."""
         return _sort_nested_dicts(value)
-
-    @model_serializer(mode="wrap")
-    def serialize_model(self, handler, info):
-        """Serializes the model, but skip empty backups data"""
-        data = PeerModel.serialize_model(self, handler, info)
-        for field in ("s3", "azure", "gcs"):
-            if data.get(field) is None:
-                data.pop(field, None)
-        return data
 
     @property
     def name(self) -> str:
@@ -199,12 +179,6 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         if user == ADMIN_USER and not hashed:
             return stripped_or_none(value)
         return value
-
-    def marshal_storage_secrets(self, cloud: str):
-        """Return a copy of the given cloud's rel data containing only its secret fields."""
-        source = getattr(self, cloud)
-        fields = OBJECT_STORAGE_SECRET_FIELDS[cloud]
-        return type(source).model_construct(**{f: getattr(source, f) for f in fields})
 
     def to_peer_cluster_rel_data(
         self,

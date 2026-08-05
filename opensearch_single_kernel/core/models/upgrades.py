@@ -49,6 +49,14 @@ class UpgradeAppModel(RelationModel, PeerModel):
         default=None, alias="-unused-timestamp-upgrade-resume-last-updated"
     )
 
+    @field_validator("upgrade_resume_last_updated", mode="before")
+    @classmethod
+    def coerce_to_str(cls, v):
+        """Coerce numeric timestamp stored as float to str."""
+        if v is None:
+            return None
+        return str(v)
+
     def set_upgrade_resumed(self, value: bool) -> None:
         """Set whether user has resumed upgrade with Juju action."""
         with self.update() as m:

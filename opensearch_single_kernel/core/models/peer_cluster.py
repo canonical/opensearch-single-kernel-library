@@ -30,6 +30,7 @@ from opensearch_single_kernel.core.models.plain_base import (
 )
 from opensearch_single_kernel.core.models.relation_base import (
     AdminSecretStr,
+    BackupSecretStr,
     PluginsSecretStr,
     RelationModel,
     UserSecretStr,
@@ -160,10 +161,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     # The currently elected main/failover orchestrator pair. None means this relation has
     # never had orchestrator data written to it.
     orchestrators: Optional[PeerClusterOrchestrators] = Field(default=None)
-    # Backup storage credentials
-    s3: Optional[S3RelData] = Field(default=None)
-    azure: Optional[AzureRelData] = Field(default=None)
-    gcs: Optional[GcsRelData] = Field(default=None)
     # Hash of the last broadcast payload
     rel_data_hash: Optional[str] = Field(default=None)
     error_data: Optional[PeerClusterRelErrorData] = Field(default=None)
@@ -199,6 +196,16 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     admin_cert: AdminSecretStr = Field(default="")
     admin_ca_cert: AdminSecretStr = Field(default="")
 
+    # Backup storage secrets. These must be top-level fields, the databag serializer only
+    # promotes top-level secret-group fields into Juju secrets, not credential fields nested
+    # inside an S3RelData/AzureRelData/GcsRelData sub-model.
+    s3_access_key: BackupSecretStr = Field(default="")
+    s3_secret_key: BackupSecretStr = Field(default="")
+    s3_tls_ca_chain: BackupSecretStr = Field(default="")
+    azure_storage_account: BackupSecretStr = Field(default="")
+    azure_secret_key: BackupSecretStr = Field(default="")
+    gcs_secret_key: BackupSecretStr = Field(default="")
+
     @field_serializer("cluster_fleet_apps", "nodes_config", "plugin_config_info")
     def _sort_dict_fields(self, value: dict) -> dict:
         """Sort nested dicts so serialized databag output is stable and order-independent."""
@@ -206,15 +213,10 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler, info):
-        """Serialize the model, skipping secret resolution on request and dropping empty backups"""
+        """Serialize the model, skipping secret resolution on request."""
         if (info.context or {}).get("skip_secrets"):
-            data = handler(self)
-        else:
-            data = BaseCommonModel.serialize_model(self, handler, info)
-        for field in ("s3", "azure", "gcs"):
-            if data.get(field) is None:
-                data.pop(field, None)
-        return data
+            return handler(self)
+        return BaseCommonModel.serialize_model(self, handler, info)
 
     def apply_rel_data(self, source: "PeerClusterAppModel") -> None:
         """Copy orchestrator-broadcast fields from source into this relation's databag."""
@@ -248,6 +250,47 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             digest_source = source.model_dump(mode="json", context={"skip_secrets": True})
             m.rel_data_hash = sha1(json.dumps(digest_source, sort_keys=True).encode()).hexdigest()
 
+    def set_backup_secrets(
+        self, cloud: str, reldata: "S3RelData | AzureRelData | GcsRelData | None"
+    ) -> None:
+        """Store a cloud's secret credentials in the top-level backup-secret fields.
+
+        Passing `reldata=None` clears the fields (e.g. the backup relation went away).
+        Call inside an `update()`
+        """
+        if cloud == "s3":
+            self.s3_access_key = getattr(reldata, "access_key", None)
+            self.s3_secret_key = getattr(reldata, "secret_key", None)
+            self.s3_tls_ca_chain = getattr(reldata, "tls_ca_chain", None)
+        elif cloud == "azure":
+            self.azure_storage_account = getattr(reldata, "storage_account", None)
+            self.azure_secret_key = getattr(reldata, "secret_key", None)
+        elif cloud == "gcs":
+            self.gcs_secret_key = getattr(reldata, "secret_key", None)
+
+    def backup_reldata(self, cloud: str) -> "S3RelData | AzureRelData | GcsRelData | None":
+        """Reconstruct a cloud's RelData from the backup secrets."""
+        if cloud == "s3":
+            if not (self.s3_access_key and self.s3_secret_key):
+                return None
+            return S3RelData.model_construct(
+                access_key=self.s3_access_key,
+                secret_key=self.s3_secret_key,
+                tls_ca_chain=self.s3_tls_ca_chain or None,
+            )
+        if cloud == "azure":
+            if not (self.azure_storage_account and self.azure_secret_key):
+                return None
+            return AzureRelData.model_construct(
+                storage_account=self.azure_storage_account,
+                secret_key=self.azure_secret_key,
+            )
+        if cloud == "gcs":
+            if not self.gcs_secret_key:
+                return None
+            return GcsRelData.model_construct(secret_key=self.gcs_secret_key)
+        return None
+
     def clear_rel_data(self) -> None:
         """Reset all orchestrator-broadcast fields to their defaults."""
         with self.update() as m:
@@ -273,6 +316,13 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             m.admin_chain = None
             m.admin_cert = None
             m.admin_ca_cert = None
+            # Backup storage secrets
+            m.s3_access_key = None
+            m.s3_secret_key = None
+            m.s3_tls_ca_chain = None
+            m.azure_storage_account = None
+            m.azure_secret_key = None
+            m.gcs_secret_key = None
             # emptying the secret fields above deletes the backing group secrets, so
             # drop the marker to let initialize_empty_secrets() re-create them later
             m.pc_secrets_initialized = False

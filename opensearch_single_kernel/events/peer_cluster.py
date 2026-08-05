@@ -645,8 +645,6 @@ class PeerClusterEventsHandler(Object):
             KIBANA_SERVER_USER, data.kibana_server_hashed_password
         )
 
-        self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
-
     def _clean_main_orchestrator_is_requirer_status(self, departing_relation: Relation) -> None:
         """Clean the status if there are no more peer cluster requirer relations."""
         if (

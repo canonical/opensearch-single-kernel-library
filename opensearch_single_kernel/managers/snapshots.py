@@ -37,7 +37,6 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
     SnapshotsStatuses,
 )
-from opensearch_single_kernel.core.models.peer_cluster import PeerClusterAppModel
 from opensearch_single_kernel.core.models.storage import (
     AzureRelData,
     GcsRelData,
@@ -63,12 +62,6 @@ from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-# TODO: remove then snapshots bug is fixed
-# Terminal snapshot states in which the backup is incomplete and cannot be
-# restored. The per-shard failure reasons are only populated once the snapshot
-# has settled into one of these states, not while it is still in progress.
-NON_RESTORABLE_SNAPSHOT_STATES = {"partial", "failed", "incompatible"}
 
 
 class SnapshotsManager(BaseManager):
@@ -417,45 +410,9 @@ class SnapshotsManager(BaseManager):
             OpenSearchListBackupsError: If the snapshot listing fails.
         """
         object_storage_type = self.state.storage_type
-        snapshots = self.opensearch_client.list_snapshots(
+        return self.opensearch_client.list_snapshots(
             object_storage_type=object_storage_type, alt_hosts=self.alt_hosts
         )
-
-        # TODO: remove then snapshots bug is fixed
-        for snapshot_id, info in snapshots.items():
-            if str(info.get("state", "")).lower() not in NON_RESTORABLE_SNAPSHOT_STATES:
-                continue
-            snapshot = self.opensearch_client.get_snapshot(
-                object_storage_type=object_storage_type,
-                snapshot_id=snapshot_id,
-                alt_hosts=self.alt_hosts,
-            )
-            if snapshot:
-                self._log_snapshot_failure_reasons(snapshot_id, snapshot)
-
-        return snapshots
-
-    # TODO: remove then snapshots bug is fixed
-    def _log_snapshot_failure_reasons(self, snapshot_id: str, snapshot: dict) -> None:
-        """Log the per-shard failure reasons for a settled, non-restorable snapshot."""
-        shards = snapshot.get("shards", {})
-        logger.error(
-            "Snapshot %s ended in %s state: %s/%s shards failed.",
-            snapshot_id,
-            str(snapshot.get("state", "unknown")).lower(),
-            shards.get("failed"),
-            shards.get("total"),
-        )
-        for failure in snapshot.get("failures", []):
-            logger.error(
-                "Snapshot %s shard failure: index=%s shard=%s node=%s status=%s reason=%s",
-                snapshot_id,
-                failure.get("index"),
-                failure.get("shard_id"),
-                failure.get("node_id"),
-                failure.get("status"),
-                failure.get("reason"),
-            )
 
     def restore_snapshot(self, snapshot_id: str) -> None:
         """Restore a snapshot from the repository for the given storage type.
@@ -601,86 +558,47 @@ class SnapshotsManager(BaseManager):
 
         if self.state.s3_relation:
             s3_info = self.state.get_storage_connection_info_from_relation(ObjectStorageType.S3)
-            if not s3_info or not self.state.application.s3:
+            if not s3_info:
                 missing.append(S3_RELATION)
 
         if self.state.azure_relation:
             azure_info = self.state.get_storage_connection_info_from_relation(
                 ObjectStorageType.AZURE
             )
-            if not azure_info or not self.state.application.azure:
+            if not azure_info:
                 missing.append(AZURE_RELATION)
 
         if self.state.gcs_relation:
             gcs_info = self.state.get_storage_connection_info_from_relation(ObjectStorageType.GCS)
-            if not gcs_info or not self.state.application.gcs:
+            if not gcs_info:
                 missing.append(GCS_RELATION)
 
         return missing
 
-    def update_backup_credentials_from_peer_relation(self, data: PeerClusterAppModel) -> None:
-        """Update backup credentials based on data from peer relation."""
-        if (s3_creds := data.s3) and self.state.application.s3:
-            self.state.application.s3.access_key = s3_creds.access_key
-            self.state.application.s3.tls_ca_chain = s3_creds.tls_ca_chain
-            self.state.application.s3.secret_key = s3_creds.secret_key
-        elif not s3_creds and self.state.application.s3:
-            self.state.application.s3.access_key = None
-            self.state.application.s3.tls_ca_chain = None
-            self.state.application.s3.secret_key = None
-
-        if (azure_creds := data.azure) and self.state.application.azure:
-            self.state.application.azure.secret_key = azure_creds.secret_key
-            self.state.application.azure.storage_account = azure_creds.storage_account
-        elif not azure_creds and self.state.application.azure:
-            self.state.application.azure.secret_key = None
-            self.state.application.azure.storage_account = None
-
-        if (gcs_creds := data.gcs) and self.state.application.gcs:
-            self.state.application.gcs.secret_key = gcs_creds.secret_key
-        elif not gcs_creds and self.state.application.gcs:
-            self.state.application.gcs.secret_key = None
-
-    def storage_relation_data_from_peer_cluster(  # noqa: C901
+    def storage_relation_data_from_peer_cluster(
         self, object_storage_type: ObjectStorageType
     ) -> S3RelData | AzureRelData | GcsRelData | None:
-        """Returns storage relation data from main orchestrator"""
+        """Returns storage credentials broadcast by the main orchestrator."""
         data = self.state.main_orchestrator_app
         if not data:
             logger.warning("no relation data from orchestrator found.")
             return None
 
-        if object_storage_type == ObjectStorageType.S3:
-            if not data or not data.s3:
-                logger.warning("no S3 credentials found.")
-                return None
+        cloud = {
+            ObjectStorageType.S3: "s3",
+            ObjectStorageType.S3_PCLUSTER: "s3",
+            ObjectStorageType.AZURE: "azure",
+            ObjectStorageType.AZURE_PCLUSTER: "azure",
+            ObjectStorageType.GCS: "gcs",
+            ObjectStorageType.GCS_PCLUSTER: "gcs",
+        }.get(object_storage_type)
+        if cloud is None:
+            return None
 
-            if not (data.s3.access_key and data.s3.secret_key):
-                logger.warning("no access key or secret key found.")
-                return None
-            return data.s3
-
-        if object_storage_type == ObjectStorageType.AZURE:
-            if not data or not data.azure:
-                logger.warning("no azure credentials found.")
-                return None
-
-            if not (data.azure.storage_account and data.azure.secret_key):
-                logger.debug("Azure storage credentials are incomplete.")
-                return None
-
-            return data.azure
-
-        if object_storage_type == ObjectStorageType.GCS:
-            if not data or not data.gcs:
-                logger.warning("no gcs credentials found.")
-                return None
-
-            if not data.gcs.secret_key:
-                logger.debug("GCS storage credentials are incomplete.")
-                return None
-
-            return data.gcs
+        reldata = data.backup_reldata(cloud)
+        if reldata is None:
+            logger.warning("no %s credentials found in peer-cluster data.", cloud)
+        return reldata
 
     @override
     def get_statuses(  # noqa: C901

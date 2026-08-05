@@ -11,9 +11,14 @@ from opensearch_single_kernel.common.constants import (
     GENERATED_ROLES,
     DeploymentType,
     Directive,
+    ObjectStorageType,
     StartMode,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchInvalidStorageTypeError,
+    OpenSearchObjectStorageConfigValidationError,
+)
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 from opensearch_single_kernel.core.models.peer_cluster import (
     PeerClusterApp,
@@ -27,6 +32,9 @@ from opensearch_single_kernel.core.models.plain_base import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.object_storage import (
+    storage_config_from_connection_info,
+)
 from opensearch_single_kernel.utils.peer_cluster import (
     update_cluster_fleet,
 )
@@ -131,15 +139,8 @@ class PeerClusterOrchestratorManager(BaseManager):
                     f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
                 )
 
-                for cloud in ("s3", "azure", "gcs"):
-                    if getattr(self.state, f"{cloud}_relation") and getattr(
-                        self.state.application, cloud
-                    ):
-                        setattr(
-                            local_peer_cluster,
-                            cloud,
-                            self.state.application.marshal_storage_secrets(cloud),
-                        )
+                # share object-storage backup credentials with the requirer sub-cluster
+                self.broadcast_backup_secrets(local_peer_cluster)
 
                 # there is no error to broadcast - we clear any previously broadcasted error
                 if not rel_err_data:
@@ -157,6 +158,33 @@ class PeerClusterOrchestratorManager(BaseManager):
                 if not has_units:
                     del local_peer_cluster.error_data
         return not should_wait
+
+    def broadcast_backup_secrets(self, local_peer_cluster: PeerClusterAppModel) -> None:
+        """Share this orchestrator's object-storage credentials with a requirer sub-cluster."""
+        for cloud, storage_type in (
+            ("s3", ObjectStorageType.S3),
+            ("azure", ObjectStorageType.AZURE),
+            ("gcs", ObjectStorageType.GCS),
+        ):
+            if not getattr(self.state, f"{cloud}_relation"):
+                local_peer_cluster.set_backup_secrets(cloud, None)
+                continue
+            try:
+                connection_info = self.state.get_storage_connection_info_from_relation(
+                    storage_type
+                )
+                config = storage_config_from_connection_info(storage_type, connection_info)
+            except (
+                OpenSearchInvalidStorageTypeError,
+                OpenSearchObjectStorageConfigValidationError,
+            ) as e:
+                # credentials not yet published/complete; leave any previous value untouched
+                # and let a later refresh broadcast them.
+                logger.warning("Backup credentials for %s not ready to broadcast: %s", cloud, e)
+                continue
+            reldata = getattr(config, cloud, None) if config else None
+            if reldata is not None:
+                local_peer_cluster.set_backup_secrets(cloud, reldata)
 
     def build_peer_cluster_rel_data(self) -> PeerClusterAppModel | None:
         """Build and return the peer cluster rel data to be shared with requirer sub-clusters."""

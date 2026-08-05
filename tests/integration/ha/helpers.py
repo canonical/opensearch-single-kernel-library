@@ -512,13 +512,6 @@ async def wait_for_backup_system_to_settle(
                 raise Exception("Failed to retrieve backup list or list is empty")
 
             logger.debug(f"list-backups output: {action}")
-            # Check that no snapshot is still being created
-            in_progress = [
-                bid for bid, info in backups.items() if info.get("state") == "in_progress"
-            ]
-            if in_progress:
-                raise Exception(f"Snapshots still in progress: {in_progress}")
-
             # Now, check if we have finished the restore
             indices_status = await http_request(
                 ops_test,
@@ -557,49 +550,18 @@ async def assert_start_and_check_continuous_writes(
     await writer.clear()
 
 
-# TODO: remove then snapshots bug is fixed
-# Terminal snapshot states in which the backup is incomplete and cannot be
-# restored (restore fails with "index ... wasn't fully snapshotted").
-NON_RESTORABLE_SNAPSHOT_STATES = {"partial", "failed", "incompatible"}
-BACKUP_CREATE_ATTEMPTS = 3
-
-
 async def create_backup(
     ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
 ) -> str:
-    """Runs the backup of the cluster.
-
-    Retries creation if the snapshot settles into a non-restorable state (e.g.
-    ``partial``). That can happen as a transient race between the snapshot and
-    the ongoing continuous writes, even while the cluster is green, and would
-    otherwise surface much later as an opaque HTTP 500 at restore time.
-    """
-    last_state = None
-    for attempt in range(1, BACKUP_CREATE_ATTEMPTS + 1):
-        action = await run_action(ops_test, leader_id, "create-backup", app=app)
-        logger.debug(f"create-backup output: {action}")
-        assert action.status == "completed"
-        st = str(action.response.get("status", ""))
-        assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
-        backup_id = action.response.get("backup-id")
-        assert backup_id, "backup-id is missing in response"
-
-        await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
-
-        backups = await list_backups(ops_test, leader_id, app=app)
-        last_state = str(backups.get(backup_id, {}).get("state", "unknown")).lower()
-        if last_state not in NON_RESTORABLE_SNAPSHOT_STATES:
-            return backup_id
-
-        logger.warning(
-            f"Backup {backup_id} settled in non-restorable state '{last_state}' "
-            f"(attempt {attempt}/{BACKUP_CREATE_ATTEMPTS}); retrying."
-        )
-
-    raise AssertionError(
-        f"Backup never reached a restorable state after {BACKUP_CREATE_ATTEMPTS} "
-        f"attempts; last observed state: {last_state}"
-    )
+    """Runs the backup of the cluster."""
+    action = await run_action(ops_test, leader_id, "create-backup", app=app)
+    logger.debug(f"create-backup output: {action}")
+    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
+    assert action.status == "completed"
+    st = str(action.response.get("status", ""))
+    assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
+    assert action.response.get("backup-id"), "backup-id is missing in response"
+    return action.response["backup-id"]
 
 
 async def restore(
