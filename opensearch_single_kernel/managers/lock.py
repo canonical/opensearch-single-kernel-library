@@ -241,8 +241,10 @@ class LockManager(PeerLockManager):
                 if not self.opensearch_client.create_lock_index_if_needed(
                     host, alt_hosts, self.state.application.component.planned_units() > 1
                 ):
-                    logger.debug("[Node lock] Failed to create lock index")
-                    return False
+                    logger.debug(
+                        "[Node lock] Failed to create lock index, falling back to peer databag"
+                    )
+                    return super().acquire()
 
                 # Attempt to create document id 0
                 try:

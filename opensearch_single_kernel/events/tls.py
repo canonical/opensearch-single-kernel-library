@@ -341,7 +341,7 @@ class TLSEventsHandler(Object):
         logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         old_csr = self.charm.tls_manager.get_secret_by_cert(cert_type, "csr").encode("utf-8")
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            cert_type=cert_type, tls_file=False
+            cert_type=cert_type, tls_file=False, renew=True
         )
         self.certs.request_certificate_renewal(
             old_certificate_signing_request=old_csr,

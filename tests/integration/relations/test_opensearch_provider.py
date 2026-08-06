@@ -35,6 +35,7 @@ from tests.integration.relations.helpers import (
     ip_to_url,
     run_request,
     wait_for_relation_joined_between,
+    wait_for_relation_removed_between,
 )
 from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
@@ -774,6 +775,20 @@ async def test_relation_broken(ops_test: OpsTest):
             lingering = [user for user in users_to_check if user in users.keys()]
             logger.info(f"Checking removal of users {users_to_check}; still present: {lingering}")
             assert not lingering, f"Users {lingering!r} were not removed after relation break"
+
+    # The relation-broken hooks run serially on the leader and can still be in flight here,
+    # leaving the relations in Juju's "dying" state. A subsequent test that re-integrates the
+    # same endpoints would otherwise fail with "is dying, but not yet removed", so wait until
+    # each broken relation is fully gone from the model before returning.
+    for requirer in (
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
+        f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
+        f"{V1_CLIENT_APP_NAME}:{V1_FIRST_RELATION_NAME}",
+        f"{V1_CLIENT_APP_NAME}:{V1_ADMIN_RELATION_NAME}",
+    ):
+        wait_for_relation_removed_between(
+            ops_test, f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", requirer
+        )
 
 
 @pytest.mark.abort_on_fail

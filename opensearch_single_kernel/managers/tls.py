@@ -109,7 +109,7 @@ class TlsManager(BaseManager):
         ]
 
         if not only_unit_resources:
-            resources.append((CertType.APP_ADMIN, self.state.application.admin_keystore_password))
+            resources.append((CertType.APP_ADMIN, self.admin_keystore_password))
 
         # compare issuer of the cert with the issuer of the CA
         # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
@@ -146,7 +146,7 @@ class TlsManager(BaseManager):
         return read_ca(
             workload=self.workload,
             alias=alias,
-            store_pwd=self.state.application.admin_truststore_password,
+            store_pwd=self.admin_truststore_password,
             store_path=ca_trust_store,
         )
 
@@ -258,6 +258,7 @@ class TlsManager(BaseManager):
         cert_type: CertType,
         secret: dict[str, str | None] | None = None,
         tls_file: bool = True,
+        renew: bool = False,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         key = (
@@ -270,6 +271,10 @@ class TlsManager(BaseManager):
             if secret is not None
             else ((self.get_secret_by_cert(cert_type, "key-password") or "").strip() or None)
         )
+
+        if renew:
+            key = None
+            password = None
 
         if key is not None:
             if tls_file:

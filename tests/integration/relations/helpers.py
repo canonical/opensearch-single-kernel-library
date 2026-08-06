@@ -146,6 +146,46 @@ def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str)
     return False
 
 
+def relation_exists(ops_test: OpsTest, endpoint_one: str, endpoint_two: str) -> bool:
+    """Check whether a relation between two ``app:endpoint`` specs still exists in the model.
+
+    Args:
+        ops_test: running OpsTest instance
+        endpoint_one: one side of the relation as ``application:endpoint``.
+        endpoint_two: the other side of the relation as ``application:endpoint``.
+    """
+    wanted = {endpoint_one, endpoint_two}
+    for rel in ops_test.model.relations:
+        specs = {f"{endpoint.application_name}:{endpoint.name}" for endpoint in rel.endpoints}
+        if wanted <= specs:
+            return True
+    return False
+
+
+def wait_for_relation_removed_between(
+    ops_test: OpsTest, endpoint_one: str, endpoint_two: str
+) -> None:
+    """Wait until a relation is fully removed (no longer ``dying``) from the model.
+
+    Juju refuses to re-add a relation whose previous incarnation is still ``dying, but
+    not yet removed``, so tests that break then re-create a relation must wait for the
+    old one to disappear first.
+
+    Args:
+        ops_test: running OpsTest instance
+        endpoint_one: one side of the relation as ``application:endpoint``.
+        endpoint_two: the other side of the relation as ``application:endpoint``.
+    """
+    try:
+        for attempt in Retrying(stop=stop_after_delay(5 * 60), wait=wait_fixed(3)):
+            with attempt:
+                assert not relation_exists(ops_test, endpoint_one, endpoint_two)
+    except RetryError:
+        assert (
+            False
+        ), f"Relation {endpoint_one} <-> {endpoint_two} was not removed after 5 minutes."
+
+
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(30))
 async def run_request(
     ops_test,

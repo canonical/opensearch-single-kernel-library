@@ -213,7 +213,7 @@ class ConfigManager(BaseManager):
             layer = "transport"
             keystore_pwd = self.state.server.transport_keystore_password
 
-        truststore_pwd = self.state.application.admin_truststore_password
+        truststore_pwd = self.admin_truststore_password
 
         if not (truststore_pwd and keystore_pwd):
             return {}

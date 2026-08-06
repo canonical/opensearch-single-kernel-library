@@ -7,6 +7,7 @@ This module manages OpenSearch keystore access and lifecycle.
 """
 
 import logging
+from enum import Enum
 
 from tenacity import retry, retry_if_result, stop_after_attempt, wait_fixed
 
@@ -25,6 +26,14 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+class KeystoreReloadResult(Enum):
+    """Outcome of a keystore reload attempt."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    RELOAD_FAILED = "reload_failed"
 
 
 class KeystoreManager(BaseManager):
@@ -176,26 +185,26 @@ class KeystoreManager(BaseManager):
         wait=wait_fixed(2),
         retry_error_callback=lambda _: False,
     )
-    def reload(self) -> bool:
+    def reload(self) -> KeystoreReloadResult:
         """Reload the keystore.
 
         Returns:
-            whether a reload was successful.
+            The outcome of the reload attempt.
         """
         try:
             self._create_if_needed()
             self.workload.run_cmd(self.keystore, "upgrade")
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
             logger.error("Keystore operation failed: %s", e)
-            return False
+            return KeystoreReloadResult.ERROR
 
         if not self.workload.is_service_started():
             # service not running, settings will be picked up at startup
             logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
-            return True
+            return KeystoreReloadResult.SUCCESS
 
         if not self.opensearch_client.reload_secure_settings():
-            return False
+            return KeystoreReloadResult.RELOAD_FAILED
 
         logger.debug("Keystore reload successful")
-        return True
+        return KeystoreReloadResult.SUCCESS
