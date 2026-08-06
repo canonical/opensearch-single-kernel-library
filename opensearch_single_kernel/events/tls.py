@@ -128,6 +128,13 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.state.fqdn_resolvable:
+            logger.warning(
+                "Unit canonical FQDN not yet resolvable in DNS, deferring CSR generation."
+            )
+            event.defer()
+            return
+
         if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             # create passwords for both ca trust_store/admin key_store
             self.charm.tls_manager.create_store_pwd_if_not_exists(
@@ -318,6 +325,13 @@ class TLSEventsHandler(Object):
             return
 
         old_csr = secrets["csr"].encode("utf-8")
+
+        if cert_type != CertType.APP_ADMIN and not self.charm.state.fqdn_resolvable:
+            logger.warning(
+                "Unit canonical FQDN not yet resolvable in DNS, deferring certificate renewal."
+            )
+            event.defer()
+            return
 
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
             scope=scope, cert_type=cert_type, secret=secrets, tls_file=False

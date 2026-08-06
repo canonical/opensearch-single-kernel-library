@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from pytest_operator.plugin import OpsTest
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from opensearch_single_kernel.common.statuses import NotificationsStatuses
 from opensearch_single_kernel.utils.status import format_status
@@ -632,10 +633,12 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     # Now, we compare the change in the action above with the opensearch's nodes.
     # In large deployments, that will mean checking if the change on main orchestrator
     # was sent down to the opensearch (data node) cluster.
-    result2 = await run_action(
-        ops_test, leader_id, "get-password", {"username": "monitor"}, app=app
-    )
-    assert result2.response.get("password") == new_password
+    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
+        with attempt:
+            result2 = await run_action(
+                ops_test, leader_id, "get-password", {"username": "monitor"}, app=app
+            )
+            assert result2.response.get("password") == new_password
 
     # Relation data is updated
     # In both large and small deployments, we want to check if the relation data is updated
@@ -1485,12 +1488,17 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
     await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
-    # run neural search
     payload = {
         "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
     }
-    response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
-    assert len(response.get("hits", {}).get("hits", [])) > 0, "Neural search did not yield results"
+    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
+        with attempt:
+            response = await http_request(
+                ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload
+            )
+            assert (
+                len(response.get("hits", {}).get("hits", [])) > 0
+            ), f"Neural search did not yield results: {response}"
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1687,8 +1695,10 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     codec = response[zstd]["settings"]["index.codec"]
     assert codec == "zstd", f"Expected codec 'zstd' but found {codec}"
 
+    await http_request(ops_test, "POST", f"{base_url}/{zstd},{default}/_refresh")
+
     # compare size of indices, zstd should be smaller or equal
-    # This test was flaky due to two reasons:
+    # This test was flaky due to three reasons:
     # 1. Compression happens during segment merges, not immediately after indexing.
     #    Without force merge, unmerged segments could make zstd appear
     #    larger than default (e.g., 147474 > 416).
@@ -1696,17 +1706,23 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # 2. For very small datasets, fixed overhead (metadata, segment headers, minimum segment sizes)
     #    may dominate, making compressed and uncompressed sizes equal (e.g., 416 == 416).
     #    Fixed by using <= instead of < to allow equality for edge cases.
-    stats = await http_request(ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store")
-    zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
-    default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
+    # 3. _stats/store counts every file in the shard directory, including segments that were
+    #    not yet deleted. We need to wait for this change to settle.
+    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
+        with attempt:
+            stats = await http_request(
+                ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store"
+            )
+            zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
+            default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
 
-    logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
-    assert zstd_size > 0 and default_size > 0, (
-        "Index store sizes should be positive after bulk indexing"
-    )
-    assert zstd_size <= default_size, (
-        f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
-    )
+            logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
+            assert (
+                zstd_size > 0 and default_size > 0
+            ), "Index store sizes should be positive after bulk indexing"
+            assert (
+                zstd_size <= default_size
+            ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
     await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
 
@@ -1848,11 +1864,10 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     assert _cfg_name(group_cfg) == email_group_cfg_name
 
     # remove relation
-    main_app = ops_test.model.applications[APP_NAME]
-
-    await main_app.remove_relation(
+    await ops_test.model.applications[APP_NAME].remove_relation(
         f"{APP_NAME}:smtp",
         f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+        block_until_done=True,
     )
     await _wait_for_units(ops_test, deploy_type)
 
