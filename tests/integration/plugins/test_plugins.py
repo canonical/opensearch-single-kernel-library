@@ -546,9 +546,8 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy_type: str):
-    if substrate == "k8s" and deploy_type == "large_deployment":
-        pytest.skip("Large deployment is not yet supported on k8s substrate.")
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
+    app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
+    leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
     secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
@@ -556,7 +555,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
         ops_test,
         "get",
         endpoint,
-        app=APP_NAME,
+        app=app,
         json_resp=False,
         user="monitor",
         user_password=secret["monitor-password"],
@@ -591,8 +590,8 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     # Relation data is updated
     # In both large and small deployments, we want to check if the relation data is updated
     # on the data node: "opensearch"
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
-    relation_data = await _get_scrape_job(ops_test, APP_NAME, leader_id, substrate)
+    leader_id = await get_leader_unit_id(ops_test, app)
+    relation_data = await _get_scrape_job(ops_test, app, leader_id, substrate)
 
     assert relation_data["basic_auth"]["username"] == "monitor"
     assert relation_data["basic_auth"]["password"] == new_password

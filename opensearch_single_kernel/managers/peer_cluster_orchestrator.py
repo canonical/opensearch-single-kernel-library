@@ -398,8 +398,10 @@ class PeerClusterOrchestratorManager(BaseManager):
                     message_suffix=message_suffix
                 )
             elif not self.state.secrets.get(Scope.APP, password_key(COS_USER)):
-                blocked_msg = PeerClusterErrorDataStatuses.COS_USER_PASSWORD_NOT_AVAILABLE.value.message.format(
-                    COS_USER=COS_USER
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.COS_USER_NOT_CREATED.value.message.format(
+                        COS_USER=COS_USER
+                    )
                 )
             else:
                 try:
