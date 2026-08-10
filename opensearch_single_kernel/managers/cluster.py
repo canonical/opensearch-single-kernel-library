@@ -963,8 +963,7 @@ class ClusterManager(BaseManager):
             )
 
         if (
-            (config_roles := self.state.config.get("roles"))
-            and isinstance(config_roles, str)
+            (config_roles := list(map(str.strip, self.state.config.get("roles", "").split(","))))
             and "cluster_manager" in config_roles
             and "voting_only" in config_roles
         ):
