@@ -46,4 +46,4 @@ docstring-code-line-length = "dynamic"
 [tool.poetry.dependencies]
 python = "^3.10"
 opensearch-charms-single-kernel = {path = "opensearch_single_kernel"}
-ops = "^3.8.0"
+ops = "^3.8.1"
