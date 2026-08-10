@@ -560,7 +560,11 @@ class ClusterManager(BaseManager):
 
                 # only change the roles of the nodes of the current cluster
                 if node.app.id == deployment_desc.app.id:
-                    roles = deployment_desc.config.roles
+                    if deployment_desc.config.roles == []:
+                        # If roles are empty use default ones
+                        roles = GENERATED_ROLES
+                    else:
+                        roles = deployment_desc.config.roles
                     temperature = deployment_desc.config.data_temperature
 
                 updated_nodes[node.name] = Node(
@@ -934,7 +938,7 @@ class ClusterManager(BaseManager):
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
-    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
+    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
         if not (deployment_desc := self.state.application.deployment_desc):
             return None
@@ -960,6 +964,13 @@ class ClusterManager(BaseManager):
                     params={"directive": deployment_desc.state.message},
                 )
             )
+
+        if (
+            (config_roles := list(map(str.strip, self.state.config.get("roles", "").split(","))))
+            and "cluster_manager" in config_roles
+            and "voting_only" in config_roles
+        ):
+            status_list.append(GeneralStatuses.CLUSTER_MANAGER_VOTING_ONLY_INVALID.value)
 
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

@@ -380,7 +380,6 @@ class PeerClusterEventsHandler(Object):
         data = PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.charm.state.secrets, data["data"]
         )
-        logger.debug(f"Checking Requirer errors with data: {data}")
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
             orchestrators, deployment_desc, data, event.relation.id
         )
@@ -422,7 +421,6 @@ class PeerClusterEventsHandler(Object):
         # let the charm know this is an already bootstrapped cluster
         self.charm.state.application.bootstrapped = True
         # store the security related settings in secrets, peer_data, disk
-        logger.debug("We received this peer cluster relation data: %s", data)
         if data.credentials.admin_tls:
             logger.debug("Admin TLS credentials received from peer cluster relation data.")
             self._set_security_conf(data)
