@@ -8,6 +8,12 @@ on:
           Use canonical/data-platform-workflows build_charm.yaml to build the charm(s)
         required: true
         type: string
+      run-on-all-bases:
+        description: |
+          Run the integration tests on all spread systems. If false, run only on ubuntu 24.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   collect-integration-tests:
@@ -29,6 +35,8 @@ jobs:
       - name: Collect spread jobs
         id: collect-jobs
         shell: python
+        env:
+          RUN_ON_ALL_BASES: ${{ inputs.run-on-all-bases }}
         run: |
           import json
           import pathlib
@@ -45,9 +53,12 @@ jobs:
               .split("\n")
           )
           jobs = []
+          run_on_all_bases = os.environ.get("RUN_ON_ALL_BASES", "false").lower() == "true"
           for job in spread_jobs:
               # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
               _, runner, task, variant = job.split(":")
+              if not run_on_all_bases and variant != "ubuntu24":
+                  continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
