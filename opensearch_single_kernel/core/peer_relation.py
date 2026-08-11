@@ -9,8 +9,7 @@ import json
 import logging
 from typing import Any
 
-from ops import ModelError
-from ops.model import Application, Relation, Unit
+from ops.model import Application, ModelError, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,

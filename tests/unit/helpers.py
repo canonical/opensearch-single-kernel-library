@@ -45,7 +45,10 @@ deployment_descriptions = {
     ),
     "cm-only": DeploymentDescription(
         config=PeerClusterConfig(
-            cluster_name="", init_hold=False, roles=["cluster-manager"], profile="production"
+            cluster_name="",
+            init_hold=False,
+            roles=["cluster-manager"],
+            profile="production",
         ),
         start=StartMode.WITH_PROVIDED_ROLES,
         pending_directives=[],
@@ -170,7 +173,10 @@ def mock_response_nodes(
     }
 
     responses.add(
-        method="GET", url=f"https://{host}:9200/_nodes", json=expected_response_nodes, status=200
+        method="GET",
+        url=f"https://{host}:9200/_nodes",
+        json=expected_response_nodes,
+        status=200,
     )
 
 
@@ -194,7 +200,13 @@ def mock_response_mynode(
                 "build_type": "tar",
                 "build_hash": "30dd870855093c9dca23fc6f8cfd5c0d7c83127d",
                 "total_indexing_buffer": 107374182,
-                "roles": ["cluster_manager", "coordinating_only", "data", "ingest", "ml"],
+                "roles": [
+                    "cluster_manager",
+                    "coordinating_only",
+                    "data",
+                    "ingest",
+                    "ml",
+                ],
                 "attributes": {
                     "shard_indexing_pressure_enabled": "true",
                     "app_id": "617e5f02-5be5-4e25-85f0-276b2347a5ad/opensearch",

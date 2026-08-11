@@ -156,7 +156,11 @@ async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model):
 
     result = requests.post(
         f"{hydra_url}/oauth2/token",
-        {"scope": "openid", "grant_type": "client_credentials", "audience": "opensearch"},
+        {
+            "scope": "openid",
+            "grant_type": "client_credentials",
+            "audience": "opensearch",
+        },
         auth=requests.auth.HTTPBasicAuth(oauth_client_id, oauth_client_secret),
         verify=False,
     )
@@ -196,7 +200,9 @@ async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
     opensearch_address = await get_leader_unit_ip(ops_test, "opensearch")
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.json().get("status") == 403, "no permissions error expected"
 
@@ -217,7 +223,9 @@ async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
     await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active")
 
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 200, "request expected to succeed with roles mapping"
 
@@ -268,9 +276,9 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
         headers={"Authorization": f"Bearer {oauth_access_token}"},
         verify=False,
     )
-    assert (
-        result.json().get("status") == 403
-    ), "no permissions error expected as admin role should be removed"
+    assert result.json().get("status") == 403, (
+        "no permissions error expected as admin role should be removed"
+    )
 
     # Ensure second data integrator role is configured
     result = requests.get(
@@ -303,8 +311,9 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model, substrate):
+async def test_setup_large_cluster(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate, charm_resources
+):
     """Replace the Opensearch application with a large deployment cluster."""
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
@@ -319,15 +328,21 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             series=series,
             config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager"} | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
             application_name=FAILOVER_APP,
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "cluster_manager",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
         ops_test.model.deploy(
             charm,
@@ -337,12 +352,16 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
             config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data"}
             | CONFIG_OPTS,
             trust=substrate == "k8s",
+            resources=charm_resources,
         ),
     )
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, "certificates")
+        if substrate == "k8s":
+            await ops_test.model.integrate(app, "self-signed-certificates")
+        else:
+            await ops_test.model.integrate(app, "certificates")
 
     # integrate large deployment cluster
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
@@ -363,11 +382,15 @@ async def test_setup_large_cluster(ops_test: OpsTest, charm, series, k8s_model: 
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_model: Model):
+async def test_oauth_relation_restricted(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
-    await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
+    if substrate == "k8s":
+        await ops_test.model.integrate(f"{DATA_APP}:oauth", "hydra")
+    else:
+        await ops_test.model.integrate(f"{DATA_APP}:oauth", "oauth")
     await wait_until(
         ops_test,
         apps=[DATA_APP],
@@ -381,13 +404,18 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_m
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 401, "`Unauthorized` error expected"
     logger.info("Access with OAuth Token failed as expected")
 
     logger.info(f"Remove relation with {DATA_APP}")
-    remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
+    if substrate == "k8s":
+        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth hydra"
+    else:
+        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
     await ops_test.juju(*remove_relation_cmd.split(), check=True)
 
     await wait_until(
@@ -398,11 +426,15 @@ async def test_oauth_relation_restricted(ops_test: OpsTest, charm, series, k8s_m
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9182")
-async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, k8s_model: Model):
+async def test_oauth_access_large_cluster(
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+):
     """Relate to main orchestrator and verify access with OAuth."""
     logger.info(f"Integrating {MAIN_APP} with oauth")
-    await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
+    if substrate == "k8s":
+        await ops_test.model.integrate(f"{MAIN_APP}:oauth", "hydra")
+    else:
+        await ops_test.model.integrate(f"{MAIN_APP}:oauth", "oauth")
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
@@ -422,11 +454,13 @@ async def test_oauth_access_large_cluster(ops_test: OpsTest, charm, series, k8s_
     config_with_roles = original_opensearch_config.copy()
     config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
     await ops_test.model.applications[DATA_APP].set_config(config_with_roles)
-    await ops_test.model.wait_for_idle(status="active")
+    await ops_test.model.wait_for_idle(apps=[MAIN_APP, DATA_APP, FAILOVER_APP], status="active")
 
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)
     opensearch_url = f"https://{opensearch_address}:9200/_cat/indices"
     result = requests.get(
-        opensearch_url, headers={"Authorization": f"Bearer {oauth_access_token}"}, verify=False
+        opensearch_url,
+        headers={"Authorization": f"Bearer {oauth_access_token}"},
+        verify=False,
     )
     assert result.status_code == 200, "request expected to succeed with roles mapping"

@@ -6,6 +6,8 @@ updates:
       interval: "weekly"
       day: "sunday"
       time: "06:00"
+    cooldown:
+      default-days: 3
     groups:
       all-non-major:
         update-types:

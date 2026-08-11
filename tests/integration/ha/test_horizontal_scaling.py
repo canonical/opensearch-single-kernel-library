@@ -348,9 +348,9 @@ async def test_safe_scale_down_remove_leaders(
     assert len(units_with_p_shards) == 1
 
     for unit_id in units_with_p_shards:
-        assert (
-            unit_id != unit_with_primary_shard
-        ), "Primary shard still assigned to destroyed unit."
+        assert unit_id != unit_with_primary_shard, (
+            "Primary shard still assigned to destroyed unit."
+        )
 
     # check that writes are still going after the removal / p_shard reelection
     time.sleep(3)

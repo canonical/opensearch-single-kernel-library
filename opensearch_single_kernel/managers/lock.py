@@ -178,8 +178,7 @@ class LockManager(PeerLockManager):
                 or (
                     # in case all data-nodes are powered down after being previously started
                     # ignore the lock to get a data-node started, as it holds security index
-                    bool(self.state.server.started)
-                    and not self.workload.is_service_started()
+                    bool(self.state.server.started) and not self.workload.is_service_started()
                 )
             )
             # TODO: Handle large deployment cases

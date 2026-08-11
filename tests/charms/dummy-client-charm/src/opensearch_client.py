@@ -15,6 +15,7 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote, urlsplit
 
 import requests
+
 from models import CA_CERTS_PATH, ClientHost
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,10 @@ class OpenSearchClient:
     def _request(self, method: str, *parts: str | int, **kwargs: Any) -> requests.Response:
         """Send a request to OpenSearch and raise for unsuccessful responses."""
         url = self._resolve_url(str(parts[0])) if len(parts) == 1 else self._url(*parts)
-        request_kwargs: dict[str, Any] = {"timeout": self._timeout, "verify": self._verify}
+        request_kwargs: dict[str, Any] = {
+            "timeout": self._timeout,
+            "verify": self._verify,
+        }
         request_kwargs.update(kwargs)
         response = self._session.request(method.upper(), url, **request_kwargs)
         return response

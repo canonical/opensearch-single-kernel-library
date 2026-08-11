@@ -151,7 +151,12 @@ class ContinuousWrites:
             client.indices.create(
                 index=ContinuousWrites.INDEX_NAME,
                 body={
-                    "settings": {"index": {"number_of_shards": 2, "auto_expand_replicas": "1-all"}}
+                    "settings": {
+                        "index": {
+                            "number_of_shards": 2,
+                            "auto_expand_replicas": "1-all",
+                        }
+                    }
                 },
                 wait_for_active_shards="all",
             )
@@ -166,7 +171,12 @@ class ContinuousWrites:
             client.indices.create(
                 index=ContinuousWrites.INDEX_NAME,
                 body={
-                    "settings": {"index": {"number_of_shards": 1, "auto_expand_replicas": "0-all"}}
+                    "settings": {
+                        "index": {
+                            "number_of_shards": 1,
+                            "auto_expand_replicas": "0-all",
+                        }
+                    }
                 },
                 wait_for_active_shards="all",
             )

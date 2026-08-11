@@ -271,6 +271,10 @@ OAUTH_RELATION = "oauth"
 STATUS_PEERS_RELATION = "status-peers"
 SMTP_RELATION = "smtp"
 UPGRADE_RELATION = "upgrade-version-a"
+PROMETHEUS_K8S_RELATION = "metrics-endpoint"
+LOKI_K8S_RELATION = "logging"
+GRAFANA_K8S_RELATION = "grafana-dashboard"
+COS_RELATION = "cos-agent"
 
 
 # Paths

@@ -46,7 +46,10 @@ async def create_dummy_indexes(
             f"https://{unit_ip}:9200/index_{index_id}",
             {
                 "settings": {
-                    "index": {"number_of_shards": p_shards, "number_of_replicas": r_shards}
+                    "index": {
+                        "number_of_shards": p_shards,
+                        "number_of_replicas": r_shards,
+                    }
                 }
             },
             app=app,
@@ -97,7 +100,11 @@ async def delete_dummy_indexes(ops_test: OpsTest, app: str, unit_ip: str, count:
     stop=stop_after_attempt(15),
 )
 async def create_dummy_docs(
-    ops_test: OpsTest, app: str, unit_ip: str, count: int = 5, substrate: Substrate = "vm"
+    ops_test: OpsTest,
+    app: str,
+    unit_ip: str,
+    count: int = 5,
+    substrate: Substrate = "vm",
 ) -> None:
     """Store documents in the dummy indexes."""
     if substrate == "k8s":
@@ -164,7 +171,10 @@ async def create_index(
         "settings": {"index": {"number_of_shards": p_shards, "number_of_replicas": r_shards}}
     }
     if extra_index_settings:
-        content["settings"]["index"] = {**content["settings"]["index"], **extra_index_settings}
+        content["settings"]["index"] = {
+            **content["settings"]["index"],
+            **extra_index_settings,
+        }
     if extra_mappings:
         content["mappings"] = extra_mappings
     await http_request(
@@ -277,7 +287,11 @@ async def index_doc(
         doc = default_doc(index_name, doc_id)
 
     await http_request(
-        ops_test, "PUT", f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}", payload=doc, app=app
+        ops_test,
+        "PUT",
+        f"https://{unit_ip}:9200/{index_name}/_doc/{doc_id}",
+        payload=doc,
+        app=app,
     )
 
     # a refresh makes the indexed data available for search, runs by default every 30 sec,

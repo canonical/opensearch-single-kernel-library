@@ -617,7 +617,7 @@ class GcsRelData(Model):
         return self
 
     @field_validator(GCS_CREDENTIALS, mode="before", check_fields=False)
-    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805):
+    def ensure_secret_content(cls, conf: dict[str, str] | GcsRelDataCredentials):  # noqa: N805
         """Ensure the secret content is set."""
         if not conf:
             return None

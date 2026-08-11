@@ -150,9 +150,9 @@ async def assert_version_units(ops_test: OpsTest, app: str, expected_version: st
 
     units = [f"{app}/{unit.id}" for unit in await get_application_units(ops_test, app)]
     versions = [get_version_on_unit(unit, ops_test.model.info.name, substrate) for unit in units]
-    assert all(
-        version == expected_version for version in versions
-    ), f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
+    assert all(version == expected_version for version in versions), (
+        f"Expected {expected_version} on all units, found versions: {list(zip(units, versions))}"
+    )
     logger.info("All units in '%s' running version %s", app, expected_version)
 
 
@@ -257,7 +257,11 @@ async def assert_upgrade_to_local(
         logger.info("Refreshing '%s' local charm", app)
         if substrate == "k8s":
             refresh(
-                ops_test, app, path=charm, config=CONFIG_OPTS | config, resources=charm_resources
+                ops_test,
+                app,
+                path=charm,
+                config=CONFIG_OPTS | config,
+                resources=charm_resources,
             )
         else:
             refresh(ops_test, app, path=charm, config=CONFIG_OPTS | config)
@@ -304,6 +308,9 @@ async def assert_upgrade_to_local(
             ops_test,
             apps=[app],
             timeout=TIMEOUT,
+            wait_for_exact_units={
+                app: len(units),
+            },
             idle_period=IDLE_PERIOD,
         )
         logger.info("Upgrade of '%s' completed", app)
@@ -447,7 +454,8 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
 
         cluster_health_resp = await cluster_health(ops_test, unit_ip)
         logger.info(
-            "Cluster health response after removing indices: %s", cluster_health_resp["status"]
+            "Cluster health response after removing indices: %s",
+            cluster_health_resp["status"],
         )
     # add unit
     logger.info("Adding new unit")
@@ -515,6 +523,6 @@ async def recover_from_rollback(ops_test: OpsTest, app: str, expected_cluster_si
 
     new_node_name = [unit.name for unit in remaining_units if unit.id == new_unit_id][0]
     assert new_node_name in node_names, f"Replacement node '{new_node_name}' not found in cluster."
-    assert (
-        len(nodes) == expected_cluster_size
-    ), f"Expected cluster size of {expected_cluster_size} but found {len(nodes)}"
+    assert len(nodes) == expected_cluster_size, (
+        f"Expected cluster size of {expected_cluster_size} but found {len(nodes)}"
+    )
