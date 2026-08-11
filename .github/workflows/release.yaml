@@ -5,7 +5,7 @@ name: Release to PyPI
 on:
   push:
     branches:
-      - 2/edge
+      - fix/ci-secrets
 
 concurrency:
   # Prevent race conditions (if multiple commits have been pushed since the last release)

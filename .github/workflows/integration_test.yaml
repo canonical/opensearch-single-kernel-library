@@ -154,6 +154,24 @@ jobs:
           EOT
 
           sudo sysctl -p
+      - name: Test environment
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
+          GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
+          GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          # Make sure environment variables are set correctly
+          if [ -z "$AWS_ACCESS_KEY" ]; then echo "AWS_ACCESS_KEY is not set"; exit 1; fi
+          if [ -z "$AWS_SECRET_KEY" ]; then echo "AWS_SECRET_KEY is not set"; exit 1; fi
+          if [ -z "$AZURE_STORAGE_ACCOUNT" ]; then echo "AZURE_STORAGE_ACCOUNT is not set"; exit 1; fi
+          if [ -z "$AZURE_SECRET_KEY" ]; then echo "AZURE_SECRET_KEY is not set"; exit 1; fi
+          if [ -z "$GCP_ACCESS_KEY" ]; then echo "GCP_ACCESS_KEY is not set"; exit 1; fi
+          if [ -z "$GCP_SECRET_KEY" ]; then echo "GCP_SECRET_KEY is not set"; exit 1; fi
+          if [ -z "$GCP_SERVICE_ACCOUNT" ]; then echo "GCP_SERVICE_ACCOUNT is not set"; exit 1; fi
 
       - name: Run spread job
         timeout-minutes: 180

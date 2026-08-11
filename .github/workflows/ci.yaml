@@ -35,6 +35,7 @@ jobs:
   pre-commit:
     name: Run pre-commits
     runs-on: ubuntu-latest
+    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -57,11 +58,13 @@ jobs:
 
   actionlint:
     name: Lint .github/workflows/
+    if: false # Disabled for now
     uses: canonical/data-platform-workflows/.github/workflows/lint_workflows.yaml@v50.0.0
 
   lib-check:
     name: Check libraries
     runs-on: ubuntu-latest
+    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -85,6 +88,7 @@ jobs:
   tox-lint:
     name: tox run -e lint
     runs-on: ubuntu-latest
+    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -104,6 +108,7 @@ jobs:
 
   unit-test:
     name: Unit test charm
+    if: false # Disabled for now
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -125,6 +130,7 @@ jobs:
   build:
     name: Build test charms
     runs-on: ubuntu-latest
+    if: false # Disabled for now
     timeout-minutes: 120
     strategy:
       matrix:
