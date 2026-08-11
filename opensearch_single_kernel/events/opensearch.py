@@ -595,9 +595,6 @@ class OpenSearchEventsHandler(Object):
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
-        if not self.charm.unit.is_leader():
-            return
-
         if not self.charm.state.application.is_admin_user_initialized:
             self.charm.status_handler.set_running_status(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,

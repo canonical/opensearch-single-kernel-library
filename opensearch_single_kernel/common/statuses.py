@@ -287,7 +287,7 @@ class PeerClusterStatuses(Enum):
     INVALID_CM_AND_VOTING_ONLY_ROLES = StatusObject(
         status="blocked",
         message="cluster_manager and voting_only roles cannot be both set on the same node.",
-        short_message="Invalid CM+voting roles",
+        short_message="Invalid roles combination",
         check="Config roles exclude invalid cluster_manager + voting_only combo.",
         action="Remove either `cluster_manager` or `voting_only` from roles.",
     )
@@ -378,7 +378,7 @@ class PeerClusterErrorDataStatuses(Enum):
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
         status="waiting",
         message="TLS not fully configured {message_suffix}.",
-        short_message="TLS incomplete (remote)",
+        short_message="TLS not fully configured (remote)",
         check="TLS readiness on related orchestrator.",
     )
     SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
@@ -421,7 +421,7 @@ class PeerClusterErrorDataStatuses(Enum):
         status="blocked",
         message="Main orchestrator cannot be a requirer",
         check="Main orchestrator is not on peer-cluster requirer side.",
-        action="Invert peer-cluster roles so main is the provider.",
+        action="Remove relation with Main orchestrator on requirer side.",
     )
     CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER = StatusObject(
         status="blocked",

@@ -51,15 +51,6 @@ class InternalUsersManager(BaseManager):
         super().__init__(state, workload, "internal_users_manager")
         self.yaml_setter = YamlConfigSetter(self.workload)
 
-    @override
-    def get_statuses(
-        self, scope: AdvancedStatusesScope, recompute: bool = False
-    ) -> list[StatusObject]:
-        """Return cached running statuses only."""
-        return running_statuses(self.state.statuses, scope, self.name) or [
-            GeneralStatuses.ACTIVE_IDLE.value
-        ]
-
     def put_or_update_internal_user_leader(  # noqa: C901
         self,
         user: str,
