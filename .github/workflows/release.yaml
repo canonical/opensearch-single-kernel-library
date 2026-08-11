@@ -5,7 +5,7 @@ name: Release to PyPI
 on:
   push:
     branches:
-      - fix/ci-secrets
+      - 2/edge
 
 concurrency:
   # Prevent race conditions (if multiple commits have been pushed since the last release)
@@ -21,8 +21,6 @@ jobs:
       AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
       AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
       AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
-      GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
-      GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       pull-requests: write # Needed by lib-check job

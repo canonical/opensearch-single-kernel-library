@@ -21,10 +21,6 @@ on:
         required: true
       AZURE_SECRET_KEY:
         required: true
-      GCP_ACCESS_KEY:
-        required: true
-      GCP_SECRET_KEY:
-        required: true
       GCP_SERVICE_ACCOUNT:
         required: true
 
@@ -35,7 +31,6 @@ jobs:
   pre-commit:
     name: Run pre-commits
     runs-on: ubuntu-latest
-    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -58,13 +53,11 @@ jobs:
 
   actionlint:
     name: Lint .github/workflows/
-    if: false # Disabled for now
     uses: canonical/data-platform-workflows/.github/workflows/lint_workflows.yaml@v50.0.0
 
   lib-check:
     name: Check libraries
     runs-on: ubuntu-latest
-    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -88,7 +81,6 @@ jobs:
   tox-lint:
     name: tox run -e lint
     runs-on: ubuntu-latest
-    if: false # Disabled for now
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -108,7 +100,6 @@ jobs:
 
   unit-test:
     name: Unit test charm
-    if: false # Disabled for now
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -130,7 +121,6 @@ jobs:
   build:
     name: Build test charms
     runs-on: ubuntu-latest
-    if: false # Disabled for now
     timeout-minutes: 120
     strategy:
       matrix:
@@ -179,6 +169,7 @@ jobs:
           sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- bash scripts/build_lib_for_integration.sh ${{ matrix.path }}
         env:
           CI_CACHE: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Compute path in artifact
         id: path-in-artifact
         run: compute-path-in-artifact '${{ matrix.path }}'
@@ -194,6 +185,8 @@ jobs:
   integration-test:
     name: Integration test charm
     uses: ./.github/workflows/integration_test.yaml
+    needs:
+      - build
     with:
       artifact-prefix: packed-charm
       run-on-all-bases: ${{ github.event_name == 'schedule' }}
@@ -202,8 +195,6 @@ jobs:
       AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
       AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
       AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
-      GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
-      GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       contents: write # Needed for Allure Report
