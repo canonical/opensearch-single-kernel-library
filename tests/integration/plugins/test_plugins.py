@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 
 import pytest
 from pytest_operator.plugin import OpsTest
@@ -792,9 +792,9 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
     logger.info("KNN training started.")
     # wait for training to finish -> fails with an exception otherwise
-    assert await is_knn_training_complete(
-        ops_test, app, leader_unit_ip, model_name
-    ), "KNN training did not complete."
+    assert await is_knn_training_complete(ops_test, app, leader_unit_ip, model_name), (
+        "KNN training did not complete."
+    )
 
     logger.info("Creating target index and bulk inserting data for KNN search...")
     # Creates the target index, to use the model
@@ -1298,9 +1298,9 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
     )
 
     logger.info(f"Notifications test response: {response}")
-    assert (
-        "Failed to send webhook" in response["error"]["reason"]
-    ), "Did not attempt to send webhook notification"
+    assert "Failed to send webhook" in response["error"]["reason"], (
+        "Did not attempt to send webhook notification"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1549,9 +1549,9 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     }
     response = await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_search", payload)
     logger.info(f"LTR search response: {response}")
-    assert (
-        len(response.get("hits", {}).get("hits", [])) == 1
-    ), "Scoring with LTR did not yield a result"
+    assert len(response.get("hits", {}).get("hits", [])) == 1, (
+        "Scoring with LTR did not yield a result"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
 
 
@@ -1697,12 +1697,12 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
 
     logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
-    assert (
-        zstd_size > 0 and default_size > 0
-    ), "Index store sizes should be positive after bulk indexing"
-    assert (
-        zstd_size <= default_size
-    ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    assert zstd_size > 0 and default_size > 0, (
+        "Index store sizes should be positive after bulk indexing"
+    )
+    assert zstd_size <= default_size, (
+        f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
 
@@ -1969,9 +1969,9 @@ async def test_smtp_notification_statuses(
     )
     logger.info("OpenSearch app blocked: SMTP relation has no data.")
     detail = await _status_detail_blob(ops_test, APP_NAME)
-    assert (
-        "no data" in detail.lower() or str(relation_id) in detail
-    ), f"status-detail missing SMTP_NO_RELATION_DATA: {detail}"
+    assert "no data" in detail.lower() or str(relation_id) in detail, (
+        f"status-detail missing SMTP_NO_RELATION_DATA: {detail}"
+    )
 
     # --- waiting for recipients (valid integrator config, no recipients) ---
     # Do not set smtp_sender to "" — integrator rejects it as invalid configuration
@@ -2009,12 +2009,12 @@ async def test_smtp_notification_statuses(
     logger.info("OpenSearch app reports waiting for SMTP recipients.")
 
     detail = await _status_detail_blob(ops_test, APP_NAME)
-    assert (
-        "notifications_manager" in detail or "waiting for recipients" in detail.lower()
-    ), f"status-detail did not surface notification waiting status: {detail}"
-    assert (
-        "waiting for recipients" in detail.lower() or str(relation_id) in detail
-    ), f"status-detail missing recipients wait / relation id: {detail}"
+    assert "notifications_manager" in detail or "waiting for recipients" in detail.lower(), (
+        f"status-detail did not surface notification waiting status: {detail}"
+    )
+    assert "waiting for recipients" in detail.lower() or str(relation_id) in detail, (
+        f"status-detail missing recipients wait / relation id: {detail}"
+    )
 
     # --- full config: recover to active ---
     await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].set_config(
@@ -2076,9 +2076,9 @@ async def test_smtp_relation_invalid_status_on_non_main(
     logger.info("Data app blocked: SMTP must be related to main-orchestrator.")
 
     detail = await _status_detail_blob(ops_test, APP_NAME)
-    assert (
-        "main-orchestrator" in detail.lower() or "notifications_manager" in detail
-    ), f"status-detail did not surface SMTP_RELATION_INVALID: {detail}"
+    assert "main-orchestrator" in detail.lower() or "notifications_manager" in detail, (
+        f"status-detail did not surface SMTP_RELATION_INVALID: {detail}"
+    )
 
     await _remove_smtp_relation_if_present(ops_test, APP_NAME)
     await _wait_for_units(ops_test, deploy_type)

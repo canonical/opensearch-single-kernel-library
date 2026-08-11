@@ -6,10 +6,6 @@
 
 import logging
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from overrides import override
-
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_ROLE,
@@ -24,9 +20,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
-from opensearch_single_kernel.common.statuses import (
-    GeneralStatuses,
-)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -35,7 +28,6 @@ from opensearch_single_kernel.utils.secrets import (
     hash_key,
     password_key,
 )
-from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)

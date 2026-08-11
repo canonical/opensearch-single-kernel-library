@@ -31,9 +31,9 @@ def test_long_messages_have_short_message():
             if not status.message or len(status.message) <= 40:
                 continue
             assert status.short_message, f"{enum_cls.__name__}.{member.name}: short_message"
-            assert (
-                len(status.short_message) <= 40
-            ), f"{enum_cls.__name__}.{member.name}: short_message length"
+            assert len(status.short_message) <= 40, (
+                f"{enum_cls.__name__}.{member.name}: short_message length"
+            )
 
 
 def test_blocked_statuses_have_check_and_action():
