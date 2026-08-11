@@ -21,7 +21,9 @@ async def failover_model(
 ) -> AsyncGenerator[Model, Any]:
     # deploy the failover model
     failover_model = await ops_test.track_model(
-        "failover", model_name=f"failover-{ops_test.model_name}", keep=ops_test.ModelKeep.IF_EXISTS
+        "failover",
+        model_name=f"failover-{ops_test.model_name}",
+        keep=ops_test.ModelKeep.IF_EXISTS,
     )
     await failover_model.set_config(MODEL_CONFIG)
     logger.info(f"Created model {failover_model.name}")
@@ -36,7 +38,9 @@ async def data_model(
 ) -> AsyncGenerator[Model, Any]:
     # deploy the data model
     data_model = await ops_test.track_model(
-        "data", model_name=f"data-{ops_test.model_name}", keep=ops_test.ModelKeep.IF_EXISTS
+        "data",
+        model_name=f"data-{ops_test.model_name}",
+        keep=ops_test.ModelKeep.IF_EXISTS,
     )
     await data_model.set_config(MODEL_CONFIG)
     logger.info(f"Created model {data_model.name}")

@@ -44,6 +44,9 @@ from ..plugins.helpers import (
     poll_until,
     run_knn_training,
 )
+from ..relations.helpers import (
+    get_application_relation_data,
+)
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,12 @@ logger = logging.getLogger(__name__)
 COS_APP_NAME = "grafana-agent"
 COS_CHANNEL = "1/stable"
 COS_RELATION_NAME = "cos-agent"
+PROMETHEUS_APP = "prometheus-k8s"
+PROMETHEUS_CHANNEL = "2/stable"
+LOKI_APP = "loki-k8s"
+LOKI_CHANNEL = "2/stable"
+GRAFANA_APP = "grafana-k8s"
+GRAFANA_CHANNEL = "2/stable"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
 MAIN_ORCHESTRATOR_NAME = "main"
 FAILOVER_ORCHESTRATOR_NAME = "failover"
@@ -92,6 +101,7 @@ async def _wait_for_units(
     ops_test: OpsTest,
     deployment_type: str,
     wait_for_cos: bool = False,
+    substrate: str = "",
 ) -> None:
     """Wait for all units to be active.
 
@@ -106,14 +116,7 @@ async def _wait_for_units(
             idle_period=IDLE_PERIOD,
         )
         if wait_for_cos:
-            await wait_until(
-                ops_test,
-                apps=[COS_APP_NAME],
-                apps_statuses={COS_APP_NAME: [CosBlockedStatus]},
-                units_statuses={COS_APP_NAME: [EmptyBlockedStatus, CosBlockedStatus]},
-                timeout=1800,
-                idle_period=IDLE_PERIOD,
-            )
+            await _wait_for_cos(ops_test, substrate)
         return
     await wait_until(
         ops_test,
@@ -133,6 +136,19 @@ async def _wait_for_units(
         idle_period=IDLE_PERIOD,
     )
     if wait_for_cos:
+        await _wait_for_cos(ops_test, substrate)
+
+
+async def _wait_for_cos(ops_test: OpsTest, substrate: str) -> None:
+    """Wait for COS apps to be ready, depending on the substrate."""
+    if substrate == "k8s":
+        await wait_until(
+            ops_test,
+            apps=[PROMETHEUS_APP, LOKI_APP, GRAFANA_APP],
+            timeout=1800,
+            idle_period=IDLE_PERIOD,
+        )
+    else:
         await wait_until(
             ops_test,
             apps=[COS_APP_NAME],
@@ -141,6 +157,80 @@ async def _wait_for_units(
             timeout=1800,
             idle_period=IDLE_PERIOD,
         )
+
+
+async def _deploy_cos(
+    ops_test: OpsTest,
+    series: str,
+    substrate: str,
+    apps: list[str],
+) -> None:
+    """Deploy and integrate COS apps for the given substrate.
+
+    On VM, a single grafana-agent is deployed and integrated via cos-agent.
+    On K8s, prometheus-k8s, loki-k8s, and grafana-k8s are deployed and
+    integrated via metrics-endpoint, logging, and grafana-dashboard.
+    """
+    if substrate == "k8s":
+        await asyncio.gather(
+            ops_test.model.deploy(PROMETHEUS_APP, channel=PROMETHEUS_CHANNEL, trust=True),
+            ops_test.model.deploy(LOKI_APP, channel=LOKI_CHANNEL, trust=True),
+            ops_test.model.deploy(GRAFANA_APP, channel=GRAFANA_CHANNEL, trust=True),
+        )
+        for app in apps:
+            await ops_test.model.integrate(
+                f"{app}:metrics-endpoint", f"{PROMETHEUS_APP}:metrics-endpoint"
+            )
+            await ops_test.model.integrate(f"{app}:logging", f"{LOKI_APP}:logging")
+            await ops_test.model.integrate(
+                f"{app}:grafana-dashboard", f"{GRAFANA_APP}:grafana-dashboard"
+            )
+    else:
+        await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series)
+        for app in apps:
+            await ops_test.model.integrate(app, COS_APP_NAME)
+
+
+async def _get_scrape_job(
+    ops_test: OpsTest,
+    app: str,
+    leader_id: int,
+    substrate: str,
+) -> dict:
+    """Read the first scrape job from the COS relation for the given app.
+
+    On VM, this reads the cos-agent unit relation data (the "config" key).
+    On K8s, this reads the metrics-endpoint application relation data
+    (the "scrape_jobs" key).
+    """
+    leader_name = f"{app}/{leader_id}"
+    if substrate == "k8s":
+        relation_id = _get_relation_id(
+            ops_test.model,
+            f"{app}:metrics-endpoint",
+            f"{PROMETHEUS_APP}:metrics-endpoint",
+        )
+        raw = await get_application_relation_data(
+            ops_test,
+            f"{PROMETHEUS_APP}/0",
+            "metrics-endpoint",
+            "scrape_jobs",
+            relation_id=relation_id,
+        )
+        jobs = json.loads(raw) if isinstance(raw, str) else raw
+        return jobs[0]
+
+    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
+    relation_data = await get_unit_relation_data(
+        ops_test,
+        f"{COS_APP_NAME}/{cos_leader_id}",
+        leader_name,
+        COS_RELATION_NAME,
+        "config",
+    )
+    if not isinstance(relation_data, dict):
+        relation_data = json.loads(relation_data)
+    return relation_data["metrics_scrape_jobs"][0]
 
 
 def _get_relation_id(model, endpoint1: str, endpoint2: str) -> int:
@@ -331,45 +421,32 @@ async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str
     assert len(response_str.split("\n")) > 500
 
 
-# TODO enable for k8s when cos is merged
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_small_deployments_prometheus_exporter_cos_relation(
-    ops_test, series, deploy_type: str
+    ops_test, series, deploy_type: str, substrate
 ):
-    await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series)
-    await ops_test.model.integrate(APP_NAME, COS_APP_NAME)
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    await _deploy_cos(ops_test, series, substrate, [APP_NAME])
+    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True, substrate=substrate)
 
-    # Check that the correct settings were successfully communicated to grafana-agent
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
-    cos_leader_name = f"{COS_APP_NAME}/{cos_leader_id}"
     leader_id = await get_leader_unit_id(ops_test, APP_NAME)
-    leader_name = f"{APP_NAME}/{leader_id}"
-    relation_data = await get_unit_relation_data(
-        ops_test, cos_leader_name, leader_name, COS_RELATION_NAME, "config"
-    )
-    if not isinstance(relation_data, dict):
-        relation_data = json.loads(relation_data)
-    relation_data = relation_data["metrics_scrape_jobs"][0]
+    relation_data = await _get_scrape_job(ops_test, APP_NAME, leader_id, substrate)
     secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
     assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
-
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
-    assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
     assert relation_data["scheme"] == "https"
+    if substrate != "k8s":
+        admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
+        assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
 
 
 # TODO add when LD is on k8s
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-@pytest.mark.skip_if_substrate("k8s")
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, deploy_type: str
+    ops_test: OpsTest, charm, series, deploy_type: str, charm_resources, substrate
 ) -> None:
     """Build and deploy a large deployment for OpenSearch."""
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -402,6 +479,8 @@ async def test_large_deployment_build_and_deploy(
             num_units=1,
             series=series,
             config=main_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -409,6 +488,8 @@ async def test_large_deployment_build_and_deploy(
             num_units=2,
             series=series,
             config=failover_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
+            trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
             charm,
@@ -416,6 +497,8 @@ async def test_large_deployment_build_and_deploy(
             num_units=1,
             series=series,
             config=data_hot_conf | CONFIG_OPTS,
+            resources=charm_resources,
+            trust=substrate == "k8s",
         ),
     )
 
@@ -437,48 +520,34 @@ async def test_large_deployment_build_and_deploy(
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s", reason="https://warthogs.atlassian.net/browse/DPE-9402")
 async def test_large_deployment_prometheus_exporter_cos_relation(
-    ops_test, series, deploy_type: str
+    ops_test, series, deploy_type: str, substrate
 ):
-    # Check that the correct settings were successfully communicated to grafana-agent
-    (await ops_test.model.deploy(COS_APP_NAME, channel=COS_CHANNEL, series=series),)
-    await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, COS_APP_NAME)
-    await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, COS_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, COS_APP_NAME)
-
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    await _deploy_cos(
+        ops_test,
+        series,
+        substrate,
+        [FAILOVER_ORCHESTRATOR_NAME, MAIN_ORCHESTRATOR_NAME, APP_NAME],
+    )
+    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True, substrate=substrate)
 
     leader_id = await get_leader_unit_id(ops_test, APP_NAME)
-    leader_name = f"{APP_NAME}/{leader_id}"
-
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
-    relation_data = await get_unit_relation_data(
-        ops_test,
-        f"{COS_APP_NAME}/{cos_leader_id}",
-        leader_name,
-        COS_RELATION_NAME,
-        "config",
-    )
-    if not isinstance(relation_data, dict):
-        relation_data = json.loads(relation_data)
-    relation_data = relation_data["metrics_scrape_jobs"][0]
+    relation_data = await _get_scrape_job(ops_test, APP_NAME, leader_id, substrate)
     secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
     assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
-
-    admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
-    assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
     assert relation_data["scheme"] == "https"
+    if substrate != "k8s":
+        admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
+        assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
 
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy_type: str):
-    if substrate == "k8s" and deploy_type == "large_deployment":
-        pytest.skip("Large deployment is not yet supported on k8s substrate.")
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
+    app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
+    leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
     endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
 
     secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
@@ -486,7 +555,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
         ops_test,
         "get",
         endpoint,
-        app=APP_NAME,
+        app=app,
         json_resp=False,
         user="monitor",
         user_password=secret["monitor-password"],
@@ -499,8 +568,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9402")
-async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str):
+async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str, substrate):
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
 
@@ -508,7 +576,7 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     result1 = await run_action(
         ops_test, leader_id, "set-password", {"username": "monitor"}, app=app
     )
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True)
+    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True, substrate=substrate)
 
     new_password = result1.response.get("monitor-password")
     # Now, we compare the change in the action above with the opensearch's nodes.
@@ -522,24 +590,11 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     # Relation data is updated
     # In both large and small deployments, we want to check if the relation data is updated
     # on the data node: "opensearch"
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
-    leader_name = f"{APP_NAME}/{leader_id}"
+    leader_id = await get_leader_unit_id(ops_test, app)
+    relation_data = await _get_scrape_job(ops_test, app, leader_id, substrate)
 
-    # We're not sure which grafana-agent is sitting with APP_NAME in large deployments
-    cos_leader_id = await get_leader_unit_id(ops_test, COS_APP_NAME)
-    relation_data = await get_unit_relation_data(
-        ops_test,
-        f"{COS_APP_NAME}/{cos_leader_id}",
-        leader_name,
-        COS_RELATION_NAME,
-        "config",
-    )
-    if not isinstance(relation_data, dict):
-        relation_data = json.loads(relation_data)
-    relation_data = relation_data["metrics_scrape_jobs"][0]["basic_auth"]
-
-    assert relation_data["username"] == "monitor"
-    assert relation_data["password"] == new_password
+    assert relation_data["basic_auth"]["username"] == "monitor"
+    assert relation_data["basic_auth"]["password"] == new_password
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -663,7 +718,13 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     model_name = "test_end_to_end_with_ivf_faiss_model"
     logger.info("Creating index and bulk inserting data for KNN training...")
     await create_index_and_bulk_insert(
-        ops_test, app, leader_unit_ip, index_name, len(units) - 1, vector_name, substrate=substrate
+        ops_test,
+        app,
+        leader_unit_ip,
+        index_name,
+        len(units) - 1,
+        vector_name,
+        substrate=substrate,
     )
     logger.info("Starting KNN training...")
     await run_knn_training(
@@ -685,9 +746,9 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
     logger.info("KNN training started.")
     # wait for training to finish -> fails with an exception otherwise
-    assert await is_knn_training_complete(
-        ops_test, app, leader_unit_ip, model_name
-    ), "KNN training did not complete."
+    assert await is_knn_training_complete(ops_test, app, leader_unit_ip, model_name), (
+        "KNN training did not complete."
+    )
 
     logger.info("Creating target index and bulk inserting data for KNN search...")
     # Creates the target index, to use the model
@@ -729,9 +790,10 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip(reason="https://warthogs.atlassian.net/browse/DPE-9258")
-async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str) -> None:
+async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
+    if substrate == "k8s":
+        pytest.skip("OpenSearch Dashboards is not yet available on k8s")
     # Deploy OpenSearch Dashboards
     await ops_test.model.deploy(
         DASHBOARDS_APP_NAME,
@@ -1190,9 +1252,9 @@ async def test_notifications_plugin(ops_test: OpsTest, deploy_type: str) -> None
     )
 
     logger.info(f"Notifications test response: {response}")
-    assert (
-        "Failed to send webhook" in response["error"]["reason"]
-    ), "Did not attempt to send webhook notification"
+    assert "Failed to send webhook" in response["error"]["reason"], (
+        "Did not attempt to send webhook notification"
+    )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1441,9 +1503,9 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     }
     response = await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_search", payload)
     logger.info(f"LTR search response: {response}")
-    assert (
-        len(response.get("hits", {}).get("hits", [])) == 1
-    ), "Scoring with LTR did not yield a result"
+    assert len(response.get("hits", {}).get("hits", [])) == 1, (
+        "Scoring with LTR did not yield a result"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, TEST_INDEX)
 
 
@@ -1589,12 +1651,12 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
 
     logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
-    assert (
-        zstd_size > 0 and default_size > 0
-    ), "Index store sizes should be positive after bulk indexing"
-    assert (
-        zstd_size <= default_size
-    ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    assert zstd_size > 0 and default_size > 0, (
+        "Index store sizes should be positive after bulk indexing"
+    )
+    assert zstd_size <= default_size, (
+        f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
 

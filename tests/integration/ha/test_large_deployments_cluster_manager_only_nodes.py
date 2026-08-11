@@ -77,7 +77,11 @@ async def test_build_and_deploy(
             num_units=1,
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "cluster_manager"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "cluster_manager",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),

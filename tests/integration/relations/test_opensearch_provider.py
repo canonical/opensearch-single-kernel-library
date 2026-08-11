@@ -39,7 +39,12 @@ logger = logging.getLogger(__name__)
 CLIENT_APP_NAME = "application"
 SECONDARY_CLIENT_APP_NAME = "secondary-application"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
-ALL_APPS = [OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME, CLIENT_APP_NAME, DASHBOARDS_APP_NAME]
+ALL_APPS = [
+    OPENSEARCH_APP_NAME,
+    TLS_CERTIFICATES_APP_NAME,
+    CLIENT_APP_NAME,
+    DASHBOARDS_APP_NAME,
+]
 
 NUM_UNITS = 3
 
@@ -98,12 +103,15 @@ async def test_create_relation(
         )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
-        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME], status="active", timeout=1600
+        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
+        status="active",
+        timeout=1600,
     )
 
     global client_relation
     client_relation = await ops_test.model.integrate(
-        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
 
     # This test shouldn't take so long
@@ -317,9 +325,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
         return len(units) == len(endpoints.split(","))
 
     # Test things are already working fine
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
@@ -340,9 +348,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
         wait_for_exact_units={OPENSEARCH_APP_NAME: len(opensearch_unit_ids) - 1},
         idle_period=70,
     )
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
 
     # test scale back up again
     await ops_test.model.applications[OPENSEARCH_APP_NAME].add_unit(count=1)
@@ -354,9 +362,9 @@ async def test_scaling(ops_test: OpsTest, substrate):
     )
     # Now, we want to sleep until an update-status happens
     time.sleep(30)
-    assert await _is_number_of_endpoints_valid(
-        CLIENT_APP_NAME, FIRST_RELATION_NAME
-    ), await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    assert await _is_number_of_endpoints_valid(CLIENT_APP_NAME, FIRST_RELATION_NAME), (
+        await rel_endpoints(CLIENT_APP_NAME, FIRST_RELATION_NAME)
+    )
 
 
 @pytest.mark.abort_on_fail
@@ -686,7 +694,8 @@ async def test_relation_broken(ops_test: OpsTest):
 async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     """Verify that if we recreate a relation, we can access the same index."""
     client_relation = await ops_test.model.integrate(
-        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
     wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
 

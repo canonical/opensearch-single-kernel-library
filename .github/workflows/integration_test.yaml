@@ -8,15 +8,25 @@ on:
           Use canonical/data-platform-workflows build_charm.yaml to build the charm(s)
         required: true
         type: string
+      run-on-all-bases:
+        description: |
+          Run the integration tests on all spread systems. If false, run only on ubuntu 24.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   collect-integration-tests:
     name: Collect integration test spread jobs
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Set up environment
         run: |
           sudo snap install go --classic
@@ -25,6 +35,8 @@ jobs:
       - name: Collect spread jobs
         id: collect-jobs
         shell: python
+        env:
+          RUN_ON_ALL_BASES: ${{ inputs.run-on-all-bases }}
         run: |
           import json
           import pathlib
@@ -41,9 +53,12 @@ jobs:
               .split("\n")
           )
           jobs = []
+          run_on_all_bases = os.environ.get("RUN_ON_ALL_BASES", "false").lower() == "true"
           for job in spread_jobs:
               # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
               _, runner, task, variant = job.split(":")
+              if not run_on_all_bases and variant != "ubuntu24":
+                  continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
@@ -89,6 +104,8 @@ jobs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
     timeout-minutes: 226 # Sum of steps `timeout-minutes` + 5
+    permissions:
+      contents: read
     steps:
       - name: Disk usage
         timeout-minutes: 1
@@ -96,6 +113,8 @@ jobs:
       - name: Checkout
         timeout-minutes: 3
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Set up environment
         timeout-minutes: 5
         run: sudo snap install charmcraft --classic
@@ -170,7 +189,7 @@ jobs:
       - name: jhack tail
         timeout-minutes: 3
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo jhack tail --printer raw --replay --no-watch | tee ~/logs/jhack-tail.txt
+        run: script -q -c "sudo env jhack tail --printer raw --replay --no-watch" /dev/null | tee "$HOME/logs/jhack-tail.txt" || true
       - name: Upload logs
         timeout-minutes: 5
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}

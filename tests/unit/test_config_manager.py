@@ -54,7 +54,12 @@ def tmp_config_path(tmp_path: Path) -> LocalPath:
     base_path = Path(config_path.as_posix())
     target_path = tmp_path / "config"
 
-    for relative_path in [opensearch_yml, seed_unicast_hosts, jvm_options, sec_conf_yml]:
+    for relative_path in [
+        opensearch_yml,
+        seed_unicast_hosts,
+        jvm_options,
+        sec_conf_yml,
+    ]:
         source = base_path / relative_path
         target = target_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)

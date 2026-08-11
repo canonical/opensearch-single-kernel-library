@@ -238,10 +238,11 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         if cluster_fleet_apps := self.state.application.cluster_fleet_apps:
             # only report nodes from apps with planned units
-            has_planned_units = (
-                lambda app_id: app_id in cluster_fleet_apps
-                and cluster_fleet_apps[app_id].planned_units > 0
-            )
+            def has_planned_units(app_id: str) -> bool:
+                return (
+                    app_id in cluster_fleet_apps and cluster_fleet_apps[app_id].planned_units > 0
+                )
+
             nodes = [node for node in nodes if has_planned_units(node.app.id)]
 
         return [
@@ -397,8 +398,10 @@ class PeerClusterOrchestratorManager(BaseManager):
                     message_suffix=message_suffix
                 )
             elif not self.state.secrets.get(Scope.APP, password_key(COS_USER)):
-                blocked_msg = PeerClusterErrorDataStatuses.COS_USER_PASSWORD_NOT_AVAILABLE.value.message.format(
-                    COS_USER=COS_USER
+                blocked_msg = (
+                    PeerClusterErrorDataStatuses.COS_USER_NOT_CREATED.value.message.format(
+                        COS_USER=COS_USER
+                    )
                 )
             else:
                 try:

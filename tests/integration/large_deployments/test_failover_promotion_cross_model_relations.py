@@ -121,7 +121,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[DATA_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         )
@@ -202,7 +206,10 @@ async def test_failover_orchestrator_promotion(
         # get orchestrators registered in data app
         unit = data_model.applications[DATA_APP].units[-1]
         orchestrators = await get_application_relation_data(
-            ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="orchestrators"
+            ops_test,
+            unit_name=unit.name,
+            relation_name=PEER_RELATION,
+            key="orchestrators",
         )
         # ensure failover is the new main and that no failover is registered
         orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))

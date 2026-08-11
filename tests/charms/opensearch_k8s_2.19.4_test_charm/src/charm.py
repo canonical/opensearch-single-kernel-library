@@ -5,9 +5,8 @@
 
 """Charmed Kubernetes Operator for OpenSearch."""
 
-from ops.main import main
-
 from opensearch_single_kernel.charms.k8s import OpenSearchK8sCharm
+from ops.main import main
 
 if __name__ == "__main__":
     main(OpenSearchK8sCharm)
