@@ -312,7 +312,10 @@ def test_restore_when_prereqs_missing_then_action_fails(
     )
 
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
     assert "cluster not ready" in err.value.message.lower()
 
@@ -357,7 +360,10 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     )
     get_snapshot.side_effect = OpenSearchHttpError(response_text="server error", response_code=500)
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
     assert "server error" in err.value.message.lower()
 
@@ -371,7 +377,14 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     ],
 )
 def test_restore_when_closing_indices_varies_then_paths_are_handled(
-    context, harness, mocker, backend_setup, close_result, expect_fail, expect_msg, monkeypatch
+    context,
+    harness,
+    mocker,
+    backend_setup,
+    close_result,
+    expect_fail,
+    expect_msg,
+    monkeypatch,
 ):
     # Given
     mocker.patch(
@@ -402,11 +415,15 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
     if expect_fail:
         with pytest.raises(testing.ActionFailed) as err:
             context.run(
-                context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st
+                context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+                st,
             )
         assert expect_msg in err.value.message.lower()
     else:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
 
 
 def test_restore_when_start_fails_then_action_fails_with_message(
@@ -443,7 +460,10 @@ def test_restore_when_start_fails_then_action_fails_with_message(
     )
 
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
     assert "restore failed" in err.value.message.lower()
 
 
@@ -575,7 +595,10 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}), st)
+        context.run(
+            context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
+            st,
+        )
     # Assert
     assert "leader" in err.value.message.lower()
 
@@ -602,7 +625,6 @@ def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, back
 def test_prereq_when_deployment_not_ready_then_action_fails(
     context, mocker, harness, backend_setup, monkeypatch
 ):
-
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
@@ -1095,7 +1117,9 @@ def test_create_gcs_bucket_when_secret_key_is_invalid_json_then_return_false():
     assert object_storage.verify_gcs_credentials(cfg) is False
 
 
-def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(monkeypatch):
+def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_access(
+    monkeypatch,
+):
     cfg = _cfg(
         secret_key='{"project_id":"p"}',
         bucket="mybucket",
@@ -1126,7 +1150,9 @@ def test_create_gcs_bucket_when_bucket_missing_then_create_bucket_test_write_acc
     blob.delete.assert_called_once()
 
 
-def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(monkeypatch):
+def test_create_gcs_bucket_when_exists_check_forbidden_then_attempt_to_create(
+    monkeypatch,
+):
     cfg = _cfg(secret_key='{"project_id":"p"}', bucket="mybucket")
 
     client = Mock()

@@ -165,7 +165,11 @@ async def test_upgrade_to_local(
     """Test upgrade from n-1 to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME
     await assert_upgrade_to_local(
-        ops_test, app=app, charm=charm, substrate=substrate, charm_resources=charm_resources
+        ops_test,
+        app=app,
+        charm=charm,
+        substrate=substrate,
+        charm_resources=charm_resources,
     )
     if substrate == "k8s":
         version = K8S_VERSION_N
@@ -217,7 +221,12 @@ async def test_upgrade_rollback_from_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 async def test_upgrade_from_version_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm, substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    version,
+    charm,
+    substrate,
 ) -> None:
     """Test upgrade from usptream to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME

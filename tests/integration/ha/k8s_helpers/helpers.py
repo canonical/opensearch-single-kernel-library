@@ -274,9 +274,9 @@ def pebble_patch_restart_delay(
         _preload_content=False,
     )
     response.run_forever(timeout=5)
-    assert (
-        response.returncode == 0
-    ), f"Failed to add to pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+    assert response.returncode == 0, (
+        f"Failed to add to pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+    )
 
     for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
         with attempt:
@@ -295,9 +295,9 @@ def pebble_patch_restart_delay(
             )
             response.run_forever(timeout=60)
             if ensure_replan:
-                assert (
-                    response.returncode == 0
-                ), f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+                assert response.returncode == 0, (
+                    f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+                )
 
     # pebble replan restarts the service; wait until opensearch is back up on port 9200
     for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3)):
@@ -308,9 +308,9 @@ def pebble_patch_restart_delay(
                 text=True,
                 env={**os.environ, "JUJU_MODEL": model_name},
             )
-            assert (
-                result.stdout.strip()
-            ), f"opensearch not yet listening on port 9200 on {unit_name}"
+            assert result.stdout.strip(), (
+                f"opensearch not yet listening on port 9200 on {unit_name}"
+            )
 
 
 def copy_file_into_pod(

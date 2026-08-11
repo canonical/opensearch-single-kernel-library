@@ -121,13 +121,16 @@ async def test_create_relation(
         )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
-        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME], status="active", timeout=1600
+        apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
+        status="active",
+        timeout=1600,
     )
 
     global client_relation
     global v1_client_relation
     client_relation = await ops_test.model.integrate(
-        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
     v1_client_relation = await ops_test.model.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",

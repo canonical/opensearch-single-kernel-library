@@ -976,7 +976,6 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
             ):
-
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 )

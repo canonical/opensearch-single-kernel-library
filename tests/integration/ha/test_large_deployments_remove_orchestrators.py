@@ -74,7 +74,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[FAILOVER_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "roles": "cluster_manager", "init_hold": True}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "roles": "cluster_manager",
+                "init_hold": True,
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
@@ -84,7 +88,11 @@ async def test_build_and_deploy(
             num_units=APP_UNITS[DATA_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
             | CONFIG_OPTS,
             trust=substrate == "k8s",
         ),
@@ -141,7 +149,10 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
     """Test that the orchestrator apps can be deleted."""
     unit = ops_test.model.applications[MAIN_APP].units[-1]
     deployment_desc = await get_application_relation_data(
-        ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="deployment-description"
+        ops_test,
+        unit_name=unit.name,
+        relation_name=PEER_RELATION,
+        key="deployment-description",
     )
     deployment_desc = DeploymentDescription.from_dict(json.loads(deployment_desc))
 
@@ -165,7 +176,10 @@ async def test_large_deployment_remove_orchestrators(ops_test: OpsTest) -> None:
 
     unit = ops_test.model.applications[FAILOVER_APP].units[-1]
     deployment_desc = await get_application_relation_data(
-        ops_test, unit_name=unit.name, relation_name=PEER_RELATION, key="deployment-description"
+        ops_test,
+        unit_name=unit.name,
+        relation_name=PEER_RELATION,
+        key="deployment-description",
     )
     deployment_desc = DeploymentDescription.from_dict(json.loads(deployment_desc))
 

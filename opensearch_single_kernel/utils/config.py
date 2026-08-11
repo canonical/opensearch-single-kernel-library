@@ -168,7 +168,6 @@ class ConfigSetter(ABC):
 
     @staticmethod
     def __clean_base_path(base_path: PathProtocol):
-
         if not base_path.as_posix().endswith("/"):
             base_path = base_path / ""
 

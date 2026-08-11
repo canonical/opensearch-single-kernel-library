@@ -10,6 +10,7 @@ from time import time_ns
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusHandler
+from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import EventSource
 from ops.charm import CharmEvents
 
@@ -51,13 +52,6 @@ from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandle
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
-    AzureStorageRequires,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
-    GcsStorageRequires,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     RequirerCommonModel,
     ResourceProviderEventHandler,
@@ -114,8 +108,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.substrate,
             SmtpRequires(self, SMTP_RELATION),
             S3Requirer(self, S3_RELATION),
-            AzureStorageRequires(self, AZURE_RELATION),
-            GcsStorageRequires(self, GCS_RELATION),
+            AzureStorageRequirer(self, AZURE_RELATION),
+            GCSRequirer(self, GCS_RELATION),
             ResourceProviderEventHandler(
                 self, relation_name=CLIENT_RELATION, request_model=RequirerCommonModel
             ),

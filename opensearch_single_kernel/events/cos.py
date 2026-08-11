@@ -48,7 +48,7 @@ class CosEventsHandler(Object):
             self.cos_integration = COSAgentProvider(
                 self.charm,
                 relation_name=COS_RELATION,
-                scrape_configs=self.scrape_vm_config(),
+                scrape_configs=self.scrape_vm_config,
                 refresh_events=[
                     self.charm.on.config_changed,
                     self.charm.on.set_password_action,
@@ -66,7 +66,6 @@ class CosEventsHandler(Object):
         self.metrics_endpoint = MetricsEndpointProvider(
             self.charm,
             relation_name="metrics-endpoint",
-            jobs=self.scrape_k8s_config(),
             refresh_event=[
                 self.charm.on.config_changed,
                 self.charm.on.set_password_action,
@@ -75,6 +74,7 @@ class CosEventsHandler(Object):
                 self.charm.on[PEER_CLUSTER_RELATION].relation_changed,
             ],
             alert_rules_path="./src/alert_rules/prometheus",
+            lookaside_jobs_callable=self.scrape_k8s_config,
         )
 
         # 2. Logs (Loki)

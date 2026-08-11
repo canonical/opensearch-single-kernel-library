@@ -488,9 +488,7 @@ class K8sWorkload(BaseWorkload):
         if violates:
             comparison_text = "below" if comparison_op == "<" else "above"
             fix_instruction = "%s=%s" % (property_name, required_value)
-            return (
-                "%s=%s is %s recommended %s. " "For K8s deployments, configure via %s: %s."
-            ) % (
+            return ("%s=%s is %s recommended %s. For K8s deployments, configure via %s: %s.") % (
                 property_name,
                 current_value,
                 comparison_text,

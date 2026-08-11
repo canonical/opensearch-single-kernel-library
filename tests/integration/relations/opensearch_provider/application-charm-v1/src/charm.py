@@ -42,7 +42,7 @@ class V1ApplicationCharm(CharmBase):
             ResourceProviderModel,
         )
 
-        index_name = f'{self.app.name.replace("-", "_")}_second_opensearch'
+        index_name = f"{self.app.name.replace('-', '_')}_second_opensearch"
         self.second_opensearch = ResourceRequirerEventHandler(
             self,
             "v1-second-index",

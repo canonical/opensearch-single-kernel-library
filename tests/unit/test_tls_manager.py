@@ -551,7 +551,8 @@ def test_on_certificate_available(harness, mocker):
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca", return_value="ca_12345"
+        "opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca",
+        return_value="ca_12345",
     )
     on_tls_conf_set = mocker.patch(
         "opensearch_single_kernel.events.tls.TLSEventsHandler.on_tls_conf_set"
@@ -1047,7 +1048,10 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     # NOTE: The event is issued with the old csr, i.e. the identifier of
     # the ongoing transaction. A new csr will be generated and saved in the second step
     event_mock = MagicMock(
-        certificate_signing_request=old_csr, chain=new_chain, certificate=new_cert, ca=new_ca
+        certificate_signing_request=old_csr,
+        chain=new_chain,
+        certificate=new_cert,
+        ca=new_ca,
     )
 
     # The CA stored in the keystore is still the old one
@@ -1739,7 +1743,8 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
 
     certs_dir = str(harness.charm.workload.paths.certs)
     assert re.search(
-        "openssl pkcs12 -export .* -out " rf"{certs_dir}/{cert_type}\.p12 -name {cert_type}",
+        "openssl pkcs12 -export .* -out "
+        rf"{certs_dir}/{cert_type}\.p12 -name {cert_type}",
         run_cmd.call_args_list[0].args[0],
     )
     assert f"chmod +r {certs_dir}/{cert_type}.p12" in run_cmd.call_args_list[1].args[0]

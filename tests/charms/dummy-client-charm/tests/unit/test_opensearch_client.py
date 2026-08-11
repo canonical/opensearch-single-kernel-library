@@ -6,8 +6,9 @@
 
 from typing import Any
 
-import opensearch_client
 import pytest
+
+import opensearch_client
 from models import CA_CERTS_PATH
 from opensearch_client import OpenSearchClient
 

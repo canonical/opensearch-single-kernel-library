@@ -181,9 +181,9 @@ def wait_for_relation_removed_between(
             with attempt:
                 assert not relation_exists(ops_test, endpoint_one, endpoint_two)
     except RetryError:
-        assert (
-            False
-        ), f"Relation {endpoint_one} <-> {endpoint_two} was not removed after 5 minutes."
+        assert False, (
+            f"Relation {endpoint_one} <-> {endpoint_two} was not removed after 5 minutes."
+        )
 
 
 @retry(wait=wait_fixed(wait=15), stop=stop_after_attempt(30))

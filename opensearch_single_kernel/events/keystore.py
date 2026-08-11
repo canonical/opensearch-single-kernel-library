@@ -41,8 +41,7 @@ class KeystoreEventsHandler(Object):
 
         if result is KeystoreReloadResult.RELOAD_FAILED:
             logger.warning(
-                "Keystore secure-settings reload failed; "
-                "restarting OpenSearch to apply settings."
+                "Keystore secure-settings reload failed; restarting OpenSearch to apply settings."
             )
             self.charm.restart_opensearch_event.emit()
             return

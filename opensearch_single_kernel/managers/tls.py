@@ -177,7 +177,6 @@ class TlsManager(BaseManager):
         if not store_pwd and not (
             self.state.is_peer_cluster_consumer(of="main") and cert_type == CertType.APP_ADMIN
         ):
-
             self.set_secret_by_cert(cert_type, secret_name, generate_password())
 
     def _get_certificate_subject(self, cert_type: CertType) -> str:
@@ -803,9 +802,7 @@ class TlsManager(BaseManager):
 
         if self.all_tls_resources_stored():  # compare CAs
             if self.state.application.admin_ca_cert != peer_cluster_rel_data.admin_ca_cert:
-                blocked_msg = (
-                    PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
-                )
+                blocked_msg = PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
                 should_sever_relation = True
 
         if (

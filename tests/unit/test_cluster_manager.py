@@ -98,9 +98,9 @@ def test_can_start(harness, mocker):
         )
         can_start = harness.charm.cluster_manager.no_blocking_directives()
 
-        assert (
-            can_start == expected
-        ), f"Failed for directives {directives}: expected {expected} but got {can_start}"
+        assert can_start == expected, (
+            f"Failed for directives {directives}: expected {expected} but got {can_start}"
+        )
 
 
 def test_pre_validate_roles_change(harness, mocker):
