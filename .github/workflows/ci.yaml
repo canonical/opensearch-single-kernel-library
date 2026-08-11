@@ -12,6 +12,21 @@ on:
   workflow_call:
     secrets:
       CHARMHUB_TOKEN:
+        required: true
+      AWS_ACCESS_KEY:
+        required: true
+      AWS_SECRET_KEY:
+        required: true
+      AZURE_STORAGE_ACCOUNT:
+        required: true
+      AZURE_SECRET_KEY:
+        required: true
+      GCP_ACCESS_KEY:
+        required: true
+      GCP_SECRET_KEY:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
 
 permissions:
   contents: read
@@ -158,7 +173,6 @@ jobs:
           sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- bash scripts/build_lib_for_integration.sh ${{ matrix.path }}
         env:
           CI_CACHE: false
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Compute path in artifact
         id: path-in-artifact
         run: compute-path-in-artifact '${{ matrix.path }}'
@@ -179,6 +193,13 @@ jobs:
     with:
       artifact-prefix: packed-charm
       run-on-all-bases: ${{ github.event_name == 'schedule' }}
-    secrets: inherit
+    secrets:
+      AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
+      GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
+      GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       contents: write # Needed for Allure Report
