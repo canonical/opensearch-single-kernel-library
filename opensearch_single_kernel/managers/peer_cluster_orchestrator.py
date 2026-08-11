@@ -67,8 +67,6 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         # compute the data that needs to be broadcast to all related clusters (success or error)
         remote_peer_cluster = self.build_peer_cluster_rel_data()
-        logger.debug("Built peer cluster relation data: %s", remote_peer_cluster)
-
         orchestrators = self.state.application.orchestrators
         rel_err_data = self.build_peer_cluster_rel_err_data(
             deployment_description, orchestrators, remote_peer_cluster

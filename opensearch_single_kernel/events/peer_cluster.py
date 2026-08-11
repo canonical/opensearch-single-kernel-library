@@ -418,8 +418,6 @@ class PeerClusterEventsHandler(Object):
         # let the charm know this is an already bootstrapped cluster
         self.charm.state.application.bootstrapped = True
         # store the security related settings in secrets, peer_data, disk
-        logger.debug("We received this peer cluster relation data: %s", remote_peer_cluster)
-
         if remote_peer_cluster.admin_hashed_password:
             logger.debug("Admin TLS credentials received from peer cluster relation data.")
             self._set_security_conf(remote_peer_cluster)

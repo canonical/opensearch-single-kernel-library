@@ -805,7 +805,6 @@ class ClusterState(Object):
         deployment_desc = self.application.deployment_description
         if not deployment_desc:
             return None
-        logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.planned_units,

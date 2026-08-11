@@ -139,7 +139,7 @@ class InternalUsersManager(BaseManager):
         if user not in OPENSEARCH_USERS:
             raise OpenSearchUserMgmtError(f"User {user} is not an internal user.")
 
-        logger.debug("Creating internal user %s, with %s", user, hashed_pwd)
+        logger.debug("Creating internal user %s", user)
 
         if user == ADMIN_USER:
             # reserved: False, prevents this resource from being update-protected from:

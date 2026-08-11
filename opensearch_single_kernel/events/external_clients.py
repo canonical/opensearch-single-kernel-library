@@ -322,11 +322,6 @@ class ExternalClientsEventsHandler(Object):
 
     def _on_update_status(self, event: UpdateStatusEvent) -> None:
         """Handle periodic checks for external clients."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug(
-                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
-            )
-
         if not self.charm.unit.is_leader():
             return
 
@@ -337,10 +332,15 @@ class ExternalClientsEventsHandler(Object):
         if not deployment_desc:
             return
 
+        # Endpoints are always refreshed; only user/role cleanup is unsafe mid-upgrade.
         for relation in self.charm.model.relations[CLIENT_RELATION]:
             self.update_external_client_endpoints(relation)
 
-        if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug(
+                "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
+            )
+        elif deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:
