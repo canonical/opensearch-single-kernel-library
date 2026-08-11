@@ -70,8 +70,6 @@ class PeerClusterOrchestratorManager(BaseManager):
         rel_data = self.build_peer_cluster_rel_data(
             deployment_desc=deployment_desc,
         )
-        logger.debug("Built peer cluster relation data: %s", rel_data)
-
         orchestrators = self.state.application.orchestrators
         rel_err_data = self.build_peer_cluster_rel_err_data(
             deployment_desc, orchestrators, rel_data

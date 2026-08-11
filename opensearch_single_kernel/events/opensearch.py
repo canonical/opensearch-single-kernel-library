@@ -402,12 +402,7 @@ class OpenSearchEventsHandler(Object):
 
             if health == HealthColors.UNKNOWN:
                 return
-
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug(
-                "Skipping `remove_lingering_users_and_roles` and `update_all_external_clients_relation_endpoints` because upgrade is in-progress"
-            )
-        elif self.charm.unit.is_leader():
+        if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
             except OpenSearchHttpError as e:
@@ -416,11 +411,15 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
-            if (
-                deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
-                and not self.charm.upgrades_manager.in_progress
-            ):
-                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug(
+                "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
+            )
+        elif (
+            self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        ):
+            self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -690,6 +689,8 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Blocking directives present. Deferring start event.")
             event.defer()
             return
+        if self.charm.unit.is_leader():
+            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
         if not self.charm.state.application.is_admin_user_initialized:
             event.defer()
@@ -741,7 +742,10 @@ class OpenSearchEventsHandler(Object):
         #   ->(app databag key: first_data_node on data app)
         # main orchestrator will choose which node to start first
         #   ->(app databag key: first_data_node on main orchestrator app)
-        if self.charm.cluster_manager.should_ignore_lock(deployment_desc):
+        if (
+            self.charm.cluster_manager.should_ignore_lock(deployment_desc)
+            and self.charm.unit.is_leader()
+        ):
             logger.debug(
                 f"Requesting start as first data node without lock: {self.charm.state.unit_name}"
             )
@@ -786,7 +790,7 @@ class OpenSearchEventsHandler(Object):
         ):
             event.defer()
             return
-        if self.charm.state.is_peer_cluster_consumer():
+        if self.charm.state.is_peer_cluster_consumer() and self.charm.unit.is_leader():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
         if (
@@ -1213,8 +1217,9 @@ class OpenSearchEventsHandler(Object):
             return
 
         if show_status_only_once:
-            logger.debug("Clearing SHOW_STATUS directive from cluster manager.")
-            self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
+            logger.debug("We are removing show status directive from cluster manager.")
+            if self.charm.unit.is_leader():
+                self.charm.cluster_manager.clear_directive(Directive.SHOW_STATUS)
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
@@ -1466,16 +1471,17 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.application.deployment_desc.typ
             == DeploymentType.MAIN_ORCHESTRATOR
         )
+
         if not cluster_changed_to_main_cm:
             return
-        # TODO: Handle upgrades
-        # if self.upgrade_in_progress:
-        # logger.warning(
-        # "Changing config during an upgrade is not supported. The charm may be in a broken,
-        #  unrecoverable state"
-        # )
-        # event.defer()
-        # return
+
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Changing config during an upgrade is not supported. The charm may be in a broken"
+                " ,unrecoverable state"
+            )
+            event.defer()
+            return
 
         # we check if we need to create the admin user
         if not self.charm.state.application.is_admin_user_initialized:

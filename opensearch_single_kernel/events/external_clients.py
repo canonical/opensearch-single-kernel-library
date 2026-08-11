@@ -178,7 +178,7 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
-            logger.error("No external client found for relation id %d", event.relation.id)
+            logger.warning("No external client found for relation id %d", event.relation.id)
             return
         if self.charm.state.server.get_relation_departing(event.relation):
             self.charm.state.server.remove_relation_departing(event.relation)

@@ -51,6 +51,10 @@ class GeneralStatuses(Enum):
         check="Service stop sequence.",
         running="blocking",
     )
+    CLUSTER_MANAGER_VOTING_ONLY_INVALID = StatusObject(
+        status="blocked",
+        message="cluster_manager and voting_only roles cannot be both set on the same nodes.",
+    )
 
     # Derived from deployment_desc.state when not ACTIVE.
     BLOCKING_DIRECTIVE = StatusObject(
@@ -372,11 +376,10 @@ class PeerClusterErrorDataStatuses(Enum):
         check="Admin user fully initialized on provider.",
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
-        status="blocked",
+        status="waiting",
         message="TLS not fully configured {message_suffix}.",
         short_message="TLS incomplete (remote)",
         check="TLS readiness on related orchestrator.",
-        action="Complete TLS on the related orchestrator cluster.",
     )
     SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
         status="waiting",

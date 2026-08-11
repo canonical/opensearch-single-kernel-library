@@ -657,7 +657,6 @@ class SnapshotsManager(BaseManager):
     def gcs_info_from_peer_cluster(self) -> dict[str, str] | None:
         """Read GCS credentials from peer cluster relation."""
         data = self.state.get_rel_data_from_main_orchestrator()
-        logger.debug("provided data: %s", data)
 
         if not data or not data.credentials or not data.credentials.gcs:
             logger.warning("no gcs credentials found.")
