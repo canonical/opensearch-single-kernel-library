@@ -193,8 +193,6 @@ jobs:
 
   integration-test:
     name: Integration test charm
-    needs:
-      - build
     uses: ./.github/workflows/integration_test.yaml
     with:
       artifact-prefix: packed-charm
