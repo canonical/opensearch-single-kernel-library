@@ -34,11 +34,11 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     TlsStatuses,
 )
-from opensearch_single_kernel.core.models.peer_cluster import (
+from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.models.peer_secrets import (
+from opensearch_single_kernel.core.peer_secrets import (
     OpenSearchAppPeerAdminTlsSecretsModel,
     OpenSearchServerPeerHttpSecretsModel,
     OpenSearchServerPeerTransportSecretsModel,

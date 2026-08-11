@@ -16,12 +16,12 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.core.models.storage import (
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.storage import (
     AzureRelData,
     GcsRelData,
     S3RelData,
 )
-from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 

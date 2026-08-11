@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models.peer_cluster import (
+from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
     PeerClusterRelErrorData,
 )

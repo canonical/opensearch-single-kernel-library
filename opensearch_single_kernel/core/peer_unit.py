@@ -10,20 +10,20 @@ from typing import ClassVar, Optional
 from pydantic import Field, field_serializer, field_validator
 
 from opensearch_single_kernel.common.constants import PerformanceType
-from opensearch_single_kernel.core.models.peer_secrets import (
+from opensearch_single_kernel.core.peer_secrets import (
     OpenSearchServerPeerHttpSecretsModel,
     OpenSearchServerPeerTransportSecretsModel,
 )
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     PluginConfigInfo,
     _sort_nested_dicts,
 )
-from opensearch_single_kernel.core.models.profiles import (
+from opensearch_single_kernel.core.profiles import (
     OpenSearchProfile,
     ProductionProfile,
     TestingProfile,
 )
-from opensearch_single_kernel.core.models.relation_base import RelationModel
+from opensearch_single_kernel.core.relation_base import RelationModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )

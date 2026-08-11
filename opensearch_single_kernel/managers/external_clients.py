@@ -27,7 +27,7 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
-from opensearch_single_kernel.core.models.plain_base import Node
+from opensearch_single_kernel.core.plain_base import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     ResourceProviderModel,

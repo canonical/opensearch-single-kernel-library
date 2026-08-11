@@ -16,7 +16,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models.upgrades import UnitUpgradesState
+from opensearch_single_kernel.core.upgrades import UnitUpgradesState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )

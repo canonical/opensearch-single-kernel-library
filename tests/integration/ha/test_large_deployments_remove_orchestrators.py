@@ -12,8 +12,8 @@ from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
 from opensearch_single_kernel.common.statuses import PeerClusterStatuses
-from opensearch_single_kernel.core.models.peer_cluster import PeerClusterOrchestrators
-from opensearch_single_kernel.core.models.plain_base import DeploymentDescription
+from opensearch_single_kernel.core.peer_cluster import PeerClusterOrchestrators
+from opensearch_single_kernel.core.plain_base import DeploymentDescription
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (

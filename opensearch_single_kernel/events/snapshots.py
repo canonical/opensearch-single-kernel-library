@@ -29,7 +29,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchRestoreBackupError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
-from opensearch_single_kernel.core.models.storage import (
+from opensearch_single_kernel.core.storage import (
     AzureRelData,
     GcsRelData,
     S3RelData,

@@ -69,10 +69,10 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
     TlsStatuses,
 )
-from opensearch_single_kernel.core.models.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.models.plain_base import DeploymentDescription
-from opensearch_single_kernel.core.models.relation_base import bind_model_to_repository
-from opensearch_single_kernel.core.models.upgrades import UnitUpgradesState
+from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
+from opensearch_single_kernel.core.plain_base import DeploymentDescription
+from opensearch_single_kernel.core.relation_base import bind_model_to_repository
+from opensearch_single_kernel.core.upgrades import UnitUpgradesState
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
     RestartOpenSearch,

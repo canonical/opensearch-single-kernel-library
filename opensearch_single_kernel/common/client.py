@@ -34,11 +34,11 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     App,
     Node,
 )
-from opensearch_single_kernel.core.models.storage import ObjectStorageConfig
+from opensearch_single_kernel.core.storage import ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     repository_type,

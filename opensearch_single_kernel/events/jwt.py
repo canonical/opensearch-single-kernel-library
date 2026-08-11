@@ -19,7 +19,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
 )
 from opensearch_single_kernel.common.statuses import JwtStatuses
-from opensearch_single_kernel.core.models.jwt import JWTAuthConfiguration
+from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     RequirerCommonModel,
     ResourceRequirerEventHandler,

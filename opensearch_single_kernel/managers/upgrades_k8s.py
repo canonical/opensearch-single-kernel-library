@@ -20,11 +20,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models.upgrades import (
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.upgrades import (
     UnitUpgradesState,
     UpgradeServerModel,
 )
-from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )

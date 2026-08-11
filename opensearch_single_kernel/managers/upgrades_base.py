@@ -31,11 +31,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
-from opensearch_single_kernel.core.models.upgrades import (
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.upgrades import (
     UnitUpgradesState,
     UpgradeVersions,
 )
-from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.status import format_status
 from opensearch_single_kernel.workload.base import BaseWorkload

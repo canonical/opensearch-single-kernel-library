@@ -13,7 +13,7 @@ from overrides import override
 from opensearch_single_kernel.common.constants import PerformanceType
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
-from opensearch_single_kernel.core.models.profiles import (
+from opensearch_single_kernel.core.profiles import (
     OpenSearchProfile,
     ProductionProfile,
     TestingProfile,

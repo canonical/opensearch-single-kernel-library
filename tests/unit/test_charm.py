@@ -29,7 +29,7 @@ def test_on_install(harness, substrate):
 def test_on_leader_elected(harness, mocker):
     """Test on leader elected event."""
     mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
@@ -89,7 +89,7 @@ def test_on_leader_elected(harness, mocker):
 
 def test_on_leader_elected_index_initialised(harness, mocker):
     mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
@@ -136,7 +136,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
     lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         new_callable=PropertyMock,
     )
@@ -151,7 +151,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
         "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored"
     )
     is_admin_user_initialized = mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.admin_user_initialized",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.admin_user_initialized",
         create=True,
         new_callable=PropertyMock,
     )
@@ -293,7 +293,7 @@ def test_host_ip(harness):
 def test_unit_name(harness, mocker):
     """Test current unit name."""
     deployment_description = mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         new_callable=PropertyMock,
     )

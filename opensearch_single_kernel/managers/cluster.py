@@ -48,8 +48,8 @@ from opensearch_single_kernel.common.statuses import (
     OAuthStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models.peer_cluster import PeerClusterAppModel
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.peer_cluster import PeerClusterAppModel
+from opensearch_single_kernel.core.plain_base import (
     App,
     DeploymentDescription,
     DeploymentState,

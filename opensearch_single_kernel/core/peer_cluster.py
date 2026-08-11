@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     App,
     DeploymentDescription,
     Node,
@@ -28,14 +28,14 @@ from opensearch_single_kernel.core.models.plain_base import (
     _sort_nested_dicts,
     stripped_or_none,
 )
-from opensearch_single_kernel.core.models.relation_base import (
+from opensearch_single_kernel.core.relation_base import (
     AdminSecretStr,
     BackupSecretStr,
     PluginsSecretStr,
     RelationModel,
     UserSecretStr,
 )
-from opensearch_single_kernel.core.models.storage import (
+from opensearch_single_kernel.core.storage import (
     AzureRelData,
     GcsRelData,
     S3RelData,
@@ -169,7 +169,11 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     cluster_name: str = Field(default="")
     nodes_config: dict[str, Node] = Field(default_factory=dict)
     deployment_description: Optional[DeploymentDescription] = Field(default=None)
-    plugin_config_info: dict[str, PluginConfigInfo] = Field(default_factory=dict)
+    # Optional (not default {}) so the requirer can distinguish "no plugin data broadcast"
+    # (None -> leave the subcluster's plugins untouched) from "plugins explicitly removed"
+    # ({} -> remove them in the subcluster). Only the main orchestrator broadcasts a dict;
+    # non-main orchestrators broadcast None. See events/peer_cluster.py guard.
+    plugin_config_info: Optional[dict[str, PluginConfigInfo]] = Field(default=None)
     # Marker that the peer-cluster relation secret groups have been pre-created; see
     # initialize_empty_secrets().
     pc_secrets_initialized: bool = Field(default=False)

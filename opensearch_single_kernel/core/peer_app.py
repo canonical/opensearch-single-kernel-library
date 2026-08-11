@@ -14,24 +14,24 @@ from opensearch_single_kernel.common.constants import (
     USER_SECRET_FIELDS,
     DeploymentType,
 )
-from opensearch_single_kernel.core.models.peer_cluster import (
+from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
 )
-from opensearch_single_kernel.core.models.peer_secrets import (
+from opensearch_single_kernel.core.peer_secrets import (
     OpenSearchAppPeerAdminTlsSecretsModel,
     OpenSearchAppPeerPluginSecretsModel,
     OpenSearchAppPeerUserSecretsModel,
 )
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     DeploymentDescription,
     Node,
     PluginConfigInfo,
     _sort_nested_dicts,
     stripped_or_none,
 )
-from opensearch_single_kernel.core.models.relation_base import RelationModel
+from opensearch_single_kernel.core.relation_base import RelationModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )
@@ -218,7 +218,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             "security_index_initialised": security_index_initialised,
             "first_data_node": first_data_node or "",
             "nodes_config": cm_nodes,
-            "plugin_config_info": self.plugin_config_info if is_main_orchestrator else {},
+            "plugin_config_info": self.plugin_config_info if is_main_orchestrator else None,
             "plugin_secrets": (
                 (
                     self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel).plugin_secrets

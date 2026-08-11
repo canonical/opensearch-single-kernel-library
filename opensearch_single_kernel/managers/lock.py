@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchLockError,
 )
 from opensearch_single_kernel.common.statuses import LockStatuses
-from opensearch_single_kernel.core.models.plain_base import DeploymentDescription
+from opensearch_single_kernel.core.plain_base import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name

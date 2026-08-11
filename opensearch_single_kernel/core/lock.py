@@ -8,7 +8,7 @@ import os
 
 from pydantic import Field
 
-from opensearch_single_kernel.core.models.relation_base import RelationModel
+from opensearch_single_kernel.core.relation_base import RelationModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     PeerModel,
 )

@@ -13,7 +13,7 @@ e.g. `application.admin_ca_cert` without building the secret model themselves.
 
 from pydantic import Field
 
-from opensearch_single_kernel.core.models.relation_base import (
+from opensearch_single_kernel.core.relation_base import (
     AdminSecretStr,
     HttpSecretStr,
     PluginsSecretStr,

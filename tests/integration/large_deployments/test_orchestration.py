@@ -14,7 +14,7 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models.peer_cluster import PeerClusterOrchestrators
+from opensearch_single_kernel.core.peer_cluster import PeerClusterOrchestrators
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.helpers import (
     wait_until,

@@ -14,7 +14,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchProvidedRolesException
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     App,
     DeploymentDescription,
     DeploymentState,
@@ -62,7 +62,7 @@ p_units = [
 def test_can_start(harness, mocker):
     """Test the can_start logic."""
     mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         return_value=None,
         new_callable=PropertyMock,
@@ -91,7 +91,7 @@ def test_can_start(harness, mocker):
             profile="production",
         )
         mocker.patch(
-            "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+            "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
             create=True,
             return_value=deployment_description,
             new_callable=PropertyMock,
@@ -111,7 +111,7 @@ def test_pre_validate_roles_change(harness, mocker):
         new_callable=PropertyMock,
     )
     mocker.patch(
-        "opensearch_single_kernel.core.models.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
         create=True,
         new_callable=PropertyMock,
         return_value=DeploymentDescription(

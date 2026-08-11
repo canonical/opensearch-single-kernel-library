@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing_extensions import Annotated, Self
 
 from opensearch_single_kernel.common.constants import SECRET_BACKUPS
-from opensearch_single_kernel.core.models.plain_base import PlainModel
+from opensearch_single_kernel.core.plain_base import PlainModel
 from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
     OptionalSecretStr,
 )

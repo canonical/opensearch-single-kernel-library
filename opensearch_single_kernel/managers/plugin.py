@@ -22,11 +22,11 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models.peer_secrets import (
+from opensearch_single_kernel.core.peer_secrets import (
     OpenSearchAppPeerPluginSecretsModel,
 )
-from opensearch_single_kernel.core.models.plain_base import PluginConfigInfo
-from opensearch_single_kernel.core.models.smtp import SmtpConfig
+from opensearch_single_kernel.core.plain_base import PluginConfigInfo
+from opensearch_single_kernel.core.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import diff
@@ -141,8 +141,8 @@ class PluginManager(BaseManager):
             label: label of the secret to store
             relation_name: name of the relation from which the secret content came
         """
-        self.add_plugin_secret(label, json.dumps(content))
         self.put_plugin_config(Scope.APP, label=label, relation_name=relation_name)
+        self.add_plugin_secret(label, json.dumps(content))
 
     def remove_plugin_secret(self, label: str) -> None:
         """Delete app-scoped plugin secret and remove id from peers data.

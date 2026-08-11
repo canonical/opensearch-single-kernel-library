@@ -44,21 +44,21 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
-from opensearch_single_kernel.core.models.jwt import JWTAuthConfiguration
-from opensearch_single_kernel.core.models.lock import (
+from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
+from opensearch_single_kernel.core.lock import (
     LockAppStateModel,
     LockServerStateModel,
 )
-from opensearch_single_kernel.core.models.peer_app import OpenSearchAppPeerModel
-from opensearch_single_kernel.core.models.peer_cluster import (
+from opensearch_single_kernel.core.peer_app import OpenSearchAppPeerModel
+from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterServerModel,
 )
-from opensearch_single_kernel.core.models.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.models.plain_base import Node
-from opensearch_single_kernel.core.models.relation_base import bind_model_to_repository
-from opensearch_single_kernel.core.models.upgrades import (
+from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
+from opensearch_single_kernel.core.plain_base import Node
+from opensearch_single_kernel.core.relation_base import bind_model_to_repository
+from opensearch_single_kernel.core.upgrades import (
     UpgradeAppModel,
     UpgradeServerModel,
 )

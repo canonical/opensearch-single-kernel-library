@@ -32,7 +32,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models.upgrades import (
+from opensearch_single_kernel.core.upgrades import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
 )

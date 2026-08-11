@@ -37,13 +37,13 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterStatuses,
     SnapshotsStatuses,
 )
-from opensearch_single_kernel.core.models.storage import (
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.storage import (
     AzureRelData,
     GcsRelData,
     ObjectStorageConfig,
     S3RelData,
 )
-from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     list_cas,

@@ -20,13 +20,13 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
 )
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
-from opensearch_single_kernel.core.models.peer_cluster import (
+from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.models.plain_base import (
+from opensearch_single_kernel.core.plain_base import (
     DeploymentDescription,
     Node,
 )
