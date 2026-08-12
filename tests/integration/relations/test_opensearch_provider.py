@@ -254,7 +254,11 @@ async def test_dashboard_relation(ops_test: OpsTest):
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
     dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{DASHBOARDS_APP_NAME}:{DASHBOARDS_RELATION_NAME}",
+    )
 
     await wait_until(
         ops_test,
@@ -399,7 +403,11 @@ async def test_multiple_relations(ops_test: OpsTest, application_charm, substrat
     second_client_relation = await ops_test.model.integrate(
         f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}", OPENSEARCH_APP_NAME
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, SECONDARY_CLIENT_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{SECONDARY_CLIENT_APP_NAME}:{SECOND_RELATION_NAME}",
+    )
 
     await wait_until(
         ops_test,
@@ -480,7 +488,11 @@ async def test_admin_relation(ops_test: OpsTest):
     admin_relation = await ops_test.model.integrate(
         f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}", OPENSEARCH_APP_NAME
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
+    )
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME, CLIENT_APP_NAME],
@@ -696,13 +708,21 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
     """Verify that if we recreate a relation, we can access the same index."""
     # The relation removed in the previous test may still be in a "dying" state;
     # re-adding it right away fails with "relation ... is dying, but not yet removed".
-    wait_for_relation_removed_between(ops_test, CLIENT_RELATION, FIRST_RELATION_NAME)
+    await wait_for_relation_removed_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
+    )
 
     client_relation = await ops_test.model.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
         f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, CLIENT_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
+    )
 
     await wait_until(
         ops_test,

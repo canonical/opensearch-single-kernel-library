@@ -8,8 +8,8 @@ from typing import Optional
 import yaml
 from pytest_operator.plugin import OpsTest
 from tenacity import (
+    AsyncRetrying,
     RetryError,
-    Retrying,
     retry,
     stop_after_attempt,
     stop_after_delay,
@@ -111,34 +111,38 @@ async def get_unit_relation_data(
     )
 
 
-def wait_for_relation_joined_between(
+async def wait_for_relation_joined_between(
     ops_test: OpsTest, endpoint_one: str, endpoint_two: str
 ) -> None:
     """Wait for relation to be created before checking if it's waiting or idle.
 
     Args:
         ops_test: running OpsTest instance
-        endpoint_one: one endpoint of the relation. Doesn't matter if it's provider or requirer.
-        endpoint_two: the other endpoint of the relation.
+        endpoint_one: one endpoint of the relation, as "application[:endpoint]".
+        endpoint_two: the other endpoint of the relation, as "application[:endpoint]".
     """
     try:
-        for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
+        async for attempt in AsyncRetrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
             with attempt:
-                if new_relation_joined(ops_test, endpoint_one, endpoint_two):
-                    break
+                assert new_relation_joined(ops_test, endpoint_one, endpoint_two)
     except RetryError:
         assert False, "New relation failed to join after 3 minutes."
 
 
 def new_relation_joined(ops_test: OpsTest, endpoint_one: str, endpoint_two: str) -> bool:
+    """Check if a relation matching both endpoint specs exists in the model.
+
+    Specs are matched against both the application name and the endpoint name, so
+    relations of different applications reusing the same endpoint name (e.g. two
+    deployments of the same client charm) are told apart.
+    """
     for rel in ops_test.model.relations:
-        endpoints = [endpoint.name for endpoint in rel.endpoints]
-        if endpoint_one in endpoints and endpoint_two in endpoints:
+        if rel.matches(endpoint_one, endpoint_two):
             return True
     return False
 
 
-def wait_for_relation_removed_between(
+async def wait_for_relation_removed_between(
     ops_test: OpsTest, endpoint_one: str, endpoint_two: str
 ) -> None:
     """Wait for a relation to be fully removed before re-adding it.
@@ -149,11 +153,11 @@ def wait_for_relation_removed_between(
 
     Args:
         ops_test: running OpsTest instance
-        endpoint_one: one endpoint of the relation. Doesn't matter if it's provider or requirer.
-        endpoint_two: the other endpoint of the relation.
+        endpoint_one: one endpoint of the relation, as "application[:endpoint]".
+        endpoint_two: the other endpoint of the relation, as "application[:endpoint]".
     """
     try:
-        for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
+        async for attempt in AsyncRetrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(3)):
             with attempt:
                 assert not new_relation_joined(ops_test, endpoint_one, endpoint_two)
     except RetryError:
