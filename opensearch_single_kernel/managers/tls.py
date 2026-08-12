@@ -97,10 +97,11 @@ class TlsManager(BaseManager):
         if self.state.substrate == Substrates.K8S and reconcile:
             try:
                 self.reconcile_k8s_runtime_resources()
-            except OpenSearchFileOperationError as e:
+            except (OpenSearchFileOperationError, OpenSearchCmdError) as e:
                 logger.warning(f"Error during TLS runtime resources reconciliation: {e}")
-                # If we cannot access the filesystem to check TLS resources
-                # we assume they are not ready.
+                # If we cannot access the filesystem or a store command fails (e.g. a
+                # transiently mismatched cert/key pair), we assume TLS is not ready and
+                # let a later event retry.
                 return False
 
         resources = [
@@ -607,14 +608,25 @@ class TlsManager(BaseManager):
             if not (cert and key and keystore_password):
                 continue
 
-            self.store_key_pair(
-                name=cert_type.val,
-                store_pwd=keystore_password,
-                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
-                cert=cert,
-                key=key,
-                key_pwd=key_password,
-            )
+            # The cert and key are stored as separate secrets updated at different times
+            # (key at CSR generation, cert when the signed cert arrives), so during a rotation
+            # they can be mismatched. openssl rejects it and returns an error
+            try:
+                self.store_key_pair(
+                    name=cert_type.val,
+                    store_pwd=keystore_password,
+                    store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+                    cert=cert,
+                    key=key,
+                    key_pwd=key_password,
+                )
+            except OpenSearchCmdError as e:
+                logger.warning(
+                    "Could not store %s TLS material yet (will retry on a later event): %s",
+                    cert_type.val,
+                    e,
+                )
+                continue
 
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
