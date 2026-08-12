@@ -51,10 +51,6 @@ class GeneralStatuses(Enum):
         check="Service stop sequence.",
         running="blocking",
     )
-    CLUSTER_MANAGER_VOTING_ONLY_INVALID = StatusObject(
-        status="blocked",
-        message="cluster_manager and voting_only roles cannot be both set on the same nodes.",
-    )
 
     # Derived from deployment_desc.state when not ACTIVE.
     BLOCKING_DIRECTIVE = StatusObject(
