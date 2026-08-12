@@ -285,7 +285,7 @@ class ExternalClientsManager(BaseManager):
         """Compute external-client statuses from state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        if scope == "unit":
+        if scope == "unit" and self.state.application.deployment_desc:
             for relation in self.state.external_client_relations:
                 self._add_relation_statuses(status_list, relation)
 
