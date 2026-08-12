@@ -218,6 +218,23 @@ class PeerClusterManager(BaseManager):
                 )
 
             if error_data:
+                parsed_error = (
+                    error_data
+                    if isinstance(error_data, PeerClusterRelErrorData)
+                    else PeerClusterRelErrorData.from_dict(error_data)
+                )
+                # A failover orchestrator that is not-ready-yet must not block a requirer from
+                # bootstrapping off an already-ready main orchestrator. Otherwise, the whole fleet
+                # blocks waiting for failover. Only the main
+                # orchestrator's errors, or a failover error that requires
+                # severing the relation, should block here.
+                if (
+                    rel_id == orchestrators.failover_rel_id
+                    and orchestrators.main_rel_id != -1
+                    and not parsed_error.should_sever_relation
+                ):
+                    continue
+
                 error = error_data
                 rel_error_id = rel_id
                 break

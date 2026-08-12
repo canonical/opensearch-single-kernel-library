@@ -416,6 +416,17 @@ class ClusterState(Object):
                 clusters.append(model)
         return clusters
 
+    @property
+    def security_index_initialised_in_all_clusters(self) -> bool:
+        """Whether the security index is initialised in this or any related peer cluster."""
+        if self.application.security_index_initialised:
+            return True
+
+        for remote_peer_cluster in self.peer_clusters(is_provider=True, remote=True):
+            if remote_peer_cluster.security_index_initialised:
+                return True
+        return False
+
     def _peer_clusters_servers(
         self, is_provider: bool, remote: bool = False
     ) -> list[PeerClusterServerModel]:
@@ -1162,14 +1173,8 @@ class ClusterState(Object):
                 if not self.gcs_relation:
                     return {}
                 info = self.gcs_requires.get_storage_connection_info(self.gcs_relation) or {}
-                # gcs-integrator publishes a Juju secret URI; resolve it to the key content.
-                raw = info.get("secret-key", "")
-                if raw and raw.startswith("secret:"):
-                    try:
-                        content = self.model.get_secret(id=raw).get_content(refresh=True)
-                        info["secret-key"] = content.get("secret-key", "")
-                    except Exception:
-                        info["secret-key"] = ""
+                if isinstance(info.get("secret-key"), dict):
+                    info["secret-key"] = json.dumps(info["secret-key"])
                 return info
             case _:
                 raise OpenSearchInvalidStorageTypeError(

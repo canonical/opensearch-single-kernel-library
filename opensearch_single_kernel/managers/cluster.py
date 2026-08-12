@@ -931,7 +931,7 @@ class ClusterManager(BaseManager):
             and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
             and "data" not in deployment_desc.config.roles
-            and not self.state.application.security_index_initialised
+            and not self.state.security_index_initialised_in_all_clusters
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
@@ -973,6 +973,6 @@ class ClusterManager(BaseManager):
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
             and not deployment_desc.start == StartMode.WITH_GENERATED_ROLES
             and "data" not in deployment_desc.config.roles
-            and not self.state.application.security_index_initialised
+            and not self.state.security_index_initialised_in_all_clusters
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)

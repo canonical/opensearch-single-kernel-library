@@ -208,7 +208,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         return self.state.application.to_peer_cluster_rel_data(
             cm_nodes=cm_nodes,
-            security_index_initialised=self.is_security_index_initialised_in_all_clusters,
+            security_index_initialised=self.state.security_index_initialised_in_all_clusters,
             first_data_node=self.first_data_node_in_all_clusters,
         )
 
@@ -252,18 +252,6 @@ class PeerClusterOrchestratorManager(BaseManager):
             for node in nodes
             if node.is_cm_eligible() and node.app.id == deployment_desc.app.id
         }
-
-    @property
-    def is_security_index_initialised_in_all_clusters(self) -> bool:
-        """Check if the security index is initialised."""
-        if self.state.application.security_index_initialised:
-            return True
-
-        # check all other clusters if they have initialised the security index
-        for remote_peer_cluster in self.state.peer_clusters(is_provider=True, remote=True):
-            if remote_peer_cluster.security_index_initialised:
-                return True
-        return False
 
     @property
     def first_data_node_in_all_clusters(self) -> str | None:
@@ -485,7 +473,7 @@ class PeerClusterOrchestratorManager(BaseManager):
 
     def reconcile_security_index_initialised(self) -> None:
         """Check if security index is initialised in any cluster and update state."""
-        if self.is_security_index_initialised_in_all_clusters:
+        if self.state.security_index_initialised_in_all_clusters:
             self.state.application.security_index_initialised = True
             # clean up the first data node attribute when security index is initialised
             del self.state.application.first_data_node
