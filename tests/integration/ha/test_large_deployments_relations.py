@@ -52,7 +52,7 @@ NO_CM_STATUS = StatusObject(
 )
 
 TLS_NOT_FULLY_CONFIGURED_IN_MAIN = StatusObject(
-    status="blocked", message="TLS not fully configured in related 'main-orchestrator'."
+    status="waiting", message="TLS not fully configured in related 'main-orchestrator'."
 )
 
 
@@ -134,7 +134,9 @@ async def test_build_and_deploy(
         apps=list(APP_UNITS.keys()),
         apps_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
-            FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
+            FAILOVER_APP: [
+                PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value,
+            ],
             DATA_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             INVALID_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
         },
@@ -262,21 +264,21 @@ async def test_large_deployment_fully_formed(
         current_app_nodes = [
             node for node in nodes if node.app.id == f"{ops_test.model.uuid}/{app}"
         ]
-        assert (
-            len(current_app_nodes) == node_count
-        ), f"Wrong count for {app}:{len(current_app_nodes)} - expected:{node_count}"
+        assert len(current_app_nodes) == node_count, (
+            f"Wrong count for {app}:{len(current_app_nodes)} - expected:{node_count}"
+        )
 
         roles = current_app_nodes[0].roles
         temperature = current_app_nodes[0].temperature
         if app in [MAIN_APP, FAILOVER_APP]:
-            assert sorted(roles) == sorted(
-                auto_gen_roles
-            ), f"Wrong roles for {app}:{roles} - expected:{auto_gen_roles}"
+            assert sorted(roles) == sorted(auto_gen_roles), (
+                f"Wrong roles for {app}:{roles} - expected:{auto_gen_roles}"
+            )
             assert temperature is None, f"Wrong temperature for {app}:{roles} - expected:None"
         else:
-            assert sorted(roles) == sorted(
-                data_roles
-            ), f"Wrong roles for {app}:{roles} - expected:{data_roles}"
-            assert (
-                temperature == "hot"
-            ), f"Wrong temperature for {app}:{temperature} - expected:hot"
+            assert sorted(roles) == sorted(data_roles), (
+                f"Wrong roles for {app}:{roles} - expected:{data_roles}"
+            )
+            assert temperature == "hot", (
+                f"Wrong temperature for {app}:{temperature} - expected:hot"
+            )

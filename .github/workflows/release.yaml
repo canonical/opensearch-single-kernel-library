@@ -15,7 +15,13 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yaml
-    secrets: inherit
+    secrets:
+      CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
+      AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       pull-requests: write # Needed by lib-check job
       contents: write # Needed by integration-test job for Allure Report
@@ -24,7 +30,7 @@ jobs:
     needs:
       - ci
     name: Release to PyPI (part 1)
-    uses: canonical/data-platform-workflows/.github/workflows/release_python_package_part1.yaml@v31.1.1
+    uses: canonical/data-platform-workflows/.github/workflows/release_python_package_part1.yaml@v50.0.0
     permissions:
       contents: write # Needed to create git tag
 
@@ -52,7 +58,7 @@ jobs:
     needs:
       - release-part1
       - release-trusted-publishing
-    uses: canonical/data-platform-workflows/.github/workflows/release_python_package_part2.yaml@v31.1.1
+    uses: canonical/data-platform-workflows/.github/workflows/release_python_package_part2.yaml@v50.0.0
     with:
       git-tag: ${{ needs.release-part1.outputs.git-tag }}
     permissions:
@@ -64,11 +70,14 @@ jobs:
     needs:
       - release-part1
       - release-part2
+    permissions: {}
     steps:
       - name: Wait for PyPI release to be available
+        env:
+          RELEASE_TAG: ${{ needs.release-part1.outputs.git-tag }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.release-part1.outputs.git-tag }}"
+          TAG="${RELEASE_TAG}"
           DEP_NAME="opensearch-charms-single-kernel"
           VERSION_NUMBER="${TAG#v}"
           URL="https://pypi.org/pypi/${DEP_NAME}/${VERSION_NUMBER}/json"
@@ -96,7 +105,8 @@ jobs:
     with:
       version: ${{ needs.release-part1.outputs.git-tag }}
       base_branch: ${{ github.ref_name }}
-    secrets: inherit
-    permissions: # Needed to create PRs in dependent charm repos
-      contents: write
-      pull-requests: write
+    secrets:
+      PAT: ${{ secrets.PAT }}
+      CI_COMMITS_SSH_SIGNING_KEY: ${{ secrets.CI_COMMITS_SSH_SIGNING_KEY }}
+    permissions:
+      contents: read

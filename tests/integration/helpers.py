@@ -462,7 +462,10 @@ async def wait_until(  # noqa: C901
 
 
 async def wait_until_condition_on_units(
-    ops_test: OpsTest, app: str, condition: Callable[[list[Unit]], bool], timeout: int = 1200
+    ops_test: OpsTest,
+    app: str,
+    condition: Callable[[list[Unit]], bool],
+    timeout: int = 1200,
 ) -> None:
     """Block and wait until a condition is met on the units in `app` or timeout."""
     try:
@@ -723,12 +726,17 @@ async def run_action(
     action = await action.wait()
 
     return SimpleNamespace(
-        status=action.status or "completed", response=action.results, message=action.message
+        status=action.status or "completed",
+        response=action.results,
+        message=action.message,
     )
 
 
 async def get_secrets(
-    ops_test: OpsTest, unit_id: Optional[int] = None, username: str = "admin", app: str = APP_NAME
+    ops_test: OpsTest,
+    unit_id: Optional[int] = None,
+    username: str = "admin",
+    app: str = APP_NAME,
 ) -> Dict[str, str]:
     """Use the charm action to retrieve the admin password and chain.
 
@@ -978,7 +986,10 @@ async def check_cluster_formation_successful(
     stop=stop_after_attempt(15),
 )
 async def cluster_health(
-    ops_test: OpsTest, unit_ip: str, wait_for_green_first: bool = False, app: str = APP_NAME
+    ops_test: OpsTest,
+    unit_ip: str,
+    wait_for_green_first: bool = False,
+    app: str = APP_NAME,
 ) -> Dict[str, any]:
     """Fetch the cluster health."""
     if wait_for_green_first:
@@ -1122,7 +1133,11 @@ async def is_up(
         for attempt in Retrying(stop=stop_after_attempt(retries), wait=wait_fixed(wait=15)):
             with attempt:
                 await http_request(
-                    ops_test, "GET", f"https://{unit_ip}:9200/", app=app, timeout=timeout
+                    ops_test,
+                    "GET",
+                    f"https://{unit_ip}:9200/",
+                    app=app,
+                    timeout=timeout,
                 )
                 return True
     except RetryError:

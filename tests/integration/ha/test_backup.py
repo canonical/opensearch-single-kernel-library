@@ -368,7 +368,13 @@ def _is_related_with(ops_test: OpsTest, app_name: str, target_app_name: str) -> 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_small_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str, substrate
+    ops_test: OpsTest,
+    charm,
+    series,
+    charm_resources,
+    cloud_name: str,
+    deploy_type: str,
+    substrate,
 ) -> None:
     """Build and deploy an HA cluster of OpenSearch and corresponding S3/Azure integration."""
     if await app_name(ops_test):
@@ -421,7 +427,13 @@ async def test_small_deployment_build_and_deploy(
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, charm_resources, cloud_name: str, deploy_type: str, substrate
+    ops_test: OpsTest,
+    charm,
+    series,
+    charm_resources,
+    cloud_name: str,
+    deploy_type: str,
+    substrate,
 ) -> None:
     """Build and deploy a large cluster (main/failover orchestrators + data.hot node).
 
@@ -1244,12 +1256,12 @@ async def test_wrong_aws_credentials(
     assert error is not None, f"No error field in response: {resp}"
     err_type = error.get("type")
     err_reason = error.get("reason", "")
-    assert (
-        "repository_missing_exception" in err_type
-    ), f"Unexpected error type: {err_type}, resp={resp}"
-    assert (
-        "[s3-repository] missing" in err_reason
-    ), f"Unexpected error reason: {err_reason}, resp={resp}"
+    assert "repository_missing_exception" in err_type, (
+        f"Unexpected error type: {err_type}, resp={resp}"
+    )
+    assert "[s3-repository] missing" in err_reason, (
+        f"Unexpected error reason: {err_reason}, resp={resp}"
+    )
 
     # revert back to normal state
     good_credentials = cloud_credentials[provider]
@@ -1318,12 +1330,12 @@ async def test_wrong_microceph_credentials(
     assert error is not None, f"No error field in response: {resp}"
     err_type = error.get("type")
     err_reason = error.get("reason", "")
-    assert (
-        "repository_missing_exception" in err_type
-    ), f"Unexpected error type: {err_type}, resp={resp}"
-    assert (
-        "[s3-repository] missing" in err_reason
-    ), f"Unexpected error reason: {err_reason}, resp={resp}"
+    assert "repository_missing_exception" in err_type, (
+        f"Unexpected error type: {err_type}, resp={resp}"
+    )
+    assert "[s3-repository] missing" in err_reason, (
+        f"Unexpected error reason: {err_reason}, resp={resp}"
+    )
 
     # revert back to normal state
     good_credentials = cloud_credentials[provider]

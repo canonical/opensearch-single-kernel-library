@@ -131,9 +131,7 @@ class ClusterManager(BaseManager):
         self.state.application.deployment_desc = deployment_desc
         return True
 
-    def reconcile_cluster_config_with_relation_data(
-        self, data: PeerClusterRelData
-    ) -> None:  # noqa: C901
+    def reconcile_cluster_config_with_relation_data(self, data: PeerClusterRelData) -> None:  # noqa: C901
         """Update current peer cluster related config based on peer_cluster rel_data."""
         logger.debug("running with relation data")
         current_deployment_desc = self.state.application.deployment_desc
@@ -560,7 +558,11 @@ class ClusterManager(BaseManager):
 
                 # only change the roles of the nodes of the current cluster
                 if node.app.id == deployment_desc.app.id:
-                    roles = deployment_desc.config.roles
+                    if deployment_desc.config.roles == []:
+                        # If roles are empty use default ones
+                        roles = GENERATED_ROLES
+                    else:
+                        roles = deployment_desc.config.roles
                     temperature = deployment_desc.config.data_temperature
 
                 updated_nodes[node.name] = Node(
@@ -869,8 +871,7 @@ class ClusterManager(BaseManager):
                 or (
                     # in case all data-nodes are powered down after being previously started
                     # ignore the lock to get a data-node started, as it holds security index
-                    self.state.server.started
-                    and not self.workload.is_service_started()
+                    self.state.server.started and not self.workload.is_service_started()
                 )
             )
             and self.get_cluster_first_data_node() is None
@@ -934,7 +935,7 @@ class ClusterManager(BaseManager):
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
 
-    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:
+    def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
         if not (deployment_desc := self.state.application.deployment_desc):
             return None
@@ -960,6 +961,13 @@ class ClusterManager(BaseManager):
                     params={"directive": deployment_desc.state.message},
                 )
             )
+
+        if (
+            (config_roles := list(map(str.strip, self.state.config.get("roles", "").split(","))))
+            and "cluster_manager" in config_roles
+            and "voting_only" in config_roles
+        ):
+            status_list.append(GeneralStatuses.CLUSTER_MANAGER_VOTING_ONLY_INVALID.value)
 
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

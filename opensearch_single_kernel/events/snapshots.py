@@ -8,12 +8,17 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from object_storage import (
+    StorageConnectionInfoChangedEvent,
+    StorageConnectionInfoGoneEvent,
+)
 from ops import ActionEvent, Object
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     GCS_RELATION,
     PEER_CLUSTER_RELATION,
+    S3_RELATION,
     DeploymentType,
     HealthColors,
     ObjectStorageType,
@@ -38,14 +43,6 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.events.custom_events import (
     VerifySnapshotsCredentialsEvent,
 )
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
-    StorageConnectionInfoChangedEvent,
-    StorageConnectionInfoGoneEvent,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import (
-    CredentialsChangedEvent,
-    CredentialsGoneEvent,
-)
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     storage_config_from_connection_info,
@@ -66,14 +63,14 @@ class SnapshotsEventsHandler(Object):
 
         # simple deployments or main orchestrator
         for event in [
-            self.charm.state.s3_requirer.on.credentials_changed,
+            self.charm.state.s3_requirer.on.storage_connection_info_changed,
             self.charm.state.azure_requires.on.storage_connection_info_changed,
             self.charm.state.gcs_requires.on.storage_connection_info_changed,
         ]:
             self.framework.observe(event, self._on_snapshots_credentials_changed)
 
         for event in [
-            self.charm.state.s3_requirer.on.credentials_gone,
+            self.charm.state.s3_requirer.on.storage_connection_info_gone,
             self.charm.state.azure_requires.on.storage_connection_info_gone,
             self.charm.state.gcs_requires.on.storage_connection_info_gone,
         ]:
@@ -99,7 +96,7 @@ class SnapshotsEventsHandler(Object):
         self.framework.observe(charm.on.restore_action, self._on_restore_action)
 
     def _on_snapshots_credentials_changed(  # noqa C901
-        self, event: CredentialsChangedEvent | StorageConnectionInfoChangedEvent
+        self, event: StorageConnectionInfoChangedEvent
     ) -> None:
         """Handler for backup credentials changed event."""
         if not (deployment_desc := self.charm.state.application.deployment_desc):
@@ -250,8 +247,7 @@ class SnapshotsEventsHandler(Object):
                 self.charm.verify_snapshots_credentials_event.emit()
         except OpenSearchHttpError as e:
             logger.error(
-                "Failed to create/verify snapshot repository for %s. "
-                "Error: %s, response_body=%r",
+                "Failed to create/verify snapshot repository for %s. Error: %s, response_body=%r",
                 object_storage_type,
                 e,
                 getattr(e, "response_body", None),
@@ -278,10 +274,10 @@ class SnapshotsEventsHandler(Object):
         self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
     def _on_snapshots_credentials_gone(  # noqa C901
-        self, event: CredentialsGoneEvent | StorageConnectionInfoGoneEvent
+        self, event: StorageConnectionInfoGoneEvent
     ) -> None:
         """Handler for backup credentials gone event."""
-        if isinstance(event, CredentialsGoneEvent):
+        if event.relation.name == S3_RELATION:
             object_storage_type = ObjectStorageType.S3
         elif event.relation.name == GCS_RELATION:
             object_storage_type = ObjectStorageType.GCS
@@ -471,7 +467,6 @@ class SnapshotsEventsHandler(Object):
             logger.warning("Pre-requisites not met for listing backups: %s", error_message)
             event.fail(error_message)
             return
-
         if (output_format := event.params.get("output", "").lower()) not in {"json", "table"}:
             logger.error("Invalid output format for listing backups: %s", output_format)
             event.fail("Failed: invalid output format, must be either 'json' or 'table'.")
@@ -502,7 +497,7 @@ class SnapshotsEventsHandler(Object):
         """Handler for the restore action."""
         snapshot_id = event.params.get("backup-id")
 
-        if error_message := self._action_missing_pre_requisites(report_running_operations=False):
+        if error_message := self._action_missing_pre_requisites():
             logger.warning("Pre-requisites not met for restoring backup: %s", error_message)
             event.fail(error_message)
             return

@@ -188,7 +188,6 @@ def validate_index_name(index_name: str) -> bool:
 
     forbidden_chars = [" ", ",", ":", '"', "*", "+", "\\", "/", "|", "?", "#", ">", "<"]
     if any([char in index_name for char in forbidden_chars]):
-
         logger.error(
             "invalid index name %s - index name includes one or more of "
             "the following forbidden characters: %s",

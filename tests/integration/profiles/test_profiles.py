@@ -77,9 +77,9 @@ async def check_heap_size(ops_test: OpsTest, heap_size_in_gb: int, app_name: str
         jvm_mem = node_info["jvm"]["mem"]
         heap_max_in_bytes = jvm_mem["heap_max_in_bytes"]
         # Check that the heap size is set to 4GB (in bytes)
-        assert (
-            heap_max_in_bytes == heap_size_in_gb * 1024 * 1024 * 1024
-        ), f"Heap size is not {heap_size_in_gb}GB: {heap_max_in_bytes}"
+        assert heap_max_in_bytes == heap_size_in_gb * 1024 * 1024 * 1024, (
+            f"Heap size is not {heap_size_in_gb}GB: {heap_max_in_bytes}"
+        )
 
 
 @pytest.mark.abort_on_fail
@@ -226,7 +226,11 @@ async def test_large_deployment_cluster(
         1,
         series=series,
         constraints="mem=8G",
-        config={"cluster_name": "test", "roles": "cluster_manager", "profile": "production"},
+        config={
+            "cluster_name": "test",
+            "roles": "cluster_manager",
+            "profile": "production",
+        },
         resources=charm_resources,
     )
     await deploy_opensearch(

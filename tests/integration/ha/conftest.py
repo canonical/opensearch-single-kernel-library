@@ -267,9 +267,9 @@ def s3_bucket(microceph_credentials, microceph_config) -> None:
 
 @pytest.fixture(scope="module")
 def chaos_mesh(ops_test, substrate: Substrate) -> Generator[None, Any, Any]:
-    assert (
-        ops_test.model
-    ), "Juju model is not set. Ensure that the test is running with a Juju model."
+    assert ops_test.model, (
+        "Juju model is not set. Ensure that the test is running with a Juju model."
+    )
     if substrate == "k8s":
         deploy_chaos_mesh(ops_test.model_name)
         yield

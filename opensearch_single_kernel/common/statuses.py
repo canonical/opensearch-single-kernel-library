@@ -35,6 +35,10 @@ class GeneralStatuses(Enum):
         message="The OpenSearch service is stopping.",
         running="blocking",
     )
+    CLUSTER_MANAGER_VOTING_ONLY_INVALID = StatusObject(
+        status="blocked",
+        message="cluster_manager and voting_only roles cannot be both set on the same nodes.",
+    )
 
     # Blocking directive should be a running status since it is set based on the presence
     # of a SHOW_STATUS directive and once the status set we remove the directive
@@ -221,7 +225,7 @@ class PeerClusterErrorDataStatuses(Enum):
         status="waiting", message="Admin user not fully configured {message_suffix}."
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
-        status="blocked", message="TLS not fully configured {message_suffix}."
+        status="waiting", message="TLS not fully configured {message_suffix}."
     )
     SECURITY_INDEX_NOT_INITIALIZED = StatusObject(
         status="waiting", message="Security index not initialized {message_suffix}."

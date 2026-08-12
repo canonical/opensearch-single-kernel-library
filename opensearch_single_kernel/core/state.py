@@ -14,21 +14,26 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import JujuVersion, Object, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     CLIENT_RELATION,
+    COS_RELATION,
     GCS_RELATION,
     GENERATED_ROLES,
+    GRAFANA_K8S_RELATION,
     JWT_CONFIG_RELATION,
     KIBANA_SERVER_ROLE,
+    LOKI_K8S_RELATION,
     NODE_LOCK_RELATION,
     OAUTH_RELATION,
     OPENSEARCH_HTTP_PORT,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
     PEER_RELATION,
+    PROMETHEUS_K8S_RELATION,
     S3_RELATION,
     SMTP_RELATION,
     STATUS_PEERS_RELATION,
@@ -76,18 +81,11 @@ from opensearch_single_kernel.core.upgrade_relation import (
     UpgradeAppState,
     UpgradeServerState,
 )
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.azure_storage import (
-    AzureStorageRequires,
-)
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,
     DataPeerUnitData,
     OpenSearchProvidesData,
 )
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.gcs_storage import (
-    GcsStorageRequires,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
@@ -116,8 +114,8 @@ class ClusterState(Object):
         substrate: Substrates,
         smtp_requires: SmtpRequires,
         s3_requirer: S3Requirer,
-        azure_requires: AzureStorageRequires,
-        gcs_requires: GcsStorageRequires,
+        azure_requires: AzureStorageRequirer,
+        gcs_requires: GCSRequirer,
     ) -> None:
         super().__init__(charm, "cluster_state")
         self.config = charm.config
@@ -220,6 +218,26 @@ class ClusterState(Object):
         """Check if the relation with id exists"""
         relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
         return bool(relation)
+
+    @property
+    def cos_agent_relation(self) -> Relation | None:
+        """Return the cos-agent relation if present."""
+        return self.model.get_relation(COS_RELATION)
+
+    @property
+    def prometheus_relation(self) -> Relation | None:
+        """Return the prometheus relation if present."""
+        return self.model.get_relation(PROMETHEUS_K8S_RELATION)
+
+    @property
+    def loki_relation(self) -> Relation | None:
+        """Return the loki relation if present."""
+        return self.model.get_relation(LOKI_K8S_RELATION)
+
+    @property
+    def grafana_relation(self) -> Relation | None:
+        """Return the grafana relation if present."""
+        return self.model.get_relation(GRAFANA_K8S_RELATION)
 
     # --- Upgrade Relation State Properties ---
 
@@ -760,7 +778,6 @@ class ClusterState(Object):
         deployment_desc = self.application.deployment_desc
         if not deployment_desc:
             return None
-        logger.info("Current deployment desc %s", deployment_desc)
         return PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.planned_units,
@@ -1122,9 +1139,9 @@ class ClusterState(Object):
         """Returns the storage connection info from the active relation.."""
         match object_storage_type:
             case ObjectStorageType.S3:
-                return self.s3_requirer.get_s3_connection_info() or {}
+                return self.s3_requirer.get_storage_connection_info(self.s3_relation) or {}
             case ObjectStorageType.AZURE:
-                return self.azure_requires.get_azure_storage_connection_info() or {}
+                return self.azure_requires.get_storage_connection_info(self.azure_relation) or {}
             case ObjectStorageType.GCS:
                 if not self.gcs_relation:
                     return {}

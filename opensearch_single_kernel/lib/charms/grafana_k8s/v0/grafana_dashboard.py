@@ -187,7 +187,6 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
 import yaml
 from cosl import DashboardPath40UID, LZMABase64
 from cosl.types import type_convert_stored
@@ -218,7 +217,7 @@ LIBAPI = 0
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
 
-LIBPATCH = 49
+LIBPATCH = 50
 
 PYDEPS = ["cosl >= 0.0.50"]
 
@@ -416,8 +415,7 @@ class RelationInterfaceMismatchError(Exception):
         self.expected_relation_interface = expected_relation_interface
         self.actual_relation_interface = actual_relation_interface
         self.message = (
-            "The '{}' relation has '{}' as "
-            "interface rather than the expected '{}'".format(
+            "The '{}' relation has '{}' as " "interface rather than the expected '{}'".format(
                 relation_name, actual_relation_interface, expected_relation_interface
             )
         )
@@ -591,7 +589,10 @@ class CharmedDashboard:
             # already in the template coming over relation data.
             # We'll store all dropdowns in the template from the provider
             # in a set. We'll add our own if they are not in this set.
-            existing_names = {item.get("name") for item in dict_content["templating"]["list"]}
+            existing_names = {
+                item.get("name")
+                for item in dict_content["templating"]["list"]
+            }
 
             for d in template_dropdowns:  # type: ignore
                 if d.get("name") not in existing_names:
@@ -968,9 +969,10 @@ class CharmedDashboard:
                 else dashboard_path
             )
         except ValueError:
-            uid = DashboardPath40UID.generate(charm_name, str(dashboard_path))
+            uid =  DashboardPath40UID.generate(charm_name, str(dashboard_path))
         else:
             uid = DashboardPath40UID.generate(charm_name, rel_path)
+
 
         logger.debug(
             "Processed dashboard '%s': replaced original uid '%s' with '%s'",
@@ -1347,10 +1349,26 @@ class GrafanaDashboardProvider(Object):
 
     def _upset_dashboards_on_relation(self, relation: Relation) -> None:
         """Update the dashboards in the relation data bucket."""
+        new_templates = type_convert_stored(self._stored.dashboard_templates)  # pyright: ignore
+
+        # Check if the templates have actually changed before updating.
+        # This avoids generating a new UUID on every event, which would cause
+        # unnecessary relation-changed events on the consumer side.
+        # See: https://github.com/canonical/opentelemetry-collector-operator/issues/331
+        existing_data_str = relation.data[self._charm.app].get("dashboards", "{}")
+        try:
+            existing_data = json.loads(existing_data_str)
+            existing_templates = existing_data.get("templates", {})
+        except json.JSONDecodeError:
+            existing_templates = {}
+
+        if new_templates == existing_templates:
+            return  # No change in templates, don't update the databag
+
         # It's completely ridiculous to add a UUID, but if we don't have some
         # pseudo-random value, this never makes it across 'juju set-state'
         stored_data = {
-            "templates": type_convert_stored(self._stored.dashboard_templates),  # pyright: ignore
+            "templates": new_templates,
             "uuid": str(uuid.uuid4()),
         }
 
@@ -1652,11 +1670,7 @@ class GrafanaDashboardConsumer(Object):
         try:
             dashboard_version = int(as_dict["version"])
         except (KeyError, ValueError):
-            logger.warning(
-                "Dashboard '%s' (uid '%s') is missing a '.version' field or is invalid (must be integer); using '0' as fallback",
-                dashboard_title,
-                dashboard_uid,
-            )
+            logger.warning("Dashboard '%s' (uid '%s') is missing a '.version' field or is invalid (must be integer); using '0' as fallback", dashboard_title, dashboard_uid)
             dashboard_version = 0
 
         return {
@@ -1691,26 +1705,12 @@ class GrafanaDashboardConsumer(Object):
                 key = obj.get("dashboard_uid")
                 if key is None or str(key).strip() == "":
                     # At this point, we assume that a `.uid` is present so we do not render a fallback identifier here. Instead, we omit it.
-                    logger.error(
-                        "dashboard '%s' from relation id '%s' is missing a '.uid' field; omitted",
-                        obj["dashboard_title"],
-                        obj["relation_id"],
-                    )
+                    logger.error("dashboard '%s' from relation id '%s' is missing a '.uid' field; omitted", obj["dashboard_title"], obj["relation_id"])
                     continue
 
                 if key in d:
-                    d[key] = max(
-                        d[key],
-                        obj,
-                        key=lambda o: (o["dashboard_version"], o["relation_id"], o["content"]),
-                    )
-                    logger.warning(
-                        "deduplicate dashboard '%s' (uid '%s') - kept version '%s' from relation id '%s'",
-                        d[key]["dashboard_title"],
-                        d[key]["dashboard_uid"],
-                        d[key]["dashboard_version"],
-                        d[key]["relation_id"],
-                    )
+                    d[key] = max(d[key], obj, key=lambda o: (o["dashboard_version"], o["relation_id"], o["content"]))
+                    logger.warning("deduplicate dashboard '%s' (uid '%s') - kept version '%s' from relation id '%s'", d[key]["dashboard_title"], d[key]["dashboard_uid"], d[key]["dashboard_version"], d[key]["relation_id"])
                 else:
                     d[key] = obj
 
@@ -1847,14 +1847,28 @@ class GrafanaDashboardAggregator(Object):
 
     def _update_remote_grafana(self, _: Optional[RelationEvent] = None) -> None:
         """Push dashboards to the downstream Grafana relation."""
-        # It's still ridiculous to add a UUID here, but needed
-        stored_data = {
-            "templates": type_convert_stored(self._stored.dashboard_templates),  # pyright: ignore
-            "uuid": str(uuid.uuid4()),
-        }
+        new_templates = type_convert_stored(self._stored.dashboard_templates)  # pyright: ignore
 
         if self._charm.unit.is_leader():
             for grafana_relation in self.model.relations[self._grafana_relation]:
+                # Check if the templates have actually changed before updating.
+                # This avoids generating a new UUID on every event, which would cause
+                # unnecessary relation-changed events on the consumer side.
+                existing_data_str = grafana_relation.data[self._charm.app].get("dashboards", "{}")
+                try:
+                    existing_data = json.loads(existing_data_str)
+                    existing_templates = existing_data.get("templates", {})
+                except json.JSONDecodeError:
+                    existing_templates = {}
+
+                if new_templates == existing_templates:
+                    continue  # No change in templates, don't update the databag
+
+                # It's still ridiculous to add a UUID here, but needed
+                stored_data = {
+                    "templates": new_templates,
+                    "uuid": str(uuid.uuid4()),
+                }
                 grafana_relation.data[self._charm.app]["dashboards"] = json.dumps(stored_data)
 
     def remove_dashboards(self, event: RelationBrokenEvent) -> None:

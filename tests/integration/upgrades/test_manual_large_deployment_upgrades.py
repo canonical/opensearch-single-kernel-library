@@ -66,7 +66,11 @@ NO_CM_STATUS = StatusObject(
 
 
 async def _build_env(
-    ops_test: OpsTest, version: str, series: str, substrate: str, charm_path: str | None = None
+    ops_test: OpsTest,
+    version: str,
+    series: str,
+    substrate: str,
+    charm_path: str | None = None,
 ) -> None:
     """Sets up environment for given version and series"""
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -110,7 +114,11 @@ async def _build_env(
             resources=charm_resources,
             series=series,
             trust=substrate == "k8s",
-            config={"cluster_name": "upgrades", "init_hold": True, "roles": "cluster_manager"}
+            config={
+                "cluster_name": "upgrades",
+                "init_hold": True,
+                "roles": "cluster_manager",
+            }
             | config,
         ),
         ops_test.model.deploy(
@@ -179,7 +187,11 @@ async def test_deploy_starting_version(
         # Deploy from the local 2.19.4 charm to have n-1 version available
         # TODO: Once revision released deploy from channel and remove local charm
         await _build_env(
-            ops_test, K8S_VERSION_N_MINUS_1, series, substrate, charm_path=charm_version_minus_1
+            ops_test,
+            K8S_VERSION_N_MINUS_1,
+            series,
+            substrate,
+            charm_path=charm_version_minus_1,
         )
     else:
         await _build_env(ops_test, VM_VERSION_N_MINUS_2, series, substrate)
@@ -190,7 +202,11 @@ async def test_deploy_starting_version(
 @pytest.mark.skip("Can't upgrade between earlier versions")
 # TODO: re-enable after two versions available
 async def test_upgrade_to_n_minus_1(
-    ops_test: OpsTest, series: str, c_writes: ContinuousWrites, c_writes_runner, substrate
+    ops_test: OpsTest,
+    series: str,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    substrate,
 ) -> None:
     """Test minor version upgrade from n-2 to n-1."""
     # upgrade to version n-1 revision for current series
@@ -219,7 +235,11 @@ async def test_upgrade_to_local(
     version_n = VM_VERSION_N if substrate == "vm" else K8S_VERSION_N
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
         await assert_upgrade_to_local(
-            ops_test, app=app, charm=charm, substrate=substrate, charm_resources=charm_resources
+            ops_test,
+            app=app,
+            charm=charm,
+            substrate=substrate,
+            charm_resources=charm_resources,
         )
         await assert_version_units(ops_test, app, version_n, substrate)
         if substrate == "k8s":
@@ -267,7 +287,12 @@ async def test_upgrade_rollback_from_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 async def test_upgrade_from_version_to_local(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner, version, charm, substrate
+    ops_test: OpsTest,
+    c_writes: ContinuousWrites,
+    c_writes_runner,
+    version,
+    charm,
+    substrate,
 ) -> None:
     """Test upgrade from usptream to local charm."""
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
