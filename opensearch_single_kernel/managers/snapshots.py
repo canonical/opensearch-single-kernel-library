@@ -156,6 +156,22 @@ class SnapshotsManager(BaseManager):
             credentials.model_dump(exclude_none=True)
         )
 
+    def has_saved_backup_credentials(self) -> bool:
+        """Whether this unit currently has a stored backup-credentials marker."""
+        orchestrators = self.state.application.orchestrators
+
+        if not orchestrators or orchestrators.main_app is None:
+            return False
+
+        peer_cluster_server = self.state.local_peer_cluster_server_by_relation_id(
+            is_provider=True, relation_id=orchestrators.main_rel_id
+        )
+
+        if not peer_cluster_server:
+            return False
+
+        return peer_cluster_server.snapshots_credentials_saved is not None
+
     def validate_storage_config(
         self, config: ObjectStorageConfig, storage_type: ObjectStorageType
     ) -> None:

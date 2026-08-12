@@ -198,9 +198,11 @@ class KeystoreManager(BaseManager):
             logger.error("Keystore operation failed: %s", e)
             return KeystoreReloadResult.ERROR
 
-        if not self.workload.is_service_started():
-            # service not running, settings will be picked up at startup
-            logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
+        if not self.workload.is_service_started() or not self.opensearch_client.is_node_up():
+            # Secure settings are read from the keystore at
+            # OpenSearch startup, so there is nothing to reload live and doing so would abort
+            # an in-progress bootstrap and deadlock the node-lock handshake.
+            logger.debug("Opensearch not up. Keystore settings will be loaded at start time.")
             return KeystoreReloadResult.SUCCESS
 
         if not self.opensearch_client.reload_secure_settings():
