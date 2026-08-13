@@ -412,10 +412,11 @@ async def _ensure_large_opensearch_deployed(
     ops_test: OpsTest,
     charm,
     series,
-    deploy_type: str = "large_deployment",
+    charm_resources,
     substrate: Substrate = "vm",
 ) -> None:
     """Deploy large OpenSearch (main/failover/data) + TLS if not already present."""
+    deploy_type: str = "large_deployment"
     if (
         MAIN_ORCHESTRATOR_NAME in ops_test.model.applications
         and APP_NAME in ops_test.model.applications
@@ -452,6 +453,7 @@ async def _ensure_large_opensearch_deployed(
             num_units=1,
             series=series,
             config=main_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
             trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
@@ -460,6 +462,7 @@ async def _ensure_large_opensearch_deployed(
             num_units=2,
             series=series,
             config=failover_orchestrator_conf | CONFIG_OPTS,
+            resources=charm_resources,
             trust=substrate == "k8s",
         ),
         ops_test.model.deploy(
@@ -468,6 +471,7 @@ async def _ensure_large_opensearch_deployed(
             num_units=1,
             series=series,
             config=data_hot_conf | CONFIG_OPTS,
+            resources=charm_resources,
             trust=substrate == "k8s",
         ),
     )
@@ -501,7 +505,7 @@ async def _ensure_opensearch_deployed(
         )
         return
     await _ensure_large_opensearch_deployed(
-        ops_test, charm, series, deploy_type, substrate=substrate
+        ops_test, charm, series, charm_resources, substrate=substrate
     )
 
 
@@ -561,7 +565,7 @@ async def test_large_deployment_build_and_deploy(
     ops_test: OpsTest, charm, series, deploy_type: str, charm_resources, substrate
 ) -> None:
     """Build and deploy a large deployment for OpenSearch."""
-    await _ensure_large_opensearch_deployed(ops_test, charm, series, deploy_type, substrate)
+    await _ensure_large_opensearch_deployed(ops_test, charm, series, charm_resources, substrate)
 
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
