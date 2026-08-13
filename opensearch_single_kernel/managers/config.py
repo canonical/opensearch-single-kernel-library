@@ -10,6 +10,7 @@ from typing import Any
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CertType,
+    PerformanceType,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
@@ -67,6 +68,7 @@ class ConfigManager(BaseManager):
 
         config = (
             self._opensearch_static_config()
+            | self._opensearch_circuit_breaker_config()
             | self._opensearch_general_config(roles)
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
@@ -144,6 +146,17 @@ class ConfigManager(BaseManager):
             "prometheus.cluster.settings": "false",
             "prometheus.nodes.filter": "_local",
         }
+
+    def _opensearch_circuit_breaker_config(self) -> dict[str, Any]:
+        """Profile-dependent parent circuit breaker settings
+
+        The testing profile runs on a hardcoded 1GB heap. With the default
+        real-memory parent breaker, transient GC spikes on that tiny heap trip the breaker
+        and block operations causing errors.
+        """
+        if PerformanceType(self.state.config.get("profile")) == PerformanceType.PRODUCTION:
+            return {}
+        return {"indices.breaker.total.use_real_memory": False}
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""

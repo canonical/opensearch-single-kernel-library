@@ -59,6 +59,8 @@ jobs:
               _, runner, task, variant = job.split(":")
               if not run_on_all_bases and variant != "ubuntu24":
                   continue
+              if not any(t in task for t in ("test_profiles.py", "test_plugins.py")):
+                  continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
               if runner.endswith("-arm"):
