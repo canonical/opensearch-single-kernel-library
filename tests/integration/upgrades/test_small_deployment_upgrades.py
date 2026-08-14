@@ -69,7 +69,7 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
         channel=OPENSEARCH_CHANNEL,
         revision=revision,
         series=series,
-        config=CONFIG_OPTS if revision > PROFILES_REVISION else {},
+        config=CONFIG_OPTS if (substrate == "k8s" or revision > PROFILES_REVISION) else {},
         resources=charm_resource,
         trust=substrate == "k8s",
     )
