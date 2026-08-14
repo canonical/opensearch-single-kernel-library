@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     S3_CREDENTIALS,
     S3_RELATION,
     STORE_PASSWORD,
+    DeploymentType,
     ObjectStorageType,
     Scope,
     Substrates,
@@ -63,7 +64,11 @@ from opensearch_single_kernel.utils.object_storage import (
     verify_gcs_credentials,
     verify_s3_credentials,
 )
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -669,25 +674,41 @@ class SnapshotsManager(BaseManager):
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+        """Compute snapshot statuses from relation / config state."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        pcluster_types = {
-            ObjectStorageType.S3_PCLUSTER,
-            ObjectStorageType.AZURE_PCLUSTER,
-            ObjectStorageType.GCS_PCLUSTER,
-        }
-        if (
-            scope == "app"
-            and self.state.application.deployment_desc
-            and (object_storage_type := self.state.storage_type)
-            and object_storage_type not in pcluster_types
+        if scope != "app":
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        status_list.extend(
+            cached_non_running_statuses(
+                self.state.statuses,
+                scope,
+                self.name,
+                matches=[SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value],
+                message_contains=["repository setup failed"],
+            )
+        )
+
+        deployment_desc = self.state.application.deployment_desc
+        if not deployment_desc:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        # Non-main apps shouldn't take direct backup relations.
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
+            self.state.is_peer_cluster_consumer() or self.state.is_peer_cluster_provider()
         ):
+            if self.state.s3_relation or self.state.azure_relation or self.state.gcs_relation:
+                status_list.append(SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value)
+                return status_list
+
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        # Main orchestrator: validate backup relation and data.
+        if object_storage_type := self.state.storage_type:
             if object_storage_type == ObjectStorageType.CONFLICT:
-                return [SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value]
+                status_list.append(SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value)
+                return status_list
             try:
                 connection_info = self.state.get_storage_connection_info_from_relation(
                     object_storage_type
@@ -698,25 +719,30 @@ class SnapshotsManager(BaseManager):
                         storage_config_from_connection_info(object_storage_type, connection_info)
                     )
                 ):
-                    return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+                    status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
+                    return status_list
 
                 self.validate_storage_config(object_storage_config, object_storage_type)
             except OpenSearchInvalidStorageTypeError:
-                return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+                status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
+                return status_list
             except OpenSearchObjectStorageConfigValidationError:
-                return [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+                status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
+                return status_list
             except OpenSearchBackupRelationDataIncompleteError:
-                return [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+                status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
+                return status_list
             except OpenSearchBackupCredentialsIncorrectError:
-                return [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
-        if scope == "app" and self.state.application.missing_relations:
-            missing_relations = self.missing_backup_relations()
-            if missing_relations:
-                return [
-                    format_status(
-                        PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                        {"relation": missing_relations[0]},
-                    )
-                ]
+                status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
+                return status_list
 
-        return [GeneralStatuses.ACTIVE_IDLE.value]
+        if missing_relations := self.missing_backup_relations():
+            status_list.append(
+                format_status(
+                    PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                    {"relation": missing_relations[0]},
+                )
+            )
+            return status_list
+
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

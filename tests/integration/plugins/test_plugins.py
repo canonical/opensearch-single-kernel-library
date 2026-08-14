@@ -11,6 +11,9 @@ from typing import Any
 import pytest
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.statuses import NotificationsStatuses
+from opensearch_single_kernel.utils.status import format_status
+from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.ha.helpers_data import (
     bulk_insert,
@@ -360,14 +363,17 @@ async def _wait_until_config_absent(
             await asyncio.sleep(poll)
 
 
-@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
-@pytest.mark.abort_on_fail
-@pytest.mark.skip_if_deployed
-async def test_build_and_deploy_small_deployment(
-    ops_test: OpsTest, charm, series, deploy_type: str, substrate, charm_resources
+async def _ensure_small_opensearch_deployed(
+    ops_test: OpsTest,
+    charm,
+    series,
+    substrate,
+    charm_resources,
+    deploy_type: str = "small_deployment",
 ) -> None:
-    """Build and deploy an OpenSearch cluster."""
-    if await app_name(ops_test):
+    """Deploy a 3-unit small OpenSearch + TLS cluster if not already present."""
+    if APP_NAME in ops_test.model.applications or await app_name(ops_test):
+        await _wait_for_units(ops_test, deploy_type)
         return
 
     model_conf = MODEL_CONFIG.copy()
@@ -378,7 +384,6 @@ async def test_build_and_deploy_small_deployment(
     model_conf["update-status-hook-interval"] = "1m"
     await ops_test.model.set_config(model_conf)
 
-    # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
     opensearch_storage = {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None
     await asyncio.gather(
@@ -398,59 +403,28 @@ async def test_build_and_deploy_small_deployment(
         ),
     )
 
-    # Relate it to OpenSearch to set up TLS.
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-
     await _wait_for_units(ops_test, deploy_type)
     assert len(ops_test.model.applications[APP_NAME].units) == 3
 
 
-@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
-@pytest.mark.abort_on_fail
-async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str):
-    """Test that Prometheus Exporter is running before the relation is there.
-
-    Test only on small deployments scenario, as this is a more functional check to the plugin.
-    """
-    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
-    endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
-    response = await http_request(ops_test, "get", endpoint, app=APP_NAME, json_resp=False)
-
-    response_str = response.content.decode("utf-8")
-    assert response_str.count("opensearch_") > 500
-    assert len(response_str.split("\n")) > 500
-
-
-@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
-@pytest.mark.abort_on_fail
-async def test_small_deployments_prometheus_exporter_cos_relation(
-    ops_test, series, deploy_type: str, substrate
-):
-    await _deploy_cos(ops_test, series, substrate, [APP_NAME])
-    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True, substrate=substrate)
-
-    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
-    relation_data = await _get_scrape_job(ops_test, APP_NAME, leader_id, substrate)
-    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
-
-    assert relation_data["basic_auth"]["username"] == "monitor"
-    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
-    assert relation_data["scheme"] == "https"
-    if substrate != "k8s":
-        admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
-        assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
-
-
-# TODO add when LD is on k8s
-@pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
-@pytest.mark.abort_on_fail
-@pytest.mark.skip_if_deployed
-async def test_large_deployment_build_and_deploy(
-    ops_test: OpsTest, charm, series, deploy_type: str, charm_resources, substrate
+async def _ensure_large_opensearch_deployed(
+    ops_test: OpsTest,
+    charm,
+    series,
+    charm_resources,
+    substrate: Substrate = "vm",
 ) -> None:
-    """Build and deploy a large deployment for OpenSearch."""
+    """Deploy large OpenSearch (main/failover/data) + TLS if not already present."""
+    deploy_type: str = "large_deployment"
+    if (
+        MAIN_ORCHESTRATOR_NAME in ops_test.model.applications
+        and APP_NAME in ops_test.model.applications
+    ):
+        await _wait_for_units(ops_test, deploy_type)
+        return
+
     await ops_test.model.set_config(MODEL_CONFIG)
-    # Deploy TLS Certificates operator.
     tls_config = {"ca-common-name": "CN_CA"}
 
     main_orchestrator_conf = {
@@ -502,20 +476,96 @@ async def test_large_deployment_build_and_deploy(
         ),
     )
 
-    # Large deployment setup
     await ops_test.model.integrate("main:peer-cluster-orchestrator", "failover:peer-cluster")
     await ops_test.model.integrate("main:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster")
     await ops_test.model.integrate(
         "failover:peer-cluster-orchestrator", f"{APP_NAME}:peer-cluster"
     )
 
-    # TLS setup
     await ops_test.model.integrate(MAIN_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.integrate(FAILOVER_ORCHESTRATOR_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
 
     await _wait_for_units(ops_test, deploy_type)
     await set_watermark(ops_test, APP_NAME)
+
+
+async def _ensure_opensearch_deployed(
+    ops_test: OpsTest,
+    deploy_type: str,
+    charm,
+    series,
+    substrate,
+    charm_resources=None,
+) -> None:
+    """Deploy OpenSearch for the given deploy_type when not already present."""
+    if deploy_type == "small_deployment":
+        await _ensure_small_opensearch_deployed(
+            ops_test, charm, series, substrate, charm_resources, deploy_type
+        )
+        return
+    await _ensure_large_opensearch_deployed(
+        ops_test, charm, series, charm_resources, substrate=substrate
+    )
+
+
+@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+@pytest.mark.skip_if_deployed
+async def test_build_and_deploy_small_deployment(
+    ops_test: OpsTest, charm, series, deploy_type: str, substrate, charm_resources
+) -> None:
+    """Build and deploy an OpenSearch cluster."""
+    await _ensure_small_opensearch_deployed(
+        ops_test, charm, series, substrate, charm_resources, deploy_type
+    )
+
+
+@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+async def test_prometheus_exporter_enabled_by_default(ops_test, deploy_type: str):
+    """Test that Prometheus Exporter is running before the relation is there.
+
+    Test only on small deployments scenario, as this is a more functional check to the plugin.
+    """
+    leader_unit_ip = await get_leader_unit_ip(ops_test, app=APP_NAME)
+    endpoint = f"https://{leader_unit_ip}:9200/_prometheus/metrics"
+    response = await http_request(ops_test, "get", endpoint, app=APP_NAME, json_resp=False)
+
+    response_str = response.content.decode("utf-8")
+    assert response_str.count("opensearch_") > 500
+    assert len(response_str.split("\n")) > 500
+
+
+@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+async def test_small_deployments_prometheus_exporter_cos_relation(
+    ops_test, series, deploy_type: str, substrate
+):
+    await _deploy_cos(ops_test, series, substrate, [APP_NAME])
+    await _wait_for_units(ops_test, deploy_type, wait_for_cos=True, substrate=substrate)
+
+    leader_id = await get_leader_unit_id(ops_test, APP_NAME)
+    relation_data = await _get_scrape_job(ops_test, APP_NAME, leader_id, substrate)
+    secret = await get_secret_by_label(ops_test, "opensearch:app:monitor-password")
+
+    assert relation_data["basic_auth"]["username"] == "monitor"
+    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
+    assert relation_data["scheme"] == "https"
+    if substrate != "k8s":
+        admin_secret = await get_secret_by_label(ops_test, "opensearch:app:app-admin")
+        assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
+
+
+# TODO add when LD is on k8s
+@pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+@pytest.mark.skip_if_deployed
+async def test_large_deployment_build_and_deploy(
+    ops_test: OpsTest, charm, series, deploy_type: str, charm_resources, substrate
+) -> None:
+    """Build and deploy a large deployment for OpenSearch."""
+    await _ensure_large_opensearch_deployed(ops_test, charm, series, charm_resources, substrate)
 
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
@@ -1810,3 +1860,229 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     await _wait_until_config_absent(ops_test, base_url, email_channel_cfg_name)
     await _wait_until_config_absent(ops_test, base_url, email_group_cfg_name)
     await _wait_until_config_absent(ops_test, base_url, smtp_sender_cfg_name)
+
+
+async def _ensure_smtp_integrator(ops_test: OpsTest) -> None:
+    """Deploy smtp-integrator if it is not already in the model."""
+    if SMTP_INTEGRATOR_APP_NAME in ops_test.model.applications:
+        return
+    await ops_test.model.deploy(
+        SMTP_INTEGRATOR_APP_NAME,
+        channel=SMTP_INTEGRATOR_CHANNEL,
+    )
+    await ops_test.model.wait_for_idle(
+        apps=[SMTP_INTEGRATOR_APP_NAME],
+        timeout=20 * 60,
+    )
+
+
+async def _remove_smtp_relation_if_present(ops_test: OpsTest, app: str = APP_NAME) -> None:
+    """Drop smtp relation for app when present (idempotent cleanup)."""
+    try:
+        _get_relation_id(
+            ops_test.model,
+            f"{app}:smtp",
+            f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+        )
+    except RuntimeError:
+        return
+
+    await ops_test.model.applications[app].remove_relation(
+        f"{app}:smtp",
+        f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+    )
+
+
+async def _status_detail_blob(ops_test: OpsTest, app: str = APP_NAME) -> str:
+    """Run status-detail with recompute and return results as a searchable string."""
+    leader_id = await get_leader_unit_id(ops_test, app=app)
+    result = await run_action(
+        ops_test,
+        leader_id,
+        "status-detail",
+        params={"recompute": True},
+        app=app,
+    )
+    assert result.status == "completed", f"status-detail failed: {result}"
+    return json.dumps(result.response, default=str)
+
+
+@pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+async def test_smtp_notification_statuses(
+    ops_test: OpsTest,
+    deploy_type: str,
+    charm,
+    series,
+    substrate,
+    charm_resources,
+) -> None:
+    """Validate notification statuses for the smtp relation on a main/small deploy.
+
+    Covers via smtp-integrator (only configs the integrator accepts):
+    - SMTP_NO_RELATION_DATA (relation while integrator is unconfigured)
+    - SMTP_WAITING_RECIPIENTS (valid SMTP config, empty recipients list)
+    - status-detail recompute surfaces notifications statuses
+    - recovery to active once recipients are configured
+
+    Not covered here (integrator cannot express them cleanly):
+    - SMTP_MISSING_REQUIRED_PARAMETERS — unit tests
+      (``smtp_sender=""`` makes smtp-integrator blocked: invalid configuration)
+    - SMTP_CONFIGURATION_ERROR — unit tests (apply-path HTTP/keystore failure)
+    - SMTP_COULD_NOT_READ_DATA — unit tests (unreadable password secret)
+    """
+    await _ensure_opensearch_deployed(
+        ops_test, deploy_type, charm, series, substrate, charm_resources
+    )
+    await _ensure_smtp_integrator(ops_test)
+    await _remove_smtp_relation_if_present(ops_test, APP_NAME)
+    await _wait_for_units(ops_test, deploy_type)
+
+    # --- no published relation data yet (unconfigured integrator) ---
+    # Integrator does not write useful app databag until required SMTP fields are set.
+    await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].reset_config(
+        [
+            "host",
+            "port",
+            "user",
+            "password",
+            "transport_security",
+            "auth_type",
+            "smtp_sender",
+            "recipients",
+        ]
+    )
+    await ops_test.model.integrate(f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp")
+    relation_id = _get_relation_id(
+        ops_test.model,
+        f"{APP_NAME}:smtp",
+        f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+    )
+    no_data_status = format_status(
+        NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
+        {"id": relation_id},
+    )
+
+    await wait_until(
+        ops_test,
+        apps=[APP_NAME],
+        apps_statuses={APP_NAME: [no_data_status]},
+        timeout=1800,
+        wait_for_exact_units={APP_NAME: 3},
+        idle_period=IDLE_PERIOD,
+    )
+    logger.info("OpenSearch app blocked: SMTP relation has no data.")
+    detail = await _status_detail_blob(ops_test, APP_NAME)
+    assert "no data" in detail.lower() or str(relation_id) in detail, (
+        f"status-detail missing SMTP_NO_RELATION_DATA: {detail}"
+    )
+
+    # --- waiting for recipients (valid integrator config, no recipients) ---
+    # Do not set smtp_sender to "" — integrator rejects it as invalid configuration
+    # and never publishes relation data (would stick on NO_RELATION_DATA).
+    await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].set_config(
+        {
+            "host": "127.0.0.1",
+            "port": "2525",
+            "user": "dummy-user",
+            "password": "dummy-pass",
+            "transport_security": "none",
+            "auth_type": "plain",
+            "smtp_sender": "no-reply@example.com",
+            "recipients": "",
+        }
+    )
+    relation_id = _get_relation_id(
+        ops_test.model,
+        f"{APP_NAME}:smtp",
+        f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+    )
+    waiting_status = format_status(
+        NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
+        {"id": relation_id},
+    )
+
+    await wait_until(
+        ops_test,
+        apps=[APP_NAME],
+        apps_statuses={APP_NAME: [waiting_status]},
+        timeout=1800,
+        wait_for_exact_units={APP_NAME: 3},
+        idle_period=IDLE_PERIOD,
+    )
+    logger.info("OpenSearch app reports waiting for SMTP recipients.")
+
+    detail = await _status_detail_blob(ops_test, APP_NAME)
+    assert "notifications_manager" in detail or "waiting for recipients" in detail.lower(), (
+        f"status-detail did not surface notification waiting status: {detail}"
+    )
+    assert "waiting for recipients" in detail.lower() or str(relation_id) in detail, (
+        f"status-detail missing recipients wait / relation id: {detail}"
+    )
+
+    # --- full config: recover to active ---
+    await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].set_config(
+        {
+            "recipients": "a@example.com,b@example.com",
+        }
+    )
+    await wait_until(
+        ops_test,
+        apps=[APP_NAME],
+        timeout=1800,
+        wait_for_exact_units={APP_NAME: 3},
+        idle_period=IDLE_PERIOD,
+    )
+    logger.info("OpenSearch app returned to active after SMTP recipients configured.")
+
+    await _remove_smtp_relation_if_present(ops_test, APP_NAME)
+    await _wait_for_units(ops_test, deploy_type)
+
+
+@pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
+@pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("k8s")
+async def test_smtp_relation_invalid_status_on_non_main(
+    ops_test: OpsTest,
+    deploy_type: str,
+    charm,
+    series,
+    substrate,
+) -> None:
+    """SMTP on a non-main orchestrator must block with SMTP_RELATION_INVALID."""
+    await _ensure_opensearch_deployed(ops_test, deploy_type, charm, series, substrate)
+    await _ensure_smtp_integrator(ops_test)
+    # In large deployments APP_NAME is the data cluster (not main orchestrator).
+    await _remove_smtp_relation_if_present(ops_test, APP_NAME)
+
+    await ops_test.model.applications[SMTP_INTEGRATOR_APP_NAME].set_config(
+        {
+            "host": "127.0.0.1",
+            "port": "2525",
+            "user": "dummy-user",
+            "password": "dummy-pass",
+            "transport_security": "none",
+            "auth_type": "plain",
+            "smtp_sender": "no-reply@example.com",
+            "recipients": "a@example.com",
+        }
+    )
+    await ops_test.model.integrate(f"{APP_NAME}:smtp", f"{SMTP_INTEGRATOR_APP_NAME}:smtp")
+
+    await wait_until(
+        ops_test,
+        apps=[APP_NAME],
+        apps_statuses={APP_NAME: [NotificationsStatuses.SMTP_RELATION_INVALID.value]},
+        timeout=1800,
+        wait_for_exact_units={APP_NAME: 1},
+        idle_period=IDLE_PERIOD,
+    )
+    logger.info("Data app blocked: SMTP must be related to main-orchestrator.")
+
+    detail = await _status_detail_blob(ops_test, APP_NAME)
+    assert "main-orchestrator" in detail.lower() or "notifications_manager" in detail, (
+        f"status-detail did not surface SMTP_RELATION_INVALID: {detail}"
+    )
+
+    await _remove_smtp_relation_if_present(ops_test, APP_NAME)
+    await _wait_for_units(ops_test, deploy_type)

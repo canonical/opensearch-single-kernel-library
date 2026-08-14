@@ -16,6 +16,7 @@ from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -124,10 +125,22 @@ class BaseManager(ManagerStatusProtocol):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Return this manager's statuses.
+
+        Non-running statuses should come from state (read-only). Merge cached
+        running statuses and apply-path failures via
+        :func:`~opensearch_single_kernel.utils.status.running_statuses` and
+        :func:`~opensearch_single_kernel.utils.status.cached_non_running_statuses`.
+        Don't write to OpenSearch/relations/databags here.
+
+        ``recompute=False`` returns the full cache. ``recompute=True`` clears the
+        component cache first — recompute non-running statuses, keep running ones,
+        else return ``ACTIVE_IDLE``.
+        """
         if not recompute:
             return self.state.statuses.get(scope, self.name).root or [
                 GeneralStatuses.ACTIVE_IDLE.value
             ]
 
-        return [GeneralStatuses.ACTIVE_IDLE.value]
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
