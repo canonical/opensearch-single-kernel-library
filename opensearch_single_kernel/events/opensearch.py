@@ -190,6 +190,13 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
+
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+            event.defer()
+            return
+
+        if self.charm.unit.is_leader():
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
             if self.charm.state.server.started:
@@ -218,16 +225,12 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.profiles_manager.check_profile_requirements():
-            event.defer()
-            return
-
-        if not (unit_data := event.relation.data.get(event.unit)):
-            return
-
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
+
+        if not (unit_data := event.relation.data.get(event.unit)):
+            return
 
         if self.charm.unit.is_leader() and unit_data.get("bootstrap_contributor"):
             contributor_count = self.charm.state.application.bootstrap_contributors_count

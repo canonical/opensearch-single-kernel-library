@@ -4,6 +4,7 @@
 
 """Utilities for editing yaml config files at any depth level and maintaining comments."""
 
+import difflib
 import logging
 import re
 import sys
@@ -274,6 +275,18 @@ class YamlConfigSetter(ConfigSetter):
         self.__dump(target, OutputType.file, config_file)
 
         new_content = path.read_text().strip()
+        diff = "\n".join(
+            difflib.unified_diff(
+                old_content.splitlines(),
+                new_content.splitlines(),
+                fromfile=f"a/{config_file}",
+                tofile=f"b/{config_file}",
+                lineterm="",
+            )
+        )
+        logger.debug("Rewrote config file %s. Diff:\n%s", config_file, diff)
+        logger.debug("old config:\n%s", old_content)
+        logger.debug("new config:\n%s", new_content)
         return old_content != new_content
 
     @override
