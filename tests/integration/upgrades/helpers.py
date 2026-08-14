@@ -52,7 +52,7 @@ K8S_VERSION_N_MINUS_1 = "2.19.5"
 K8S_VERSION_TO_REVISION = {K8S_VERSION_N_MINUS_1: {"jammy": 8, "noble": 7}}
 K8S_VERSION_TO_RESOURCE = {
     K8S_VERSION_N_MINUS_1: {
-        "opensearch-image": "hcr.io/canonical/charmed-opensearch@sha256:f2aef1886c224f62cfd4601120f780aaef604d3cf0d850b778be99d1f0c54015"
+        "opensearch-image": "ghcr.io/canonical/charmed-opensearch@sha256:f2aef1886c224f62cfd4601120f780aaef604d3cf0d850b778be99d1f0c54015"
     }
 }
 
