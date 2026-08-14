@@ -92,6 +92,14 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
         upgrade_rel_id = harness.add_relation(UPGRADE_RELATION, harness.charm.app.name)
         harness.add_relation_unit(upgrade_rel_id, f"{harness.charm.app.name}/0")
 
+    # get_statuses() may call check_certs_expiration(); unit tests often suite
+    # incomplete cert secrets that are not valid PEMs, so stub the check.
+    mocker.patch.object(
+        harness.charm.tls_manager,
+        "check_certs_expiration",
+        return_value=None,
+    )
+
     return harness
 
 
