@@ -53,6 +53,8 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
     await ops_test.model.set_config(MODEL_CONFIG)
 
     if substrate == "k8s":
+        if version not in K8S_VERSION_TO_REVISION or version not in K8S_VERSION_TO_RESOURCE:
+            pytest.skip(f"Version {version} is not available for k8s upgrade tests")
         revision = K8S_VERSION_TO_REVISION[version][series]
         charm_resource = K8S_VERSION_TO_RESOURCE[version]
         charm = OPENSEARCH_K8S_CHARM
