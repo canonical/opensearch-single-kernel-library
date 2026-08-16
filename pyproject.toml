@@ -124,7 +124,7 @@ fix-shallow-repository = true
 optional = true
 
 [tool.poetry.group.format.dependencies]
-ruff = "^0.15.20"
+ruff = "^0.16.2"
 
 [tool.poetry.group.lint]
 optional = true
