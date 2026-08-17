@@ -618,9 +618,10 @@ class ClusterState(Object):
     def fqdn_resolvable(self) -> bool:
         """Whether the unit's canonical FQDN is already published in DNS.
 
-        On K8s, the per-unit endpoint record only appears once the (re)created
-        pod is registered; until then certificate SANs computed from `fqdn`
-        would silently miss the cluster-local FQDN.
+        On K8s, the FQDN used in certificate SANs can be temporarily
+        unavailable (e.g. after pod recreation), resulting in bad certificates
+        loaded and unavailability of OpenSearch connection. This check was
+        added to handle this case.
         """
         if self.substrate != Substrates.K8S:
             return True

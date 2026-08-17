@@ -633,12 +633,10 @@ async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: st
     # Now, we compare the change in the action above with the opensearch's nodes.
     # In large deployments, that will mean checking if the change on main orchestrator
     # was sent down to the opensearch (data node) cluster.
-    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
-        with attempt:
-            result2 = await run_action(
-                ops_test, leader_id, "get-password", {"username": "monitor"}, app=app
-            )
-            assert result2.response.get("password") == new_password
+    result2 = await run_action(
+        ops_test, leader_id, "get-password", {"username": "monitor"}, app=app
+    )
+    assert result2.response.get("password") == new_password
 
     # Relation data is updated
     # In both large and small deployments, we want to check if the relation data is updated
@@ -1491,14 +1489,18 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     payload = {
         "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
     }
+    # Model can cause memory usage spike of over 90% on machines with limited RAM capacity.
+    # Because of this spike, the following action may fail with status
+    # HTTP 429: "Memory Circuit Breaker is open, please check your resources!".
+    # This error is transient and should be retried.
     for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
         with attempt:
             response = await http_request(
                 ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload
             )
-            assert (
-                len(response.get("hits", {}).get("hits", [])) > 0
-            ), f"Neural search did not yield results: {response}"
+            assert len(response.get("hits", {}).get("hits", [])) > 0, (
+                f"Neural search did not yield results: {response}"
+            )
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
@@ -1698,7 +1700,7 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     await http_request(ops_test, "POST", f"{base_url}/{zstd},{default}/_refresh")
 
     # compare size of indices, zstd should be smaller or equal
-    # This test was flaky due to three reasons:
+    # This test was flaky due to two reasons:
     # 1. Compression happens during segment merges, not immediately after indexing.
     #    Without force merge, unmerged segments could make zstd appear
     #    larger than default (e.g., 147474 > 416).
@@ -1706,23 +1708,20 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # 2. For very small datasets, fixed overhead (metadata, segment headers, minimum segment sizes)
     #    may dominate, making compressed and uncompressed sizes equal (e.g., 416 == 416).
     #    Fixed by using <= instead of < to allow equality for edge cases.
-    # 3. _stats/store counts every file in the shard directory, including segments that were
-    #    not yet deleted. We need to wait for this change to settle.
-    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
-        with attempt:
-            stats = await http_request(
-                ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store"
-            )
-            zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
-            default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
+    segments = await http_request(
+        ops_test, "GET", f"{base_url}/_cat/segments/{zstd},{default}?format=json&bytes=b"
+    )
+    zstd_size = sum(int(segment["size"]) for segment in segments if segment["index"] == zstd)
+    default_size = sum(int(segment["size"]) for segment in segments if segment["index"] == default)
 
-            logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
-            assert (
-                zstd_size > 0 and default_size > 0
-            ), "Index store sizes should be positive after bulk indexing"
-            assert (
-                zstd_size <= default_size
-            ), f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    # exactly one segment per shard copy (primary + replica) proves the force merge applied
+    assert len(segments) == 4, f"Expected 1 segment per shard copy, got: {segments}"
+    assert zstd_size > 0 and default_size > 0, (
+        "Index segment sizes should be positive after bulk indexing"
+    )
+    assert zstd_size <= default_size, (
+        f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
+    )
     await delete_index(ops_test, APP_NAME, leader_unit_ip, zstd)
     await delete_index(ops_test, APP_NAME, leader_unit_ip, default)
 

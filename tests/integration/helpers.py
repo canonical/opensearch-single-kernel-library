@@ -377,7 +377,7 @@ async def _is_every_condition_met(
             logger.info(_progress_line(units))
             return False
 
-        if expected_units > -1 and not _is_every_condition_on_units_met(
+        if not _is_every_condition_on_units_met(
             model=ops_test.model.info.name,
             units=units,
             unit_statuses=units_statuses.get(app) if units_statuses else None,
@@ -426,6 +426,7 @@ async def wait_until(  # noqa: C901
     elif not wait_for_exact_units:
         wait_for_exact_units = {app: -1 for app in apps}
     else:
+        wait_for_exact_units = wait_for_exact_units.copy()
         for app in apps:
             if app not in wait_for_exact_units:
                 wait_for_exact_units[app] = 1
