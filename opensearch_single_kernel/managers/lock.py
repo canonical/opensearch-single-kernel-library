@@ -69,10 +69,6 @@ class PeerLockManager(BaseManager):
             )
             return False
 
-        self.state.remove_status_if_present(
-            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
-        )
-
         if (
             self.state.server.is_app_leader
             and self.state.application_lock.leader_acquired_after_juju_event_id
@@ -102,6 +98,9 @@ class PeerLockManager(BaseManager):
                 return False
 
         logger.debug("[Node lock] Acquired via peer databag")
+        self.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.name
+        )
         return True
 
     def release(self) -> None:

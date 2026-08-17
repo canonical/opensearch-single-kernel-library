@@ -45,14 +45,23 @@ NO_CM_STATUS_MESSAGE = "Missing requirements: At least 1 cluster manager nodes a
 NO_DATA_NODE_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 data nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 NO_CM_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 cluster manager nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 
 TLS_NOT_FULLY_CONFIGURED_IN_MAIN = StatusObject(
-    status="waiting", message="TLS not fully configured in related 'main-orchestrator'."
+    status="waiting",
+    message="TLS not fully configured in related 'main-orchestrator'.",
+    short_message="TLS incomplete (remote)",
+    check="TLS readiness on related orchestrator.",
 )
 
 

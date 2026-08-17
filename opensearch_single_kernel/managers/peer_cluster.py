@@ -47,6 +47,7 @@ from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
 )
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -432,49 +433,76 @@ class PeerClusterManager(BaseManager):
                 rel_id=rel.id, deployment_desc=deployment_desc, is_provider=False
             )
 
+    def should_promote_failover_to_main(self) -> bool:
+        """Check if majority of related apps are disconnected from main orchestrator.
+
+        This runs on the failover application.
+        """
+        # Count related apps that have lost the main orchestrator.
+        remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
+        n_disconnected = sum(
+            1
+            for p_cluster in remote_peer_clusters
+            if (p_cluster.main_orchestrator_registered.lower() == "false")
+        )
+
+        # The failover app itself may also be disconnected.
+        orchestrators = self.state.application.orchestrators
+        if not orchestrators.main_app:
+            n_disconnected += 1
+
+        # Promote only once a majority is cut off.
+        return n_disconnected > (len(remote_peer_clusters) + 1) // 2
+
     @override
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = self.state.statuses.get(
-            scope, self.name, running_status_only=True
-        ).root
+        """Compute peer-cluster statuses from orchestrator and relation state."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.deployment_desc:
-            return status_list
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        if scope == "app":
-            # Only if we are a requirer and we have some orchestrators
-            orchestrators = self.state.application.orchestrators
+        if scope == "unit":
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        orchestrators = self.state.application.orchestrators
+        # Empty dict = never related; empty ids = departed.
+        if self.state.application.orchestrators_dict:
             if (
-                self.state.is_peer_cluster_consumer()
-                and self.state.peer_clusters(is_provider=False, remote=True)
-                and orchestrators
+                not orchestrators.main_app
+                and orchestrators.failover_app
+                # On scale-up from 0, cluster manager owns these statuses.
+                and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
+                not in self.state.application.deployment_desc.pending_directives
             ):
-                if not orchestrators.main_app and orchestrators.failover_app:
+                if self.should_promote_failover_to_main():
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
                     )
-                elif not orchestrators.main_app and not orchestrators.failover_app:
+                else:
                     status_list.append(
-                        PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
+                        PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
                     )
-            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                # check if there is an error
-                if error_data := peer_cluster.error_data:
-                    status_list.append(error_data.get_status())
 
-                # requirer errors
-                if data := peer_cluster.data():
-                    requirer_errors = self.requirer_errors(
-                        orchestrators=orchestrators,
-                        deployment_desc=self.state.application.deployment_desc,
-                        peer_cluster_rel_data=data,
-                        # only check if we have orchestrators in the data bag
-                        event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
-                    )
-                    if requirer_errors and (status := requirer_errors.get_status()):
-                        status_list.append(status)
+            elif not orchestrators.main_app and not orchestrators.failover_app:
+                status_list.append(PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value)
+        for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+            # check if there is an error
+            if error_data := peer_cluster.error_data:
+                status_list.append(error_data.get_status())
+
+            # requirer errors
+            if data := peer_cluster.data():
+                requirer_errors = self.requirer_errors(
+                    orchestrators=orchestrators,
+                    deployment_desc=self.state.application.deployment_desc,
+                    peer_cluster_rel_data=data,
+                    # only check if we have orchestrators in the data bag
+                    event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
+                )
+                if requirer_errors and (status := requirer_errors.get_status()):
+                    status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

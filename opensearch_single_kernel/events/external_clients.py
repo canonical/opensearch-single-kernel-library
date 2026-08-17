@@ -84,20 +84,12 @@ class ExternalClientsEventsHandler(Object):
             return
 
         if not validate_index_name(event.index):
-            self.charm.state.add_status_if_not_present(
-                ExternalClientsStatuses.INVALID_INDEX_NAME.value,
-                "unit",
-                self.charm.external_clients_manager.name,
-                dynamic_params={"id": event.relation.id, "index": event.index},
+            logger.error(
+                "Invalid index name %s on client relation %s",
+                event.index,
+                event.relation.id,
             )
             return
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.INVALID_INDEX_NAME.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
-        )
 
         self.charm.status_handler.set_running_status(
             format_status(
@@ -117,21 +109,8 @@ class ExternalClientsEventsHandler(Object):
             logger.error(
                 f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
             )
-            self.charm.state.add_status_if_not_present(
-                ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
-                "unit",
-                self.charm.external_clients_manager.name,
-                dynamic_params={"id": event.relation.id, "index": event.index},
-            )
             event.defer()
             return
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
-        )
 
         try:
             username, pwd = self.charm.external_clients_manager.create_opensearch_users(
@@ -139,21 +118,8 @@ class ExternalClientsEventsHandler(Object):
             )
         except OpenSearchUserMgmtError as err:
             logger.error(err)
-            self.charm.state.add_status_if_not_present(
-                ExternalClientsStatuses.USER_CREATION_FAILED.value,
-                "unit",
-                self.charm.external_clients_manager.name,
-                dynamic_params={"id": event.relation.id},
-            )
             event.defer()
             return
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.USER_CREATION_FAILED.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
-        )
         try:
             external_client.version = self.charm.workload.version
         except OpenSearchCmdError as e:
@@ -173,7 +139,6 @@ class ExternalClientsEventsHandler(Object):
         self.update_external_client_endpoints(external_client)
 
         logger.info("new index %s available", event.index)
-        # Clear old statuses set by this hook
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle opensearch client relation-changed event."""
@@ -206,28 +171,6 @@ class ExternalClientsEventsHandler(Object):
             )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
             external_client
-        )
-        # Clear old statuses when the relation is departed
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.INVALID_INDEX_NAME.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
-        )
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
-        )
-        self.charm.state.remove_status_if_present(
-            ExternalClientsStatuses.USER_CREATION_FAILED.value,
-            "unit",
-            self.charm.external_clients_manager.name,
-            interpolated=True,
-            search_parameters={"id": event.relation.id},
         )
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
