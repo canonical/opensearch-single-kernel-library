@@ -79,6 +79,7 @@ async def test_deploy_small_cluster(
         ops_test,
         apps=[JWT_APP_NAME],
         apps_statuses={JWT_APP_NAME: [EmptyBlockedStatus]},
+        units_statuses={JWT_APP_NAME: [EmptyBlockedStatus]},
     )
 
 
