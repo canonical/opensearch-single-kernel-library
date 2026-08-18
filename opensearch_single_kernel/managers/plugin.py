@@ -28,7 +28,7 @@ from opensearch_single_kernel.core.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import diff
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -214,23 +214,15 @@ class PluginManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+        """Compute plugin statuses from credentials / relations (no side effects)."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        status_list: list[StatusObject] = []
-
-        if scope == "app":
-            if self.state.application.missing_relations and (
-                missing_relations := self.missing_plugins_relations()
-            ):
-                status_list.append(
-                    format_status(
-                        PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                        {"relation": missing_relations[0]},
-                    )
+        if scope == "app" and (missing_relations := self.missing_plugins_relations()):
+            status_list.append(
+                format_status(
+                    PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
+                    {"relation": missing_relations[0]},
                 )
+            )
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

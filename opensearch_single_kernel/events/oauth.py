@@ -22,9 +22,6 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_RELATION,
     DeploymentType,
 )
-from opensearch_single_kernel.common.statuses import (
-    OAuthStatuses,
-)
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
     ClientConfig,
     OAuthRequirer,
@@ -73,14 +70,7 @@ class OAuthEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # in large deployments, OAuth config must only be handled by the main orchestrator
-            # this is a safeguard to avoid different sources for applying security configuration
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
+            logger.warning("OAuth relation created on non-main orchestrator.")
 
     def _on_oauth_relation_changed(self, event: EventBase) -> None:
         """Handler for `_on_oauth_relation_changed` event.
@@ -90,14 +80,6 @@ class OAuthEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # in large deployments, OAuth config must only be handled by the main orchestrator
-            # this is a safeguard to avoid different sources for applying security configuration
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
             return
 
         if not (relation := self.charm.state.oauth_relation):
@@ -144,12 +126,6 @@ class OAuthEventsHandler(Object):
         if (
             deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            if self.charm.unit.is_leader():
-                self.charm.state.remove_status_if_present(
-                    OAuthStatuses.OAUTH_RELATION_INVALID.value,
-                    "app",
-                    self.charm.cluster_manager.name,
-                )
             return
 
         if (

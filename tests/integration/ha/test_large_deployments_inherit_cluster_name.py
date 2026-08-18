@@ -57,10 +57,16 @@ NO_CM_STATUS_MESSAGE = "Missing requirements: At least 1 cluster manager nodes a
 NO_DATA_NODE_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 data nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 NO_CM_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 cluster manager nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 
 

@@ -292,7 +292,11 @@ async def test_dashboard_relation(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
     # Add a dashboard relation and wait for them to exchange data
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{DASHBOARDS_APP_NAME}:{DASHBOARDS_RELATION_NAME}",
+    )
 
     await wait_until(
         ops_test,
@@ -440,7 +444,11 @@ async def test_multiple_relations(
 
     relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, f"{name}:{relation_name}")
 
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, name)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{name}:{relation_name}",
+    )
     units = {
         OPENSEARCH_APP_NAME: expected_opensearch_units,
         CLIENT_APP_NAME: 1,
@@ -553,7 +561,11 @@ async def test_admin_relation(ops_test: OpsTest, app_name, substrate):
         v1_admin_relation = relation
         relation_id = v1_admin_relation.id
 
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, name)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{name}:{relation_name}",
+    )
     await wait_until(
         ops_test,
         apps=_all_apps(substrate) + [secondary_name],
@@ -789,7 +801,7 @@ async def test_relation_broken(ops_test: OpsTest):
         f"{V1_CLIENT_APP_NAME}:{V1_FIRST_RELATION_NAME}",
         f"{V1_CLIENT_APP_NAME}:{V1_ADMIN_RELATION_NAME}",
     ):
-        wait_for_relation_removed_between(
+        await wait_for_relation_removed_between(
             ops_test, f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", requirer
         )
 
@@ -802,10 +814,22 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str
     relation_name = FIRST_RELATION_NAME if v0 else V1_FIRST_RELATION_NAME
     album = "albums" if v0 else "albums_v1"
 
+    # The relation removed in the previous test may still be in a "dying" state;
+    # re-adding it right away fails with "relation ... is dying, but not yet removed".
+    await wait_for_relation_removed_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{app_name}:{relation_name}",
+    )
+
     new_relation = await ops_test.model.integrate(
         f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{app_name}:{relation_name}"
     )
-    wait_for_relation_joined_between(ops_test, OPENSEARCH_APP_NAME, app_name)
+    await wait_for_relation_joined_between(
+        ops_test,
+        f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+        f"{app_name}:{relation_name}",
+    )
 
     apps_to_wait = [
         OPENSEARCH_APP_NAME,

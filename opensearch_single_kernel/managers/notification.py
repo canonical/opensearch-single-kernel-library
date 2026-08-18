@@ -21,7 +21,6 @@ from opensearch_single_kernel.common.constants import (
     SmtpTransportSecurity,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchHttpError,
     OpenSearchSmtpMissingParametersError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -35,7 +34,11 @@ from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SmtpRelationData,
 )
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 
@@ -247,74 +250,65 @@ class NotificationsManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = []
+        """Compute SMTP statuses from relation data."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+        # Keep cached apply failures until the next successful apply.
+        status_list.extend(
+            cached_non_running_statuses(
+                self.state.statuses,
+                scope,
+                self.name,
+                message_contains=["configuration failed"],
+            )
+        )
 
         if not (deployment_desc := self.state.application.deployment_description):
-            return []
+            return status_list
 
         if not self.state.smtp_relations:
-            return [GeneralStatuses.ACTIVE_IDLE.value]
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         if scope == "app":
             if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
                 for relation in self.state.smtp_relations:
-                    self._add_relation_statuses(status_list, relation)
+                    status_list.extend(self._relation_statuses(relation))
             else:
                 status_list.append(NotificationsStatuses.SMTP_RELATION_INVALID.value)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-    def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:
-        """Compute the manager's app statuses for relation and append them to list."""
+    def _relation_statuses(self, relation: Relation) -> list[StatusObject]:
+        """Validate one SMTP relation and return its statuses."""
         try:
             if not (
                 smtp_data := self.state.smtp_requires.get_relation_data_from_relation(relation)
             ):
-                status_list.append(
+                return [
                     format_status(
                         NotificationsStatuses.SMTP_NO_RELATION_DATA.value,
                         {"id": relation.id},
                     )
-                )
-                return
-            config = self.get_smtp_config(smtp_data, relation.id)
+                ]
 
-            self.put_smtp_sender(
-                smtp_account_id=config.smtp_account_id,
-                host=smtp_data.host,
-                port=smtp_data.port,
-                transport_security=config.transport_security,
-                from_address=config.sender_email,
-            )
+            self.get_smtp_config(smtp_data, relation.id)
 
-            if smtp_data.recipients:
-                self.put_email_group(
-                    group_id=config.group_id,
-                    recipients=[str(r) for r in smtp_data.recipients],
-                )
-                self.put_email_channel(
-                    channel_id=config.channel_id,
-                    smtp_account_id=config.smtp_account_id,
-                    email_group_ids=[config.group_id],
-                    fallback_recipients=[],
-                )
-            else:
-                status_list.append(
+            if not smtp_data.recipients:
+                return [
                     format_status(
                         NotificationsStatuses.SMTP_WAITING_RECIPIENTS.value,
                         {"id": relation.id},
                     )
-                )
+                ]
+            return []
         except SecretError as e:
-            status_list.append(
+            return [
                 format_status(
                     NotificationsStatuses.SMTP_COULD_NOT_READ_DATA.value,
                     {"id": relation.id, "exc": str(e)},
                 )
-            )
+            ]
         except OpenSearchSmtpMissingParametersError as e:
-            status_list.append(
+            return [
                 format_status(
                     NotificationsStatuses.SMTP_MISSING_REQUIRED_PARAMETERS.value,
                     {
@@ -322,11 +316,4 @@ class NotificationsManager(BaseManager):
                         "params": ", ".join(e.missing_parameters),
                     },
                 )
-            )
-        except OpenSearchHttpError:
-            status_list.append(
-                format_status(
-                    NotificationsStatuses.SMTP_CONFIGURATION_ERROR.value,
-                    {"id": relation.id},
-                ),
-            )
+            ]

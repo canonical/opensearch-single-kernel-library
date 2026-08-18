@@ -38,10 +38,16 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 3, DATA_APP: 1}
 NO_DATA_NODE_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 data nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 NO_CM_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 cluster manager nodes are required.",
+    short_message="Profile requirements missing",
+    check="Machine resources against selected profile.",
+    action="Provide the missing resources or switch profile.",
 )
 
 
@@ -130,6 +136,11 @@ async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) 
         ops_test,
         apps=[MAIN_APP, FAILOVER_APP, DATA_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        apps_statuses={
+            FAILOVER_APP: [
+                PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
+            ],
+        },
         idle_period=IDLE_PERIOD,
         timeout=1800,
     )

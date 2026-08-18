@@ -12,6 +12,17 @@ on:
   workflow_call:
     secrets:
       CHARMHUB_TOKEN:
+        required: true
+      AWS_ACCESS_KEY:
+        required: true
+      AWS_SECRET_KEY:
+        required: true
+      AZURE_STORAGE_ACCOUNT:
+        required: true
+      AZURE_SECRET_KEY:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
 
 permissions:
   contents: read
@@ -174,12 +185,17 @@ jobs:
 
   integration-test:
     name: Integration test charm
+    uses: ./.github/workflows/integration_test.yaml
     needs:
       - build
-    uses: ./.github/workflows/integration_test.yaml
     with:
       artifact-prefix: packed-charm
       run-on-all-bases: ${{ github.event_name == 'schedule' }}
-    secrets: inherit
+    secrets:
+      AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       contents: write # Needed for Allure Report

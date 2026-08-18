@@ -37,7 +37,11 @@ from opensearch_single_kernel.core.upgrades import (
     UpgradeVersions,
 )
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import (
+    cached_non_running_statuses,
+    format_status,
+    running_statuses,
+)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -196,15 +200,28 @@ class UpgradesManagerBase(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Compute upgrade statuses from upgrade state."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
+        if scope == "unit":
+            status_list.extend(
+                cached_non_running_statuses(
+                    self.state.statuses,
+                    scope,
+                    self.name,
+                    message_contains=["Pre upgrade check failed"],
+                )
+            )
+
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
-            return [format_status(unit_status, unit_dynamic_params)]
+            formatted = format_status(unit_status, unit_dynamic_params)
+            if formatted not in status_list:
+                status_list.append(formatted)
 
-        if scope == "app" and (status := self.app_status):
-            return [status]
+        if scope == "app" and (status := self.app_status) and status not in status_list:
+            status_list.append(status)
 
-        return [GeneralStatuses.ACTIVE_IDLE.value]
+        return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
     def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""

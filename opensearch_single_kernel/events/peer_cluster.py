@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from ops import (
     Object,
-    Relation,
     RelationChangedEvent,
     RelationDepartedEvent,
     RelationJoinedEvent,
@@ -26,10 +25,6 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
-)
-from opensearch_single_kernel.common.statuses import (
-    PeerClusterErrorDataStatuses,
-    PeerClusterStatuses,
 )
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
@@ -121,7 +116,7 @@ class PeerClusterEventsHandler(Object):
         if (
             deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
             and self.charm.tls_manager.is_fully_configured()
-            and self.charm.peer_cluster_orchestrator_manager.should_promote_failover_to_main()
+            and self.charm.peer_cluster_manager.should_promote_failover_to_main()
         ):
             self.charm.cluster_manager.promote_deployment_type()
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
@@ -284,9 +279,7 @@ class PeerClusterEventsHandler(Object):
         # fetch the trigger of this event
         trigger = data.get("trigger")
 
-        # reject before mutating any state if this relation is trying to claim a
-        # main/failover role already held by a different relation.
-        # get_statuses will set CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER for it.
+        # Reject conflicting main/failover claims before mutating state.
         if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
             trigger, event.relation.id
         ):
@@ -410,9 +403,6 @@ class PeerClusterEventsHandler(Object):
         logger.debug("Requirer updating orchestrators %s", orchestrators)
         self.charm.state.application.orchestrators = orchestrators
 
-        # clear or set missing orchestrator status
-        self.apply_orchestrator_status()
-
         if remote_peer_cluster.security_index_initialised:
             self.charm.state.application.security_index_initialised = True
 
@@ -443,7 +433,6 @@ class PeerClusterEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        self._clean_main_orchestrator_is_requirer_status(event.relation)
         # fetch current deployment_desc
         deployment_desc = self.charm.state.application.deployment_description
 
@@ -465,16 +454,13 @@ class PeerClusterEventsHandler(Object):
                 self.charm.peer_cluster_manager.update_main_orchestrator_registered(
                     orchestrators.failover_rel_id, value=False
                 )
-            elif self.charm.peer_cluster_orchestrator_manager.should_promote_failover_to_main():
+            elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
                 )
-
-        # clear or set missing orchestrator status
-        self.apply_orchestrator_status()
 
         # we leave in case not an orchestrator
         if (
@@ -491,54 +477,22 @@ class PeerClusterEventsHandler(Object):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
 
     def check_credentials_with_missing_relations(self) -> None:
-        """Checks if the relation data has credentials for non-related apps"""
+        """Track whether credentials exist for plugins/backups without a relation."""
         if not self.charm.unit.is_leader():
             return
 
-        plugins_missing_relations = self.charm.plugin_manager.missing_plugins_relations()
-        snapshots_missing_relations = self.charm.snapshots_manager.missing_backup_relations()
-        if plugins_missing_relations:
-            self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                scope="app",
-                component=self.charm.plugin_manager.name,
-                dynamic_params={"relation": plugins_missing_relations[0]},
-            )
-            self.charm.state.application.missing_relations = True
-            return
-        elif snapshots_missing_relations:
-            self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                scope="app",
-                component=self.charm.snapshots_manager.name,
-                dynamic_params={"relation": snapshots_missing_relations[0]},
-            )
+        if (
+            self.charm.plugin_manager.missing_plugins_relations()
+            or self.charm.snapshots_manager.missing_backup_relations()
+        ):
             self.charm.state.application.missing_relations = True
             return
 
-        # No missing relations, clean up any previous state
         del self.charm.state.application.missing_relations
-        self.charm.state.remove_status_if_present(
-            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-            scope="app",
-            component=self.charm.plugin_manager.name,
-            interpolated=True,
-        )
-        self.charm.state.remove_status_if_present(
-            PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-            scope="app",
-            component=self.charm.snapshots_manager.name,
-            interpolated=True,
-        )
 
     def handle_joining_data_node(self) -> None:
         """Start Opensearch on a cluster-manager node when a data-node is joining"""
         if self.charm.state.server.started:
-            self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
             return
 
         try:
@@ -559,71 +513,17 @@ class PeerClusterEventsHandler(Object):
     def reconcile_peer_cluster_errors(
         self, label: str, error: PeerClusterRelErrorData | None
     ) -> None:
-        """Set error status from the passed errors and store for future deletion."""
+        """Store peer-cluster error labels for relation synchronization."""
         if error:
-            err_message = error.blocked_message
-            status = error.get_status()
-            if status:
-                # set the message
-                self.charm.state.add_status_if_not_present(
-                    status,
-                    scope="app",
-                    component=self.charm.peer_cluster_manager.name,
-                )
-
-            # keep track of set messages for targeted deletion later
+            # keep track of set messages so managers can recompute statuses
             with self.charm.state.application.update() as m:
-                m.model_extra[label] = err_message
+                m.model_extra[label] = error.blocked_message
         else:
-            # if there is no error, clear the status and stored message for this label
+            # if there is no error, clear the stored message for this label
             app_m = self.charm.state.application
-            error_message = app_m.model_extra.get(label, "") if app_m else ""
-            status = PeerClusterRelErrorData.get_status_from_message(error_message)
-            if status:
-                self.charm.state.remove_status_if_present(
-                    status,
-                    scope="app",
-                    component=self.charm.peer_cluster_manager.name,
-                )
             if app_m and label in app_m.model_extra:
                 with app_m.update():
                     app_m.model_extra[label] = None
-
-    def apply_orchestrator_status(self) -> None:
-        """Sets or clears status based on presence of local orchestrators."""
-        if not self.charm.unit.is_leader():
-            return
-
-        deployment_desc = self.charm.state.application.deployment_description
-        if not (orchestrators := self.charm.state.application.orchestrators):
-            return
-
-        if orchestrators.failover_app and orchestrators.failover_app.id == deployment_desc.app.id:
-            return
-
-        if orchestrators.main_app:
-            self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
-            self.charm.state.remove_status_if_present(
-                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
-        elif orchestrators.failover_app:
-            self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
-        else:
-            self.charm.state.add_status_if_not_present(
-                PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
 
     def _set_security_conf(self, data: PeerClusterAppModel) -> None:
         """Store security related config."""
@@ -643,28 +543,6 @@ class PeerClusterEventsHandler(Object):
         self.charm.internal_users_manager.put_internal_user(
             KIBANA_SERVER_USER, data.kibana_server_hashed_password
         )
-
-    def _clean_main_orchestrator_is_requirer_status(self, departing_relation: Relation) -> None:
-        """Clean the status if there are no more peer cluster requirer relations."""
-        if (
-            not self.charm.unit.is_leader()
-            or not (deployment_desc := self.charm.state.application.deployment_description)
-            or deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
-        ):
-            return
-
-        peer_cluster_requirer_relations = [
-            rel
-            for rel in self.charm.state.peer_cluster_orchestrator_relations
-            if rel.id != departing_relation.id
-        ]
-        # clean the status if it is set
-        if not peer_cluster_requirer_relations:
-            self.charm.state.remove_status_if_present(
-                PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value,
-                scope="app",
-                component=self.charm.peer_cluster_manager.name,
-            )
 
     def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterAppModel) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""

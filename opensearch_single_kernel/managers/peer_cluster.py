@@ -41,6 +41,7 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     format_unit_name,
 )
+from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -451,14 +452,33 @@ class PeerClusterManager(BaseManager):
                 rel_id=rel.id, deployment_desc=deployment_desc, is_provider=False
             )
 
+    def should_promote_failover_to_main(self) -> bool:
+        """Check if majority of related apps are disconnected from main orchestrator.
+
+        This runs on the failover application.
+        """
+        # Count related apps that have lost the main orchestrator.
+        remote_peer_clusters = self.state.peer_clusters(is_provider=True, remote=True)
+        n_disconnected = sum(
+            1
+            for p_cluster in remote_peer_clusters
+            if p_cluster.main_orchestrator_registered is False
+        )
+
+        # The failover app itself may also be disconnected.
+        orchestrators = self.state.application.orchestrators
+        if not orchestrators.main_app:
+            n_disconnected += 1
+
+        # Promote only once a majority is cut off.
+        return n_disconnected > (len(remote_peer_clusters) + 1) // 2
+
     @override
     def get_statuses(  # noqa: C901
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = self.state.statuses.get(
-            scope, self.name, running_status_only=True
-        ).root
+        """Compute peer-cluster statuses from orchestrator and relation state."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.deployment_description:
             return status_list

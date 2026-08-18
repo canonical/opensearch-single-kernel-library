@@ -2,6 +2,10 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    commit-message:
+      # Required by create-semantic-version-tag; must be breaking/compatible/patch
+      prefix: "patch"
+      prefix-development: "patch"
     schedule:
       interval: "weekly"
       day: "sunday"

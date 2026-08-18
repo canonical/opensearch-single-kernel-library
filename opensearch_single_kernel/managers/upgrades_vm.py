@@ -44,6 +44,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         """Get unit upgrade status."""
         if not self.state.upgrade_relation:
             return (None, None)
+
         if not self.in_progress:
             return (None, None)
 

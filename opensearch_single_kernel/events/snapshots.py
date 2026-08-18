@@ -103,17 +103,11 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
 
-        # block non-main orchestrators only when they are in a multi-app topology.
+        # Non-main apps: status is handled by SnapshotsManager.
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR and (
             self.charm.state.is_peer_cluster_consumer()
             or self.charm.state.is_peer_cluster_provider()
         ):
-            if self.charm.unit.is_leader():
-                self.charm.state.add_status_if_not_present(
-                    SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value,
-                    scope="app",
-                    component=self.charm.snapshots_manager.name,
-                )
             return
 
         if not (object_storage_type := self.charm.state.storage_type):
@@ -121,19 +115,8 @@ class SnapshotsEventsHandler(Object):
             return
 
         if object_storage_type == ObjectStorageType.CONFLICT:
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             event.defer()
             return
-
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_CONFLICT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
 
         # Get connection info
         try:
@@ -146,11 +129,6 @@ class SnapshotsEventsHandler(Object):
                     storage_config_from_connection_info(object_storage_type, connection_info)
                 )
             ):
-                self.charm.state.add_status_if_not_present(
-                    SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                    "app",
-                    self.charm.snapshots_manager.name,
-                )
                 return
 
             self.charm.snapshots_manager.validate_storage_config(
@@ -158,11 +136,6 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchInvalidStorageTypeError as e:
             logger.error(str(e))
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchObjectStorageConfigValidationError as e:
             # Get config using the connection info
@@ -171,40 +144,14 @@ class SnapshotsEventsHandler(Object):
                 object_storage_type,
                 e.error,
             )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchBackupRelationDataIncompleteError:
             # Validate storage config
             logger.warning("No %s object storage configuration.", object_storage_type)
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
-
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
 
         # Update backup credentials
         # Catch file operation exceptions
@@ -251,24 +198,11 @@ class SnapshotsEventsHandler(Object):
                 e,
                 getattr(e, "response_body", None),
             )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
-                "app",
-                self.charm.snapshots_manager.name,
-                dynamic_params={
-                    "storage_type": object_storage_type.value,
-                    "integrator": f"{object_storage_type.value} integrator",
-                },
-            )
+            self._set_repository_misconfigured_status(object_storage_type)
             event.defer()
             return
 
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
-            "app",
-            self.charm.snapshots_manager.name,
-            interpolated=True,
-        )
+        self._clear_repository_misconfigured_status()
         # Refresh peer relations
         self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
 
@@ -286,31 +220,12 @@ class SnapshotsEventsHandler(Object):
             logger.debug("The object storage type could not be determined.")
             return
 
-        # Clear backup related statuses
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_SHOULD_NOT_EXIST.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
-            "app",
-            self.charm.snapshots_manager.name,
-            interpolated=True,
-        )
+        # Clear the misconfigured flag now that credentials are gone.
+        self._clear_repository_misconfigured_status()
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
+            self._set_credentials_cleanup_failed_status(True)
             event.defer()
             return None
 
@@ -321,11 +236,7 @@ class SnapshotsEventsHandler(Object):
                 "Failed to remove snapshot repository for %s during credentials cleanup.",
                 object_storage_type,
             )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
+            self._set_credentials_cleanup_failed_status(True)
             event.defer()
             return None
 
@@ -341,16 +252,7 @@ class SnapshotsEventsHandler(Object):
                 event.relation.id if hasattr(event, "relation") else None
             )
 
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-            "app",
-            self.charm.snapshots_manager.name,
-        )
+        self._set_credentials_cleanup_failed_status(False)
 
         self.charm.reload_keystore_event.emit()
 
@@ -371,11 +273,6 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchInvalidStorageTypeError as e:
             logger.error(str(e))
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
 
         # Get config using the connection info
@@ -387,11 +284,6 @@ class SnapshotsEventsHandler(Object):
             logger.warning(
                 "Object storage configuration not ready for backup credentials verification."
             )
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-                "app",
-                self.charm.snapshots_manager.name,
-            )
             return
 
         try:
@@ -399,15 +291,7 @@ class SnapshotsEventsHandler(Object):
                 object_storage_type, object_storage_config
             )
         except OpenSearchHttpError as e:
-            self.charm.state.add_status_if_not_present(
-                SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
-                "app",
-                self.charm.snapshots_manager.name,
-                dynamic_params={
-                    "storage_type": object_storage_type.value,
-                    "integrator": f"{object_storage_type.value} integrator",
-                },
-            )
+            self._set_repository_misconfigured_status(object_storage_type)
             logger.error(
                 "Failed to verify snapshot repository after credentials verification. "
                 "Error: %s, response_body=%r",
@@ -423,12 +307,7 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.state.remove_status_if_present(
-            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
-            "app",
-            self.charm.snapshots_manager.name,
-            interpolated=True,
-        )
+        self._clear_repository_misconfigured_status()
         logger.info("Backup credentials verified successfully.")
 
     def _on_create_backup_action(self, event: ActionEvent) -> None:
@@ -558,20 +437,10 @@ class SnapshotsEventsHandler(Object):
                         "Cleanup for %s credentials are failed during peer cluster relation change.",
                         object_storage_type,
                     )
-                    if self.charm.unit.is_leader():
-                        self.charm.state.add_status_if_not_present(
-                            SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                            scope="app",
-                            component=self.charm.snapshots_manager.name,
-                        )
+                    self._set_credentials_cleanup_failed_status(True)
                     event.defer()
                     return None
-            if self.charm.unit.is_leader():
-                self.charm.state.remove_status_if_present(
-                    SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                    scope="app",
-                    component=self.charm.snapshots_manager.name,
-                )
+            self._set_credentials_cleanup_failed_status(False)
 
             try:
                 self.update_stored_credentials(
@@ -645,21 +514,11 @@ class SnapshotsEventsHandler(Object):
                     "Cleanup for %s credentials are failed during peer cluster relation departure.",
                     object_storage_type,
                 )
-                if self.charm.unit.is_leader():
-                    self.charm.state.add_status_if_not_present(
-                        SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                        scope="app",
-                        component=self.charm.snapshots_manager.name,
-                    )
+                self._set_credentials_cleanup_failed_status(True)
                 event.defer()
                 return
 
-        if self.charm.unit.is_leader():
-            self.charm.state.remove_status_if_present(
-                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
-                scope="app",
-                component=self.charm.snapshots_manager.name,
-            )
+        self._set_credentials_cleanup_failed_status(False)
 
         # clean S3 CA
         if self.charm.snapshots_manager.is_custom_s3_ca_stored():
@@ -753,6 +612,42 @@ class SnapshotsEventsHandler(Object):
             return f"Action failed with: {str(e)}."
 
         return None
+
+    def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
+        """Cache blocked status for repository registration failure (apply path only)."""
+        self.charm.state.add_status_if_not_present(
+            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
+            "app",
+            self.charm.snapshots_manager.name,
+            dynamic_params={
+                "storage_type": object_storage_type.value,
+                "integrator": f"{object_storage_type.value} integrator",
+            },
+        )
+
+    def _clear_repository_misconfigured_status(self) -> None:
+        """Clear repository setup failure status after a successful apply."""
+        self.charm.state.remove_status_if_present(
+            SnapshotsStatuses.BACKUP_REPOSITORY_MISCONFIGURED.value,
+            "app",
+            self.charm.snapshots_manager.name,
+            interpolated=True,
+        )
+
+    def _set_credentials_cleanup_failed_status(self, failed: bool) -> None:
+        """Cache or clear credentials/repository cleanup failure status (apply path only)."""
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_CLEANUP_FAILED.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
 
     def update_stored_credentials(
         self,

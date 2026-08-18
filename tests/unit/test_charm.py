@@ -62,6 +62,7 @@ def test_on_leader_elected(harness, mocker):
             call(
                 InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
                 "unit",
+                statuses_state=harness.charm.state.statuses,
                 component_name=harness.charm.internal_users_manager.name,
             )
         ]

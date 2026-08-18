@@ -37,7 +37,7 @@ from opensearch_single_kernel.utils.helpers import (
     generate_hashed_password,
     validate_index_name,
 )
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -280,15 +280,10 @@ class ExternalClientsManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
+        """Compute external-client statuses from state."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        status_list: list[StatusObject] = []
-
-        if scope == "unit":
+        if scope == "unit" and self.state.application.deployment_description:
             for relation in self.state.external_client_relations:
                 self._add_relation_statuses(status_list, relation)
 
@@ -313,6 +308,9 @@ class ExternalClientsManager(BaseManager):
             return
 
         try:
+            if not self.opensearch_client.is_node_up():
+                return
+
             if index not in self.opensearch_client.indices():
                 status_list.append(
                     format_status(

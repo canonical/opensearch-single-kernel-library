@@ -20,7 +20,7 @@ from opensearch_single_kernel.core.profiles import (
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.status import format_status
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -145,17 +145,18 @@ class ProfilesManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        status_list: list[StatusObject] = []
+        """Compute profile statuses from current config and local checks."""
+        status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.current_peer_cluster_app:
-            return [GeneralStatuses.ACTIVE_IDLE.value]
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         if scope == "unit":
             try:
                 _ = self.get_config_profile()
             except ValueError:
-                return [ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value]
+                status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
+                return status_list
 
             try:
                 if missing_requirements := self.get_missing_requirements():

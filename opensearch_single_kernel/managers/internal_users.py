@@ -19,9 +19,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
-from opensearch_single_kernel.common.statuses import (
-    InternalUsersStatuses,
-)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -96,11 +93,6 @@ class InternalUsersManager(BaseManager):
             self.state.application.admin_password = pwd
             self.state.application.admin_hashed_password = hashed_pwd
             self.state.application.admin_user_initialized = True
-            self.state.remove_status_if_present(
-                InternalUsersStatuses.ADMIN_USER_INIT_IN_PROGRESS.value,
-                "unit",
-                self.name,
-            )
         elif user == KIBANA_SERVER_USER:
             self.state.application.kibana_server_password = pwd
             self.state.application.kibana_server_hashed_password = hashed_pwd

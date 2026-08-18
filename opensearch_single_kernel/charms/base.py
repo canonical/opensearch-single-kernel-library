@@ -155,6 +155,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         # leaves the charm stuck with all events deferred and no trigger to replay them.
         self.pebble_observer = PebbleObserver(self)
 
+        # Status priority — earlier means higher juju urgency.
         self.status_handler = StatusHandler(
             self,
             self.upgrades_manager,
@@ -162,8 +163,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.tls_manager,
             self.health_manager,
             self.peer_cluster_manager,
-            self.peer_cluster_orchestrator_manager,
             self.cluster_manager,
+            self.plugin_manager,
             self.lock_manager,
             self.snapshots_manager,
             self.internal_users_manager,
