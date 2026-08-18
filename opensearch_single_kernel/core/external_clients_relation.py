@@ -5,11 +5,15 @@
 
 """State collection for external client relation."""
 
-import json
 import logging
 
 from ops.model import Application, Relation
+from pydantic import ValidationError
 
+from opensearch_single_kernel.core.models import (
+    ExternalClientEntityPermissions,
+    ExternalClientRequestedEntity,
+)
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
@@ -119,11 +123,6 @@ class ExternalOpenSearchClient(RelationState):
             role.strip() for role in self.relation_data.get("extra-group-roles", "").split(",")
         ]
 
-    @extra_group_roles.setter
-    def extra_group_roles(self, roles: str) -> None:
-        """Set the extra group roles for this relation."""
-        self.update({"extra-group-roles": roles})
-
     @property
     def entity_type(self) -> str:
         """Get entity type of this relation."""
@@ -138,33 +137,11 @@ class ExternalOpenSearchClient(RelationState):
         if not (raw := self.relation_data.get("entity-permissions")):
             return None
         try:
-            if (
-                not (parsed := json.loads(raw))
-                or not isinstance(parsed, list)
-                or len(parsed) != 1
-                or not isinstance(permissions := parsed[0], dict)
-                or permissions.keys() != {"resource_name", "resource_type", "privileges"}
-                or not isinstance(resource_name := permissions["resource_name"], list)
-                or permissions["resource_type"] != "index_permissions"
-                or not isinstance(privileges := permissions["privileges"], list)
-            ):
-                logger.error(
-                    "entity-permissions field is malformed in client relation %d", self.relation.id
-                )
-                return None
-
-            return {
-                "index_permissions": [
-                    {
-                        "index_patterns": resource_name,
-                        "allowed_actions": privileges,
-                    }
-                ]
-            }
-        except json.JSONDecodeError as e:
+            return ExternalClientEntityPermissions.model_validate_json(raw).to_role_permissions()
+        except ValidationError as e:
             logger.error(
-                "Failed to parse entity-permissions field in client relation %d: %s",
-                self.relation.id if self.relation else -1,
+                "Invalid entity-permissions field in client relation %d: %s",
+                self.relation.id,
                 e,
             )
             return None
@@ -174,7 +151,7 @@ class ExternalOpenSearchClient(RelationState):
         """Get entity secret id for this relation."""
         return self.relation_data.get("requested-entity-secret")
 
-    def get_requested_entity(self) -> tuple[str, str] | None:
+    def get_requested_entity(self) -> ExternalClientRequestedEntity | None:
         """Retrieve and validate entity from requested entity secret using model.
 
         If content is invalid or absent the None is returned and error is logged.
@@ -192,4 +169,6 @@ class ExternalOpenSearchClient(RelationState):
                 self.relation.id,
             )
             return None
-        return requested_entity[0], requested_entity[1]
+        return ExternalClientRequestedEntity(
+            username=requested_entity[0], password=requested_entity[1]
+        )

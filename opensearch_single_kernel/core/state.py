@@ -807,8 +807,11 @@ class ClusterState(Object):
         )
 
     @property
-    def roles_mapped_users(self) -> dict[str, list[str]]:
-        """Reconcile the users mapped to roles from roles mapping config."""
+    def mapped_users(self) -> dict[str, list[str]]:
+        """Reconcile the users mappings from roles mapping config.
+
+        Format: role -> mapped users.
+        """
         res = {"own_index": ["*"]}
         config_roles_mapping = self.config.get("roles_mapping")
         if not config_roles_mapping or not isinstance(config_roles_mapping, str):
@@ -826,8 +829,11 @@ class ClusterState(Object):
         return res
 
     @property
-    def roles_mapped_roles(self) -> dict[str, list[str]]:
-        """Reconcile the backend roles mapped to roles including client connections."""
+    def mapped_roles(self) -> dict[str, list[str]]:
+        """Reconcile the backend roles mappings including client connections.
+
+        Format: role -> mapped backend roles.
+        """
         res = {
             "manage_snapshots": ["snapshotrestore"],
             "logstash": ["logstash"],
@@ -849,8 +855,11 @@ class ClusterState(Object):
         return res
 
     @property
-    def managed_role_mappings(self) -> list[str]:
-        """Return all of the roles the charm should manage including clients."""
+    def managed_mappings(self) -> list[str]:
+        """Return all of the roles for which the charm should manage roles mappings.
+
+        External client roles also included in the results.
+        """
         return [
             "manage_snapshots",
             "logstash",

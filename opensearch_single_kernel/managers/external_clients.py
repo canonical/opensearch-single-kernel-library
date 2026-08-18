@@ -154,8 +154,8 @@ class ExternalClientsManager(BaseManager):
 
             self.opensearch_client.put_role_mapping(
                 user,
-                self.state.roles_mapped_users.get(user, []),
-                self.state.roles_mapped_roles.get(user, []),
+                self.state.mapped_users.get(user, []),
+                self.state.mapped_roles.get(user, []),
             )
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
@@ -260,9 +260,9 @@ class ExternalClientsManager(BaseManager):
             raise OpenSearchUserMgmtError(
                 "Cannot update relations roles mapping as node is not active."
             )
-        roles_mapped_users = self.state.roles_mapped_users
-        roles_mapped_roles = self.state.roles_mapped_roles
-        for role in self.state.managed_role_mappings:
+        roles_mapped_users = self.state.mapped_users
+        roles_mapped_roles = self.state.mapped_roles
+        for role in self.state.managed_mappings:
             self.opensearch_client.put_role_mapping(
                 role, roles_mapped_users.get(role, []), roles_mapped_roles.get(role, [])
             )
@@ -315,6 +315,18 @@ class ExternalClientsManager(BaseManager):
                     format_status(
                         ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
                         {"id": relation.id, "index": index},
+                    )
+                )
+                return
+
+            if (
+                external_client.entity_type == ENTITY_GROUP
+                and not external_client.get_requested_entity()
+            ):
+                status_list.append(
+                    format_status(
+                        ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
+                        {"id": relation.id},
                     )
                 )
                 return

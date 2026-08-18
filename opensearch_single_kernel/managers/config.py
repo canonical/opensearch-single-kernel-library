@@ -279,7 +279,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via HTTP Basic against internal users database",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 4,
+                "order": 5,
                 "http_authenticator": {
                     "type": "basic",
                     "challenge": True,
@@ -292,7 +292,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via SSL client certificates",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 2,
+                "order": 3,
                 "http_authenticator": {
                     "type": "clientcert",
                     "challenge": False,
@@ -303,7 +303,7 @@ class ConfigManager(BaseManager):
             "kerberos_auth_domain": {
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 6,
+                "order": 7,
                 "http_authenticator": {
                     "type": "kerberos",
                     "challenge": True,
@@ -315,7 +315,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via proxy",
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 3,
+                "order": 4,
                 "http_authenticator": {
                     "type": "proxy",
                     "challenge": False,
@@ -382,7 +382,7 @@ class ConfigManager(BaseManager):
                     # NOTE: Order value needs to be lower than basic_internal_auth_domain section,
                     # which is set to 4 by default. Only available number is 1, if we want a
                     # different number, all other numbers need to be reshuffled.
-                    "order": 1,
+                    "order": 2,
                     "http_authenticator": {
                         "type": "openid",
                         "challenge": False,
@@ -440,8 +440,9 @@ class ConfigManager(BaseManager):
                     },
                 }
             }
-            if (ldap_data := self.state.ldap_data) and ldap_data.ldaps_urls
-            # and self.workload.exists(self.workload.paths.ldap_chain)
+            if (ldap_data := self.state.ldap_data)
+            and ldap_data.ldaps_urls
+            and self.workload.exists(self.workload.paths.ldap_chain)
             else {
                 "ldap": {
                     "description": "Authenticate via LDAP or Active Directory",

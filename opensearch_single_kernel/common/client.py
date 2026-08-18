@@ -237,7 +237,11 @@ class OpenSearchClient:
             True if snapshot is running else False
         """
         response = self.request(
-            "GET", "_snapshot/_status", alt_hosts=alt_hosts, retries=3, wait_strategy=wait_fixed(3)
+            "GET",
+            "_snapshot/_status",
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_fixed(3),
         )
         return len(response.get("snapshots", [])) > 0
 
@@ -539,7 +543,10 @@ class OpenSearchClient:
         resp = self.request(
             "PUT",
             f"{USER_ROLE_ENDPOINT}/{role_name}",
-            payload={**(permissions or {"index_permissions": []}), **(action_groups or {})},
+            payload={
+                **(permissions or {"index_permissions": []}),
+                **(action_groups or {}),
+            },
         )
 
         if resp.get("status") != "CREATED" and not (
@@ -691,7 +698,8 @@ class OpenSearchClient:
 
         Args:
             role: name of the role for users being mapped to.
-            mapped_users: all the users, that should be mapped to the specified role.
+            users: all the users that should be mapped to the specified role.
+            backend_roles: all the backend roles in use of specified role.
 
         Raises:
             OpenSearchHttpError: If the request fails.
@@ -942,7 +950,11 @@ class OpenSearchClient:
         return None
 
     def get_roles_by_unit_name(
-        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None, substrate: Substrates
+        self,
+        unit_name: str,
+        unit_number: int,
+        alt_hosts: list[str] | None,
+        substrate: Substrates,
     ) -> list[str]:
         """Get the list of the roles assigned to this node.
 

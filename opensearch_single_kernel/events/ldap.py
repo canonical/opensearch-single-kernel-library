@@ -137,6 +137,10 @@ class LdapEventsHandler(Object):
         if not self.charm.cluster_manager.workload.is_service_started():
             return
 
+        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            event.defer()
+            return
+
         try:
             self.charm.cluster_manager.apply_security_config(
                 admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML

@@ -246,6 +246,13 @@ class ExternalClientsStatuses(Enum):
         check="OpenSearch user for client relation.",
         action="Check unit logs and retry the client relation.",
     )
+    USER_ENTITY_GROUP_INVALID = StatusObject(
+        status="blocked",
+        message="Missing or invalid group entity on client relation {id}",
+        short_message="Invalid client group entity",
+        check="Entity validation for entity-type=GROUP client relations.",
+        action="Change entity-type or provide valid entity through client relation.",
+    )
 
 
 class PeerClusterStatuses(Enum):
@@ -647,11 +654,31 @@ class UpgradesStatuses(Enum):
 class LdapStatuses(Enum):
     """Collection of charm statuses related to LDAP relation."""
 
-    LDAP_DATA_UNAVAILABLE = StatusObject(status="blocked", message="LDAP data is unavailable")
-    LDAPS_NOT_ENABLED = StatusObject(status="blocked", message="LDAPS is not enabled")
+    LDAP_DATA_UNAVAILABLE = StatusObject(
+        status="blocked",
+        message="LDAP data is unavailable; configure LDAP provider and check logs.",
+        short_message="LDAP data is unavailable",
+        check="LDAP relation app databag content.",
+        action="Configure LDAP provider and check logs.",
+    )
+    LDAPS_NOT_ENABLED = StatusObject(
+        status="blocked",
+        message="LDAPS is not enabled; enable LDAPS on LDAP provider.",
+        short_message="LDAPS is not enabled",
+        check="LDAP relation app databag content.",
+        action="Configure LDAPS on LDAP provider.",
+    )
     CERT_NOT_CONNECTED = StatusObject(
-        status="blocked", message="LDAP certificates are not connected"
+        status="blocked",
+        message="LDAP certificates are not connected; connect ldap-certificate-transfer relation.",
+        short_message="LDAP certificates are not connected",
+        check="ldap-certificate-transfer relation.",
+        action="Connect ldap-certificate-transfer relation.",
     )
     RELATION_INVALID = StatusObject(
-        status="blocked", message="LDAP relation must be created on main cluster orchestrator"
+        status="blocked",
+        message="LDAP relation must be created on main cluster orchestrator.",
+        short_message="LDAP only on main",
+        check="LDAP relation.",
+        action="Unrelate LDAP from this app; relate LDAP to main-orchestrator.",
     )

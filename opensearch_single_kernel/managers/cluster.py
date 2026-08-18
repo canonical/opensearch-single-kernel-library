@@ -46,7 +46,6 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     JwtStatuses,
-    LdapStatuses,
     OAuthStatuses,
     PeerClusterStatuses,
 )
@@ -997,17 +996,3 @@ class ClusterManager(BaseManager):
             and not self.state.application.is_security_index_initialised
         ):
             status_list.append(PeerClusterStatuses.PEER_CLUSTER_NO_DATA_NODE.value)
-
-        self._add_app_ldap_statuses(status_list)
-
-    def _add_app_ldap_statuses(self, status_list: list[StatusObject]) -> None:
-        if not self.state.ldap_relation:
-            return
-        if self.state.is_non_main_orchestrator:
-            status_list.append(LdapStatuses.RELATION_INVALID.value)
-        elif not (ldap_data := self.state.ldap_data):
-            status_list.append(LdapStatuses.LDAP_DATA_UNAVAILABLE.value)
-        elif not ldap_data.ldaps_urls:
-            status_list.append(LdapStatuses.LDAPS_NOT_ENABLED.value)
-        if not self.workload.exists(self.workload.paths.ldap_chain):
-            status_list.append(LdapStatuses.CERT_NOT_CONNECTED.value)

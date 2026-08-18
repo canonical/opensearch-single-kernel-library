@@ -66,6 +66,7 @@ from opensearch_single_kernel.managers.external_clients import ExternalClientsMa
 from opensearch_single_kernel.managers.health import HealthManager
 from opensearch_single_kernel.managers.internal_users import InternalUsersManager
 from opensearch_single_kernel.managers.keystore import KeystoreManager
+from opensearch_single_kernel.managers.ldap import LdapManager
 from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
 from opensearch_single_kernel.managers.peer_cluster import PeerClusterManager
@@ -122,6 +123,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.cluster_manager = ClusterManager(self.state, self.workload)
         self.exclusions_manager = NodesExclusionsManager(self.state, self.workload)
         self.external_clients_manager = ExternalClientsManager(self.state, self.workload)
+        self.ldap_manager = LdapManager(self.state, self.workload)
         self.lock_manager = LockManager(self.state, self.workload)
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
@@ -171,6 +173,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.snapshots_manager,
             self.internal_users_manager,
             self.external_clients_manager,
+            self.ldap_manager,
             self.notifications_manager,
         )
 

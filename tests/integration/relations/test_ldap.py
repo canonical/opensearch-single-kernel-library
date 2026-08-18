@@ -63,6 +63,47 @@ CERT_OFFER = "certificates"
 logger = logging.getLogger(__name__)
 
 
+async def _apply_ldif(ops_test_k8s: OpsTest, k8s_model: Model) -> None:
+    """Apply an LDIF on glauth-utils."""
+    source_path = "./tests/integration/relations/ldap.ldif"
+    target_path = "/var/tmp/ldap.ldif"
+    app = k8s_model.applications[LDAP_UTILS_APP_NAME]
+    scp_cmd = f"scp {source_path} {app.units[0].name}:{target_path}".split()
+    await ops_test_k8s.juju(*scp_cmd)
+    await run_action(
+        ops_test_k8s,
+        0,
+        "apply-ldif",
+        {"path": target_path},
+        LDAP_UTILS_APP_NAME,
+    )
+
+
+async def _configure_data_integrators(model: Model) -> None:
+    search_admin_secret = await model.add_secret(
+        SEARCH_ADMIN_ROLE, [f"{SEARCH_ADMIN_ROLE}={ROLE_PASSWORD}"]
+    )
+    search_readonly_secret = await model.add_secret(
+        SEARCH_READONLY_ROLE, [f"{SEARCH_READONLY_ROLE}={ROLE_PASSWORD}"]
+    )
+
+    await asyncio.gather(
+        model.grant_secret(SEARCH_ADMIN_ROLE, SEARCH_ADMIN_DATA_INTEGRATOR_NAME),
+        model.grant_secret(SEARCH_READONLY_ROLE, SEARCH_READONLY_DATA_INTEGRATOR_NAME),
+    )
+
+    await asyncio.gather(
+        model.applications[SEARCH_ADMIN_DATA_INTEGRATOR_NAME].set_config(
+            SEARCH_ADMIN_DATA_INTEGRATOR_CONFIG
+            | {"requested-entities-secret": search_admin_secret}
+        ),
+        model.applications[SEARCH_READONLY_DATA_INTEGRATOR_NAME].set_config(
+            SEARCH_READONLY_DATA_INTEGRATOR_CONFIG
+            | {"requested-entities-secret": search_readonly_secret}
+        ),
+    )
+
+
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy_glauth(
@@ -72,10 +113,6 @@ async def test_deploy_glauth(
 
     Then it offers the two relations provided by glauth.
     """
-    # workaround for https://bugs.launchpad.net/snapd/+bug/2127244
-    await k8s_model.set_constraints({"arch": "amd64"})
-    await k8s_model.set_config({"image-stream": "daily"})
-
     await asyncio.gather(
         k8s_model.deploy(
             POSTGRESQL_K8S,
@@ -119,24 +156,13 @@ async def test_deploy_glauth(
         },  # postgresql can be in Blocked State because of low free space
     )
 
-    await apply_ldif(ops_test_k8s, k8s_model)
+    await _apply_ldif(ops_test_k8s, k8s_model)
 
-    # On k8s creating an offer on a remote model fails somehow, so we fallback to juju command.
     if substrate == "vm":
         await asyncio.gather(
-            ops_test_k8s.juju(
-                *(f"offer {k8s_model.info.name}.{LDAP_APP_NAME}:ldap {LDAP_OFFER}".split())
-            ),
-            ops_test_k8s.juju(
-                *(
-                    f"offer {k8s_model.info.name}.{LDAP_APP_NAME}:send-ca-cert {LDAP_CERT_OFFER}".split()
-                )
-            ),
-            ops_test_k8s.juju(
-                *(
-                    f"offer {k8s_model.info.name}.{TLS_CERTIFICATES_APP_NAME}:certificates {CERT_OFFER}".split()
-                )
-            ),
+            k8s_model.create_offer(f"{LDAP_APP_NAME}:ldap", LDAP_OFFER),
+            k8s_model.create_offer(f"{LDAP_APP_NAME}:send-ca-cert", LDAP_CERT_OFFER),
+            k8s_model.create_offer(f"{TLS_CERTIFICATES_APP_NAME}:certificates", CERT_OFFER),
         )
 
 
@@ -156,9 +182,9 @@ async def test_deploy(
 
     if substrate == "vm":
         await asyncio.gather(
-            ops_test.juju(*(f"consume admin/{k8s_model.info.name}.{LDAP_OFFER}".split())),
-            ops_test.juju(*(f"consume admin/{k8s_model.info.name}.{LDAP_CERT_OFFER}".split())),
-            ops_test.juju(*(f"consume admin/{k8s_model.info.name}.{CERT_OFFER}".split())),
+            model.consume(f"admin/{k8s_model.info.name}.{LDAP_OFFER}"),
+            model.consume(f"admin/{k8s_model.info.name}.{LDAP_CERT_OFFER}"),
+            model.consume(f"admin/{k8s_model.info.name}.{CERT_OFFER}"),
         )
 
     await gather(
@@ -197,7 +223,7 @@ async def test_deploy(
 
     await model.wait_for_idle(timeout=1800)
 
-    await configure_data_integrators(model)
+    await _configure_data_integrators(model)
 
     await asyncio.gather(
         model.integrate(
@@ -427,44 +453,3 @@ async def test_remove_ldap_access(ops_test: OpsTest) -> None:
                         verify=False,
                     )
                     assert result.status_code == 403
-
-
-async def apply_ldif(ops_test_k8s: OpsTest, k8s_model: Model) -> None:
-    """Apply an LDIF on glauth-utils."""
-    source_path = "./tests/integration/relations/ldap.ldif"
-    target_path = "/var/tmp/ldap.ldif"
-    app = k8s_model.applications[LDAP_UTILS_APP_NAME]
-    scp_cmd = f"scp {source_path} {app.units[0].name}:{target_path}".split()
-    await ops_test_k8s.juju(*scp_cmd)
-    await run_action(
-        ops_test_k8s,
-        0,
-        "apply-ldif",
-        {"path": target_path},
-        LDAP_UTILS_APP_NAME,
-    )
-
-
-async def configure_data_integrators(model: Model) -> None:
-    search_admin_secret = await model.add_secret(
-        SEARCH_ADMIN_ROLE, [f"{SEARCH_ADMIN_ROLE}={ROLE_PASSWORD}"]
-    )
-    search_readonly_secret = await model.add_secret(
-        SEARCH_READONLY_ROLE, [f"{SEARCH_READONLY_ROLE}={ROLE_PASSWORD}"]
-    )
-
-    await asyncio.gather(
-        model.grant_secret(SEARCH_ADMIN_ROLE, SEARCH_ADMIN_DATA_INTEGRATOR_NAME),
-        model.grant_secret(SEARCH_READONLY_ROLE, SEARCH_READONLY_DATA_INTEGRATOR_NAME),
-    )
-
-    await asyncio.gather(
-        model.applications[SEARCH_ADMIN_DATA_INTEGRATOR_NAME].set_config(
-            SEARCH_ADMIN_DATA_INTEGRATOR_CONFIG
-            | {"requested-entities-secret": search_admin_secret}
-        ),
-        model.applications[SEARCH_READONLY_DATA_INTEGRATOR_NAME].set_config(
-            SEARCH_READONLY_DATA_INTEGRATOR_CONFIG
-            | {"requested-entities-secret": search_readonly_secret}
-        ),
-    )

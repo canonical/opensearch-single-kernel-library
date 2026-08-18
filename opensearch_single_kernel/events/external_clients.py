@@ -189,7 +189,10 @@ class ExternalClientsEventsHandler(Object):
 
         try:
             self.charm.external_clients_manager.put_client_user(
-                event.relation.id, entity[0], entity[1], external_client.entity_permissions
+                event.relation.id,
+                entity.username,
+                entity.password,
+                external_client.entity_permissions,
             )
             self.charm.external_clients_manager.reconcile_role_mappings()
         except OpenSearchUserMgmtError as err:
