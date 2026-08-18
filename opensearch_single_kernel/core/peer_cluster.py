@@ -11,11 +11,7 @@ from hashlib import sha1
 from typing import Literal, Optional
 
 from data_platform_helpers.advanced_statuses import StatusObject
-from dpcharmlibs.interfaces import (
-    BaseCommonModel,
-    PeerModel,
-    UserSecretStr
-)
+from dpcharmlibs.interfaces import BaseCommonModel, PeerModel, UserSecretStr
 from pydantic import (
     Field,
     field_serializer,
@@ -24,7 +20,7 @@ from pydantic import (
 )
 
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     Node,
@@ -166,7 +162,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     error_data: Optional[PeerClusterRelErrorData] = Field(default=None)
     security_index_initialised: bool = Field(default=False)
     first_data_node: Optional[str] = Field(default=None)
-    cluster_name: str = Field(default="")
     nodes_config: dict[str, Node] = Field(default_factory=dict)
     deployment_description: Optional[DeploymentDescription] = Field(default=None)
     # Optional (not default {}) so the requirer can distinguish "no plugin data broadcast"
@@ -183,8 +178,8 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     admin_hashed_password: UserSecretStr = Field(default="")
     kibana_server_password: UserSecretStr = Field(default="")
     kibana_server_hashed_password: UserSecretStr = Field(default="")
-    cos_password: UserSecretStr = Field(default="")
-    cos_hashed_password: UserSecretStr = Field(default="")
+    monitor_password: UserSecretStr = Field(default="")
+    monitor_hashed_password: UserSecretStr = Field(default="")
 
     # Plugin secrets
     plugin_secrets: PluginsSecretStr = Field(default="")
@@ -225,7 +220,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     def apply_rel_data(self, source: "PeerClusterAppModel") -> None:
         """Copy orchestrator-broadcast fields from source into this relation's databag."""
         with self.update() as m:
-            m.cluster_name = source.cluster_name
             m.deployment_description = source.deployment_description
             m.security_index_initialised = source.security_index_initialised
             m.first_data_node = source.first_data_node or ""
@@ -236,8 +230,8 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             m.admin_hashed_password = source.admin_hashed_password
             m.kibana_server_password = source.kibana_server_password
             m.kibana_server_hashed_password = source.kibana_server_hashed_password
-            m.cos_password = source.cos_password
-            m.cos_hashed_password = source.cos_hashed_password
+            m.monitor_password = source.monitor_password
+            m.monitor_hashed_password = source.monitor_hashed_password
             # Plugin secrets
             m.plugin_secrets = source.plugin_secrets
             # Admin TLS secrets
@@ -298,7 +292,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     def clear_rel_data(self) -> None:
         """Reset all orchestrator-broadcast fields to their defaults."""
         with self.update() as m:
-            m.cluster_name = ""
             m.deployment_description = None
             m.security_index_initialised = False
             m.first_data_node = ""
@@ -308,8 +301,8 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             m.admin_hashed_password = None
             m.kibana_server_password = None
             m.kibana_server_hashed_password = None
-            m.cos_password = None
-            m.cos_hashed_password = None
+            m.monitor_password = None
+            m.monitor_hashed_password = None
             m.plugin_secrets = None
             m.admin_truststore_password = None
             m.admin_keystore_password = None

@@ -31,7 +31,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchLockError,
 )
 from opensearch_single_kernel.common.statuses import LockStatuses
-from opensearch_single_kernel.core.plain_base import DeploymentDescription
+from opensearch_single_kernel.core.base_models import DeploymentDescription
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -57,7 +57,7 @@ class PeerLockManager(BaseManager):
 
         self.state.server_lock.lock_requested = True
 
-        if self.state.server.is_app_leader:
+        if self.state.is_app_leader:
             logger.debug("[Node lock] Requested peer lock as leader unit")
             # A separate relation-changed event won't get fired
             self.refresh_lock()
@@ -70,7 +70,7 @@ class PeerLockManager(BaseManager):
             return False
 
         if (
-            self.state.server.is_app_leader
+            self.state.is_app_leader
             and self.state.application_lock.leader_acquired_lock_after_juju_event_id
             == os.environ["JUJU_CONTEXT_ID"]
         ):
@@ -112,7 +112,7 @@ class PeerLockManager(BaseManager):
 
         self.state.server_lock.lock_requested = False
         logger.debug(f"Released peer databag lock {self.state.server_lock.lock_requested}")
-        if self.state.server.is_app_leader:
+        if self.state.is_app_leader:
             # A separate relation-changed event won't get fired
             self.refresh_lock()
             logger.debug("[Node lock] Released peer lock as leader unit")
@@ -129,7 +129,7 @@ class PeerLockManager(BaseManager):
         if not (deployment_desc := self.state.application.deployment_description):
             return
 
-        if not self.state.server.is_app_leader:
+        if not self.state.is_app_leader:
             if self.state.application_lock.leader_acquired_lock_after_juju_event_id:
                 # Trigger peer relation changed event on leader unit
                 # Without this, the leader unit might not receive another event (to use the lock it
@@ -167,7 +167,7 @@ class LockManager(PeerLockManager):
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
-            self.state.server.is_app_leader
+            self.state.is_app_leader
             # data unit
             and (
                 "data" in deployment_desc.config.roles

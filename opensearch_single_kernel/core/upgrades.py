@@ -14,7 +14,7 @@ from dpcharmlibs.interfaces import (
 )
 from pydantic import Field, field_validator
 
-from opensearch_single_kernel.core.plain_base import PlainModel
+from opensearch_single_kernel.core.base_models import PlainModel
 from opensearch_single_kernel.core.relation_base import RelationModel
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 

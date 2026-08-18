@@ -20,15 +20,15 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
 )
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
+from opensearch_single_kernel.core.base_models import (
+    DeploymentDescription,
+    Node,
+)
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
-)
-from opensearch_single_kernel.core.plain_base import (
-    DeploymentDescription,
-    Node,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -350,7 +350,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 blocked_msg = PeerClusterErrorDataStatuses.WAITING_FOR_EVERY_UNIT_TO_START.value.message.format(
                     message_suffix=message_suffix
                 )
-            elif not self.state.application.cos_password:
+            elif not self.state.application.monitor_password:
                 blocked_msg = (
                     PeerClusterErrorDataStatuses.COS_USER_NOT_CREATED.value.message.format(
                         COS_USER=COS_USER

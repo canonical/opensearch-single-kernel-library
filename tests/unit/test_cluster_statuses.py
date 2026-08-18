@@ -6,6 +6,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from opensearch_single_kernel.core.base_models import DeploymentState, PeerClusterConfig
+
 from opensearch_single_kernel.common.constants import (
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
     DeploymentType,
@@ -16,7 +18,6 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import DeploymentState, PeerClusterConfig
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.utils.status import format_status
 

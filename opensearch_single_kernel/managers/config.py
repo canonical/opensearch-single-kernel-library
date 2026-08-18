@@ -13,7 +13,7 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
-from opensearch_single_kernel.core.plain_base import Node
+from opensearch_single_kernel.core.base_models import Node
 from opensearch_single_kernel.core.profiles import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager

@@ -26,15 +26,15 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
 )
+from opensearch_single_kernel.core.base_models import (
+    DeploymentDescription,
+    Node,
+)
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
-)
-from opensearch_single_kernel.core.plain_base import (
-    DeploymentDescription,
-    Node,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -291,7 +291,7 @@ class PeerClusterManager(BaseManager):
             ]
         ):
             blocked_msg = PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message
-        elif peer_cluster_rel_data.cluster_name != deployment_desc.config.cluster_name:
+        elif provider_deployment_desc.config.cluster_name != deployment_desc.config.cluster_name:
             contains_inherit_directive = (
                 Directive.INHERIT_CLUSTER_NAME in deployment_desc.pending_directives
             )
@@ -302,7 +302,7 @@ class PeerClusterManager(BaseManager):
                 blocked_msg = PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value.message
 
         logger.debug(
-            f"This is cluster_name from provider: {peer_cluster_rel_data.cluster_name}, "
+            f"This is cluster_name from provider: {provider_deployment_desc.config.cluster_name}, "
             f"and this is cluster_name from requirer: {deployment_desc.config.cluster_name}"
         )
 

@@ -12,7 +12,7 @@ import pytest
 from charmlibs.pathops import LocalPath
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode, State
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,

@@ -15,17 +15,17 @@ from opensearch_single_kernel.common.constants import (
     USER_SECRET_FIELDS,
     DeploymentType,
 )
-from opensearch_single_kernel.core.peer_cluster import (
-    PeerClusterApp,
-    PeerClusterAppModel,
-    PeerClusterOrchestrators,
-)
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
     PluginConfigInfo,
     _sort_nested_dicts,
     stripped_or_none,
+)
+from opensearch_single_kernel.core.peer_cluster import (
+    PeerClusterApp,
+    PeerClusterAppModel,
+    PeerClusterOrchestrators,
 )
 from opensearch_single_kernel.core.relation_base import (
     AdminSecretStr,
@@ -48,8 +48,8 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     admin_hashed_password: UserSecretStr = Field(default="")
     kibana_server_password: UserSecretStr = Field(default="")
     kibana_server_hashed_password: UserSecretStr = Field(default="")
-    cos_password: UserSecretStr = Field(default="")
-    cos_hashed_password: UserSecretStr = Field(default="")
+    monitor_password: UserSecretStr = Field(default="")
+    monitor_hashed_password: UserSecretStr = Field(default="")
 
     # --- Secret-group fields (admin-TLS material) ---
     admin_truststore_password: AdminSecretStr = Field(default="")
@@ -85,7 +85,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         default_factory=dict, alias="cluster_fleet_apps"
     )
     # Peer-cluster fleet apps learned through peer-cluster relations (from other apps in the
-    # fleet), keyed by app id.
+    # fleet), keyed by relation id.
     cluster_fleet_apps_rels: dict[str, PeerClusterApp] = Field(
         default_factory=dict, alias="cluster_fleet_apps_rels"
     )
@@ -195,18 +195,13 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             and self.deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
         )
         copied_data: dict = {
-            "cluster_name": (
-                self.deployment_description.config.cluster_name
-                if self.deployment_description
-                else ""
-            ),
             "deployment_description": self.deployment_description,
             "admin_password": stripped_or_none(self.admin_password),
             "admin_hashed_password": self.admin_hashed_password,
             "kibana_server_password": self.kibana_server_password,
             "kibana_server_hashed_password": self.kibana_server_hashed_password,
-            "cos_password": self.cos_password,
-            "cos_hashed_password": self.cos_hashed_password,
+            "monitor_password": self.monitor_password,
+            "monitor_hashed_password": self.monitor_hashed_password,
             "admin_truststore_password": stripped_or_none(self.admin_truststore_password),
             "admin_keystore_password": stripped_or_none(self.admin_keystore_password),
             "admin_subject": stripped_or_none(self.admin_subject),
@@ -236,8 +231,8 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             m.admin_hashed_password = peer_data.admin_hashed_password
             m.kibana_server_password = peer_data.kibana_server_password
             m.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
-            m.cos_password = peer_data.cos_password
-            m.cos_hashed_password = peer_data.cos_hashed_password
+            m.monitor_password = peer_data.monitor_password
+            m.monitor_hashed_password = peer_data.monitor_hashed_password
 
             m.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
             m.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)

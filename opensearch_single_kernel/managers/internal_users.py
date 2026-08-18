@@ -97,7 +97,7 @@ class InternalUsersManager(BaseManager):
             self.state.application.kibana_server_password = pwd
             self.state.application.kibana_server_hashed_password = hashed_pwd
         elif user == COS_USER:
-            self.state.application.cos_password = pwd
+            self.state.application.monitor_password = pwd
         return True
 
     def purge_initial_default_users(self) -> None:
@@ -180,6 +180,6 @@ class InternalUsersManager(BaseManager):
                     }
                 ],
             )
-            self.state.application.cos_password = pwd
+            self.state.application.monitor_password = pwd
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)

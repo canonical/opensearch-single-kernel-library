@@ -18,16 +18,21 @@ from ops import (
     RelationBrokenEvent,
     RelationChangedEvent,
     RelationDepartedEvent,
+    SecretChangedEvent,
     UpdateStatusEvent,
 )
 
 from opensearch_single_kernel.common.constants import (
+    ADMIN_HASHED_PASSWORD_KEY,
+    ADMIN_USER,
     CLIENT_RELATION,
+    KIBANA_SERVER_HASHED_PASSWORD_KEY,
+    KIBANA_SERVER_USER,
     PEER_RELATION,
     DeploymentType,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchCmdError,
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
@@ -81,8 +86,7 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        index_name = self._validate_request(event)
-        if not index_name:
+        if not (index_name := self._validate_request(event)):
             return
 
         self.charm.status_handler.set_running_status(
@@ -105,8 +109,15 @@ class ExternalClientsEventsHandler(Object):
             return
         username, pwd = credentials
 
-        conn_data = self._get_connection_data(event)
+        try:
+            nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
+        except OpenSearchHttpError as e:
+            logger.error("unable to get nodes %s", str(e))
+            nodes = []
+
+        conn_data = self.charm.external_clients_manager.get_connection_data(nodes)
         if not conn_data:
+            event.defer()
             return
 
         response = ResourceProviderModel(
@@ -173,30 +184,30 @@ class ExternalClientsEventsHandler(Object):
             return None
         return credentials
 
-    def _get_connection_data(self, event: ResourceRequestedEvent) -> dict | None:
-        """Gathers version, TLS certificates, and endpoint data."""
-        try:
-            version = self.charm.workload.version
-        except OpenSearchCmdError as e:
-            logger.error("Failed to update relation version info: %s", str(e))
-            event.defer()
-            return None
+    def update_users_on_secret_change(self, event: SecretChangedEvent) -> bool:
+        """React to a system-user password-hash secret change.
 
-        try:
-            tls_ca = self.charm.state.application.admin_chain
-        except KeyError as e:
-            logger.error("Failed to update relation TLS info: missing key %s", str(e))
-            event.defer()
-            return None
+        The leader propagates the new password to the dashboards relation; non-leaders
+        refresh their local internal_users.yml. Returns False if the event was deferred.
+        """
+        if self.charm.unit.is_leader():
+            self.charm.external_clients_manager.update_dashboards_password()
+            return True
 
-        try:
-            nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
-            endpoints = self.charm.external_clients_manager.get_relation_endpoints(nodes)
-        except OpenSearchHttpError as e:
-            logger.error("unable to get nodes %s", str(e))
-            endpoints = ""
-
-        return {"version": version, "tls_ca": tls_ca, "endpoints": endpoints}
+        # Non-leader units need to maintain local users in internal_users.yml
+        keys_to_update = {
+            ADMIN_HASHED_PASSWORD_KEY: ADMIN_USER,
+            KIBANA_SERVER_HASHED_PASSWORD_KEY: KIBANA_SERVER_USER,
+        }
+        for key, user in keys_to_update.items():
+            password = event.secret.get_content().get(key)
+            try:
+                self.charm.internal_users_manager.put_internal_user(user, password)
+            except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
+                logger.error("An error occurred while updating internal user: %s", str(e))
+                event.defer()
+                return False
+        return True
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle opensearch client relation-changed event."""

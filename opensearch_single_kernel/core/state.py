@@ -59,6 +59,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
+from opensearch_single_kernel.core.base_models import Node
 from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
 from opensearch_single_kernel.core.lock import (
     LockAppStateModel,
@@ -71,7 +72,6 @@ from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterServerModel,
 )
 from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.plain_base import Node
 from opensearch_single_kernel.core.relation_base import (
     build_and_bound_model,
 )
@@ -433,6 +433,11 @@ class ClusterState(Object):
         ]
 
     @property
+    def is_app_leader(self) -> bool:
+        """Whether this unit is the leader of the application."""
+        return self.model.unit.is_leader()
+
+    @property
     def application(self) -> OpenSearchAppPeerModel:
         """Get the opensearch application state."""
         repository = self.get_repository_from_interface(
@@ -490,6 +495,27 @@ class ClusterState(Object):
         except ValidationError as e:
             logger.error(f"failed to validate jwt: {e}")
             return None
+
+    @property
+    def jwt_config_is_valid(self) -> bool:
+        """Whether the JWT config published on the relation is present and valid.
+
+        `jwt` swallows validation errors (returns None) so its other callers can treat
+        "missing" and "invalid" alike; this helper distinguishes them for status checks.
+        """
+        relation = self.jwt_relation
+        if not relation or not relation.app:
+            return False
+
+        repository = OpsRelationRepository(self.model, relation, component=relation.app)
+        version = repository.get_field("version") or "v0"
+        try:
+            if version == "v0":
+                return build_model(repository, JWTAuthConfiguration) is not None
+            contract = build_model(repository, DataContractV1[JWTAuthConfiguration])
+            return bool(contract.requests)
+        except ValidationError:
+            return False
 
     @property
     def server_lock(self) -> LockServerStateModel:
@@ -639,6 +665,10 @@ class ClusterState(Object):
         """Check if TLS is configured in all the units of the current cluster."""
         if not self.peer_relation:
             return False
+        logger.debug(
+            "TLS configured per unit: %s",
+            {server.unit.name: server.tls_configured for server in self.application_servers},
+        )
         for server in self.application_servers:
             if not server.tls_configured:
                 return False
@@ -873,7 +903,7 @@ class ClusterState(Object):
                 the same statuses from different relations. Note: "{}" placeholder makes
                 parameter loosen.
         """
-        if scope == "app" and not self.server.is_app_leader:
+        if scope == "app" and not self.is_app_leader:
             return
 
         present_statuses = self.statuses.get(scope, component)
@@ -913,7 +943,7 @@ class ClusterState(Object):
                 search. Helps to differentiate between statuses with multiple dynamic parameters.
                 Note: "{}" placeholder makes parameter loosen.
         """
-        if scope == "app" and not self.server.is_app_leader:
+        if scope == "app" and not self.is_app_leader:
             return
 
         present_statuses = self.statuses.get(scope, component)
@@ -1034,8 +1064,10 @@ class ClusterState(Object):
     @property
     def main_orchestrator_app(self) -> PeerClusterAppModel | None:
         """Return the main orchestrator's remote app model, or None if not related to one."""
-        orchestrators = self.application.orchestrators
-        if not orchestrators or orchestrators.main_rel_id == -1:
+        if (
+            not (orchestrators := self.application.orchestrators)
+            or orchestrators.main_rel_id == -1
+        ):
             return None
         return self.peer_cluster_by_relation_id(
             is_provider=False,

@@ -23,6 +23,7 @@ from opensearch_single_kernel.common.constants import (
     ExtraUserRolePermissions,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
@@ -30,7 +31,7 @@ from opensearch_single_kernel.common.statuses import (
     ExternalClientsStatuses,
     GeneralStatuses,
 )
-from opensearch_single_kernel.core.plain_base import Node
+from opensearch_single_kernel.core.base_models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
@@ -164,6 +165,31 @@ class ExternalClientsManager(BaseManager):
         users[str(relation_id)] = user
         self.state.application.client_relation_users = users
 
+    def get_connection_data(self, nodes: list[Node]) -> dict | None:
+        """Gather version, TLS CA and endpoint data for a client relation response.
+
+        Returns None when the workload version or admin TLS material can't be resolved;
+        the caller should defer in that case. `nodes` is supplied by the caller so this
+        manager does not depend on the cluster manager.
+        """
+        try:
+            version = self.workload.version
+        except OpenSearchCmdError as e:
+            logger.error("Failed to update relation version info: %s", str(e))
+            return None
+
+        try:
+            tls_ca = self.state.application.admin_chain
+        except KeyError as e:
+            logger.error("Failed to update relation TLS info: missing key %s", str(e))
+            return None
+
+        return {
+            "version": version,
+            "tls_ca": tls_ca,
+            "endpoints": self.get_relation_endpoints(nodes),
+        }
+
     def get_relation_endpoints(
         self,
         nodes: list[Node],
@@ -292,7 +318,7 @@ class ExternalClientsManager(BaseManager):
     def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:
         """Compute the manager's app statuses for relation and append them to list."""
         if (
-            not self.state.server.is_app_leader
+            not self.state.is_app_leader
             or not (index := relation.data[relation.app].get("index"))
             or not self.opensearch_client.is_node_up()
         ):

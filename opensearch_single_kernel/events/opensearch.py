@@ -31,10 +31,11 @@ from ops import (
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
+    ADMIN_HASHED_PASSWORD_KEY,
     ADMIN_USER,
     CERTS_EXPIRATION_DATE_FORMAT,
     CONTAINER_NAME,
-    KIBANA_SERVER_USER,
+    KIBANA_SERVER_HASHED_PASSWORD_KEY,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
     OPENSEARCH_DATA_STORAGE_NAME,
@@ -67,8 +68,8 @@ from opensearch_single_kernel.common.statuses import (
     InternalUsersStatuses,
     LockStatuses,
 )
+from opensearch_single_kernel.core.base_models import DeploymentDescription
 from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.plain_base import DeploymentDescription
 from opensearch_single_kernel.core.relation_base import build_and_bound_model
 from opensearch_single_kernel.core.upgrades import UnitUpgradesState
 from opensearch_single_kernel.events.custom_events import (
@@ -196,8 +197,8 @@ class OpenSearchEventsHandler(Object):
                 # to relate integrators to this new main orchestrator
                 self.charm.peer_cluster_events.check_credentials_with_missing_relations()
 
-        elif self.charm.state.application.nodes_config:
-            # if app_data + app_data["nodes_config"]: Reconfigure + restart node on the unit
+        elif event.relation.data.get(event.app):
+            # if app_data: Reconfigure + restart node on the unit
             if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
@@ -1235,33 +1236,16 @@ class OpenSearchEventsHandler(Object):
         if (
             label_parts["application_name"] != self.charm.app.name
             or label_parts["scope"] != Scope.APP
-            or "admin-hashed-password" not in event.secret.get_content().keys()
-            or "kibana-server-hashed-password" not in event.secret.get_content().keys()
+            or ADMIN_HASHED_PASSWORD_KEY not in event.secret.get_content().keys()
+            or KIBANA_SERVER_HASHED_PASSWORD_KEY not in event.secret.get_content().keys()
         ):
             logger.info("Secret %s was not relevant for us.", event.secret.label)
             return
 
         logger.debug("Secret change for user secrets, updating all users.")
 
-        if self.charm.unit.is_leader():
-            self.charm.external_clients_manager.update_dashboards_password()
-
-        # Non-leader units need to maintain local users in internal_users.yml
-        else:
-            keys_to_update = {
-                "admin-hashed-password": ADMIN_USER,
-                "kibana-server-hashed-password": KIBANA_SERVER_USER,
-            }
-            for key in keys_to_update.keys():
-                password = event.secret.get_content().get(key)
-                try:
-                    self.charm.internal_users_manager.put_internal_user(
-                        keys_to_update[key], password
-                    )
-                except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
-                    logger.error("An error occurred while updating internal user: %s", str(e))
-                    event.defer()
-                    return
+        if not self.charm.external_clients_events.update_users_on_secret_change(event):
+            return
 
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(

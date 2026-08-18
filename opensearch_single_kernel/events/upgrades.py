@@ -256,12 +256,12 @@ class UpgradesEventsHandler(Object):
                 (
                     f"{app_name}:app:{COS_USER}-{PW_POSTFIX}",
                     f"{COS_USER}-{PW_POSTFIX}",
-                    "cos_password",
+                    "monitor_password",
                 ),
                 (
                     f"{app_name}:app:{COS_USER}-{HASH_POSTFIX}",
                     f"{COS_USER}-{HASH_POSTFIX}",
-                    "cos_hashed_password",
+                    "monitor_hashed_password",
                 ),
             ]
 

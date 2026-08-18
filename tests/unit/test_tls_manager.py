@@ -22,7 +22,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import TlsStatuses
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,

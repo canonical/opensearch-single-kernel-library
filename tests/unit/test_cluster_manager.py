@@ -14,7 +14,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchProvidedRolesException
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,

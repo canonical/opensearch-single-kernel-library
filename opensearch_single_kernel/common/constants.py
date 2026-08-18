@@ -214,7 +214,7 @@ OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 USER_SECRET_FIELDS: dict[str, tuple[str, str]] = {
     ADMIN_USER: ("admin_password", "admin_hashed_password"),
     KIBANA_SERVER_USER: ("kibana_server_password", "kibana_server_hashed_password"),
-    COS_USER: ("cos_password", "cos_hashed_password"),
+    COS_USER: ("monitor_password", "monitor_hashed_password"),
 }
 
 GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
@@ -298,6 +298,9 @@ HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
 SECRETS_LABEL_SEPARATOR = "."
+
+ADMIN_HASHED_PASSWORD_KEY = "admin-hashed-password"
+KIBANA_SERVER_HASHED_PASSWORD_KEY = "kibana-server-hashed-password"
 
 SECRET_APP_ADMIN = "app-admin"
 SECRET_UNIT_TRANSPORT = "unit-transport"

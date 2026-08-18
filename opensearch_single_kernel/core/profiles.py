@@ -11,7 +11,7 @@ from opensearch_single_kernel.common.constants import (
     MAX_HEAP_SIZE_IN_KB,
     PerformanceType,
 )
-from opensearch_single_kernel.core.plain_base import PlainModel
+from opensearch_single_kernel.core.base_models import PlainModel
 
 
 class ProfileMemoryRequirements(PlainModel):

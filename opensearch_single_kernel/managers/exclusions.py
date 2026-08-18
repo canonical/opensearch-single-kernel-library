@@ -12,7 +12,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.core.plain_base import Node
+from opensearch_single_kernel.core.base_models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name

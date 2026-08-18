@@ -22,8 +22,8 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
+from opensearch_single_kernel.core.base_models import PluginConfigInfo
 from opensearch_single_kernel.core.peer_app import OpenSearchAppPeerModel
-from opensearch_single_kernel.core.plain_base import PluginConfigInfo
 from opensearch_single_kernel.core.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager

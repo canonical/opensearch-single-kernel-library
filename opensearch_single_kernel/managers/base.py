@@ -15,7 +15,7 @@ from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Substrates
 from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.common.statuses import GeneralStatuses
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     Node,
 )

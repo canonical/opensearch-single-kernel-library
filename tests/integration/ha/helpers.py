@@ -19,7 +19,7 @@ from tenacity import (
     wait_random,
 )
 
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     Node,
 )

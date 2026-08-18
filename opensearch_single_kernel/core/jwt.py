@@ -17,7 +17,7 @@ class JWTAuthConfiguration(ResourceProviderModel):
     signing_key: ExtraSecretStr = Field(default=None)
     jwt_header: str | None = Field(default=None)
     jwt_url_parameter: str | None = Field(default=None)
-    roles_key: str | None = Field(default=None)
+    roles_key: str
     subject_key: str | None = Field(default=None)
     required_audience: str | None = Field(default=None)
     required_issuer: str | None = Field(default=None)

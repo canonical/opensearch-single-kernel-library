@@ -698,7 +698,7 @@ class TlsManager(BaseManager):
         if self.get_secret_by_cert(CertType.UNIT_HTTP, "cert"):
             certs[CertType.UNIT_HTTP] = self.get_secret_by_cert(CertType.UNIT_HTTP, "cert")
 
-        if self.state.server.is_app_leader:
+        if self.state.is_app_leader:
             if self.get_secret_by_cert(CertType.APP_ADMIN, "cert"):
                 certs[CertType.APP_ADMIN] = self.get_secret_by_cert(CertType.APP_ADMIN, "cert")
 

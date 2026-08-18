@@ -13,7 +13,7 @@ from dpcharmlibs.interfaces import (
 from pydantic import Field, field_serializer, field_validator
 
 from opensearch_single_kernel.common.constants import PerformanceType
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     PluginConfigInfo,
     _sort_nested_dicts,
 )
@@ -95,6 +95,9 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
         default_factory=dict, alias="plugin_config_info"
     )
     oauth_openid_connect_url: str = Field(default="", alias="oauth_openid_connect_url")
+    # Set when this unit is departing the oauth relation. Retained for parity with the v0
+    # unit databag layout.
+    oauth_departing: bool = Field(default=False, alias="oauth_departing")
     # Set when this specific unit is departing/scaling down. Used to skip relation-broken
     # triggered by the unit's own removal.
     unit_dying: bool = Field(default=False)
@@ -148,11 +151,6 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
     def opensearch_profile(self, value: OpenSearchProfile) -> None:
         """Set current profile of the unit from an OpenSearchProfile instance."""
         self.profile = value.type
-
-    @property
-    def is_app_leader(self) -> bool:
-        """Check if the unit this model is bound to is the leader of the application."""
-        return self.component.is_leader() if self.component is not None else False
 
     @property
     def unit_id(self) -> int:

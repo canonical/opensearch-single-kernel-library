@@ -11,7 +11,6 @@ from datetime import datetime
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
-from pydantic import ValidationError
 from shortuuid import ShortUUID
 from tenacity import (
     Retrying,
@@ -48,14 +47,14 @@ from opensearch_single_kernel.common.statuses import (
     OAuthStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.peer_cluster import PeerClusterAppModel
-from opensearch_single_kernel.core.plain_base import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,
     Node,
     PeerClusterConfig,
 )
+from opensearch_single_kernel.core.peer_cluster import PeerClusterAppModel
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -152,7 +151,7 @@ class ClusterManager(BaseManager):
                 deployment_state = DeploymentState(value=State.ACTIVE)
 
         if Directive.VALIDATE_CLUSTER_NAME in pending_directives:
-            if config.cluster_name != data.cluster_name:
+            if config.cluster_name != data.deployment_description.config.cluster_name:
                 deployment_state = DeploymentState(
                     value=State.BLOCKED_WRONG_RELATED_CLUSTER, message=PEER_CLUSTER_WRONG_RELATION
                 )
@@ -164,7 +163,7 @@ class ClusterManager(BaseManager):
                 deployment_state = DeploymentState(value=State.ACTIVE)
                 pending_directives.remove(Directive.VALIDATE_CLUSTER_NAME)
         elif Directive.INHERIT_CLUSTER_NAME in pending_directives:
-            config.cluster_name = data.cluster_name
+            config.cluster_name = data.deployment_description.config.cluster_name
             pending_directives.remove(Directive.INHERIT_CLUSTER_NAME)
             if deployment_state.value == State.BLOCKED_WAITING_FOR_RELATION:
                 deployment_state = DeploymentState(value=State.ACTIVE)
@@ -523,7 +522,7 @@ class ClusterManager(BaseManager):
             computed_roles = GENERATED_ROLES
 
         if (
-            self.state.server.is_app_leader
+            self.state.is_app_leader
             and "data" in computed_roles
             and not self.state.application.security_index_initialised
         ):
@@ -612,7 +611,7 @@ class ClusterManager(BaseManager):
                 if cms_in_bootstrap < self.state.planned_units:
                     contribute_to_bootstrap = True
 
-                    if self.state.server.is_app_leader:
+                    if self.state.is_app_leader:
                         self.state.application.bootstrap_contributors_count = cms_in_bootstrap + 1
 
                     # indicates that this unit is part of the "initial cm nodes"
@@ -863,7 +862,7 @@ class ClusterManager(BaseManager):
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
-            self.state.server.is_app_leader
+            self.state.is_app_leader
             # data unit
             and (
                 "data" in deployment_desc.config.roles
@@ -953,11 +952,8 @@ class ClusterManager(BaseManager):
                 status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
             if self.state.jwt_relation:
                 status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
-        elif self.state.jwt_relation:
-            try:
-                _ = self.state.jwt
-            except ValidationError:
-                status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
+        elif self.state.jwt_relation and not self.state.jwt_config_is_valid:
+            status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
         # Validate current juju `roles` config (DPE #75).
         user_roles = self._user_config().roles
