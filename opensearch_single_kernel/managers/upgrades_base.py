@@ -96,13 +96,7 @@ class UpgradesManagerBase(BaseManager):
     @property
     def in_progress(self) -> bool:
         """Whether an upgrade is in progress"""
-        logger.debug(
-            f"{self._app_workload_container_version=} {self._unit_workload_container_versions=}"
-        )
-        return any(
-            version != self._app_workload_container_version
-            for version in self._unit_workload_container_versions.values()
-        )
+        return self.upgrade_in_progress
 
     @property
     @abc.abstractmethod
@@ -419,21 +413,3 @@ class UpgradesManagerBase(BaseManager):
     def save_upgrades_versions(self) -> None:
         """Save revision on first install"""
         ...
-
-    @property
-    @abc.abstractmethod
-    def _unit_workload_container_versions(self) -> dict[str, str]:
-        """{Unit name: Kubernetes controller revision hash}
-
-        Even if the workload container version is the same, the workload will restart if the
-        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
-
-        Therefore, we must use the revision hash instead of the workload container version. (To
-        satisfy the requirement that if and only if this version changes, the workload will
-        restart.)
-        """
-
-    @property
-    @abc.abstractmethod
-    def _app_workload_container_version(self) -> str:
-        """App's Kubernetes controller revision hash"""

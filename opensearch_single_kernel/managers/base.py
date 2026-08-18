@@ -11,7 +11,11 @@ from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, Statu
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.client import OpenSearchClient
-from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Substrates
+from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
+    OPENSEARCH_SNAP_REVISION,
+    Substrates,
+)
 from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import App, Node
@@ -144,3 +148,22 @@ class BaseManager(ManagerStatusProtocol):
 
         status_list = running_statuses(self.state.statuses, scope, self.name)
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    @property
+    def upgrade_in_progress(self) -> bool:
+        """Whether an upgrade is in progress."""
+        app_workload_version, unit_workload_versions = (
+            OPENSEARCH_SNAP_REVISION,
+            {
+                server.unit.name: server.snap_revision
+                for server in self.state.sorted_upgrades_units
+                if server.snap_revision
+            },
+        )
+        if self.state.substrate == Substrates.K8S:
+            app_workload_version = self.k8s_client.get_revision()
+            unit_workload_versions = self.k8s_client.list_revisions()
+        logger.debug(
+            f"App version: {app_workload_version=} | Unit versions: {unit_workload_versions=}"
+        )
+        return any(version != app_workload_version for version in unit_workload_versions.values())

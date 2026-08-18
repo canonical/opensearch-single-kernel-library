@@ -395,7 +395,8 @@ class OpenSearchEventsHandler(Object):
         )
         if (
             health := self.charm.apply_health(
-                wait_for_green_first=True, app=self.charm.unit.is_leader()
+                wait_for_green_first=not self.charm.upgrades_manager.upgrade_in_progress,
+                app=self.charm.unit.is_leader(),
             )
         ) not in [
             HealthColors.GREEN,
@@ -1075,6 +1076,7 @@ class OpenSearchEventsHandler(Object):
         )
 
         if event.after_upgrade:
+            logger.debug("Upgrade completed, checking cluster health")
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
             # Cluster is considered healthy if green or yellow
             # TODO future improvement: try to narrow scope to just green or green + yellow in
@@ -1176,14 +1178,16 @@ class OpenSearchEventsHandler(Object):
         """Event handler for when the node-lock relation changed"""
         self.charm.lock_manager.refresh_lock()
 
-    def is_cluster_healthy_to_start(self) -> bool:
+    def is_cluster_healthy_to_start(self, wait_for_green: bool = True) -> bool:
         """Check the cluster health before being able to start."""
         # When a new unit joins, replica shards are automatically added to it. In order to prevent
         # overloading the cluster, units must be started one at a time. So we defer starting
         # opensearch until all shards in other units are in a "started" or "unassigned" state.
         try:
             if (
-                self.charm.apply_health(wait_for_green_first=True, use_localhost=False, app=False)
+                self.charm.apply_health(
+                    wait_for_green_first=wait_for_green, use_localhost=False, app=False
+                )
                 == HealthColors.YELLOW_TEMP
             ):
                 return False
@@ -1325,7 +1329,7 @@ class OpenSearchEventsHandler(Object):
                     and event.is_first_data_node
                 )
             )
-        return self.is_cluster_healthy_to_start()
+        return self.is_cluster_healthy_to_start(wait_for_green=not event.after_upgrade)
 
     def trigger_peer_rel_changed(
         self,

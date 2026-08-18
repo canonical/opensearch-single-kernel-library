@@ -171,25 +171,3 @@ class UpgradesManagerVM(UpgradesManagerBase):
                 )
                 return index == 0 and not is_rollback
         return False
-
-    @property
-    def _unit_workload_container_versions(self) -> dict[str, str]:
-        """{Unit name: Kubernetes controller revision hash}
-
-        Even if the workload container version is the same, the workload will restart if the
-        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
-
-        Therefore, we must use the revision hash instead of the workload container version. (To
-        satisfy the requirement that if and only if this version changes, the workload will
-        restart.)
-        """
-        return {
-            server.unit.name: server.snap_revision
-            for server in self.state.sorted_upgrades_units
-            if server.snap_revision
-        }
-
-    @property
-    def _app_workload_container_version(self) -> str:
-        """App's Kubernetes controller revision hash"""
-        return OPENSEARCH_SNAP_REVISION
