@@ -19,7 +19,6 @@ from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
-    K8S_VERSION_TO_RESOURCE,
     K8S_VERSION_TO_REVISION,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
@@ -53,15 +52,21 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
     await ops_test.model.set_config(MODEL_CONFIG)
 
     if substrate == "k8s":
-        if version not in K8S_VERSION_TO_REVISION or version not in K8S_VERSION_TO_RESOURCE:
+        if version not in K8S_VERSION_TO_REVISION:
             pytest.skip(f"Version {version} is not available for k8s upgrade tests")
         revision = K8S_VERSION_TO_REVISION[version][series]
-        charm_resource = K8S_VERSION_TO_RESOURCE[version]
         charm = OPENSEARCH_K8S_CHARM
     else:
         revision = VM_VERSION_TO_REVISION[version][series]
-        charm_resource = None
         charm = OPENSEARCH_CHARM
+
+    logger.info(
+        "Deploying %s (revision: %s, series: %s, channel: %s)",
+        charm,
+        revision,
+        series,
+        OPENSEARCH_CHANNEL,
+    )
     await ops_test.model.deploy(
         charm,
         application_name=APP_NAME,
@@ -70,7 +75,6 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
         revision=revision,
         series=series,
         config=CONFIG_OPTS if (substrate == "k8s" or revision > PROFILES_REVISION) else {},
-        resources=charm_resource,
         trust=substrate == "k8s",
     )
 
