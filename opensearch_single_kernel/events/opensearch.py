@@ -71,7 +71,7 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
 from opensearch_single_kernel.core.plain_base import DeploymentDescription
-from opensearch_single_kernel.core.relation_base import bind_model_to_repository
+from opensearch_single_kernel.core.relation_base import build_and_bound_model
 from opensearch_single_kernel.core.upgrades import UnitUpgradesState
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
@@ -217,11 +217,11 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        event_server = bind_model_to_repository(
-            self.charm.state.peer_unit_interface,
-            event.relation.id,
+        event_server = build_and_bound_model(
+            self.charm.state.get_repository_from_interface(
+                self.charm.state.peer_unit_interface, event.relation, event.unit
+            ),
             OpenSearchServerPeerModel,
-            component=event.unit,
         )
 
         self.charm.exclusions_manager.cleanup(

@@ -7,6 +7,9 @@
 import logging
 from typing import TYPE_CHECKING
 
+from dpcharmlibs.interfaces import (
+    ResourceProviderModel,
+)
 from ops import (
     ActionEvent,
     Object,
@@ -26,9 +29,6 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchFileOperationError,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    ResourceProviderModel,
 )
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,

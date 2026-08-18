@@ -22,9 +22,7 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.peer_secrets import (
-    OpenSearchAppPeerPluginSecretsModel,
-)
+from opensearch_single_kernel.core.peer_app import OpenSearchAppPeerModel
 from opensearch_single_kernel.core.plain_base import PluginConfigInfo
 from opensearch_single_kernel.core.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
@@ -155,15 +153,10 @@ class PluginManager(BaseManager):
 
     def _load_plugin_secrets(
         self,
-    ) -> tuple[OpenSearchAppPeerPluginSecretsModel | None, dict]:
-        """Return the plugins sibling secret model and its decoded contents.
-
-        Returns (None, {}) when the sibling model is unavailable.
-        """
-        plugin_m = self.state.application.build_sibling_model(OpenSearchAppPeerPluginSecretsModel)
-        if not plugin_m:
-            return None, {}
-        return plugin_m, (json.loads(plugin_m.plugin_secrets) if plugin_m.plugin_secrets else {})
+    ) -> tuple[OpenSearchAppPeerModel, dict]:
+        """Return the application model and its decoded plugin-secrets contents."""
+        app = self.state.application
+        return app, (json.loads(app.plugin_secrets) if app.plugin_secrets else {})
 
     def _plugin_secret_name(self, plugin_name: str) -> str | None:
         """Return the configured secret_name for a plugin, or None if it has none."""

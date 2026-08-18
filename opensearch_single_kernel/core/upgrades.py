@@ -9,13 +9,13 @@ from enum import IntEnum
 from typing import Optional
 
 import poetry.core.constraints.version as poetry_version
+from dpcharmlibs.interfaces import (
+    PeerModel,
+)
 from pydantic import Field, field_validator
 
 from opensearch_single_kernel.core.plain_base import PlainModel
 from opensearch_single_kernel.core.relation_base import RelationModel
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    PeerModel,
-)
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 

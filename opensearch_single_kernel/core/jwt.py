@@ -4,12 +4,11 @@
 
 """JWT authentication configuration model."""
 
-from pydantic import Field
-
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
+from dpcharmlibs.interfaces import (
     ExtraSecretStr,
     ResourceProviderModel,
 )
+from pydantic import Field
 
 
 class JWTAuthConfiguration(ResourceProviderModel):

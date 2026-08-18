@@ -10,6 +10,10 @@ from time import time_ns
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusHandler
+from dpcharmlibs.interfaces import (
+    RequirerCommonModel,
+    ResourceProviderEventHandler,
+)
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import EventSource
 from ops.charm import CharmEvents
@@ -52,10 +56,6 @@ from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandle
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    RequirerCommonModel,
-    ResourceProviderEventHandler,
-)
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager

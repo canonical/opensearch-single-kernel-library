@@ -38,11 +38,6 @@ from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
     PeerClusterRelErrorData,
 )
-from opensearch_single_kernel.core.peer_secrets import (
-    OpenSearchAppPeerAdminTlsSecretsModel,
-    OpenSearchServerPeerHttpSecretsModel,
-    OpenSearchServerPeerTransportSecretsModel,
-)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     generate_csr,
@@ -300,25 +295,21 @@ class TlsManager(BaseManager):
 
         match cert_type:
             case CertType.APP_ADMIN:
-                with self.state.application.update_secrets(
-                    OpenSearchAppPeerAdminTlsSecretsModel
-                ) as m:
+                with self.state.application.update() as m:
                     m.admin_key = key.decode("utf-8")
                     m.admin_key_password = password
                     m.admin_csr = csr.decode("utf-8")
                     m.admin_subject = f"O={organization},CN={subject}"
 
             case CertType.UNIT_TRANSPORT:
-                with self.state.server.update_secrets(
-                    OpenSearchServerPeerTransportSecretsModel
-                ) as m:
+                with self.state.server.update() as m:
                     m.transport_key = key.decode("utf-8")
                     m.transport_key_password = password
                     m.transport_csr = csr.decode("utf-8")
                     m.transport_subject = f"O={organization},CN={subject}"
 
             case CertType.UNIT_HTTP:
-                with self.state.server.update_secrets(OpenSearchServerPeerHttpSecretsModel) as m:
+                with self.state.server.update() as m:
                     m.http_key = key.decode("utf-8")
                     m.http_key_password = password
                     m.http_csr = csr.decode("utf-8")
@@ -344,23 +335,17 @@ class TlsManager(BaseManager):
             # for the same content
             match cert_type:
                 case CertType.APP_ADMIN:
-                    with self.state.application.update_secrets(
-                        OpenSearchAppPeerAdminTlsSecretsModel
-                    ) as m:
+                    with self.state.application.update() as m:
                         m.admin_chain = ca_chain
                         m.admin_cert = certificate
                         m.admin_ca_cert = ca
                 case CertType.UNIT_HTTP:
-                    with self.state.server.update_secrets(
-                        OpenSearchServerPeerHttpSecretsModel
-                    ) as m:
+                    with self.state.server.update() as m:
                         m.http_chain = ca_chain
                         m.http_cert = certificate
                         m.http_ca_cert = ca
                 case CertType.UNIT_TRANSPORT:
-                    with self.state.server.update_secrets(
-                        OpenSearchServerPeerTransportSecretsModel
-                    ) as m:
+                    with self.state.server.update() as m:
                         m.transport_chain = ca_chain
                         m.transport_cert = certificate
                         m.transport_ca_cert = ca

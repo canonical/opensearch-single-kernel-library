@@ -9,6 +9,9 @@ from typing import Any
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from dpcharmlibs.interfaces import (
+    ResourceProviderModel,
+)
 from ops import Relation
 from overrides import override
 
@@ -29,9 +32,6 @@ from opensearch_single_kernel.common.statuses import (
 )
 from opensearch_single_kernel.core.plain_base import Node
 from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    ResourceProviderModel,
-)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import (
     generate_hashed_password,

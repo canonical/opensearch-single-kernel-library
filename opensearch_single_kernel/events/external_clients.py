@@ -7,6 +7,10 @@
 import logging
 from typing import TYPE_CHECKING
 
+from dpcharmlibs.interfaces import (
+    ResourceProviderModel,
+    ResourceRequestedEvent,
+)
 from ops import (
     ConfigChangedEvent,
     Object,
@@ -28,10 +32,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    ResourceProviderModel,
-    ResourceRequestedEvent,
-)
 from opensearch_single_kernel.utils.helpers import (
     validate_index_name,
 )

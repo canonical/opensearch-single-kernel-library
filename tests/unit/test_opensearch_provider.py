@@ -101,9 +101,7 @@ def test_on_index_requested(harness, mocker):
         "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.create_opensearch_users",
         return_value=(username, password),
     )
-    set_response = mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces.ResourceProviderEventHandler.set_response"
-    )
+    set_response = mocker.patch("dpcharmlibs.interfaces.ResourceProviderEventHandler.set_response")
 
     harness.set_leader(False)
     harness.charm.external_clients_events._on_resource_requested(event)
@@ -184,9 +182,7 @@ def test_on_index_requested_kibanaserver(harness, mocker):
         "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.create_opensearch_users",
         return_value=(username, password),
     )
-    set_response = mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces.ResourceProviderEventHandler.set_response"
-    )
+    set_response = mocker.patch("dpcharmlibs.interfaces.ResourceProviderEventHandler.set_response")
 
     harness.set_leader(False)
     harness.charm.external_clients_events._on_resource_requested(event)

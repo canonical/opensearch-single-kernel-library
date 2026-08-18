@@ -210,7 +210,7 @@ OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
 # Maps an internal user to its (password, hashed_password) field names on
-# OpenSearchAppPeerUserSecretsModel.
+# OpenSearchAppPeerModel.
 USER_SECRET_FIELDS: dict[str, tuple[str, str]] = {
     ADMIN_USER: ("admin_password", "admin_hashed_password"),
     KIBANA_SERVER_USER: ("kibana_server_password", "kibana_server_hashed_password"),

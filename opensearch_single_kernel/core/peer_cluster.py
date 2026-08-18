@@ -11,6 +11,11 @@ from hashlib import sha1
 from typing import Literal, Optional
 
 from data_platform_helpers.advanced_statuses import StatusObject
+from dpcharmlibs.interfaces import (
+    BaseCommonModel,
+    PeerModel,
+    UserSecretStr
+)
 from pydantic import (
     Field,
     field_serializer,
@@ -33,16 +38,11 @@ from opensearch_single_kernel.core.relation_base import (
     BackupSecretStr,
     PluginsSecretStr,
     RelationModel,
-    UserSecretStr,
 )
 from opensearch_single_kernel.core.storage import (
     AzureRelData,
     GcsRelData,
     S3RelData,
-)
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    BaseCommonModel,
-    PeerModel,
 )
 
 logger = logging.getLogger(__name__)

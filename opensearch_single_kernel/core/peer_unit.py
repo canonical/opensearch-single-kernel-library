@@ -5,15 +5,14 @@
 """Models for the opensearch-peers relation (unit databags)."""
 
 import logging
-from typing import ClassVar, Optional
+from typing import Optional
 
+from dpcharmlibs.interfaces import (
+    PeerModel,
+)
 from pydantic import Field, field_serializer, field_validator
 
 from opensearch_single_kernel.common.constants import PerformanceType
-from opensearch_single_kernel.core.peer_secrets import (
-    OpenSearchServerPeerHttpSecretsModel,
-    OpenSearchServerPeerTransportSecretsModel,
-)
 from opensearch_single_kernel.core.plain_base import (
     PluginConfigInfo,
     _sort_nested_dicts,
@@ -23,29 +22,43 @@ from opensearch_single_kernel.core.profiles import (
     ProductionProfile,
     TestingProfile,
 )
-from opensearch_single_kernel.core.relation_base import RelationModel
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    PeerModel,
+from opensearch_single_kernel.core.relation_base import (
+    HttpSecretStr,
+    RelationModel,
+    TransportSecretStr,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class OpenSearchServerPeerModel(RelationModel, PeerModel):
-    """Peer model to the OpenSearch unit state."""
+    """Peer model to the OpenSearch unit state.
 
-    # Proxy of secret-group fields (see RelationModel._secret_group_fields)
-    # so callers never need to build the secret models themselves.
-    _secret_group_fields: ClassVar[dict[str, type]] = {
-        **dict.fromkeys(
-            OpenSearchServerPeerTransportSecretsModel.__pydantic_fields__,
-            OpenSearchServerPeerTransportSecretsModel,
-        ),
-        **dict.fromkeys(
-            OpenSearchServerPeerHttpSecretsModel.__pydantic_fields__,
-            OpenSearchServerPeerHttpSecretsModel,
-        ),
-    }
+    Plain databag fields and the unit's transport/HTTP-layer TLS Juju secret-group fields
+    all live on this single model.
+    """
+
+    # --- Secret-group fields (transport-layer TLS) ---
+    transport_key: TransportSecretStr = Field(default="")
+    transport_key_password: TransportSecretStr = Field(default="")
+    transport_csr: TransportSecretStr = Field(default="")
+    transport_chain: TransportSecretStr = Field(default="")
+    transport_cert: TransportSecretStr = Field(default="")
+    transport_ca_cert: TransportSecretStr = Field(default="")
+    transport_truststore_password: TransportSecretStr = Field(default="")
+    transport_subject: TransportSecretStr = Field(default="")
+    transport_keystore_password: TransportSecretStr = Field(default="")
+
+    # --- Secret-group fields (HTTP-layer TLS) ---
+    http_keystore_password: HttpSecretStr = Field(default="")
+    http_key: HttpSecretStr = Field(default="")
+    http_key_password: HttpSecretStr = Field(default="")
+    http_csr: HttpSecretStr = Field(default="")
+    http_chain: HttpSecretStr = Field(default="")
+    http_cert: HttpSecretStr = Field(default="")
+    http_ca_cert: HttpSecretStr = Field(default="")
+    http_truststore_password: HttpSecretStr = Field(default="")
+    http_subject: HttpSecretStr = Field(default="")
 
     # Aliases here are pinned to the underscored keys deployed databags use,
     # so upgrade works correctly
@@ -154,9 +167,8 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
     def initialize_empty_secrets(self) -> None:
         """Initialize empty unit-level secrets to prevent log spam."""
         # Use truthy placeholders only for fields whose secrets don't exist yet
-        if transport_m := self.build_sibling_model(OpenSearchServerPeerTransportSecretsModel):
-            if not transport_m.transport_key_password:
-                transport_m.transport_key_password = " "
-        if http_m := self.build_sibling_model(OpenSearchServerPeerHttpSecretsModel):
-            if not http_m.http_key_password:
-                http_m.http_key_password = " "
+        with self.update() as m:
+            if not m.transport_key_password:
+                m.transport_key_password = " "
+            if not m.http_key_password:
+                m.http_key_password = " "

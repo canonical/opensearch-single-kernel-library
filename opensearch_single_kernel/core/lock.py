@@ -6,12 +6,12 @@
 
 import os
 
+from dpcharmlibs.interfaces import (
+    PeerModel,
+)
 from pydantic import Field
 
 from opensearch_single_kernel.core.relation_base import RelationModel
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    PeerModel,
-)
 
 
 class LockAppStateModel(RelationModel, PeerModel):

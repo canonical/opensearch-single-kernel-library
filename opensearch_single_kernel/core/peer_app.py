@@ -5,8 +5,9 @@
 """Models for the opensearch-peers relation (application databags)."""
 
 import logging
-from typing import ClassVar, Optional
+from typing import Optional
 
+from dpcharmlibs.interfaces import PeerModel, UserSecretStr
 from pydantic import Field, field_serializer, field_validator
 
 from opensearch_single_kernel.common.constants import (
@@ -19,11 +20,6 @@ from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
     PeerClusterOrchestrators,
 )
-from opensearch_single_kernel.core.peer_secrets import (
-    OpenSearchAppPeerAdminTlsSecretsModel,
-    OpenSearchAppPeerPluginSecretsModel,
-    OpenSearchAppPeerUserSecretsModel,
-)
 from opensearch_single_kernel.core.plain_base import (
     DeploymentDescription,
     Node,
@@ -31,33 +27,43 @@ from opensearch_single_kernel.core.plain_base import (
     _sort_nested_dicts,
     stripped_or_none,
 )
-from opensearch_single_kernel.core.relation_base import RelationModel
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    PeerModel,
+from opensearch_single_kernel.core.relation_base import (
+    AdminSecretStr,
+    PluginsSecretStr,
+    RelationModel,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class OpenSearchAppPeerModel(RelationModel, PeerModel):
-    """Peer model mapping to the OpenSearch application state. Contains only plain values"""
+    """Peer model mapping to the OpenSearch application state.
 
-    # Proxy of secret-group fields (see RelationModel._secret_group_fields)
-    # so callers never need to build the secret models themselves.
-    _secret_group_fields: ClassVar[dict[str, type]] = {
-        **dict.fromkeys(
-            OpenSearchAppPeerUserSecretsModel.__pydantic_fields__,
-            OpenSearchAppPeerUserSecretsModel,
-        ),
-        **dict.fromkeys(
-            OpenSearchAppPeerAdminTlsSecretsModel.__pydantic_fields__,
-            OpenSearchAppPeerAdminTlsSecretsModel,
-        ),
-        **dict.fromkeys(
-            OpenSearchAppPeerPluginSecretsModel.__pydantic_fields__,
-            OpenSearchAppPeerPluginSecretsModel,
-        ),
-    }
+    Plain databag fields and the application's Juju secret-group fields (internal-user
+    credentials, admin-TLS material and plugin secrets) all live on this single model.
+    """
+
+    # --- Secret-group fields (internal-user credentials) ---
+    admin_password: UserSecretStr = Field(default="")
+    admin_hashed_password: UserSecretStr = Field(default="")
+    kibana_server_password: UserSecretStr = Field(default="")
+    kibana_server_hashed_password: UserSecretStr = Field(default="")
+    cos_password: UserSecretStr = Field(default="")
+    cos_hashed_password: UserSecretStr = Field(default="")
+
+    # --- Secret-group fields (admin-TLS material) ---
+    admin_truststore_password: AdminSecretStr = Field(default="")
+    admin_subject: AdminSecretStr = Field(default="")
+    admin_keystore_password: AdminSecretStr = Field(default="")
+    admin_key: AdminSecretStr = Field(default="")
+    admin_key_password: AdminSecretStr = Field(default="")
+    admin_csr: AdminSecretStr = Field(default="")
+    admin_chain: AdminSecretStr = Field(default="")
+    admin_cert: AdminSecretStr = Field(default="")
+    admin_ca_cert: AdminSecretStr = Field(default="")
+
+    # --- Secret-group fields (plugin secrets) ---
+    plugin_secrets: PluginsSecretStr = Field(default="")
 
     # Aliases here are pinned to the underscored keys deployed databags use,
     # so upgrade works correctly
@@ -155,25 +161,22 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
         callers strip the value before use so the placeholder is never
         mistaken for real data.
         """
-        if plugin_m := self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel):
-            if not plugin_m.plugin_secrets:
-                plugin_m.plugin_secrets = "{}"
-        if user_m := self.build_sibling_model(OpenSearchAppPeerUserSecretsModel):
-            if not user_m.admin_password:
-                user_m.admin_password = " "
-        if admin_tls_m := self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel):
-            if not admin_tls_m.admin_key_password:
-                admin_tls_m.admin_key_password = " "
+        with self.update() as m:
+            if not m.plugin_secrets:
+                m.plugin_secrets = "{}"
+            if not m.admin_password:
+                m.admin_password = " "
+            if not m.admin_key_password:
+                m.admin_key_password = " "
 
     def get_user_secret(self, user: str, hashed: bool = False) -> str | None:
-        """Read a user's password (or hashed password) off the user secrets sibling model."""
+        """Read a user's password (or hashed password) off the model's user secrets."""
         fields = USER_SECRET_FIELDS.get(user)
         if fields is None:
             raise ValueError(f"User {user} is not an internal user.")
 
         field_name = fields[1] if hashed else fields[0]
-        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
-        value = getattr(user_m, field_name) if user_m else None
+        value = getattr(self, field_name)
         # admin_password may hold a single-space placeholder to force secret
         # creation (see initialize_empty_secrets)
         if user == ADMIN_USER and not hashed:
@@ -191,8 +194,6 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             self.deployment_description is not None
             and self.deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
         )
-        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
-        admin_tls_m = self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
         copied_data: dict = {
             "cluster_name": (
                 self.deployment_description.config.cluster_name
@@ -200,33 +201,26 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
                 else ""
             ),
             "deployment_description": self.deployment_description,
-            "admin_password": stripped_or_none(user_m.admin_password),
-            "admin_hashed_password": user_m.admin_hashed_password,
-            "kibana_server_password": user_m.kibana_server_password,
-            "kibana_server_hashed_password": user_m.kibana_server_hashed_password,
-            "cos_password": user_m.cos_password,
-            "cos_hashed_password": user_m.cos_hashed_password,
-            "admin_truststore_password": stripped_or_none(admin_tls_m.admin_truststore_password),
-            "admin_keystore_password": stripped_or_none(admin_tls_m.admin_keystore_password),
-            "admin_subject": stripped_or_none(admin_tls_m.admin_subject),
-            "admin_key": stripped_or_none(admin_tls_m.admin_key),
-            "admin_key_password": stripped_or_none(admin_tls_m.admin_key_password),
-            "admin_csr": stripped_or_none(admin_tls_m.admin_csr),
-            "admin_chain": stripped_or_none(admin_tls_m.admin_chain),
-            "admin_cert": stripped_or_none(admin_tls_m.admin_cert),
-            "admin_ca_cert": stripped_or_none(admin_tls_m.admin_ca_cert),
+            "admin_password": stripped_or_none(self.admin_password),
+            "admin_hashed_password": self.admin_hashed_password,
+            "kibana_server_password": self.kibana_server_password,
+            "kibana_server_hashed_password": self.kibana_server_hashed_password,
+            "cos_password": self.cos_password,
+            "cos_hashed_password": self.cos_hashed_password,
+            "admin_truststore_password": stripped_or_none(self.admin_truststore_password),
+            "admin_keystore_password": stripped_or_none(self.admin_keystore_password),
+            "admin_subject": stripped_or_none(self.admin_subject),
+            "admin_key": stripped_or_none(self.admin_key),
+            "admin_key_password": stripped_or_none(self.admin_key_password),
+            "admin_csr": stripped_or_none(self.admin_csr),
+            "admin_chain": stripped_or_none(self.admin_chain),
+            "admin_cert": stripped_or_none(self.admin_cert),
+            "admin_ca_cert": stripped_or_none(self.admin_ca_cert),
             "security_index_initialised": security_index_initialised,
             "first_data_node": first_data_node or "",
             "nodes_config": cm_nodes,
             "plugin_config_info": self.plugin_config_info if is_main_orchestrator else None,
-            "plugin_secrets": (
-                (
-                    self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel).plugin_secrets
-                    or ""
-                )
-                if is_main_orchestrator
-                else ""
-            ),
+            "plugin_secrets": (self.plugin_secrets or "") if is_main_orchestrator else "",
         }
 
         return PeerClusterAppModel(**copied_data)
@@ -238,31 +232,27 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
             m.first_data_node = peer_data.first_data_node
             m.nodes_config = peer_data.nodes_config
 
-        user_m = self.build_sibling_model(OpenSearchAppPeerUserSecretsModel)
-        with user_m.update() as u:
-            u.admin_password = stripped_or_none(peer_data.admin_password)
-            u.admin_hashed_password = peer_data.admin_hashed_password
-            u.kibana_server_password = peer_data.kibana_server_password
-            u.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
-            u.cos_password = peer_data.cos_password
-            u.cos_hashed_password = peer_data.cos_hashed_password
-        if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
-            self.admin_user_initialized = True
+            m.admin_password = stripped_or_none(peer_data.admin_password)
+            m.admin_hashed_password = peer_data.admin_hashed_password
+            m.kibana_server_password = peer_data.kibana_server_password
+            m.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
+            m.cos_password = peer_data.cos_password
+            m.cos_hashed_password = peer_data.cos_hashed_password
 
-        admin_tls_m = self.build_sibling_model(OpenSearchAppPeerAdminTlsSecretsModel)
-        with admin_tls_m.update() as a:
-            a.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
-            a.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
-            a.admin_subject = stripped_or_none(peer_data.admin_subject)
-            a.admin_key = stripped_or_none(peer_data.admin_key)
-            a.admin_key_password = stripped_or_none(peer_data.admin_key_password)
-            a.admin_csr = stripped_or_none(peer_data.admin_csr)
-            a.admin_chain = stripped_or_none(peer_data.admin_chain)
-            a.admin_cert = stripped_or_none(peer_data.admin_cert)
-            a.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
+            m.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
+            m.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
+            m.admin_subject = stripped_or_none(peer_data.admin_subject)
+            m.admin_key = stripped_or_none(peer_data.admin_key)
+            m.admin_key_password = stripped_or_none(peer_data.admin_key_password)
+            m.admin_csr = stripped_or_none(peer_data.admin_csr)
+            m.admin_chain = stripped_or_none(peer_data.admin_chain)
+            m.admin_cert = stripped_or_none(peer_data.admin_cert)
+            m.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
 
-        if peer_data.plugin_config_info:
-            self.plugin_config_info = peer_data.plugin_config_info
-        if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
-            plugin_m = self.build_sibling_model(OpenSearchAppPeerPluginSecretsModel)
-            plugin_m.plugin_secrets = peer_data.plugin_secrets
+            if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
+                m.admin_user_initialized = True
+
+            if peer_data.plugin_config_info:
+                m.plugin_config_info = peer_data.plugin_config_info
+            if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
+                m.plugin_secrets = peer_data.plugin_secrets

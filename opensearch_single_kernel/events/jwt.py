@@ -6,6 +6,10 @@
 import logging
 from typing import TYPE_CHECKING
 
+from dpcharmlibs.interfaces import (
+    RequirerCommonModel,
+    ResourceRequirerEventHandler,
+)
 from ops import (
     EventBase,
     Object,
@@ -20,10 +24,6 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.statuses import JwtStatuses
 from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
-from opensearch_single_kernel.lib.charms.data_platform_libs.v1.data_interfaces import (
-    RequirerCommonModel,
-    ResourceRequirerEventHandler,
-)
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
