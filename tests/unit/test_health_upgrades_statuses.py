@@ -51,6 +51,14 @@ class _UpgradesManager(UpgradesManagerBase):
     def save_upgrades_versions(self) -> None:
         return None
 
+    @property
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        return {}
+
+    @property
+    def _app_workload_container_version(self) -> str:
+        return ""
+
 
 def test_health_red_app_status_merges_running():
     state = MagicMock()

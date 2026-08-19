@@ -257,3 +257,21 @@ class UpgradesManagerK8s(UpgradesManagerBase):
                     return int(units[0].unit.name.split("/")[-1])
                 return int(server_upgrade_unit.unit.name.split("/")[-1])
         return 0
+
+    @property
+    def _unit_workload_container_versions(self) -> dict[str, str]:
+        """{Unit name: Kubernetes controller revision hash}
+
+        Even if the workload container version is the same, the workload will restart if the
+        controller revision hash changes. (Juju bug: https://bugs.launchpad.net/juju/+bug/2036246).
+
+        Therefore, we must use the revision hash instead of the workload container version. (To
+        satisfy the requirement that if and only if this version changes, the workload will
+        restart.)
+        """
+        return self.k8s_client.list_revisions()
+
+    @property
+    def _app_workload_container_version(self) -> str:
+        """App's Kubernetes controller revision hash"""
+        return self.k8s_client.get_revision()
