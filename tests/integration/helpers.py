@@ -899,9 +899,17 @@ async def debug_failed_unit(ops_test: OpsTest, app: str, endpoint: str) -> None:
 
 
 def opensearch_client(
-    hosts: List[str], user_name: str, password: str, cert_path: str
+    hosts: List[str],
+    user_name: str,
+    password: str,
+    cert_path: str,
+    timeout: int = 10,
+    max_retries: int = 3,
 ) -> OpenSearch:
-    """Build an opensearch client."""
+    """Build an opensearch client.
+
+    Pass max_retries=0 if the caller has its own retry loop and wants to fail fast.
+    """
     return OpenSearch(
         hosts=[{"host": ip, "port": 9200} for ip in hosts],
         http_auth=(user_name, password),
@@ -919,7 +927,8 @@ def opensearch_client(
         ssl_show_warn=False,
         ca_certs=cert_path,  # cert path on disk
         retry_on_timeout=True,
-        max_retries=3,
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 

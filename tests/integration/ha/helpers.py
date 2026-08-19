@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch.daemon.service"
 
+# How long to wait for the writes to resume, e.g. after a restart or an upgrade
+CONTINUOUS_WRITES_INCREASE_TIMEOUT = 180
+CONTINUOUS_WRITES_INCREASE_INTERVAL = 10
+
 
 def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:
     """Count number of nodes by role."""
@@ -213,12 +217,29 @@ async def get_shards_by_index(
 
 async def assert_continuous_writes_increasing(
     c_writes: ContinuousWrites,
+    timeout: int = CONTINUOUS_WRITES_INCREASE_TIMEOUT,
 ) -> None:
-    """Asserts that the continuous writes are increasing."""
+    """Asserts that the continuous writes are increasing.
+
+    The writer might need time to resume, for example when the unit IPs change.
+    So poll the count instead of reading it only once.
+    """
     writes_count = await c_writes.count()
-    await asyncio.sleep(20)
-    more_writes = await c_writes.count()
-    assert more_writes > writes_count, "Writes not continuing to DB"
+
+    deadline = time.monotonic() + timeout
+    more_writes = writes_count
+    while time.monotonic() < deadline:
+        await asyncio.sleep(CONTINUOUS_WRITES_INCREASE_INTERVAL)
+
+        more_writes = await c_writes.count()
+        if more_writes > writes_count:
+            return
+
+        logger.info("Writes still at %s, waiting for them to increase...", more_writes)
+
+    raise AssertionError(
+        f"Writes not continuing to DB: count stuck at {more_writes} after {timeout}s"
+    )
 
 
 async def assert_continuous_writes_consistency(
