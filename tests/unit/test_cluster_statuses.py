@@ -6,8 +6,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from opensearch_single_kernel.core.base_models import DeploymentState, PeerClusterConfig
-
 from opensearch_single_kernel.common.constants import (
     CLUSTER_MANAGER_VOTING_ROLES_PROVIDED_INVALID,
     DeploymentType,
@@ -18,6 +16,7 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
+from opensearch_single_kernel.core.base_models import DeploymentState, PeerClusterConfig
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.utils.status import format_status
 
@@ -35,7 +34,7 @@ def _manager(
         "init_hold": False,
         "roles": roles_config,
     }
-    state.application.deployment_desc = deployment_desc
+    state.application.deployment_description = deployment_desc
     state.is_peer_cluster_consumer.return_value = is_peer_consumer
     state.oauth_relation = None
     state.jwt_relation = None

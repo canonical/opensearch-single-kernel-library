@@ -270,9 +270,13 @@ class PeerClusterManager(BaseManager):
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
         blocked_msg = None
         provider_deployment_desc = peer_cluster_rel_data.deployment_description
-        if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR and (
-            provider_deployment_desc.promotion_time is None
-            or deployment_desc.promotion_time > provider_deployment_desc.promotion_time
+        if (
+            provider_deployment_desc
+            and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            and (
+                provider_deployment_desc.promotion_time is None
+                or deployment_desc.promotion_time > provider_deployment_desc.promotion_time
+            )
         ):
             cluster_fleet_apps = self.state.application.cluster_fleet_apps
             provider_app_id = provider_deployment_desc.app.id
@@ -291,7 +295,10 @@ class PeerClusterManager(BaseManager):
             ]
         ):
             blocked_msg = PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message
-        elif provider_deployment_desc.config.cluster_name != deployment_desc.config.cluster_name:
+        elif (
+            provider_deployment_desc
+            and provider_deployment_desc.config.cluster_name != deployment_desc.config.cluster_name
+        ):
             contains_inherit_directive = (
                 Directive.INHERIT_CLUSTER_NAME in deployment_desc.pending_directives
             )
@@ -301,8 +308,11 @@ class PeerClusterManager(BaseManager):
             ):
                 blocked_msg = PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value.message
 
+        provider_cluster_name = (
+            provider_deployment_desc.config.cluster_name if provider_deployment_desc else None
+        )
         logger.debug(
-            f"This is cluster_name from provider: {provider_deployment_desc.config.cluster_name}, "
+            f"This is cluster_name from provider: {provider_cluster_name}, "
             f"and this is cluster_name from requirer: {deployment_desc.config.cluster_name}"
         )
 

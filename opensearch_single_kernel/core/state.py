@@ -30,7 +30,7 @@ from dpcharmlibs.interfaces import (
 )
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import Object, Relation, Unit
-from ops.model import SecretNotFoundError
+from ops.model import RelationNotFoundError, SecretNotFoundError
 from pydantic import BaseModel, ValidationError
 
 from opensearch_single_kernel.common.constants import (
@@ -230,6 +230,20 @@ class ClusterState(Object):
         return PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
 
     # --- Repositories ---
+    def _live_relation(self, relation_name: str, relation_id: int) -> Relation | None:
+        """Return the relation for the given id only if it is live for this unit.
+
+        ops' `get_relation` never returns None for an unknown/`-1`/departing id — it
+        returns a placeholder `Relation(active=False)`. Building a model from such a
+        relation reads `remote_model`, which raises `RelationNotFoundError`. Callers
+        handed an arbitrary/merged rel id must go through here so the not-live case is a
+        clean None instead of a crash.
+        """
+        relation = self.model.get_relation(relation_name, relation_id)
+        if not relation or not relation.active:
+            return None
+        return relation
+
     def get_repository_from_interface(self, interface, relation: Relation | None, component):
         """Return a repository, or None if no relation."""
         if not relation:
@@ -302,7 +316,13 @@ class ClusterState(Object):
             )
         except SecretNotFoundError:
             logger.warning(
-                "Secret not found when reading relation %s model — relation may be departing.",
+                "Secret not found when reading relation %s model, relation may be departing.",
+                relation.id,
+            )
+            return None
+        except RelationNotFoundError:
+            logger.warning(
+                "Remote model unavailable for relation %s, relation is departing.",
                 relation.id,
             )
             return None
@@ -319,7 +339,7 @@ class ClusterState(Object):
               or the local one (current cluster as part of the relation).
         """
         relation_name = self.peer_cluster_relation_name(is_provider)
-        if not (relation := self.model.get_relation(relation_name, relation_id)):
+        if not (relation := self._live_relation(relation_name, relation_id)):
             return None
         return self.get_peer_cluster_app_model(relation, is_provider, remote)
 
@@ -373,7 +393,7 @@ class ClusterState(Object):
     ) -> PeerClusterServerModel | None:
         """Return this unit's peer cluster server model for the given relation id."""
         relation_name = self.peer_cluster_relation_name(is_provider)
-        if relation := self.model.get_relation(relation_name, relation_id):
+        if relation := self._live_relation(relation_name, relation_id):
             unit = self.model.unit
             return build_and_bound_model(
                 self.get_repository_from_interface(
