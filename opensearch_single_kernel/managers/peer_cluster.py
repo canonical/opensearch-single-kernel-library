@@ -494,29 +494,39 @@ class PeerClusterManager(BaseManager):
             return status_list
 
         if scope == "app":
-            # Only if we are a requirer and we have some orchestrators
             orchestrators = self.state.application.orchestrators
             has_no_orchestrators = (
                 orchestrators and not orchestrators.main_app and not orchestrators.failover_app
             )
             if (
-                self.state.is_peer_cluster_consumer()
-                and self.state.peer_clusters(is_provider=False, remote=True)
-                and orchestrators
+                orchestrators
+                and not orchestrators.main_app
+                and orchestrators.failover_app
+                # On scale-up from 0, the cluster manager owns these statuses.
+                and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
+                not in self.state.application.deployment_description.pending_directives
             ):
-                if not orchestrators.main_app and orchestrators.failover_app:
+                # The main orchestrator departed but a failover is still registered: either
+                # enough apps are cut off to promote the failover, or we cannot reach a
+                # majority yet and must report that main was removed without one.
+                if self.should_promote_failover_to_main():
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value
                     )
-                elif has_no_orchestrators:
+                else:
                     status_list.append(
-                        PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value
+                        PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
                     )
-            elif (
-                has_no_orchestrators
-                and self.state.application.deployment_description.typ == DeploymentType.OTHER
-                and self.state.application.deployment_description.state.value == State.ACTIVE
-                and not self.state.peer_clusters(is_provider=False, remote=True)
+            elif has_no_orchestrators and (
+                (
+                    self.state.is_peer_cluster_consumer()
+                    and self.state.peer_clusters(is_provider=False, remote=True)
+                )
+                or (
+                    self.state.application.deployment_description.typ == DeploymentType.OTHER
+                    and self.state.application.deployment_description.state.value == State.ACTIVE
+                    and not self.state.peer_clusters(is_provider=False, remote=True)
+                )
             ):
                 status_list.append(PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value)
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
