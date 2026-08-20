@@ -550,7 +550,7 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
     secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.user")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
-    assert relation_data["basic_auth"]["password"] == secret["cos-password"]
+    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
     assert relation_data["scheme"] == "https"
     if substrate != "k8s":
         admin_secret = await get_secret_by_label(
@@ -588,7 +588,7 @@ async def test_large_deployment_prometheus_exporter_cos_relation(
     secret = await get_secret_by_label(ops_test, "opensearch-peers.opensearch.app.user")
 
     assert relation_data["basic_auth"]["username"] == "monitor"
-    assert relation_data["basic_auth"]["password"] == secret["cos-password"]
+    assert relation_data["basic_auth"]["password"] == secret["monitor-password"]
     assert relation_data["scheme"] == "https"
     if substrate != "k8s":
         admin_secret = await get_secret_by_label(
@@ -612,7 +612,7 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
         app=app,
         json_resp=False,
         user="monitor",
-        user_password=secret["cos-password"],
+        user_password=secret["monitor-password"],
     )
     response_str = response.content.decode("utf-8")
 

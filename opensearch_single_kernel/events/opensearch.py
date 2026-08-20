@@ -186,7 +186,7 @@ class OpenSearchEventsHandler(Object):
 
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
-            if self.charm.state.server.started:
+            if self.charm.state.server.started and not self.charm.upgrades_manager.in_progress:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
                 if not self._reconfigure_and_restart_if_needed():
@@ -199,7 +199,7 @@ class OpenSearchEventsHandler(Object):
 
         elif event.relation.data.get(event.app):
             # if app_data: Reconfigure + restart node on the unit
-            if self.charm.state.server.started:
+            if self.charm.state.server.started and not self.charm.upgrades_manager.in_progress:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
                 if not self._reconfigure_and_restart_if_needed():

@@ -546,6 +546,9 @@ class PeerClusterEventsHandler(Object):
 
     def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterAppModel) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""
+        if data.deployment_description is None:
+            logger.debug("No deployment description in peer cluster data, skipping reconcile.")
+            return
         self.charm.cluster_manager.reconcile_cluster_config_with_relation_data(data)
         self.charm.config_manager.update_seeds_config(list(data.nodes_config.values()))
         self.charm.opensearch_events.apply_status_from_deployment_desc(
