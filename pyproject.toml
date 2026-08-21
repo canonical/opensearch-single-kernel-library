@@ -124,14 +124,14 @@ fix-shallow-repository = true
 optional = true
 
 [tool.poetry.group.format.dependencies]
-ruff = "^0.15.20"
+ruff = "^0.16.4"
 
 [tool.poetry.group.lint]
 optional = true
 
 [tool.poetry.group.lint.dependencies]
 codespell = "^2.4.3"
-ruff = "^0.15.20"
+ruff = "^0.16.4"
 tomli = {version = "^2.0.1", python = "<3.11"}
 
 
