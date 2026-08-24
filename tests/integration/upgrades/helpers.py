@@ -31,13 +31,14 @@ from ..helpers import (
 
 OPENSEARCH_CHARM = "opensearch"
 OPENSEARCH_CHANNEL = "2/edge"
+OPENSEARCH_K8S_CHARM = "opensearch-k8s"
 PROFILES_REVISION = 185
 
 TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VM_VERSION_N = "2.19.4"
+VM_VERSION_N = "2.19.6"
 VM_VERSION_N_MINUS_1 = "2.18.0"
 VM_VERSION_N_MINUS_2 = "2.17.0"
 
@@ -46,10 +47,13 @@ VM_VERSION_TO_REVISION = {
     VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
 }
 
-K8S_VERSION_N = "2.19.5"
-K8S_VERSION_N_MINUS_1 = "2.19.4"
+K8S_VERSION_N = "2.19.6"
+K8S_VERSION_N_MINUS_1 = "2.19.5"
+K8S_VERSION_TO_REVISION = {K8S_VERSION_N_MINUS_1: {"jammy": 8, "noble": 7}}
 K8S_VERSION_TO_RESOURCE = {
-    K8S_VERSION_N_MINUS_1: {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
+    K8S_VERSION_N_MINUS_1: {
+        "opensearch-image": "ghcr.io/canonical/charmed-opensearch@sha256:f2aef1886c224f62cfd4601120f780aaef604d3cf0d850b778be99d1f0c54015"
+    }
 }
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"

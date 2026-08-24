@@ -196,9 +196,7 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
-# Revision 2.19.5
-# OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
+OPENSEARCH_SNAP_REVISION = "147"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -364,4 +362,5 @@ PEBBLE_SERVICE_GROUP = "_daemon_"
 UPGRADES_COMPATIBILITY_MATRIX = {
     "2.19.4": {"2.18.0", "2.19.0", "2.19.1", "2.19.2", "2.19.3"},
     "2.19.5": {"2.19.1", "2.19.4"},
+    "2.19.6": {"2.19.1", "2.19.4", "2.19.5"},
 }

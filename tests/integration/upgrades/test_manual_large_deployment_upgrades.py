@@ -23,9 +23,9 @@ from .helpers import (
     IDLE_PERIOD,
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
-    K8S_VERSION_TO_RESOURCE,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
+    OPENSEARCH_K8S_CHARM,
     UPGRADE_PARAMS,
     VM_VERSION_N,
     VM_VERSION_N_MINUS_1,
@@ -70,7 +70,6 @@ async def _build_env(
     version: str,
     series: str,
     substrate: str,
-    charm_path: str | None = None,
 ) -> None:
     """Sets up environment for given version and series"""
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -80,38 +79,32 @@ async def _build_env(
 
     if substrate == "k8s":
         revision = None
-        charm_resources = K8S_VERSION_TO_RESOURCE[version]
         config = {"profile": "testing"}
-        charm = charm_path
-        channel = None
+        charm = OPENSEARCH_K8S_CHARM
     else:
         revision = VM_VERSION_TO_REVISION[version][series]
         config = testing_config_if_supported(revision)
         charm = OPENSEARCH_CHARM
-        channel = OPENSEARCH_CHANNEL
-        charm_resources = None
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
         ),
         ops_test.model.deploy(
             charm,
-            channel=channel,
+            channel=OPENSEARCH_CHANNEL,
             application_name=MAIN_APP,
             num_units=APPS[MAIN_APP],
             revision=revision,
-            resources=charm_resources,
             series=series,
             trust=substrate == "k8s",
             config={"cluster_name": "upgrades"} | config,
         ),
         ops_test.model.deploy(
             charm,
-            channel=channel,
+            channel=OPENSEARCH_CHANNEL,
             application_name=FAILOVER_APP,
             num_units=APPS[FAILOVER_APP],
             revision=revision,
-            resources=charm_resources,
             series=series,
             trust=substrate == "k8s",
             config={
@@ -123,11 +116,10 @@ async def _build_env(
         ),
         ops_test.model.deploy(
             charm,
-            channel=channel,
+            channel=OPENSEARCH_CHANNEL,
             application_name=APP_NAME,
             num_units=APPS[APP_NAME],
             revision=revision,
-            resources=charm_resources,
             series=series,
             trust=substrate == "k8s",
             config={"cluster_name": "upgrades", "init_hold": True, "roles": "data"} | config,
@@ -178,23 +170,11 @@ async def _build_env(
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_starting_version(
-    ops_test: OpsTest, series, substrate, charm_version_minus_1
-) -> None:
+async def test_deploy_starting_version(ops_test: OpsTest, series, substrate) -> None:
     """Build and deploy the charm for large deployment tests."""
     # deploy version n-2 for current series
-    if substrate == "k8s":
-        # Deploy from the local 2.19.4 charm to have n-1 version available
-        # TODO: Once revision released deploy from channel and remove local charm
-        await _build_env(
-            ops_test,
-            K8S_VERSION_N_MINUS_1,
-            series,
-            substrate,
-            charm_path=charm_version_minus_1,
-        )
-    else:
-        await _build_env(ops_test, VM_VERSION_N_MINUS_2, series, substrate)
+    version = K8S_VERSION_N_MINUS_1 if substrate == "k8s" else VM_VERSION_N_MINUS_2
+    await _build_env(ops_test, version, series, substrate)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
