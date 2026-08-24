@@ -265,14 +265,6 @@ class ConfigManager(BaseManager):
             self.JVM_OPTIONS,
             "-Djdk.tls.client.protocols=TLSv1.2",
         )
-        # The reactor-netty connection pool used by the azure repository plugin never
-        # evicts idle connections, while Azure's load balancer silently drops them
-        # after ~4 minutes, causing PrematureCloseException on reuse. Evict idle
-        # connections before the load balancer can kill them.
-        self.yaml_setter.append(
-            self.JVM_OPTIONS,
-            "-Dreactor.netty.pool.maxIdleTime=60000",
-        )
 
     @staticmethod
     def _security_authc_static_config() -> dict[str, Any]:
