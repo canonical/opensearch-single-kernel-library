@@ -474,7 +474,7 @@ class ConfigManager(BaseManager):
         Returns:
             True on success, False if a filesystem error occurred.
         """
-        nodes = nodes or []
+        nodes = list(nodes or [])
         if nodes_config := self.state.application.nodes_config:
             nodes.extend(list(nodes_config.values()))
         try:
