@@ -47,7 +47,7 @@ jobs:
           echo "PATH=$PATH" >> "$GITHUB_PATH"
 
       - name: Run tox unit tests to create coverage.xml
-        run: tox run -e unit-vm
+        run: tox run -e unit
 
       - name: move results to necessary folder for TICS
         run: |
