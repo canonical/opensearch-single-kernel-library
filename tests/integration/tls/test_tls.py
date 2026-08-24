@@ -104,7 +104,9 @@ async def test_cluster_formation_after_tls(ops_test: OpsTest) -> None:
     unit_names = get_application_unit_names(ops_test)
     leader_unit_ip = await get_leader_unit_ip(ops_test)
 
-    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names)
+    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names), (
+        "Not all nodes joined the cluster."
+    )
 
 
 @pytest.mark.abort_on_fail
