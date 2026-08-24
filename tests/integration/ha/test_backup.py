@@ -861,7 +861,6 @@ async def test_restore_to_new_cluster(
     1) At each backup restored, check our track of doc count vs. current index count
     2) Try to write to that new index.
     """
-
     logging.info("Saving logs")
     assert ops_test.model
     for unit in ops_test.model.applications[APP_NAME].units:
@@ -869,7 +868,7 @@ async def test_restore_to_new_cluster(
             await unit.ssh(
                 "sudo tar -czf logs.tar.xz /var/snap/opensearch/common/var/log/opensearch"
             )
-            await unit.scp_from("logs.tar.xz", f"{unit.name.replace('/','-')}-logs.tar.xz")
+            await unit.scp_from("logs.tar.xz", f"{unit.name.replace('/', '-')}-logs.tar.xz")
         else:
             subprocess.check_output(
                 [
@@ -892,7 +891,7 @@ async def test_restore_to_new_cluster(
                     "--container",
                     "opensearch",
                     f"{unit.name}:/tmp/logs.tar.xz",
-                    f"{unit.name.replace('/','-')}-logs.tar.xz",
+                    f"{unit.name.replace('/', '-')}-logs.tar.xz",
                 ]
             )
 
