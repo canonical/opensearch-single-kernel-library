@@ -376,11 +376,15 @@ class SnapshotsManager(BaseManager):
         Returns:
             str: The ID of the created snapshot.
         """
+        self.opensearch_client.reload_secure_settings()
         object_storage_type = self.state.storage_type
+        alt_hosts = self.alt_hosts
+        assert object_storage_type
         # Create a new snapshot
+        self.opensearch_client.poc_verify_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
-            alt_hosts=self.alt_hosts,
+            alt_hosts=alt_hosts,
         )
         return snapshot_id
 
