@@ -265,8 +265,6 @@ class ContinuousWrites:
         proc_logger.setLevel(logging.INFO)
 
         def _client(_data) -> OpenSearch:
-            # Do not retry inside the client. The loop below is the retry, and it picks
-            # up new hosts from the queue. Dead hosts are still skipped.
             return opensearch_client(
                 _data.hosts,
                 "admin",
