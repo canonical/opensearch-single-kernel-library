@@ -533,6 +533,11 @@ class UpgradesEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.tls_manager.all_tls_resources_stored():
+            logger.info("TLS resources not yet stored on disk after upgrade. Deferring.")
+            event.defer()
+            return
+
         # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
