@@ -155,7 +155,7 @@ class ConfigManager(BaseManager):
             "cluster.name": self.state.application.deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
-            "http.publish_host": list(publish_hosts),
+            "http.publish_host": sorted(publish_hosts),
             "node.roles": sorted(roles),
             "node.attr.app_id": self.state.application.deployment_desc.app.id,
             "path.data": self.workload.paths.data.as_posix(),
