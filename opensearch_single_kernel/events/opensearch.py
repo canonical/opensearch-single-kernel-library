@@ -214,6 +214,9 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        if not event.relation.data.get(event.unit):
+            return
+
         event_server = build_and_bound_model(
             self.charm.state.get_repository_from_interface(
                 self.charm.state.peer_unit_interface, event.relation, event.unit

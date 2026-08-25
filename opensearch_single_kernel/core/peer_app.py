@@ -65,36 +65,29 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     # --- Secret-group fields (plugin secrets) ---
     plugin_secrets: PluginsSecretStr = Field(default="")
 
-    # Aliases here are pinned to the underscored keys deployed databags use,
-    # so upgrade works correctly
-
     # Whether the admin user has been created in the security index.
-    admin_user_initialized: bool = Field(default=False, alias="admin_user_initialized")
+    admin_user_initialized: bool = Field(default=False)
     # Number of units that took part in the initial cluster bootstrap.
-    bootstrap_contributors_count: int = Field(default=0, alias="bootstrap_contributors_count")
+    bootstrap_contributors_count: int = Field(default=0)
     # Whether the OpenSearch security plugin's security index has been initialized.
-    security_index_initialised: bool = Field(default=False, alias="security_index_initialised")
+    security_index_initialised: bool = Field(default=False)
     # Cluster topology: unit name -> Node (roles, temperature, unit number) for every unit
-    nodes_config: dict[str, Node] = Field(default_factory=dict, alias="nodes_config")
+    nodes_config: dict[str, Node] = Field(default_factory=dict)
     # Whether the application-level cluster bootstrap process has completed.
     bootstrapped: bool = Field(default=False)
     # Description of application's role/config within the deployment.
     deployment_description: DeploymentDescription | None = Field(default=None)
     # Peer-cluster fleet apps discovered by this application, keyed by app id.
-    cluster_fleet_apps: dict[str, PeerClusterApp] = Field(
-        default_factory=dict, alias="cluster_fleet_apps"
-    )
+    cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
     # Peer-cluster fleet apps learned through peer-cluster relations (from other apps in the
     # fleet), keyed by relation id.
-    cluster_fleet_apps_rels: dict[str, PeerClusterApp] = Field(
-        default_factory=dict, alias="cluster_fleet_apps_rels"
-    )
+    cluster_fleet_apps_rels: dict[str, PeerClusterApp] = Field(default_factory=dict)
     # Which app in the fleet act as the main/failover orchestrator.
     orchestrators: Optional[PeerClusterOrchestrators] = Field(
         default_factory=PeerClusterOrchestrators
     )
     # Name of the first unit to take on the "data" role.
-    first_data_node: Optional[str] = Field(default=None, alias="first_data_node")
+    first_data_node: Optional[str] = Field(default=None)
     # Last time application's databag was updated; used to force relation-changed hook
     update_ts: str = Field(default="")
     # Voting-exclusion entries application still needs to remove from the cluster voting config.
@@ -103,16 +96,12 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     # shard allocation exclusion settings.
     allocation_exclusions_to_delete: set[str] = Field(default_factory=set)
     # Users created for external client relations. Key is username, Value is relation id.
-    client_relation_users: dict[str, str] = Field(
-        default_factory=dict, alias="client_relation_users"
-    )
+    client_relation_users: dict[str, str] = Field(default_factory=dict)
     # Whether the application is missing a relation it requires
-    missing_relations: bool = Field(default=False, alias="missing_relations")
+    missing_relations: bool = Field(default=False)
 
     # Plugin configuration metadata application is responsible for, key is plugin label
-    plugin_config_info: dict[str, PluginConfigInfo] = Field(
-        default_factory=dict, alias="plugin_config_info"
-    )
+    plugin_config_info: dict[str, PluginConfigInfo] = Field(default_factory=dict)
 
     @field_validator("allocation_exclusions_to_delete", "delete_voting_exclusions", mode="before")
     @classmethod

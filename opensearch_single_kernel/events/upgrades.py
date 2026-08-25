@@ -12,12 +12,7 @@ from data_platform_helpers.version_check import get_charm_revision
 from ops import Object, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
-    ADMIN_USER,
-    COS_USER,
-    HASH_POSTFIX,
-    KIBANA_SERVER_USER,
     OPENSEARCH_SNAP_REVISION,
-    PW_POSTFIX,
     UPGRADE_RELATION,
     HealthColors,
     Substrates,
@@ -212,145 +207,14 @@ class UpgradesEventsHandler(Object):
         )
         # TODO check backwards compatibility for profiles
         self.charm.state.server.initialize_empty_secrets()
-        self._migrate_v0_unit_tls_secrets()
 
         if self.authorized_leader:
-            self._migrate_v0_secrets()
             self.charm.state.application.initialize_empty_secrets()
 
         if self.charm.substrate == Substrates.VM:
             self.machine_upgrade()
         else:
             self.kubernetes_upgrade(event)
-
-    def _migrate_v0_secrets(self) -> None:  # noqa: C901
-        """Migrate secrets from v0 (colon-separated labels) to v1 (dot-separated labels).
-
-        In the v0 charm, secrets were created with labels like '{app}:app:{key}'.
-        The v1 data_interfaces library uses '{relation}.{app}.app.{group}' labels.
-        """
-        app_name = self.charm.app.name
-
-        if not (self.charm.state.application.admin_password or "").strip():
-            user_mappings = [
-                (
-                    f"{app_name}:app:{ADMIN_USER}-{PW_POSTFIX}",
-                    f"{ADMIN_USER}-{PW_POSTFIX}",
-                    "admin_password",
-                ),
-                (
-                    f"{app_name}:app:{ADMIN_USER}-{HASH_POSTFIX}",
-                    f"{ADMIN_USER}-{HASH_POSTFIX}",
-                    "admin_hashed_password",
-                ),
-                (
-                    f"{app_name}:app:{KIBANA_SERVER_USER}-{PW_POSTFIX}",
-                    f"{KIBANA_SERVER_USER}-{PW_POSTFIX}",
-                    "kibana_server_password",
-                ),
-                (
-                    f"{app_name}:app:{KIBANA_SERVER_USER}-{HASH_POSTFIX}",
-                    f"{KIBANA_SERVER_USER}-{HASH_POSTFIX}",
-                    "kibana_server_hashed_password",
-                ),
-                (
-                    f"{app_name}:app:{COS_USER}-{PW_POSTFIX}",
-                    f"{COS_USER}-{PW_POSTFIX}",
-                    "monitor_password",
-                ),
-                (
-                    f"{app_name}:app:{COS_USER}-{HASH_POSTFIX}",
-                    f"{COS_USER}-{HASH_POSTFIX}",
-                    "monitor_hashed_password",
-                ),
-            ]
-
-            for old_label, content_key, new_field in user_mappings:
-                try:
-                    secret = self.charm.model.get_secret(label=old_label)
-                    value = secret.get_content().get(content_key)
-                    if value:
-                        setattr(self.charm.state.application, new_field, value)
-                        logger.info("Migrated v0 secret %s to v1 field %s", old_label, new_field)
-                except ops.SecretNotFoundError:
-                    pass
-                except Exception as e:
-                    logger.warning("Failed to migrate v0 secret %s: %s", old_label, e)
-
-        # Migrate app-level admin TLS secrets
-        admin_label = f"{app_name}:app:app-admin"
-        admin_field_mapping = {
-            "admin_key": "key",
-            "admin_key_password": "key-password",
-            "admin_csr": "csr",
-            "admin_subject": "subject",
-            "admin_chain": "chain",
-            "admin_cert": "cert",
-            "admin_ca_cert": "ca-cert",
-            "admin_keystore_password": "keystore-password",
-            "admin_truststore_password": "truststore-password",
-        }
-        if not self.charm.state.application.admin_cert:
-            try:
-                secret = self.charm.model.get_secret(label=admin_label)
-                content = secret.get_content()
-                for new_field, old_key in admin_field_mapping.items():
-                    value = content.get(old_key)
-                    if value:
-                        setattr(self.charm.state.application, new_field, value)
-                logger.info("Migrated v0 admin TLS secret to v1")
-            except ops.SecretNotFoundError:
-                pass
-            except Exception as e:
-                logger.warning("Failed to migrate v0 admin TLS secret %s: %s", admin_label, e)
-
-    def _migrate_v0_unit_tls_secrets(self) -> None:
-        """Migrate unit-level TLS secrets from v0 to v1 for this unit."""
-        app_name = self.charm.app.name
-        unit_id = self.charm.state.server.unit_id
-
-        unit_tls_migrations = {
-            f"{app_name}:unit:{unit_id}:unit-transport": {
-                "transport_key": "key",
-                "transport_key_password": "key-password",
-                "transport_csr": "csr",
-                "transport_subject": "subject",
-                "transport_chain": "chain",
-                "transport_cert": "cert",
-                "transport_ca_cert": "ca-cert",
-                "transport_keystore_password": "keystore-password",
-                "transport_truststore_password": "truststore-password",
-            },
-            f"{app_name}:unit:{unit_id}:unit-http": {
-                "http_key": "key",
-                "http_key_password": "key-password",
-                "http_csr": "csr",
-                "http_subject": "subject",
-                "http_chain": "chain",
-                "http_cert": "cert",
-                "http_ca_cert": "ca-cert",
-                "http_keystore_password": "keystore-password",
-                "http_truststore_password": "truststore-password",
-            },
-        }
-
-        for old_label, field_mapping in unit_tls_migrations.items():
-            if old_label.endswith("unit-transport") and self.charm.state.server.transport_cert:
-                continue
-            if old_label.endswith("unit-http") and self.charm.state.server.http_cert:
-                continue
-            try:
-                secret = self.charm.model.get_secret(label=old_label)
-                content = secret.get_content()
-                for new_field, old_key in field_mapping.items():
-                    value = content.get(old_key)
-                    if value:
-                        setattr(self.charm.state.server, new_field, value)
-                logger.info("Migrated v0 unit TLS secret %s to v1", old_label)
-            except ops.SecretNotFoundError:
-                pass
-            except Exception as e:
-                logger.warning("Failed to migrate v0 unit TLS secret %s: %s", old_label, e)
 
     def _on_pre_upgrade_check_action(self, event: ops.ActionEvent) -> None:
         """Handle pre-upgrade-check action."""

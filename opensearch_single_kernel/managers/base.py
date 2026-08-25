@@ -7,7 +7,6 @@
 import logging
 import random
 
-import ops
 from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
@@ -36,40 +35,6 @@ class BaseManager(ManagerStatusProtocol):
         self.state: ClusterState = state  # type: ignore[override]
         self.workload = workload
         self.name = name
-
-    def _admin_tls_secret_with_v0_fallback(self, field: str, v0_key: str) -> str:
-        """Resolve an app-level admin TLS secret, with a v0-secret fallback during upgrade.
-
-        The v1 app-admin TLS secret is migrated only by the leader
-        (`_migrate_v0_secrets`), which sometimes upgrades LAST. During a rolling v0->v1 upgrade a
-        non-leader unit restarts first and reads the v1 field empty; it would then write
-        opensearch.yml without a truststore password and fail to
-        open the existing v0-created stores, blocking its OpenSearch start and wedging the
-        whole upgrade. When the v1 field is empty, read the still-present v0
-        `<app>:app:app-admin` secret locally. This is read-only.
-        """
-        if value := getattr(self.state.application, field):
-            return value
-        try:
-            label = f"{self.state.model.app.name}:app:app-admin"
-            secret = self.state.model.get_secret(label=label)
-            return secret.get_content().get(v0_key) or ""
-        except ops.SecretNotFoundError:
-            return ""
-
-    @property
-    def admin_truststore_password(self) -> str:
-        """App-level admin truststore password (with v0-secret fallback during upgrade)."""
-        return self._admin_tls_secret_with_v0_fallback(
-            "admin_truststore_password", "truststore-password"
-        )
-
-    @property
-    def admin_keystore_password(self) -> str:
-        """App-level admin keystore password (with v0-secret fallback during upgrade)."""
-        return self._admin_tls_secret_with_v0_fallback(
-            "admin_keystore_password", "keystore-password"
-        )
 
     @property
     def opensearch_client(self) -> OpenSearchClient:

@@ -60,44 +60,38 @@ class OpenSearchServerPeerModel(RelationModel, PeerModel):
     http_truststore_password: HttpSecretStr = Field(default="")
     http_subject: HttpSecretStr = Field(default="")
 
-    # Aliases here are pinned to the underscored keys deployed databags use,
-    # so upgrade works correctly
-
     # Performance profile ("testing"/"production") applied to this unit's JVM/OpenSearch config.
     # None means "not yet set" callers fall back to the profile configured via charm config.
     profile: Optional[PerformanceType] = Field(default=None)
     # Whether this unit was one of the initial seed nodes used to bootstrap the cluster.
-    bootstrap_contributor: bool = Field(default=False, alias="bootstrap_contributor")
+    bootstrap_contributor: bool = Field(default=False)
     # Whether this unit has been removed from the cluster_manager-eligible role.
-    cluster_manager_removed: bool = Field(default=False, alias="cluster_manager_removed")
+    cluster_manager_removed: bool = Field(default=False)
     # Timestamp set once the unit's OpenSearch service has started; unset
     # means "not started".
     started: Optional[str] = Field(default=None)
     # Whether this unit is currently mid CA-rotation
-    tls_ca_renewing: bool = Field(default=False, alias="tls_ca_renewing")
+    tls_ca_renewing: bool = Field(default=False)
     # Whether this unit has finished renewing to the new CA.
-    tls_ca_renewed: bool = Field(default=False, alias="tls_ca_renewed")
+    tls_ca_renewed: bool = Field(default=False)
     # Whether this unit's TLS certificates are fully configured.
-    tls_configured: bool = Field(default=False, alias="tls_configured")
+    tls_configured: bool = Field(default=False)
     # Last time application's databag was updated; used to force relation-changed hook
     update_ts: str = Field(default="")
     # Timestamp of the last time this unit checked its certificates for upcoming expiry.
-    certs_exp_checked_at: str = Field(default="1970-01-01 00:00:00", alias="certs_exp_checked_at")
+    certs_exp_checked_at: str = Field(default="1970-01-01 00:00:00")
     # Allocation-exclusion entries application still needs to remove from the cluster
     # shard allocation exclusion settings.
     allocation_exclusions_to_delete: set[str] = Field(default_factory=set)
     # Voting-exclusion entries application still needs to remove from the cluster voting config.
     delete_voting_exclusions: set[str] = Field(default_factory=set)
     # Last known IP address of this unit.
-    last_host_ip: str = Field(default="", alias="last_host_ip")
+    last_host_ip: str = Field(default="")
     # Plugin configuration metadata unit is responsible for, key is plugin label
-    plugin_config_info: dict[str, PluginConfigInfo] = Field(
-        default_factory=dict, alias="plugin_config_info"
-    )
-    oauth_openid_connect_url: str = Field(default="", alias="oauth_openid_connect_url")
-    # Set when this unit is departing the oauth relation. Retained for parity with the v0
-    # unit databag layout.
-    oauth_departing: bool = Field(default=False, alias="oauth_departing")
+    plugin_config_info: dict[str, PluginConfigInfo] = Field(default_factory=dict)
+    oauth_openid_connect_url: str = Field(default="")
+    # Set when this unit is departing the oauth relation.
+    oauth_departing: bool = Field(default=False)
     # Set when this specific unit is departing/scaling down. Used to skip relation-broken
     # triggered by the unit's own removal.
     unit_dying: bool = Field(default=False)

@@ -150,7 +150,7 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
     trigger: Optional[str] = Field(default=None)
     # Whether the requirer has acknowledged/registered the main orchestrator.
     main_orchestrator_registered: Optional[bool] = Field(default=None)
-    # The current app's own identity/roles/unit-count on this relation.
+    # The current peer cluster app own identity/roles/unit-count on this relation.
     app: Optional[PeerClusterApp] = Field(default=None)
     # All apps in the fleet as known by the orchestrator, keyed by app id.
     cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
