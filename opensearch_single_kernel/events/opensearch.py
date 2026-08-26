@@ -159,9 +159,10 @@ class OpenSearchEventsHandler(Object):
 
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
-            and self.charm.apply_health(app=self.charm.unit.is_leader())
-            in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]
-        ):
+        ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
+            HealthColors.UNKNOWN,
+            HealthColors.YELLOW_TEMP,
+        ]:
             # we defer because we want the temporary status to be updated
             logger.debug("Cluster health temp yellow or unknown. Deferring event.")
             event.defer()
@@ -209,7 +210,8 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
-        if not self.charm.config_manager.update_seeds_config():
+        # Refresh the seed hosts from the live cluster query, so stale ones can recover.
+        if not self.charm.config_manager.update_seeds_config(nodes):
             event.defer()
             return
 
