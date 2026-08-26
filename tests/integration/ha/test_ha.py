@@ -319,8 +319,6 @@ async def test_freeze_db_process_node_with_primary_shard(
         units_ips[first_unit_with_primary_shard],
         retries=3,
         app=app,
-        # short timeout: a frozen node accepts TCP but never answers, so each attempt burns the
-        # full timeout and keeps the node frozen longer than needed (slower/harder re-join)
         timeout=5,
     )
     assert not is_node_up
@@ -358,10 +356,9 @@ async def test_freeze_db_process_node_with_primary_shard(
         "OpenSearch service hasn't restarted."
     )
 
-    # verify the node with the old primary successfully joined back the rest of the fleet.
-    # checked *before* the shard assertions below: an answering HTTP port does not mean the node
-    # is a cluster member again, and the shard view cannot be correct before it is.
-    # `reachable_ip` is used because the leader may be the unit that was just frozen.
+    # verify the node with the old primary re-joined the fleet, before the shard assertions:
+    # the shard view is only meaningful once the node is back in `_nodes`.
+    # queried on `reachable_ip`, the leader may be the unit that was just frozen.
     assert await check_cluster_formation_successful(
         ops_test, reachable_ip, get_application_unit_names(ops_test, app=app), app=app
     ), "Node did not re-join the cluster after being un-frozen."
@@ -415,7 +412,6 @@ async def test_freeze_db_process_node_with_elected_cm(
     time.sleep(10)
 
     # verify the unit is not reachable
-    # short timeout: keeps the frozen window (and hence the re-join cost) as small as possible
     is_node_up = await is_up(
         ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app, timeout=5
     )
@@ -448,9 +444,8 @@ async def test_freeze_db_process_node_with_elected_cm(
         "OpenSearch service hasn't restarted."
     )
 
-    # verify the previously elected CM node successfully joined back the rest of the fleet.
-    # `reachable_ip` (not the possibly frozen leader) is queried, and the check itself now waits
-    # for the re-join instead of asserting on the first observation.
+    # verify the previously elected CM node re-joined the fleet.
+    # queried on `reachable_ip`, the leader may be the unit that was just frozen.
     assert await check_cluster_formation_successful(
         ops_test, reachable_ip, get_application_unit_names(ops_test, app=app), app=app
     ), "Previously elected CM node did not re-join the cluster after being un-frozen."

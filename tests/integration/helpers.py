@@ -25,11 +25,10 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from opensearchpy import OpenSearch
 from pytest_operator.plugin import OpsTest
 from tenacity import (
+    AsyncRetrying,
     RetryError,
     Retrying,
     retry,
-    retry_if_exception_type,
-    retry_if_result,
     stop_after_attempt,
     stop_after_delay,
     wait_fixed,
@@ -892,7 +891,6 @@ async def debug_failed_unit(
         f"{root}/current/config/opensearch.yml",
         f"{root}/current/config/unicast_hosts.txt",
     ]
-    # `juju run` runs actions since juju 3, running a command inside a unit is `juju exec`
     bin_cmd = "exec" if juju_version_major() > 2 else "run"
     for f in files_to_debug:
         logger.log(level, f"{f}:\n")
@@ -958,47 +956,6 @@ async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
             return secret_data[secret_id]["content"]["Data"]
 
 
-@retry(
-    wait=wait_fixed(wait=5) + wait_random(0, 5),
-    stop=stop_after_attempt(15),
-    # tenacity only retries exceptions by default, so a `False` return (node not re-joined
-    # yet, or an OpenSearch error body such as a 503 during a CM election) used to fail the
-    # caller on the very 1st attempt. `retry_if_result` *replaces* the default exception
-    # predicate, hence the explicit `| retry_if_exception_type()` to keep retrying errors.
-    retry=retry_if_result(lambda formed: not formed) | retry_if_exception_type(),
-    # once the budget is exhausted, keep returning False (instead of raising RetryError) so
-    # the callers' `assert await check_cluster_formation_successful(...)` semantics hold
-    retry_error_callback=lambda state: state.outcome.result(),
-)
-async def _is_cluster_formed(
-    ops_test: OpsTest, unit_ip: str, unit_names: list[str], app: str = APP_NAME
-) -> bool:
-    """Single (retried) check that all `unit_names` are registered in the cluster."""
-    response = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
-    if "_nodes" not in response or "nodes" not in response:
-        logger.warning(
-            "Cluster formation on %s -- unexpected _nodes response: %s", unit_ip, response
-        )
-        return False
-
-    successful_nodes = response["_nodes"]["successful"]
-    registered_nodes = {node_desc["name"] for node_desc in response["nodes"].values()}
-    expected_nodes = set(unit_names)
-    if successful_nodes < len(unit_names) or registered_nodes != expected_nodes:
-        # logged on every attempt: makes "slow re-join" vs "never re-joined" visible in CI logs
-        logger.warning(
-            "Cluster formation on %s -- %s/%s nodes responded, missing=%s, unexpected=%s",
-            unit_ip,
-            successful_nodes,
-            len(unit_names),
-            expected_nodes - registered_nodes,
-            registered_nodes - expected_nodes,
-        )
-        return False
-
-    return True
-
-
 async def check_cluster_formation_successful(
     ops_test: OpsTest, unit_ip: str, unit_names: list[str], app: str = APP_NAME
 ) -> bool:
@@ -1013,12 +970,34 @@ async def check_cluster_formation_successful(
     Returns:
         Whether The cluster formation is successful.
     """
-    if await _is_cluster_formed(ops_test, unit_ip, unit_names, app=app):
+    try:
+        # raising (not returning False) is what makes tenacity retry: a node may need a while
+        # to (re-)join, and `_nodes` can fail while a cluster manager is being elected
+        async for attempt in AsyncRetrying(
+            wait=wait_fixed(wait=5) + wait_random(0, 5),
+            stop=stop_after_attempt(15),
+            before_sleep=lambda state: logger.warning(
+                "Cluster formation attempt %s: %s", state.attempt_number, state.outcome.exception()
+            ),
+            reraise=True,
+        ):
+            with attempt:
+                response = await http_request(
+                    ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app
+                )
+                expected = set(unit_names)
+                registered = {node["name"] for node in response.get("nodes", {}).values()}
+                successful = response.get("_nodes", {}).get("successful", 0)
+                assert successful >= len(expected) and registered == expected, (
+                    f"{unit_ip}: {successful}/{len(expected)} nodes responded, "
+                    f"missing={sorted(expected - registered)}, "
+                    f"unexpected={sorted(registered - expected)}"
+                )
         return True
+    except Exception as e:
+        logger.error("Cluster formation check failed: %s", e)
 
-    # retry budget exhausted: collect the evidence that tells a charm/workload bug (node's HTTP
-    # port answers but the node never re-joins) apart from a test-side race, before model teardown.
-    # bounded + never raising: diagnostics must not mask the assertion failure of the caller
+    # collect evidence before model teardown
     try:
         await asyncio.wait_for(debug_cluster_formation(ops_test, unit_names, app=app), timeout=300)
     except Exception as e:
@@ -1033,8 +1012,8 @@ async def debug_cluster_formation(
     logger.error("Cluster formation failed -- expected nodes: %s", sorted(unit_names))
     for unit in await get_application_units(ops_test, app):
         # a node answering "/" but not "/_cluster/health" is up without a discovered cluster
-        # manager, i.e. running outside of the cluster. Used instead of matching node names
-        # against `unit_names` so the diagnostics do not depend on the node naming scheme.
+        # manager, i.e. running outside the cluster. Preferred over matching node names against
+        # `unit_names`, so the diagnostics do not depend on the node naming scheme.
         health_reachable = False
         for path in ("/", "/_cluster/health", "/_cat/nodes?v"):
             try:
@@ -1062,9 +1041,8 @@ async def debug_cluster_formation(
         if health_reachable:
             continue
 
-        # OpenSearch server logs of the node(s) that are not (fully) in the cluster: the only place
-        # where discovery/join failures of the workload itself are visible. Raised to error level,
-        # the default (debug) is not emitted by the CI log level
+        # server logs of the non-member node(s): the only place where the workload's own
+        # discovery/join failures show up. Error level, as debug is not emitted in CI.
         await debug_failed_unit(ops_test, app, f"https://{unit.ip}:9200/", level=logging.ERROR)
 
 
@@ -1241,8 +1219,8 @@ async def get_reachable_unit_ips(
         if not is_reachable(ip, 9200):
             continue
 
-        # a SIGSTOPped node still completes the TCP handshake, so `GET /` hangs for the whole
-        # timeout: keep it short, this is only used to skip unresponsive units
+        # a SIGSTOPped node completes the TCP handshake, so `GET /` hangs for the whole timeout:
+        # keep it short, this only skips unresponsive units
         if await is_up(ops_test, ip, retries=1, app=app, timeout=timeout):
             result.append(ip)
 
