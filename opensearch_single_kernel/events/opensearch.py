@@ -206,7 +206,8 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
-        if not self.charm.config_manager.update_seeds_config():
+        # Refresh the seed hosts from the live cluster query, so stale ones can recover.
+        if not self.charm.config_manager.update_seeds_config(nodes):
             event.defer()
             return
 

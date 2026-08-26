@@ -314,11 +314,9 @@ def storage_id(ops_test: OpsTest, app: str, unit_id: int):
 
 async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
     """Check if all processes are down."""
-    bin_cmd = "exec" if juju_version_major() > 2 else "run"
-
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
-        get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+        get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
         _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
         if opensearch_pid.strip():
             return False
@@ -337,10 +335,9 @@ async def send_kill_signal_to_process(
     """Run kill with signal in specific unit."""
     unit_name = f"{app}/{unit_id}"
 
-    bin_cmd = "exec" if juju_version_major() > 2 else "run"
     if opensearch_pid is None:
         if substrate == "vm":
-            get_pid_cmd = f"{bin_cmd} --unit {unit_name} -- sudo lsof -ti:9200"
+            get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
         else:
             get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200"
         _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)

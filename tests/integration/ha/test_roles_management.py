@@ -108,7 +108,7 @@ async def test_set_roles_manually(
     logger.info("Checking if the cluster name and roles + temperature were changed.")
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
     new_cluster_name = (await cluster_health(ops_test, leader_unit_ip, app=app))["cluster_name"]
     assert new_cluster_name == cluster_name, "Oops - cluster name changed."
 
