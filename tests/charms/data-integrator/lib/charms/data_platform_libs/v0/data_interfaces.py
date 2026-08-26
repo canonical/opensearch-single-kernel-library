@@ -5559,7 +5559,7 @@ class OpenSearchRequiresEventHandlers(RequirerEventHandlers):
             # To avoid unnecessary application restarts do not trigger other events.
             return
 
-    def _update_request(self, relation_id: int, encryption_secret: str | None = None) -> None:
+    def _update_request(self, relation_id: int, encryption_secret: Optional[str] = None) -> None:
         """Generate payload and update relation data."""
         # Sets both index and extra user roles in the relation if the roles are provided.
         # Otherwise, sets only the index.
