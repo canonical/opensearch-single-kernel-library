@@ -186,6 +186,11 @@ class ExternalClientsManager(BaseManager):
         ):
             return
 
+        if not nodes:
+            # `get_nodes()` returns [] when the cluster is unreachable: keep current endpoints.
+            logger.debug("No nodes provided, keeping the currently advertised endpoints.")
+            return
+
         if not omit_endpoints:
             omit_endpoints = set()
 
