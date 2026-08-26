@@ -278,17 +278,17 @@ def test_provide_client_user(
         component=harness.charm.app,
         relation_name=CLIENT_RELATION,
     )
-    roles_mapped_users = {username: ["test_oidc"]}
-    roles_mapped_roles = {username: [username]}
+    mapped_users = {username: ["test_oidc"]}
+    mapped_roles = {username: [username]}
     mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.roles_mapped_users",
+        "opensearch_single_kernel.core.state.ClusterState.mapped_users",
         new_callable=PropertyMock,
-        return_value=roles_mapped_users,
+        return_value=mapped_users,
     )
     mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.roles_mapped_roles",
+        "opensearch_single_kernel.core.state.ClusterState.mapped_roles",
         new_callable=PropertyMock,
-        return_value=roles_mapped_roles,
+        return_value=mapped_roles,
     )
     create_user_role = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_user_role",
@@ -325,8 +325,6 @@ def test_provide_client_user(
         ),
     )
     create_user.assert_called_with(username, roles, hashed_pw)
-    put_role_mapping.assert_called_with(
-        username, roles_mapped_users[username], roles_mapped_roles[username]
-    )
+    put_role_mapping.assert_called_with(username, mapped_users[username], mapped_roles[username])
     patch_user.assert_called_with(username, patches)
     client_users_dict.assert_called()

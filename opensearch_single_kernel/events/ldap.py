@@ -32,7 +32,7 @@ class LdapEventsHandler(Object):
     """Handler for managing LDAP relations."""
 
     def __init__(self, charm: "OpenSearchBaseCharm") -> None:
-        super().__init__(charm, "oauth")
+        super().__init__(charm, "ldap")
         self.charm = charm
 
         self.framework.observe(self.charm.state.ldap_requirer.on.ldap_ready, self._on_ldap_ready)
