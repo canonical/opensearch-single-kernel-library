@@ -971,11 +971,9 @@ async def check_cluster_formation_successful(
         Whether The cluster formation is successful.
     """
     try:
-        # raising (not returning False) is what makes tenacity retry: a node may need a while
-        # to (re-)join, and `_nodes` can fail while a cluster manager is being elected
         async for attempt in AsyncRetrying(
-            wait=wait_fixed(wait=5) + wait_random(0, 5),
-            stop=stop_after_attempt(15),
+            wait=wait_fixed(wait=1),
+            stop=stop_after_attempt(2),
             before_sleep=lambda state: logger.warning(
                 "Cluster formation attempt %s: %s", state.attempt_number, state.outcome.exception()
             ),
