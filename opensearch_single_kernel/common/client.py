@@ -115,10 +115,10 @@ class OpenSearchClient:
         assert response.get("acknowledged") is True
         return repo_name
 
-    def verify_repository(
+    def check_repository(
         self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
     ) -> bool:
-        """Verify repository by listing snapshots.
+        """Check repository health by listing snapshots.
 
         Args:
             object_storage_type (ObjectStorageType): Object storage type
@@ -134,6 +134,32 @@ class OpenSearchClient:
         self.request(
             "GET",
             f"_snapshot/{repository}/_all",
+            alt_hosts=alt_hosts,
+            timeout=30,
+            retries=3,
+            wait_strategy=wait_fixed(3),
+        )
+        return True
+
+    def verify_repository(
+        self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
+    ) -> bool:
+        """Verify repository.
+
+        Args:
+            object_storage_type (ObjectStorageType): Object storage type
+
+        Returns:
+            True if the repository is healthy.
+
+        Raises:
+            OpenSearchHttpError if there are any backend issues such as auth/perm errors.
+        """
+        repository = repository_name(object_storage_type)
+        # If creds/endpoint/perm are wrong, this call raises OpenSearchHttpError with a 500.
+        self.request(
+            "POST",
+            f"_snapshot/{repository}/_verify",
             alt_hosts=alt_hosts,
             timeout=30,
             retries=3,

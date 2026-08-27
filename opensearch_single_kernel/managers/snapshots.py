@@ -376,11 +376,14 @@ class SnapshotsManager(BaseManager):
         Returns:
             str: The ID of the created snapshot.
         """
+        self.opensearch_client.reload_secure_settings()
         object_storage_type = self.state.storage_type
+        alt_hosts = self.alt_hosts
         # Create a new snapshot
+        self.opensearch_client.verify_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
-            alt_hosts=self.alt_hosts,
+            alt_hosts=alt_hosts,
         )
         return snapshot_id
 
@@ -548,7 +551,7 @@ class SnapshotsManager(BaseManager):
 
         # all units have saved the latest credentials
         logger.info("All peer-cluster units have saved the latest backup credentials.")
-        self.opensearch_client.verify_repository(object_storage_type, alt_hosts=self.alt_hosts)
+        self.opensearch_client.check_repository(object_storage_type, alt_hosts=self.alt_hosts)
 
     @property
     def is_operation_in_progress(self) -> bool:

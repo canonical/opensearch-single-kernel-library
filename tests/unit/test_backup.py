@@ -64,6 +64,12 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
     mocker, harness, backend_setup, context
 ):
     # Given
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     create_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
     )
@@ -91,6 +97,12 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
     mocker, harness, backend_setup, context
 ):
     # Given
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
@@ -123,6 +135,12 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     _mock_backup(mocker)
     ca = "-----BEGIN CERT-----\nMIIB...==\n-----END CERT-----\n"
     use_s3(ca=ca, mocker=mocker)
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     patch_create_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
@@ -147,6 +165,12 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
 
 def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
     # Given
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
