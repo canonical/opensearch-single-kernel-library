@@ -131,7 +131,7 @@ jobs:
     with:
       path-to-charm-directory: ${{ matrix.path }}
       artifact-prefix: packed-charm
-      cache: true
+      cache: false
     permissions:
       contents: read
   integration-test:
