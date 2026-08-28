@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# ci-telemetry — start host metrics collection (PoC)
+# Downloads pinned Telegraf, launches it in the background.
+# Idempotent: refuses to start twice over the same telemetry dir.
+set -euo pipefail
+
+# Hashes committed in-repo for the default version: a real supply-chain pin, so a
+# tampered upstream tarball fails here. A caller-overridden version can only be
+# checked against upstream's own published digest (corruption, not tampering) —
+# see below.
+PINNED_VERSION="1.39.2"
+
+TELEGRAF_VERSION="${TELEGRAF_VERSION:-$PINNED_VERSION}"
+ACTION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CI_TELEMETRY_DIR="${CI_TELEMETRY_DIR:-${RUNNER_TEMP:-/tmp}/ci-telemetry}"
+TELEGRAF_HOME="${TELEGRAF_HOME:-${RUNNER_TEMP:-/tmp}/ci-telemetry-telegraf}"
+PIDFILE="$CI_TELEMETRY_DIR/telegraf.pid"
+LAUNCHER_PIDFILE="$CI_TELEMETRY_DIR/launcher.pid"
+
+# --- tag values: default to "local" when not on a GitHub runner ---------------
+# These are passed to Telegraf through `env` (below), which expands ${VARS} in
+# telegraf.conf itself. They are never substituted into the config text: values
+# may contain characters that are special to a templating tool but perfectly
+# legal here (a workflow named "build | test" broke an earlier sed-based version).
+: "${GITHUB_RUN_ID:=local}"
+: "${GITHUB_RUN_ATTEMPT:=0}"
+: "${GITHUB_REPOSITORY:=local}"
+: "${GITHUB_WORKFLOW:=local}"
+: "${GITHUB_JOB:=local}"
+: "${GITHUB_SHA:=unknown}"
+: "${GITHUB_REF_NAME:=unknown}"
+: "${RUNNER_NAME:=$(hostname)}"
+: "${RUNNER_OS:=$(uname -s)}"
+: "${ImageOS:=unknown}"
+
+TELEGRAF_ENV=()
+for var in CI_TELEMETRY_DIR GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_REPOSITORY \
+           GITHUB_WORKFLOW GITHUB_JOB GITHUB_SHA GITHUB_REF_NAME \
+           RUNNER_NAME RUNNER_OS ImageOS; do
+  TELEGRAF_ENV+=("${var}=${!var}")
+done
+
+# --- sanity -------------------------------------------------------------------
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "ci-telemetry: already running (pid $(cat "$PIDFILE"))" >&2
+  exit 1
+fi
+mkdir -p "$CI_TELEMETRY_DIR"
+
+# Telegraf needs root for some /proc reads; sudo scrubs the environment, hence
+# the explicit `env` prefix on launch rather than exported variables.
+SUDO=()
+if sudo -n true 2>/dev/null; then
+  SUDO=(sudo -n)
+fi
+
+# --- install pinned Telegraf (static binary) ----------------------------------
+case "$(uname -m)" in
+  x86_64)  ARCH="amd64"; PINNED_SHA256="3ecf733bec389b8a0e1072f134ce379d79efe0d3caf984c164bd4cfc515a86d6" ;;
+  aarch64) ARCH="arm64"; PINNED_SHA256="7626df978e86b4788aed477f7acb4528ff517b506c721f1bd4c9ac77464a93e5" ;;
+  *) echo "ci-telemetry: unsupported arch $(uname -m) (linux x86_64/aarch64 only)" >&2; exit 1 ;;
+esac
+
+TARBALL_NAME="telegraf-${TELEGRAF_VERSION}_linux_${ARCH}.tar.gz"
+BASE_URL="https://dl.influxdata.com/telegraf/releases"
+TELEGRAF_BIN="$TELEGRAF_HOME/telegraf-${TELEGRAF_VERSION}/usr/bin/telegraf"
+
+if [ ! -x "$TELEGRAF_BIN" ]; then
+  if [ "$TELEGRAF_VERSION" = "$PINNED_VERSION" ]; then
+    EXPECTED_SHA256="$PINNED_SHA256"
+  else
+    # Overridden version: no in-repo hash exists for it, so verify against the
+    # digest upstream publishes next to the tarball. This catches truncated or
+    # corrupted downloads but, coming from the same origin, is not a defence
+    # against a compromised origin. Prefer the pinned default.
+    echo "ci-telemetry: warning: telegraf-version '${TELEGRAF_VERSION}' is not the in-repo pinned ${PINNED_VERSION};" >&2
+    echo "ci-telemetry: warning: falling back to upstream-published digest (integrity check only)" >&2
+    EXPECTED_SHA256="$(curl -fsSL --retry 3 --retry-delay 5 "${BASE_URL}/${TARBALL_NAME}.DIGESTS" | awk 'NR==1{print $1}')"
+    if ! [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "ci-telemetry: could not fetch a valid sha256 for ${TARBALL_NAME}" >&2
+      exit 1
+    fi
+  fi
+
+  echo "ci-telemetry: installing telegraf v${TELEGRAF_VERSION} (${ARCH})"
+  mkdir -p "$TELEGRAF_HOME"
+  TMP_TARBALL="$(mktemp)"
+  trap 'rm -f "$TMP_TARBALL"' EXIT
+  curl -fsSL --retry 3 --retry-delay 5 "${BASE_URL}/${TARBALL_NAME}" -o "$TMP_TARBALL"
+  echo "${EXPECTED_SHA256}  ${TMP_TARBALL}" | sha256sum -c - >/dev/null
+  # tarball extracts to telegraf-<version>/ — the final layout, no move needed
+  tar -xzf "$TMP_TARBALL" -C "$TELEGRAF_HOME"
+  rm -f "$TMP_TARBALL"
+  trap - EXIT
+fi
+echo "ci-telemetry: using $("$TELEGRAF_BIN" version)"
+
+# --- config -------------------------------------------------------------------
+# Copied rather than used in place only so the conditional conntrack block can be
+# appended; ${VARS} inside are left for Telegraf to expand.
+RESOLVED_CONF="$CI_TELEMETRY_DIR/telegraf.resolved.conf"
+cp "$ACTION_DIR/telegraf.conf" "$RESOLVED_CONF"
+
+# conntrack table usage vs max, only where the conntrack module is loaded
+if [ -r /proc/sys/net/netfilter/nf_conntrack_count ]; then
+  cat >> "$RESOLVED_CONF" <<'EOF'
+
+# Conntrack table usage vs max (appended: conntrack module present)
+[[inputs.conntrack]]
+EOF
+fi
+
+# Caller-supplied additions, e.g. an extra [[inputs.procstat]] block for a
+# workload this action does not know about. Appended verbatim; the --test gate
+# below rejects the whole config if it is malformed.
+if [ -n "${CI_TELEMETRY_EXTRA_CONFIG:-}" ]; then
+  if [ ! -r "$CI_TELEMETRY_EXTRA_CONFIG" ]; then
+    echo "ci-telemetry: extra-config not readable: $CI_TELEMETRY_EXTRA_CONFIG" >&2
+    exit 1
+  fi
+  echo "ci-telemetry: appending extra config from $CI_TELEMETRY_EXTRA_CONFIG"
+  printf '\n# --- appended from %s ---\n' "$CI_TELEMETRY_EXTRA_CONFIG" >> "$RESOLVED_CONF"
+  cat "$CI_TELEMETRY_EXTRA_CONFIG" >> "$RESOLVED_CONF"
+fi
+
+# --- validate then launch ------------------------------------------------------
+if ! env "${TELEGRAF_ENV[@]}" "$TELEGRAF_BIN" --config "$RESOLVED_CONF" --test >/dev/null 2>&1; then
+  echo "ci-telemetry: config failed validation, output:" >&2
+  env "${TELEGRAF_ENV[@]}" "$TELEGRAF_BIN" --config "$RESOLVED_CONF" --test >&2 || true
+  exit 1
+fi
+
+: > "$CI_TELEMETRY_DIR/metrics.json"
+rm -f "$PIDFILE"
+
+# --pidfile makes Telegraf record its own pid. Capturing $! instead would record
+# the pid of the sudo wrapper, so liveness checks and SIGTERM would target sudo
+# rather than the collector.
+"${SUDO[@]}" env "${TELEGRAF_ENV[@]}" "$TELEGRAF_BIN" \
+  --config "$RESOLVED_CONF" --pidfile "$PIDFILE" \
+  > "$CI_TELEMETRY_DIR/telegraf.log" 2>&1 &
+LAUNCHER_PID=$!
+echo "$LAUNCHER_PID" > "$LAUNCHER_PIDFILE"
+
+# health check: launcher alive, pidfile written, and a first flush landed
+# (flush_interval 5s + up to 1s jitter, so allow generous headroom)
+for _ in $(seq 1 20); do
+  sleep 1
+  if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+    echo "ci-telemetry: telegraf died at startup, log follows:" >&2
+    cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
+    exit 1
+  fi
+  [ -s "$CI_TELEMETRY_DIR/metrics.json" ] && [ -s "$PIDFILE" ] && break
+done
+
+if [ ! -s "$PIDFILE" ]; then
+  echo "ci-telemetry: telegraf never wrote a pidfile, log follows:" >&2
+  cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
+  exit 1
+fi
+if [ ! -s "$CI_TELEMETRY_DIR/metrics.json" ]; then
+  echo "ci-telemetry: no metrics after 20s, log follows:" >&2
+  cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
+  exit 1
+fi
+
+echo "ci-telemetry: running (pid $(cat "$PIDFILE")), writing $CI_TELEMETRY_DIR/metrics.json"
