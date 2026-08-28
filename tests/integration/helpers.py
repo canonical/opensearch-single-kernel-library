@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+import tenacity
 import yaml
 from data_platform_helpers.advanced_statuses import StatusObject
 from opensearchpy import OpenSearch
@@ -957,7 +958,11 @@ async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
 
 
 async def check_cluster_formation_successful(
-    ops_test: OpsTest, unit_ip: str, unit_names: list[str], app: str = APP_NAME
+    ops_test: OpsTest,
+    unit_ip: str,
+    unit_names: list[str],
+    app: str = APP_NAME,
+    stop_after_attempt: int = 1,
 ) -> bool:
     """Returns whether the cluster formation was successful and all nodes successfully joined.
 
@@ -966,6 +971,8 @@ async def check_cluster_formation_successful(
         unit_ip: The ip of the unit of the OpenSearch unit.
         unit_names: The list of unit names in the cluster.
         app: the name of the app.
+        stop_after_attempt: attempts, 1s apart, to tolerate a node that is still (re-)joining.
+            1 (default) means a single check.
 
     Returns:
         Whether The cluster formation is successful.
@@ -973,7 +980,8 @@ async def check_cluster_formation_successful(
     try:
         async for attempt in AsyncRetrying(
             wait=wait_fixed(wait=1),
-            stop=stop_after_attempt(2),
+            # the parameter shadows the tenacity helper of the same name
+            stop=tenacity.stop_after_attempt(stop_after_attempt),
             before_sleep=lambda state: logger.warning(
                 "Cluster formation attempt %s: %s", state.attempt_number, state.outcome.exception()
             ),

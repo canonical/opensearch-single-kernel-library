@@ -360,7 +360,11 @@ async def test_freeze_db_process_node_with_primary_shard(
     # the shard view is only meaningful once the node is back in `_nodes`.
     # queried on `reachable_ip`, the leader may be the unit that was just frozen.
     assert await check_cluster_formation_successful(
-        ops_test, reachable_ip, get_application_unit_names(ops_test, app=app), app=app
+        ops_test,
+        reachable_ip,
+        get_application_unit_names(ops_test, app=app),
+        app=app,
+        stop_after_attempt=2,
     ), "Node did not re-join the cluster after being un-frozen."
 
     # fetch unit hosting the new primary shard of the previous index
@@ -447,7 +451,11 @@ async def test_freeze_db_process_node_with_elected_cm(
     # verify the previously elected CM node re-joined the fleet.
     # queried on `reachable_ip`, the leader may be the unit that was just frozen.
     assert await check_cluster_formation_successful(
-        ops_test, reachable_ip, get_application_unit_names(ops_test, app=app), app=app
+        ops_test,
+        reachable_ip,
+        get_application_unit_names(ops_test, app=app),
+        app=app,
+        stop_after_attempt=2,
     ), "Previously elected CM node did not re-join the cluster after being un-frozen."
 
     # continuous writes checks
