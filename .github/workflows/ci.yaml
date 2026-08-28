@@ -134,13 +134,14 @@ jobs:
       cache: false
     permissions:
       contents: read
+
   integration-test:
     name: Integration test charm
     uses: ./.github/workflows/integration_test.yaml
     needs:
       - build
     with:
-      artifact-prefix: packed-charm
+      artifact-prefix: ${{ needs.build.outputs.artifact-prefix }}
       run-on-all-bases: ${{ github.event_name == 'schedule' }}
     secrets:
       AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
