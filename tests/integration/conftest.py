@@ -105,11 +105,11 @@ def charm_resources(substrate: Substrate) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate):
+async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate, architecture: str) -> None:
     """Deploy the client charm."""
     if substrate == "k8s" and CLIENT_CHARM not in ops_test.model.applications:
         await ops_test.model.deploy(
-            "./tests/charms/dummy-client-charm/dummy-client-charm_amd64.charm",
+            f"./tests/charms/dummy-client-charm/dummy-client-charm_{architecture}.charm",
             CLIENT_CHARM,
         )
         await ops_test.model.wait_for_idle(apps=[CLIENT_CHARM])
