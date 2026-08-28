@@ -8,6 +8,12 @@ CI_TELEMETRY_DIR="${CI_TELEMETRY_DIR:-${RUNNER_TEMP:-/tmp}/ci-telemetry}"
 BUNDLE_PATH="${BUNDLE_PATH:-$(dirname "$CI_TELEMETRY_DIR")/ci-telemetry-bundle.tar.zst}"
 PIDFILE="$CI_TELEMETRY_DIR/telegraf.pid"
 LAUNCHER_PIDFILE="$CI_TELEMETRY_DIR/launcher.pid"
+RESOLVED_CONF="$CI_TELEMETRY_DIR/telegraf.resolved.conf"
+
+# Matches the collector but not the `sudo -n env ... telegraf --config ...`
+# wrapper, whose command line contains the same config path but starts with
+# sudo. Anchoring on the executable path is what separates them.
+TELEGRAF_PATTERN="^[^ ]*telegraf --config ${RESOLVED_CONF}"
 
 # Publish the path we actually wrote so the upload step never guesses. Set before
 # any early exit so a missing bundle is a warning downstream, not a broken ref.
@@ -30,20 +36,43 @@ fi
 # --- stop telegraf: SIGTERM triggers a final flush + clean shutdown -----------
 # $PIDFILE is written by telegraf itself (--pidfile), so this is the collector's
 # pid, not the pid of the sudo wrapper that launched it.
-if [ -s "$PIDFILE" ]; then
-  PID="$(cat "$PIDFILE")"
+#
+# Reading it needs care: telegraf writes it 0640, and under sudo that is
+# root-owned, so a plain `cat` fails for the runner user. start-telemetry.sh
+# relaxes the mode, but a collector started by an older version will not have
+# been relaxed, hence the sudo read and the pgrep fallback.
+PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+if [ -z "$PID" ] && [ ${#SUDO[@]} -gt 0 ]; then
+  PID="$("${SUDO[@]}" cat "$PIDFILE" 2>/dev/null || true)"
+fi
+if [ -z "$PID" ]; then
+  PID="$(pgrep -f "$TELEGRAF_PATTERN" 2>/dev/null | head -1 || true)"
+  [ -n "$PID" ] && echo "ci-telemetry: pidfile unreadable, matched collector by config path (pid $PID)"
+fi
+
+if [ -n "$PID" ] && "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
+  echo "ci-telemetry: stopping telegraf (pid $PID)"
+  "${SUDO[@]}" kill -TERM "$PID" 2>/dev/null || true
+  for _ in $(seq 1 15); do
+    "${SUDO[@]}" kill -0 "$PID" 2>/dev/null || break
+    sleep 1
+  done
   if "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
-    echo "ci-telemetry: stopping telegraf (pid $PID)"
-    "${SUDO[@]}" kill -TERM "$PID" 2>/dev/null || true
-    for _ in $(seq 1 15); do
-      "${SUDO[@]}" kill -0 "$PID" 2>/dev/null || break
-      sleep 1
-    done
-    if "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
-      echo "ci-telemetry: SIGTERM timed out, sending SIGKILL (final flush lost)"
-      "${SUDO[@]}" kill -KILL "$PID" 2>/dev/null || true
-    fi
+    echo "ci-telemetry: SIGTERM timed out, sending SIGKILL (final flush lost)"
+    "${SUDO[@]}" kill -KILL "$PID" 2>/dev/null || true
   fi
+fi
+
+# Safety net: never leave a root-owned collector running past the job, whatever
+# happened above. Also stops it writing into the directory while we archive it.
+if pgrep -f "$TELEGRAF_PATTERN" >/dev/null 2>&1; then
+  echo "ci-telemetry: collector still running, terminating by config path"
+  "${SUDO[@]}" pkill -TERM -f "$TELEGRAF_PATTERN" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    pgrep -f "$TELEGRAF_PATTERN" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  "${SUDO[@]}" pkill -KILL -f "$TELEGRAF_PATTERN" 2>/dev/null || true
 fi
 
 # Wait for the launcher (sudo) to reap, so nothing is still writing into the

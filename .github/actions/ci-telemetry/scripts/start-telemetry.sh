@@ -159,6 +159,14 @@ if [ ! -s "$PIDFILE" ]; then
   cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
   exit 1
 fi
+
+# Telegraf creates the pidfile with mode 0640. Running under sudo that makes it
+# root:root, so the unprivileged runner user cannot read it and stop-telemetry.sh
+# would have no pid to signal — the collector would keep running past the job.
+if [ ${#SUDO[@]} -gt 0 ]; then
+  "${SUDO[@]}" chmod 0644 "$PIDFILE" 2>/dev/null || true
+fi
+
 if [ ! -s "$CI_TELEMETRY_DIR/metrics.json" ]; then
   echo "ci-telemetry: no metrics after 20s, log follows:" >&2
   cat "$CI_TELEMETRY_DIR/telegraf.log" >&2

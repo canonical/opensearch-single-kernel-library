@@ -74,15 +74,20 @@ jq -r '.metrics[]|select(.name=="internal_gather")|"\(.tags.input) \(.fields.gat
 
 ## Volume on this repository's jobs
 
-The integration job allows up to 180 minutes, which is far longer than anything the action was
-originally sized for. Measured on a 28-core host running this repo's OpenSearch workload:
-~1.4 MB per 74 s, which extrapolates to **~200 MB of `metrics.json` over a full 180-minute job**,
-packing down to a ~12 MB artifact. Expect less on the runners used in CI, which have fewer cores
-and therefore fewer `cpu` series and fewer matched processes.
+Measured on an 8-core `self-hosted-linux-amd64-noble-large` runner, from run
+[33168877009](https://github.com/canonical/opensearch-single-kernel-library/actions/runs/33168877009)
+(`k8s/test_backups.py-all-azure`, 18.4 minutes of collection):
 
-That file lives in `$RUNNER_TEMP`. This job already brackets itself with `df --human-readable`
-steps, so if disk headroom turns out to be tight, the knob is the agent interval in
-`telegraf.conf`:
+| | Measured |
+|---|---|
+| Collector CPU | 1.44% of one core (0.18% of the 8-core machine) |
+| Collector memory | 172 MB VmRSS, 56 MB Go `sys_bytes` |
+| `metrics.json` | 24.4 MB — **~240 MB extrapolated to a full 180-minute job** |
+| Artifact | 0.86 MB, ~8 MB extrapolated (30x compression) |
+
+The artifact is small; the uncompressed file in `$RUNNER_TEMP` is not. This job already brackets
+itself with `df --human-readable` steps, so if disk headroom turns out to be tight, the knob is
+the agent interval in `telegraf.conf`:
 
 ```toml
 [agent]
