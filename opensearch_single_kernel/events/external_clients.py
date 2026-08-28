@@ -76,9 +76,14 @@ class ExternalClientsEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not self.charm.cluster_manager.opensearch_client.is_node_up() or not event.index:
+        if (
+            not self.charm.cluster_manager.opensearch_client.is_node_up()
+            or not event.index
+            or not self.charm.state.application.is_security_index_initialised
+        ):
             event.defer()
             return
+
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
