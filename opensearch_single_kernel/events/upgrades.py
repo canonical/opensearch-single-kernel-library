@@ -6,13 +6,14 @@
 
 import logging
 import typing
+from platform import machine
 
 import ops
 from data_platform_helpers.version_check import get_charm_revision
 from ops import Object, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_SNAP_REVISION,
+    OPENSEARCH_SNAP_REVISIONS,
     UPGRADE_RELATION,
     HealthColors,
     Substrates,
@@ -81,7 +82,7 @@ class UpgradesEventsHandler(Object):
     def _on_upgrade_peer_relation_created(self, _) -> None:
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
-            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISIONS[machine()]
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
@@ -368,7 +369,7 @@ class UpgradesEventsHandler(Object):
                     )
                     self.charm.lock_manager.release()
                     return
-        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISIONS[machine()]
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
@@ -379,7 +380,7 @@ class UpgradesEventsHandler(Object):
             interpolated=True,
         )
         logger.debug(
-            f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
+            f"Saved {OPENSEARCH_SNAP_REVISIONS[machine()]} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
         )
 
         logger.debug("Starting OpenSearch after upgrade")

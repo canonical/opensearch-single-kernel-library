@@ -29,6 +29,25 @@ def pytest_configure(config):
 
 
 @pytest.fixture(scope="session")
+def machine_platform() -> str:
+    """Get the machine platform running the tests."""
+    import platform
+
+    return platform.machine()
+
+
+@pytest.fixture(scope="session")
+def architecture(machine_platform) -> str:
+    """Get the architecture of the machine running the tests."""
+    if machine_platform == "x86_64":
+        return "amd64"
+    elif machine_platform == "aarch64":
+        return "arm64"
+    else:
+        raise ValueError(f"Unsupported machine platform: {machine_platform}")
+
+
+@pytest.fixture(scope="session")
 def substrate(request) -> Substrate:
     """The substrate that we are testing."""
     return request.config.option.substrate
