@@ -163,7 +163,7 @@ pyjwt = "^2.13.0"
 httpx-ws = ">=0.9.0,<0.10.0"
 pytest-microceph = { git = "https://github.com/canonical/data-platform-workflows", tag = "v32.1.0", subdirectory = "python/pytest_plugins/microceph" }
 pyyaml = "^6.0.2"
-protobuf = "^6.31.1"
+protobuf = "^7.36.0"
 opensearch-py = "^2.8.0"
 # Azure integration tests
 azure-identity = "^1.23.0"
