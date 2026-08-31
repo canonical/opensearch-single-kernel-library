@@ -145,7 +145,9 @@ async def test_upgrade_to_n_minus_1(
     app = (await app_name(ops_test)) or APP_NAME
     revision = VM_VERSION_TO_REVISION[VM_VERSION_N_MINUS_1][series]
     await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_2, substrate)
-    await assert_upgrade_to_revision(ops_test, app=app, revision=revision)
+    await assert_upgrade_to_revision(
+        ops_test, app=app, revision=revision, substrate=substrate, c_writes=c_writes
+    )
     await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_1, substrate)
 
     # continuous writes checks
@@ -171,6 +173,7 @@ async def test_upgrade_to_local(
         charm=charm,
         substrate=substrate,
         charm_resources=charm_resources,
+        c_writes=c_writes,
     )
     if substrate == "k8s":
         version = K8S_VERSION_N
@@ -231,7 +234,9 @@ async def test_upgrade_from_version_to_local(
 ) -> None:
     """Test upgrade from usptream to currently locally built version."""
     app = (await app_name(ops_test)) or APP_NAME
-    await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
+    await assert_upgrade_to_local(
+        ops_test, app=app, charm=charm, substrate=substrate, c_writes=c_writes
+    )
     await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
 
     # continuous writes checks

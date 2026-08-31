@@ -148,15 +148,15 @@ class ConfigManager(BaseManager):
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""
-        publish_hosts = [self.state.node_host]
+        publish_hosts = {self.state.node_host}
         if self.state.substrate == Substrates.VM:
             if public_ip := self.workload.get_host_public_ip():
-                publish_hosts.append(public_ip)
+                publish_hosts.add(public_ip)
         return {
             "cluster.name": self.state.application.deployment_description.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
-            "http.publish_host": publish_hosts,
+            "http.publish_host": sorted(publish_hosts),
             "node.roles": sorted(roles),
             "node.attr.app_id": self.state.application.deployment_description.app.id,
             "path.data": self.workload.paths.data.as_posix(),

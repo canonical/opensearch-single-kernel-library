@@ -184,9 +184,15 @@ class OpenSearchEventsHandler(Object):
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+            event.defer()
+            return
+
+        if self.charm.unit.is_leader():
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
-            if self.charm.state.server.started and not self.charm.upgrades_manager.in_progress:
+            if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
                 if not self._reconfigure_and_restart_if_needed():
@@ -199,7 +205,7 @@ class OpenSearchEventsHandler(Object):
 
         elif event.relation.data.get(event.app):
             # if app_data: Reconfigure + restart node on the unit
-            if self.charm.state.server.started and not self.charm.upgrades_manager.in_progress:
+            if self.charm.state.server.started:
                 # make sure that we only restart if the node has already
                 # gone through the start workflow
                 if not self._reconfigure_and_restart_if_needed():
@@ -211,9 +217,9 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.profiles_manager.check_profile_requirements():
-            event.defer()
-            return
+        self.charm.exclusions_manager.cleanup(
+            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
+        )
 
         if not event.relation.data.get(event.unit):
             return
@@ -223,10 +229,6 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.peer_unit_interface, event.relation, event.unit
             ),
             OpenSearchServerPeerModel,
-        )
-
-        self.charm.exclusions_manager.cleanup(
-            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
 
         if self.charm.unit.is_leader() and event_server.bootstrap_contributor:

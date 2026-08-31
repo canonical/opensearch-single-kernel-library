@@ -15,6 +15,7 @@ from tenacity import Retrying, stop_after_attempt, wait_fixed
 from opensearch_single_kernel.common.constants import UPGRADE_RELATION
 from opensearch_single_kernel.common.statuses import GeneralStatuses, LockStatuses
 from tests.integration.conftest import CONFIG_OPTS
+from tests.integration.ha.continuous_writes import ContinuousWrites
 from tests.integration.models import Unit
 
 from ..helpers import (
@@ -165,6 +166,8 @@ async def assert_upgrade_to_revision(
     ops_test: OpsTest,
     app: str,
     revision: int,
+    substrate: str,
+    c_writes: ContinuousWrites,
     config: dict[str, str] = {},
 ):
     """Upgrades app to revision"""
@@ -195,6 +198,9 @@ async def assert_upgrade_to_revision(
             timeout=TIMEOUT,
             idle_period=IDLE_PERIOD,
         )
+
+        if substrate == "k8s":
+            await c_writes.update()
 
         # run resume-upgrade action on leader
         action = await run_action(ops_test, leader_id, "resume-upgrade", app=app)
@@ -240,6 +246,7 @@ async def assert_upgrade_to_local(
     app: str,
     charm: str,
     substrate: str,
+    c_writes: ContinuousWrites,
     charm_resources: dict[str, str] | None = None,
     config: dict[str, str] = {},
 ):
@@ -281,6 +288,9 @@ async def assert_upgrade_to_local(
             timeout=TIMEOUT,
             idle_period=IDLE_PERIOD,
         )
+
+        if substrate == "k8s":
+            await c_writes.update()
 
         await wait_until_upgrade_state_healthy(ops_test, app)
         # run resume-upgrade action on leader
