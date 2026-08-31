@@ -21,7 +21,7 @@ from tenacity import (
     wait_fixed,
 )
 
-from tests.integration.helpers import get_application_unit_ids
+from tests.integration.helpers import NO_TTY_STDIN, get_application_unit_ids
 
 logger = getLogger(__name__)
 
@@ -306,6 +306,7 @@ def pebble_patch_restart_delay(
                 f"juju ssh --container opensearch {unit_name} lsof -ti:9200".split(),
                 capture_output=True,
                 text=True,
+                stdin=subprocess.DEVNULL,
                 env={**os.environ, "JUJU_MODEL": model_name},
             )
             assert result.stdout.strip(), (
@@ -448,7 +449,9 @@ async def k8s_all_processes_down(
             "-f",
             db_process,
         ]
-        return_code, opensearch_pid, stderr = await ops_test.juju(*get_pid_cmd, check=False)
+        return_code, opensearch_pid, stderr = await ops_test.juju(
+            *get_pid_cmd, check=False, stdin=NO_TTY_STDIN
+        )
         if return_code not in (0, 1):
             logger.error(
                 "Failed to check OpenSearch process on unit %s: rc=%s, stderr=%s",

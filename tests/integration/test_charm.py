@@ -295,6 +295,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
                 "--unicode=always",
             ],
             text=True,
+            stdin=subprocess.DEVNULL,
         ).replace("\r\n", "\n")
     )["installed"].split()
     logger.info(f"Installed snap: {installed_info}")
@@ -334,6 +335,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
 
     proc = await asyncio.create_subprocess_exec(
         *command,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -400,7 +402,7 @@ async def test_add_users_and_calling_update_status(ops_test: OpsTest) -> None:
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
         # Adding it fixed the issue.
-        subprocess.run(shlex.split(exec_cmd))
+        subprocess.run(shlex.split(exec_cmd), stdin=subprocess.DEVNULL)
     except Exception as e:
         logger.error(
             f"Failed to apply state: process exited with {e.returncode}; "

@@ -45,6 +45,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# It's better to block stdin so terminal don't break after the test (e.g. Ctrl+C and lines alignment)
+NO_TTY_STDIN = b""
+
 # Keep the existing connect/read timeout used by http_request.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
 EmptyBlockedStatus = StatusObject(
@@ -166,7 +169,7 @@ def _progress_line(units: List[Unit]) -> str:
 
 async def get_unit_hostname(ops_test: OpsTest, unit_id: int, app: str) -> str:
     """Get the hostname of a specific unit."""
-    _, hostname, _ = await ops_test.juju("ssh", f"{app}/{unit_id}", "hostname")
+    _, hostname, _ = await ops_test.juju("ssh", f"{app}/{unit_id}", "hostname", stdin=NO_TTY_STDIN)
     return hostname.strip()
 
 
@@ -580,7 +583,7 @@ def get_file_contents(
     else:
         command.extend([unit, "sudo", "cat", filename])
 
-    return subprocess.check_output(command)
+    return subprocess.check_output(command, stdin=subprocess.DEVNULL)
 
 
 def get_conf_as_dict(
@@ -696,7 +699,13 @@ async def run_action(
             # try to juju exec
             if ops_test.request.config.option.substrate == "k8s":
                 return_code, output, _ = await ops_test.juju(
-                    "exec", "--wait", "5s", "--unit", f"{app}/{unit.id}", "echo hello"
+                    "exec",
+                    "--wait",
+                    "5s",
+                    "--unit",
+                    f"{app}/{unit.id}",
+                    "echo hello",
+                    stdin=NO_TTY_STDIN,
                 )
                 if return_code == 0 and output.strip() == "hello":
                     online_units.append(unit)
@@ -893,7 +902,7 @@ async def debug_failed_unit(ops_test: OpsTest, app: str, endpoint: str) -> None:
         logger.debug(f"{f}:\n")
 
         get_logs_cmd = f"run --unit {app}/{unit_id} -- sudo cat {f}"
-        _, out, err = await ops_test.juju(*get_logs_cmd.split())
+        _, out, err = await ops_test.juju(*get_logs_cmd.split(), stdin=NO_TTY_STDIN)
         logger.debug(f"out:\n{out}\n---\nerr:\n{err}")
 
         logger.debug("\n\n------------------\n\n")
@@ -1088,7 +1097,7 @@ async def execute_update_status_manually(ops_test: OpsTest, app: str):
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
         # Adding it fixed the issue.
-        subprocess.run(shlex.split(exec_cmd))
+        subprocess.run(shlex.split(exec_cmd), stdin=subprocess.DEVNULL)
     except Exception as e:
         logger.error(
             f"Failed to apply state: process exited with {e.returncode}; "

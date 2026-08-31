@@ -121,7 +121,9 @@ def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
     if substrate == "k8s":
         cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        output = subprocess.check_output(
+            cmd, shell=True, text=True, stdin=subprocess.DEVNULL
+        ).strip()
     else:
         # opensearch.opensearch-bin not exposed in older snap revisions
         cmd = [
@@ -140,7 +142,7 @@ def get_version_on_unit(unit: str, model: str, substrate):
             "-c",
             "$OPENSEARCH_BIN/opensearch --version",
         ]
-        output = subprocess.check_output(cmd, text=True)
+        output = subprocess.check_output(cmd, text=True, stdin=subprocess.DEVNULL)
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 
