@@ -392,8 +392,7 @@ async def _ensure_small_opensearch_deployed(
             application_name=APP_NAME,
             num_units=3,
             series=series,
-            constraints="mem=8G",
-            config={"profile": "production"},
+            config={"profile": "testing"},
             resources=charm_resources,
             storage=opensearch_storage,
             trust=substrate == "k8s",
@@ -1485,6 +1484,17 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     }
     response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
     assert len(response.get("hits", {}).get("hits", [])) > 0, "Neural search did not yield results"
+
+    # clean up resources
+    response = await http_request(ops_test, "GET", f"{base_url}/_plugins/_ml/models/{model_id}")
+    model_group_id = response["model_group_id"]
+
+    await http_request(ops_test, "POST", f"{base_url}/_plugins/_ml/models/{model_id}/_undeploy")
+    await http_request(ops_test, "DELETE", f"{base_url}/_plugins/_ml/models/{model_id}")
+    await http_request(
+        ops_test, "DELETE", f"{base_url}/_plugins/_ml/model_groups/{model_group_id}"
+    )
+    await http_request(ops_test, "DELETE", f"{base_url}/_ingest/pipeline/{INGEST_PIPELINE_ID}")
 
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
