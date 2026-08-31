@@ -292,7 +292,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
                 "sudo",
                 "snap",
                 "info",
-                "opensearch",
+                "opensearch-charmed",
                 "--color=never",
                 "--unicode=always",
             ],
@@ -369,7 +369,7 @@ async def test_all_units_have_internal_users_synced(
     filename = (
         "/etc/opensearch/opensearch-security/internal_users.yml"
         if substrate == "k8s"
-        else "/var/snap/opensearch/current/etc/opensearch/opensearch-security/internal_users.yml"
+        else "/var/snap/opensearch-charmed/current/etc/opensearch/opensearch-security/internal_users.yml"
     )
 
     leader_conf = get_conf_as_dict(ops_test, leader_name, filename, substrate)

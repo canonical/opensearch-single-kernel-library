@@ -32,7 +32,7 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip(reason="Upgrades temporarily disabled: v1 moved to 3.x")
+pytestmark = pytest.mark.skip(reason="Upgrades temporarily disabled")
 
 OPENSEARCH_ORIGINAL_CHARM_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/edge"

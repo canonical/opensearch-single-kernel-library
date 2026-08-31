@@ -198,7 +198,9 @@ PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
 # OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
 # Revision 2.19.5
-OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
+# OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
+# Revision 3.7.0
+OPENSEARCH_SNAP_REVISION = "49"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -285,10 +287,10 @@ GRAFANA_K8S_RELATION = "grafana-dashboard"
 
 
 # Paths
-BASE_SNAP_DIR = "/var/snap/opensearch"
+BASE_SNAP_DIR = "/var/snap/opensearch-charmed"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
-SNAP = "/snap/opensearch/current"
+SNAP = "/snap/opensearch-charmed/current"
 
 
 # Secrets
@@ -306,7 +308,6 @@ SECRET_UNIT_TRANSPORT = "unit-transport"
 SECRET_UNIT_HTTP = "unit-http"
 SECRET_PLUGIN = "plugins"
 SECRET_BACKUPS = "backups"
-SECRET_USERS = "user"
 
 # Backup
 S3_CREDENTIALS = "s3-creds"

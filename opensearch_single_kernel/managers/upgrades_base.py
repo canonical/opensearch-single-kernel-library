@@ -250,7 +250,9 @@ class UpgradesManagerBase(BaseManager):
                 )
             else:
                 # Separated the command and passed 'N' via stdin to match the K8s behavior
-                output = self.workload.run_cmd("opensearch.node", "override-version", stdin="N\n")
+                output = self.workload.run_cmd(
+                    "opensearch-charmed.node", "override-version", stdin="N\n"
+                )
 
             # Optional: strip() the output if your framework doesn't do it automatically
             if isinstance(output, str):
@@ -284,7 +286,7 @@ class UpgradesManagerBase(BaseManager):
         if self.state.substrate == Substrates.K8S:
             self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
         else:
-            self.workload.run_cmd("opensearch.node", "override-version", stdin="y\n")
+            self.workload.run_cmd("opensearch-charmed.node", "override-version", stdin="y\n")
 
     @property
     def compatibility_matrix(self) -> dict[str, set[str]]:

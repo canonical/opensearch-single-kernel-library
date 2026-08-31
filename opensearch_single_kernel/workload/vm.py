@@ -55,7 +55,7 @@ class VMWorkload(BaseWorkload):
         """Return the opensearch snap."""
         for attempt in Retrying(stop=stop_after_attempt(12), wait=wait_fixed(10), reraise=True):
             with attempt:
-                opensearch_snap = snap.SnapCache()["opensearch"]
+                opensearch_snap = snap.SnapCache()["opensearch-charmed"]
         logger.debug(
             f"Snap opensearch fetched after {attempt.retry_state.attempt_number - 1} attempts"
         )
@@ -108,7 +108,7 @@ class VMWorkload(BaseWorkload):
         try:
             self._ensure_snap_reexec()
             cache = snap.SnapCache()
-            opensearch_snap = cache["opensearch"]
+            opensearch_snap = cache["opensearch-charmed"]
             # Make sure that we have the exact revision
             opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
             opensearch_snap.connect("process-control")
@@ -172,13 +172,13 @@ class VMWorkload(BaseWorkload):
         if not os.access(script_path, os.X_OK):
             self.run_cmd(f"chmod a+x {script_path}")
 
-        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+        self.run_cmd(f"snap run --shell opensearch-charmed.daemon -- {script_path}", args)
 
     @property
     @override
     def keytool_cmd(self) -> str:
         """Return VM keytool command via snap wrapper."""
-        return "opensearch.keytool"
+        return "opensearch-charmed.keytool"
 
     @override
     def get_host_public_ip(self) -> str | None:
@@ -202,7 +202,7 @@ class VMWorkload(BaseWorkload):
         if not self.opensearch_snap.present:
             return False
 
-        if not service_running("snap.opensearch.daemon.service"):
+        if not service_running("snap.opensearch-charmed.daemon.service"):
             return False
 
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
@@ -253,7 +253,7 @@ class VMWorkload(BaseWorkload):
         if not self.opensearch_snap.present:
             raise OpenSearchMissingError()
 
-        return service_failed("snap.opensearch.daemon.service")
+        return service_failed("snap.opensearch-charmed.daemon.service")
 
     @override
     def start_service(self):
@@ -412,7 +412,9 @@ class VMWorkload(BaseWorkload):
     @override
     def get_workload_version(self) -> str:
         """Return the workload version."""
-        return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()
+        return self.run_cmd(
+            "opensearch-charmed.opensearch-bin", args="--version 2>/dev/null"
+        ).out.strip()
 
     @override
     def memtotal(self) -> float:
