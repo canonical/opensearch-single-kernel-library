@@ -11,6 +11,11 @@ rules:
         - actions/*
         - pypa/gh-action-pypi-publish
         - tiobe/tics-github-action
+        - python-poetry/poetry
+        - pre-commit/pre-commit-hooks
+        - astral-sh/ruff-pre-commit
+        - codespell-project/codespell
+        - rhysd/actionlint
   unpinned-uses:
     config:
       policies:
@@ -21,3 +26,6 @@ rules:
   secrets-inherit:
     ignore:
       - ci.yaml:178
+  # Since actionlint don't support $/.. syntax
+  self-repository:
+    disable: true
