@@ -855,6 +855,10 @@ class TlsManager(BaseManager):
         """Compute TLS statuses from state and the cert store (read-only)."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
+        # Means the unit is  being terminated
+        if not self.state.peer_relation:
+            return status_list
+
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
             if (
@@ -863,10 +867,6 @@ class TlsManager(BaseManager):
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
-
-        # Means the unit is  being terminated
-        if not self.state.peer_relation:
-            return status_list
 
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:
