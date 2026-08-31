@@ -442,11 +442,12 @@ class SnapshotsManager(BaseManager):
 
         """
         object_storage_type = self.state.storage_type
+        alt_hosts = self.alt_hosts
         # Fetch the snapshot with the corresponding ID
         try:
             if not (
                 snapshot := self.opensearch_client.get_snapshot(
-                    object_storage_type, snapshot_id, alt_hosts=self.alt_hosts
+                    object_storage_type, snapshot_id, alt_hosts=alt_hosts
                 )
             ):
                 logger.error("Backup %s not found", snapshot_id)
@@ -462,10 +463,12 @@ class SnapshotsManager(BaseManager):
         # start the restore
         logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
+            self.opensearch_client.reload_secure_settings()
+            self.opensearch_client.verify_repository(object_storage_type, alt_hosts)
             non_restored_indices = self.opensearch_client.restore_snapshot(
                 object_storage_type=object_storage_type,
                 snapshot=snapshot,
-                alt_hosts=self.alt_hosts,
+                alt_hosts=alt_hosts,
             )
             if not non_restored_indices:
                 return

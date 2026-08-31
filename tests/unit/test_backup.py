@@ -409,6 +409,12 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
     )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     _mock_backup(mocker)
     backend, rels = backend_setup
 
@@ -452,6 +458,12 @@ def test_restore_when_start_fails_then_action_fails_with_message(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
     )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
+    )
     _mock_backup(mocker)
     backend, rels = backend_setup
 
@@ -492,6 +504,12 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
@@ -562,6 +580,12 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
