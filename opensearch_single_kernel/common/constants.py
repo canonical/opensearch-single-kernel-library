@@ -141,7 +141,6 @@ class OpenSearchPaths(BaseStrEnum):
     CONF = "etc/opensearch"
     DATA = "var/lib/opensearch"
     LOGS = "var/log/opensearch"
-    JDK = "usr/lib/jvm/java-21-openjdk-amd64"
     TMP = "usr/share/tmp"
     BIN = "usr/share/opensearch/bin"
 

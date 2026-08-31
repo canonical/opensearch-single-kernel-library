@@ -9,6 +9,7 @@ import socket
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
+from platform import machine
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -109,7 +110,10 @@ class Paths:
     @property
     def jdk(self) -> PathProtocol:
         """Get path to the jdk directory."""
-        return self.snap / OpenSearchPaths.JDK.val
+        if machine() == "aarch64":
+            return self.snap / "usr/lib/jvm/java-21-openjdk-arm64"
+        else:
+            return self.snap / "usr/lib/jvm/java-21-openjdk-amd64"
 
     @property
     def tmp(self) -> PathProtocol:
