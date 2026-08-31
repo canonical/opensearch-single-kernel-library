@@ -20,11 +20,13 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+import tenacity
 import yaml
 from data_platform_helpers.advanced_statuses import StatusObject
 from opensearchpy import OpenSearch
 from pytest_operator.plugin import OpsTest
 from tenacity import (
+    AsyncRetrying,
     RetryError,
     Retrying,
     retry,
@@ -875,7 +877,9 @@ async def http_request(  # noqa: C901
         return resp
 
 
-async def debug_failed_unit(ops_test: OpsTest, app: str, endpoint: str) -> None:
+async def debug_failed_unit(
+    ops_test: OpsTest, app: str, endpoint: str, level: int = logging.DEBUG
+) -> None:
     """Print the logs of a unit failing with a certain set of statuses."""
     unit_ip = endpoint[8:].split(":")[0]
 
@@ -888,20 +892,29 @@ async def debug_failed_unit(ops_test: OpsTest, app: str, endpoint: str) -> None:
         f"{root}/current/config/opensearch.yml",
         f"{root}/current/config/unicast_hosts.txt",
     ]
+    bin_cmd = "exec" if juju_version_major() > 2 else "run"
     for f in files_to_debug:
-        logger.debug(f"{f}:\n")
+        logger.log(level, f"{f}:\n")
 
-        get_logs_cmd = f"run --unit {app}/{unit_id} -- sudo cat {f}"
+        get_logs_cmd = f"{bin_cmd} --unit {app}/{unit_id} -- sudo cat {f}"
         _, out, err = await ops_test.juju(*get_logs_cmd.split())
-        logger.debug(f"out:\n{out}\n---\nerr:\n{err}")
+        logger.log(level, f"out:\n{out}\n---\nerr:\n{err}")
 
-        logger.debug("\n\n------------------\n\n")
+        logger.log(level, "\n\n------------------\n\n")
 
 
 def opensearch_client(
-    hosts: List[str], user_name: str, password: str, cert_path: str
+    hosts: List[str],
+    user_name: str,
+    password: str,
+    cert_path: str,
+    timeout: int = 10,
+    max_retries: int = 3,
 ) -> OpenSearch:
-    """Build an opensearch client."""
+    """Build an opensearch client.
+
+    Pass max_retries=0 if the caller has its own retry loop and wants to fail fast.
+    """
     return OpenSearch(
         hosts=[{"host": ip, "port": 9200} for ip in hosts],
         http_auth=(user_name, password),
@@ -919,7 +932,8 @@ def opensearch_client(
         ssl_show_warn=False,
         ca_certs=cert_path,  # cert path on disk
         retry_on_timeout=True,
-        max_retries=3,
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 
@@ -952,12 +966,12 @@ async def get_secret_by_label(ops_test, label: str) -> Dict[str, str]:
             return secret_data[secret_id]["content"]["Data"]
 
 
-@retry(
-    wait=wait_fixed(wait=5) + wait_random(0, 5),
-    stop=stop_after_attempt(15),
-)
 async def check_cluster_formation_successful(
-    ops_test: OpsTest, unit_ip: str, unit_names: list[str], app: str = APP_NAME
+    ops_test: OpsTest,
+    unit_ip: str,
+    unit_names: list[str],
+    app: str = APP_NAME,
+    stop_after_attempt: int = 1,
 ) -> bool:
     """Returns whether the cluster formation was successful and all nodes successfully joined.
 
@@ -965,20 +979,86 @@ async def check_cluster_formation_successful(
         ops_test: The ops test framework instance.
         unit_ip: The ip of the unit of the OpenSearch unit.
         unit_names: The list of unit names in the cluster.
+        app: the name of the app.
+        stop_after_attempt: attempts, 1s apart, to tolerate a node that is still (re-)joining.
+            1 (default) means a single check.
 
     Returns:
         Whether The cluster formation is successful.
     """
-    response = await http_request(ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app)
-    if "_nodes" not in response or "nodes" not in response:
-        return False
+    try:
+        async for attempt in AsyncRetrying(
+            wait=wait_fixed(wait=1),
+            # the parameter shadows the tenacity helper of the same name
+            stop=tenacity.stop_after_attempt(stop_after_attempt),
+            before_sleep=lambda state: logger.warning(
+                "Cluster formation attempt %s: %s", state.attempt_number, state.outcome.exception()
+            ),
+            reraise=True,
+        ):
+            with attempt:
+                response = await http_request(
+                    ops_test, "GET", f"https://{unit_ip}:9200/_nodes", app=app
+                )
+                expected = set(unit_names)
+                registered = {node["name"] for node in response.get("nodes", {}).values()}
+                successful = response.get("_nodes", {}).get("successful", 0)
+                assert successful >= len(expected) and registered == expected, (
+                    f"{unit_ip}: {successful}/{len(expected)} nodes responded, "
+                    f"missing={sorted(expected - registered)}, "
+                    f"unexpected={sorted(registered - expected)}"
+                )
+        return True
+    except Exception as e:
+        logger.error("Cluster formation check failed: %s", e)
 
-    successful_nodes = response["_nodes"]["successful"]
-    if successful_nodes < len(unit_names):
-        return False
+    # collect evidence before model teardown
+    try:
+        await asyncio.wait_for(debug_cluster_formation(ops_test, unit_names, app=app), timeout=300)
+    except Exception as e:
+        logger.error("Cluster formation diagnostics failed: %s", e)
+    return False
 
-    registered_nodes = [node_desc["name"] for node_desc in response["nodes"].values()]
-    return set(unit_names) == set(registered_nodes)
+
+async def debug_cluster_formation(
+    ops_test: OpsTest, unit_names: list[str], app: str = APP_NAME
+) -> None:
+    """Log the per-node view of the cluster to pinpoint nodes that are up but not members."""
+    logger.error("Cluster formation failed -- expected nodes: %s", sorted(unit_names))
+    for unit in await get_application_units(ops_test, app):
+        # a node answering "/" but not "/_cluster/health" is up without a discovered cluster
+        # manager, i.e. running outside the cluster. Preferred over matching node names against
+        # `unit_names`, so the diagnostics do not depend on the node naming scheme.
+        health_reachable = False
+        for path in ("/", "/_cluster/health", "/_cat/nodes?v"):
+            try:
+                resp = await http_request(
+                    ops_test,
+                    "GET",
+                    f"https://{unit.ip}:9200{path}",
+                    app=app,
+                    json_resp=False,
+                    timeout=10,
+                )
+                logger.error(
+                    "%s (%s) GET %s -> [%s] %s",
+                    unit.name,
+                    unit.ip,
+                    path,
+                    resp.status_code,
+                    resp.text,
+                )
+                if path == "/_cluster/health":
+                    health_reachable = resp.status_code == 200
+            except Exception as e:
+                logger.error("%s (%s) GET %s -> failed: %s", unit.name, unit.ip, path, e)
+
+        if health_reachable:
+            continue
+
+        # server logs of the non-member node(s): the only place where the workload's own
+        # discovery/join failures show up. Error level, as debug is not emitted in CI.
+        await debug_failed_unit(ops_test, app, f"https://{unit.ip}:9200/", level=logging.ERROR)
 
 
 @retry(
@@ -1145,14 +1225,18 @@ async def is_up(
     return False
 
 
-async def get_reachable_unit_ips(ops_test: OpsTest, app: str = APP_NAME) -> List[str]:
+async def get_reachable_unit_ips(
+    ops_test: OpsTest, app: str = APP_NAME, timeout: float = 10
+) -> List[str]:
     """Helper function to retrieve the IP addresses of all online units."""
     result = []
     for ip in await get_application_unit_ips(ops_test, app):
         if not is_reachable(ip, 9200):
             continue
 
-        if await is_up(ops_test, ip, retries=1):
+        # a SIGSTOPped node completes the TCP handshake, so `GET /` hangs for the whole timeout:
+        # keep it short, this only skips unresponsive units
+        if await is_up(ops_test, ip, retries=1, app=app, timeout=timeout):
             result.append(ip)
 
     return result
