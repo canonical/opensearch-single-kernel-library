@@ -113,7 +113,9 @@ async def test_horizontal_scale_up(
     unit_names = get_application_unit_names(ops_test, app=app)
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
-    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names)
+    assert await check_cluster_formation_successful(ops_test, leader_unit_ip, unit_names), (
+        "Not all nodes joined the cluster."
+    )
 
     cluster_health_resp = await cluster_health(ops_test, leader_unit_ip)
     assert cluster_health_resp["status"] == "green"

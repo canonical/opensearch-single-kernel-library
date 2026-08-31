@@ -159,9 +159,10 @@ class OpenSearchEventsHandler(Object):
 
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
-            and self.charm.apply_health(app=self.charm.unit.is_leader())
-            in [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP]
-        ):
+        ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
+            HealthColors.UNKNOWN,
+            HealthColors.YELLOW_TEMP,
+        ]:
             # we defer because we want the temporary status to be updated
             logger.debug("Cluster health temp yellow or unknown. Deferring event.")
             event.defer()
@@ -187,6 +188,13 @@ class OpenSearchEventsHandler(Object):
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
                 nodes
             )
+
+        if self.charm.upgrades_manager.in_progress:
+            logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+            event.defer()
+            return
+
+        if self.charm.unit.is_leader():
             # Update nodes_config property
             self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes)
             if self.charm.state.server.started:
@@ -209,20 +217,17 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
-        if not self.charm.config_manager.update_seeds_config():
+        # Refresh the seed hosts from the live cluster query, so stale ones can recover.
+        if not self.charm.config_manager.update_seeds_config(nodes):
             event.defer()
-            return
-
-        if not self.charm.profiles_manager.check_profile_requirements():
-            event.defer()
-            return
-
-        if not (unit_data := event.relation.data.get(event.unit)):
             return
 
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
+
+        if not (unit_data := event.relation.data.get(event.unit)):
+            return
 
         if self.charm.unit.is_leader() and unit_data.get("bootstrap_contributor"):
             contributor_count = self.charm.state.application.bootstrap_contributors_count

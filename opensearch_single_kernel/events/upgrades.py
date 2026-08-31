@@ -324,6 +324,9 @@ class UpgradesEventsHandler(Object):
             self.charm.cluster_manager.opensearch_client.disable_shard_allocation()
         except OpenSearchHttpError:
             logger.exception("Failed to disable shard allocation before upgrade")
+            self.charm.lock_manager.release()
+            event.defer()
+            return
 
         try:
             self.charm.cluster_manager.opensearch_client.flush_translog()
