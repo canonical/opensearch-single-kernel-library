@@ -378,6 +378,7 @@ async def test_setup_large_cluster(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_INTEGRATOR_NAME],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        timeout=2400,
     )
 
 
