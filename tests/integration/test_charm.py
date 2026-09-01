@@ -276,7 +276,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
-async def test_check_pinned_revision(ops_test: OpsTest, platform_machine: str) -> None:
+async def test_check_pinned_revision(ops_test: OpsTest, machine_platform: str) -> None:
     """Test check the pinned revision."""
     leader_id = await get_leader_unit_id(ops_test)
 
@@ -298,7 +298,7 @@ async def test_check_pinned_revision(ops_test: OpsTest, platform_machine: str) -
         ).replace("\r\n", "\n")
     )["installed"].split()
     logger.info(f"Installed snap: {installed_info}")
-    assert installed_info[1] == f"({OPENSEARCH_SNAP_REVISIONS[platform_machine]})"
+    assert installed_info[1] == f"({OPENSEARCH_SNAP_REVISIONS[machine_platform]})"
     assert installed_info[3] == "held"
 
 
