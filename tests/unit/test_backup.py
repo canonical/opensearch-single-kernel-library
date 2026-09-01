@@ -58,23 +58,24 @@ def _mock_backup(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_restore_in_progress",
         return_value=restore_running_return_value,
     )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.verify_snapshots_repository",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.keystore.KeystoreManager.reload",
+        return_value=True,
+    )
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
     mocker, harness, backend_setup, context
 ):
     # Given
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
-    )
     create_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
     )
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     create_snapshot.side_effect = OpenSearchHttpError(
@@ -98,12 +99,6 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
-    )
-    mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
     )
@@ -112,7 +107,7 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
         return_value={"snapshot": "2025-01-01T10:00:00Z", "state": "SUCCESS"},
     )
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -135,18 +130,12 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     _mock_backup(mocker)
     ca = "-----BEGIN CERT-----\nMIIB...==\n-----END CERT-----\n"
     use_s3(ca=ca, mocker=mocker)
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
-    )
     patch_create_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
     )
     is_repository_created = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
     )
     is_repository_created.return_value = False
 
@@ -166,17 +155,11 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
 def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
-    )
-    mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
         return_value="2025-01-01T10:00:00Z",
     )
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     mocker.patch(
@@ -203,7 +186,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -232,7 +215,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -263,7 +246,7 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -297,7 +280,7 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
 def test_list_backups_when_not_leader_then_action_fails(harness, mocker, backend_setup, context):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -316,7 +299,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -343,7 +326,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -366,7 +349,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -406,14 +389,8 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
@@ -455,14 +432,8 @@ def test_restore_when_start_fails_then_action_fails_with_message(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
@@ -502,14 +473,8 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
@@ -542,7 +507,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -578,14 +543,8 @@ def test_restore_when_all_ok_then_health_apply_is_called(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.reload_secure_settings",
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.verify_repository",
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
@@ -627,7 +586,7 @@ def test_restore_when_all_ok_then_health_apply_is_called(
 def test_restore_when_not_leader_then_action_fails(mocker, context, harness, backend_setup):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -648,7 +607,7 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
 def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, backend_setup):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -669,7 +628,7 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
 
@@ -717,7 +676,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -735,7 +694,7 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -752,7 +711,7 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
 ):
     # Given
     is_repository_created = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -762,7 +721,7 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
 
     is_repository_created.side_effect = [False, False]
     monkeypatch.setattr(
-        "opensearch_single_kernel.common.client.OpenSearchClient.create_repository",
+        "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshots_repository",
         lambda *_a, **_k: None,
     )
     # When
@@ -785,7 +744,7 @@ def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
         raise OpenSearchHttpError(response_text="precheck-failed", response_code=500)
 
     monkeypatch.setattr(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_error,
     )
     # When
@@ -803,7 +762,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
 ):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     _mock_backup(mocker)
@@ -825,7 +784,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
 def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     mocker.patch(
@@ -844,7 +803,7 @@ def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness
 def test_prereq_when_restore_running_then_action_fails(context, mocker, harness):
     # Given
     mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
         return_value=True,
     )
     mocker.patch(
