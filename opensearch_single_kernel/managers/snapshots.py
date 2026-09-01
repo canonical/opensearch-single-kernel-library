@@ -339,13 +339,15 @@ class SnapshotsManager(BaseManager):
             return False
 
         logger.info("Creating/Updating snapshot repository for %s", storage_type)
-        self.opensearch_client.create_repository(
+        self.opensearch_client.create_snapshots_repository(
             object_storage_type=storage_type,
             object_storage_config=storage_cfg,
             alt_hosts=self.alt_hosts,
         )
         logger.info("Created/Updated snapshot repository for %s", storage_type)
-        return self.opensearch_client.is_repository_created(storage_type, alt_hosts=self.alt_hosts)
+        return self.opensearch_client.is_snapshots_repository_created(
+            storage_type, alt_hosts=self.alt_hosts
+        )
 
     def remove_repository(self, storage_type: ObjectStorageType) -> bool:
         """Remove the snapshot repository for the given storage type.
@@ -357,7 +359,7 @@ class SnapshotsManager(BaseManager):
             bool: True if repository was removed or did not exist, False if removal failed.
         """
         try:
-            self.opensearch_client.remove_repository(
+            self.opensearch_client.remove_snapshots_repository(
                 object_storage_type=storage_type,
                 alt_hosts=self.alt_hosts,
             )
@@ -376,11 +378,10 @@ class SnapshotsManager(BaseManager):
         Returns:
             str: The ID of the created snapshot.
         """
-        self.opensearch_client.reload_secure_settings()
         object_storage_type = self.state.storage_type
         alt_hosts = self.alt_hosts
         # Create a new snapshot
-        self.opensearch_client.verify_repository(object_storage_type, alt_hosts)
+        self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
             alt_hosts=alt_hosts,
@@ -463,8 +464,7 @@ class SnapshotsManager(BaseManager):
         # start the restore
         logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
-            self.opensearch_client.reload_secure_settings()
-            self.opensearch_client.verify_repository(object_storage_type, alt_hosts)
+            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
             non_restored_indices = self.opensearch_client.restore_snapshot(
                 object_storage_type=object_storage_type,
                 snapshot=snapshot,
@@ -554,7 +554,9 @@ class SnapshotsManager(BaseManager):
 
         # all units have saved the latest credentials
         logger.info("All peer-cluster units have saved the latest backup credentials.")
-        self.opensearch_client.check_repository(object_storage_type, alt_hosts=self.alt_hosts)
+        self.opensearch_client.verify_snapshots_repository(
+            object_storage_type, alt_hosts=self.alt_hosts
+        )
 
     @property
     def is_operation_in_progress(self) -> bool:

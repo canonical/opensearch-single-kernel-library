@@ -63,7 +63,7 @@ class OpenSearchClient:
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def create_repository(
+    def create_snapshots_repository(
         self,
         object_storage_type: ObjectStorageType,
         object_storage_config: ObjectStorageConfig,
@@ -115,33 +115,7 @@ class OpenSearchClient:
         assert response.get("acknowledged") is True
         return repo_name
 
-    def check_repository(
-        self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
-    ) -> bool:
-        """Check repository health by listing snapshots.
-
-        Args:
-            object_storage_type (ObjectStorageType): Object storage type
-
-        Returns:
-            True if the repository can be listed successfully.
-
-        Raises:
-            OpenSearchHttpError if there are any backend issues such as auth/perm errors.
-        """
-        repository = repository_name(object_storage_type)
-        # If creds/endpoint/perm are wrong, this call raises OpenSearchHttpError with a 500.
-        self.request(
-            "GET",
-            f"_snapshot/{repository}/_all",
-            alt_hosts=alt_hosts,
-            timeout=30,
-            retries=3,
-            wait_strategy=wait_fixed(3),
-        )
-        return True
-
-    def verify_repository(
+    def verify_snapshots_repository(
         self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
     ) -> bool:
         """Verify repository.
@@ -226,7 +200,7 @@ class OpenSearchClient:
         }
         return dict(sorted(snapshots.items(), reverse=True))
 
-    def is_repository_created(
+    def is_snapshots_repository_created(
         self,
         object_storage_type: ObjectStorageType,
         repository: str = None,
@@ -285,7 +259,7 @@ class OpenSearchClient:
                 return True
         return False
 
-    def remove_repository(
+    def remove_snapshots_repository(
         self,
         object_storage_type: ObjectStorageType,
         name: str | None = None,
