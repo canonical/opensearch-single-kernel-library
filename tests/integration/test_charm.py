@@ -317,7 +317,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
         f"{APP_NAME}/{leader_id}",
         "--",
         "sudo",
-        "opensearch.opensearch-bin",
+        "opensearch-charmed.opensearch-bin",
         "--version",
     ]
 

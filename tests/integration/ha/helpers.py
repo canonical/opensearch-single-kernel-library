@@ -42,7 +42,7 @@ from .continuous_writes import ContinuousWrites
 logger = logging.getLogger(__name__)
 
 
-OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch.daemon.service"
+OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch-charmed.daemon.service"
 
 
 def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:

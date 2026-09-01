@@ -200,7 +200,7 @@ PERFORMANCE_PROFILE = "profile"
 # Revision 2.19.5
 # OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
 # Revision 3.7.0
-OPENSEARCH_SNAP_REVISION = "49"  # Keep in sync with `workload_version` file
+OPENSEARCH_SNAP_REVISION = "65"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"

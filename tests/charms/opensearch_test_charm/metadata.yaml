@@ -68,4 +68,4 @@ requires:
 storage:
   opensearch-data:
     type: filesystem
-    location: /var/snap/opensearch/common # /mnt/opensearch/data
+    location: /var/snap/opensearch-charmed/common # /mnt/opensearch/data
