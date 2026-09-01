@@ -14,6 +14,7 @@ from tenacity import (
     Retrying,
     retry,
     stop_after_attempt,
+    stop_after_delay,
     wait_fixed,
     wait_random,
 )
@@ -310,10 +311,14 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
         get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
-        _, opensearch_pid, _ = await ops_test.juju(
-            *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
-        )
-        if opensearch_pid.strip():
+        try:
+            for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+                with attempt:
+                    _, opensearch_pid, _ = await ops_test.juju(
+                        *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
+                    )
+                    assert not opensearch_pid.strip(), f"{unit_name} still running opensearch"
+        except RetryError:
             return False
 
     return True
