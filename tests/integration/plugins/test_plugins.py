@@ -840,6 +840,7 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
 
 
+@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate) -> None:

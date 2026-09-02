@@ -84,6 +84,12 @@ def charm_version_minus_1(opensearch_minus_1_base_path: Path, ubuntu_base: str) 
 
 
 @pytest.fixture
+def upgrade_base_charm(opensearch_upgrade_base_path: Path, ubuntu_base: str) -> str:
+    """Path to the packed 3.7.0 base charm used as the VM upgrade starting point."""
+    return str(opensearch_upgrade_base_path / f"opensearch_ubuntu@{ubuntu_base}-amd64.charm")
+
+
+@pytest.fixture
 def charm_resources(substrate: Substrate) -> dict[str, str]:
     """Resources to pass to `juju deploy` for the OpenSearch charm.
 

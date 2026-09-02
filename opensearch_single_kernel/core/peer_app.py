@@ -212,7 +212,6 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     def update_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
         """Unmarshal: Update the local app peer model using data from a peer cluster relation."""
         with self.update() as m:
-            m.security_index_initialised = peer_data.security_index_initialised
             m.first_data_node = peer_data.first_data_node
             m.nodes_config = peer_data.nodes_config
 

@@ -126,6 +126,7 @@ jobs:
       matrix:
         path:
           - tests/charms/opensearch_test_charm
+          - tests/charms/opensearch_3.7.0_test_charm
           - tests/charms/opensearch_k8s_test_charm
           - tests/charms/opensearch_k8s_2.19.4_test_charm
           - tests/charms/dummy-client-charm
