@@ -394,7 +394,7 @@ class TlsManager(BaseManager):
             bundle_content = (
                 self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
             )
-            if ca_chain not in bundle_content:
+            if ca_chain and ca_chain not in bundle_content:
                 self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
         except OpenSearchFileOperationError as e:
             logger.error("Error updating request CA bundle: %s", e)
