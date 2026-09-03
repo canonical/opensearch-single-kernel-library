@@ -453,6 +453,11 @@ class PeerClusterEventsHandler(Object):
         self.charm.peer_cluster_manager.delete_departed_orchestrator(
             event_src_cluster_type, orchestrators
         )
+
+        # In case peer relation data is already gone
+        if not deployment_desc:
+            return
+
         # the 'main' cluster orchestrator is the one being removed
         if event_src_cluster_type == "main" and orchestrators.failover_app:
             if orchestrators.failover_app.id != deployment_desc.app.id:
@@ -469,8 +474,7 @@ class PeerClusterEventsHandler(Object):
 
         # we leave in case not an orchestrator
         if (
-            self.charm.state.application.deployment_desc
-            and self.charm.state.application.deployment_desc.typ == DeploymentType.OTHER
+            self.charm.state.application.deployment_desc.typ == DeploymentType.OTHER
             or deployment_desc.app.id
             not in [app.id for app in (orchestrators.main_app, orchestrators.failover_app) if app]
         ):
