@@ -23,6 +23,7 @@ from .helpers import (
     IDLE_PERIOD,
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_REVISION,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
     OPENSEARCH_K8S_CHARM,
@@ -78,7 +79,7 @@ async def _build_env(
     tls_config = {"ca-common-name": "CN_CA"}
 
     if substrate == "k8s":
-        revision = None
+        revision = K8S_VERSION_TO_REVISION[version][series]
         config = {"profile": "testing"}
         charm = OPENSEARCH_K8S_CHARM
     else:
