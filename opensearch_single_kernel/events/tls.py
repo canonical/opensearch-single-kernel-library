@@ -102,7 +102,7 @@ class TLSEventsHandler(Object):
                 "key-password": event.params.get("password", None),
             }
             csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope, cert_type, secret=secrets, renew=True
+                scope, cert_type, secret=secrets
             )
             self.certs.request_certificate_creation(certificate_signing_request=csr)
 
@@ -320,7 +320,7 @@ class TLSEventsHandler(Object):
         old_csr = secrets["csr"].encode("utf-8")
 
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            scope=scope, cert_type=cert_type, secret=secrets, tls_file=False
+            scope=scope, cert_type=cert_type, secret=secrets, tls_file=False, renew=True
         )
         self.certs.request_certificate_renewal(
             old_certificate_signing_request=old_csr,
