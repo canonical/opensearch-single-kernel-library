@@ -5,3 +5,9 @@ self-hosted-runner:
     - amd64
     - tiobe
     - noble
+
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      # TODO: Remove this once actionlint supports GitHub's self-repository ($/) syntax.
+      - 'reusable workflow call "\$/\.github/workflows/.+" at "uses" is not following the format'
