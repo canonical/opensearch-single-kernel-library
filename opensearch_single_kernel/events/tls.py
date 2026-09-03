@@ -102,7 +102,7 @@ class TLSEventsHandler(Object):
                 "key-password": event.params.get("password", None),
             }
             csr = self.charm.tls_manager.create_certificate_signing_request(
-                scope, cert_type, secret=secrets
+                scope, cert_type, secret=secrets, renew=True
             )
             self.certs.request_certificate_creation(certificate_signing_request=csr)
 
