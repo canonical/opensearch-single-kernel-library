@@ -1775,11 +1775,11 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_ml/agents"
 
-    # register flow agent to run CatIndexTool
+    # register flow agent to run ListIndexTool
     payload = {
         "name": "skills_test",
         "type": "flow",
-        "tools": [{"type": "CatIndexTool", "name": "list"}],
+        "tools": [{"type": "ListIndexTool", "name": "list"}],
     }
     response = await http_request(ops_test, "POST", f"{endpoint}/_register", payload)
     agent_id = response.get("agent_id")

@@ -136,7 +136,7 @@ def get_version_on_unit(unit: str, model: str, substrate):
             "snap",
             "run",
             "--shell",
-            "opensearch.daemon",
+            "opensearch-charmed.daemon",
             "-c",
             "$OPENSEARCH_BIN/opensearch --version",
         ]
