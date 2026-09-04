@@ -3,6 +3,7 @@ rules:
     config:
       days: 3
 
+  # Allowlist trusted actions and pre-commit repos.
   forbidden-uses:
     config:
       allow:
