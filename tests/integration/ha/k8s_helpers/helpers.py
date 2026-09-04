@@ -16,12 +16,13 @@ import urllib3
 from kubernetes import client, config, stream
 from kubernetes.client.rest import ApiException
 from tenacity import (
+    RetryError,
     Retrying,
     stop_after_delay,
     wait_fixed,
 )
 
-from tests.integration.helpers import get_application_unit_ids
+from tests.integration.helpers import NO_TTY_STDIN, get_application_unit_ids
 
 logger = getLogger(__name__)
 
@@ -306,6 +307,7 @@ def pebble_patch_restart_delay(
                 f"juju ssh --container opensearch {unit_name} lsof -ti:9200".split(),
                 capture_output=True,
                 text=True,
+                stdin=subprocess.DEVNULL,
                 env={**os.environ, "JUJU_MODEL": model_name},
             )
             assert result.stdout.strip(), (
@@ -448,16 +450,22 @@ async def k8s_all_processes_down(
             "-f",
             db_process,
         ]
-        return_code, opensearch_pid, stderr = await ops_test.juju(*get_pid_cmd, check=False)
-        if return_code not in (0, 1):
-            logger.error(
-                "Failed to check OpenSearch process on unit %s: rc=%s, stderr=%s",
-                unit_name,
-                return_code,
-                stderr,
-            )
-            return False
-        if opensearch_pid.strip():
+        try:
+            for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+                with attempt:
+                    return_code, opensearch_pid, stderr = await ops_test.juju(
+                        *get_pid_cmd, check=False, stdin=NO_TTY_STDIN
+                    )
+                    if return_code not in (0, 1):
+                        logger.error(
+                            "Failed to check OpenSearch process on unit %s: rc=%s, stderr=%s",
+                            unit_name,
+                            return_code,
+                            stderr,
+                        )
+                        return False
+                    assert not opensearch_pid.strip(), f"{unit_name} still running opensearch"
+        except RetryError:
             return False
 
     return True

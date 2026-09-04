@@ -154,9 +154,10 @@ async def test_build_large_deployment(
     # wait for the cluster to fully form
     await wait_until(
         ops_test,
-        apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-        wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        apps=[MAIN_APP, DATA_APP, FAILOVER_APP, TLS_CERTIFICATES_APP_NAME],
+        wait_for_exact_units=APP_UNITS | {TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
+        timeout=3000,
     )
 
 
@@ -194,7 +195,7 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
             await wait_until(
                 ops_test,
                 apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
-                wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+                wait_for_exact_units=APP_UNITS,
                 timeout=2400,
                 idle_period=IDLE_PERIOD,
             )

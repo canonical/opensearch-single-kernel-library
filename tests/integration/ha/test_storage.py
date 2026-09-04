@@ -111,7 +111,7 @@ async def test_storage_reuse_after_scale_down(
     # create a testfile on the newly added unit to check if data in storage is persistent
     testfile = "/var/snap/opensearch/common/testfile"
     create_testfile_cmd = f"juju ssh {app}/{unit_id} -q sudo touch {testfile}"
-    subprocess.run(create_testfile_cmd, shell=True)
+    subprocess.run(create_testfile_cmd, shell=True, stdin=subprocess.DEVNULL)
 
     # scale-down to 1
     # app status might be blocked because after scaling down not all shards are assigned
@@ -155,7 +155,15 @@ async def test_storage_reuse_after_scale_down(
 
     # check if the testfile is still there or was overwritten on installation
     check_testfile_cmd = f"juju ssh {app}/{new_unit_id} -q sudo ls {testfile}"
-    assert testfile == subprocess.getoutput(check_testfile_cmd)
+    check_testfile = subprocess.run(
+        check_testfile_cmd,
+        shell=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert testfile == check_testfile.stdout.strip()
 
 
 @pytest.mark.abort_on_fail

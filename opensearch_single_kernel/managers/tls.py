@@ -394,7 +394,7 @@ class TlsManager(BaseManager):
             bundle_content = (
                 self.workload.read_text(chain_path) if self.workload.exists(chain_path) else ""
             )
-            if ca_chain not in bundle_content:
+            if ca_chain and ca_chain not in bundle_content:
                 self.workload.write_text(f"{bundle_content}\n{ca_chain}", chain_path)
         except OpenSearchFileOperationError as e:
             logger.error("Error updating request CA bundle: %s", e)
@@ -855,6 +855,10 @@ class TlsManager(BaseManager):
         """Compute TLS statuses from state and the cert store (read-only)."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
+        # Means the unit is  being terminated
+        if not self.state.peer_relation:
+            return status_list
+
         if not self.state.tls_relation:
             # Unit will fail if we combine the two iF
             if (
@@ -863,10 +867,6 @@ class TlsManager(BaseManager):
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
-
-        # Means the unit is  being terminated
-        if not self.state.peer_relation:
-            return status_list
 
         if scope == "unit":
             if self.state.server.tls_ca_renewing and not self.state.server.tls_ca_renewed:

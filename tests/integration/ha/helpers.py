@@ -14,6 +14,7 @@ from tenacity import (
     Retrying,
     retry,
     stop_after_attempt,
+    stop_after_delay,
     wait_fixed,
     wait_random,
 )
@@ -23,6 +24,7 @@ from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.helpers import (
+    NO_TTY_STDIN,
     get_application_unit_ids,
     get_application_unit_ids_hostnames,
     get_application_unit_ids_ips,
@@ -309,8 +311,14 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
         get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
-        _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
-        if opensearch_pid.strip():
+        try:
+            for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+                with attempt:
+                    _, opensearch_pid, _ = await ops_test.juju(
+                        *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
+                    )
+                    assert not opensearch_pid.strip(), f"{unit_name} still running opensearch"
+        except RetryError:
             return False
 
     return True
@@ -332,7 +340,9 @@ async def send_kill_signal_to_process(
             get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
         else:
             get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200"
-        _, opensearch_pid, _ = await ops_test.juju(*get_pid_cmd.split(), check=False)
+        _, opensearch_pid, _ = await ops_test.juju(
+            *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
+        )
 
     if not (opensearch_pid := opensearch_pid.strip()):
         raise Exception("Could not fetch PID for process listening on port 9200.")
@@ -342,7 +352,9 @@ async def send_kill_signal_to_process(
     else:
         # use xargs to bypass error codes returned by kill
         kill_cmd = f"ssh --container opensearch {unit_name} echo {opensearch_pid} | xargs -r kill -{signal.upper()}"
-    return_code, stdout, stderr = await ops_test.juju(*kill_cmd.split(), check=False)
+    return_code, stdout, stderr = await ops_test.juju(
+        *kill_cmd.split(), check=False, stdin=NO_TTY_STDIN
+    )
     if return_code != 0:
         raise Exception(f"{kill_cmd} failed -- rc: {return_code} - out: {stdout} - err: {stderr}")
 
@@ -361,11 +373,11 @@ async def update_restart_delay(ops_test: OpsTest, app: str, unit_id: int, delay:
         f"sudo sed -i -e s/^RestartSec=[0-9]\\+/RestartSec={delay}/g "
         f"{OPENSEARCH_SERVICE_PATH}"
     )
-    await ops_test.juju(*replace_delay_cmd.split(), check=True)
+    await ops_test.juju(*replace_delay_cmd.split(), check=True, stdin=NO_TTY_STDIN)
 
     # reload the daemon for systemd to reflect changes
     reload_cmd = f"{bin_cmd} --unit {unit_name} -- sudo systemctl daemon-reload"
-    await ops_test.juju(*reload_cmd.split(), check=True)
+    await ops_test.juju(*reload_cmd.split(), check=True, stdin=NO_TTY_STDIN)
 
 
 async def cut_network_from_unit_with_ip_change(ops_test: OpsTest, app: str, unit_id: int) -> None:

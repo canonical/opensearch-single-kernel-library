@@ -94,8 +94,13 @@ def deployment_type(
     )
 
 
-def get_k8s_fqdn(name: str) -> str:
-    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+def resolve_k8s_canonical_name(name: str) -> str | None:
+    """Resolve the canonical DNS name for a K8s service or pod name, or None if unresolvable.
+
+    On a freshly (re)created pod, the per-unit DNS record may not be published
+    yet — callers can use None to postpone work that must not run with an
+    unresolved name (e.g. computing certificate SANs).
+    """
     try:
         info = socket.getaddrinfo(
             name,
@@ -105,20 +110,23 @@ def get_k8s_fqdn(name: str) -> str:
             type=socket.SOCK_STREAM,
         )
     except socket.gaierror as e:
-        logger.warning(
-            "Failed to resolve canonical name for %s: %s. \nFalling back on default fqdn.",
-            name,
-            e,
-        )
-        return socket.getfqdn(name)
+        logger.warning("Failed to resolve canonical name for %s: %s.", name, e)
+        return None
 
     for entry in info:
         if canonname := entry[3]:
             return canonname
 
-    logger.warning(
-        "Failed to resolve canonical name for %s. \nFalling back on default fqdn.", name
-    )
+    logger.warning("Failed to resolve canonical name for %s.", name)
+    return None
+
+
+def get_k8s_fqdn(name: str) -> str:
+    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+    if canonname := resolve_k8s_canonical_name(name):
+        return canonname
+
+    logger.warning("Falling back on default fqdn for %s.", name)
     return socket.getfqdn(name)
 
 
