@@ -197,7 +197,7 @@ class KeystoreManager(BaseManager):
             logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
             return True
 
-        if not self.opensearch_client.reload_secure_settings():
+        if not self.opensearch_client.reload_secure_settings(alt_hosts=self.alt_hosts):
             return False
 
         logger.debug("Keystore reload successful")

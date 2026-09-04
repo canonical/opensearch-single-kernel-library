@@ -381,7 +381,8 @@ class SnapshotsManager(BaseManager):
         object_storage_type = self.state.storage_type
         alt_hosts = self.alt_hosts
         # Create a new snapshot
-        self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+        if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
+            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
             alt_hosts=alt_hosts,
@@ -459,12 +460,13 @@ class SnapshotsManager(BaseManager):
                 "Backup %s could not be fetched. Error: %s." % (snapshot_id, str(e))
             )
 
-        # close indices that were snapshotted if they still exist, so they can be restored
-        self.close_snapshot_indices(snapshot)
-        # start the restore
-        logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
-            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+            if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
+                self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+            # close indices that were snapshotted if they still exist, so they can be restored
+            self.close_snapshot_indices(snapshot)
+            # start the restore
+            logger.info("Starting restore of snapshot %s.", snapshot_id)
             non_restored_indices = self.opensearch_client.restore_snapshot(
                 object_storage_type=object_storage_type,
                 snapshot=snapshot,

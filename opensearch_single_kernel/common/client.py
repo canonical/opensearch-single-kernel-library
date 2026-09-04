@@ -1231,14 +1231,21 @@ class OpenSearchClient:
                 return
             raise
 
-    def reload_secure_settings(self) -> bool:
+    def reload_secure_settings(self, alt_hosts: list[str] | None = None) -> bool:
         """Reload secure settings. Doesn't throw an exception.
 
         Returns:
             bool: whether operation was successful.
         """
         try:
-            response = self.request("POST", "_nodes/reload_secure_settings")
+            response = self.request(
+                "POST",
+                "_nodes/reload_secure_settings",
+                alt_hosts=alt_hosts,
+                retries=3,
+                wait_strategy=wait_exponential(min=2),
+                timeout=30,
+            )
         except OpenSearchHttpError as e:
             logger.error("Could not reload secure settings: %s", e)
             return False
