@@ -436,21 +436,24 @@ class PeerClusterEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        # fetch current deployment_desc
-        deployment_desc = self.charm.state.application.deployment_desc
-
-        orchestrators = self.charm.state.application.orchestrators
-
         # handle scale-down at the charm level storage detaching
         if len(event.relation.units) > 0:
             return
 
+        # fetch current deployment_desc
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            return
+
+        orchestrators = self.charm.state.application.orchestrators
         # check the departed cluster which triggered this hook
         event_src_cluster_type = (
             "main" if event.relation.id == orchestrators.main_rel_id else "failover"
         )
 
-        self.charm.peer_cluster_manager.delete_departed_orchestrator(event_src_cluster_type)
+        self.charm.peer_cluster_manager.delete_departed_orchestrator(
+            event_src_cluster_type, orchestrators
+        )
+
         # the 'main' cluster orchestrator is the one being removed
         if event_src_cluster_type == "main" and orchestrators.failover_app:
             if orchestrators.failover_app.id != deployment_desc.app.id:
