@@ -339,13 +339,15 @@ class SnapshotsManager(BaseManager):
             return False
 
         logger.info("Creating/Updating snapshot repository for %s", storage_type)
-        self.opensearch_client.create_repository(
+        self.opensearch_client.create_snapshots_repository(
             object_storage_type=storage_type,
             object_storage_config=storage_cfg,
             alt_hosts=self.alt_hosts,
         )
         logger.info("Created/Updated snapshot repository for %s", storage_type)
-        return self.opensearch_client.is_repository_created(storage_type, alt_hosts=self.alt_hosts)
+        return self.opensearch_client.is_snapshots_repository_created(
+            storage_type, alt_hosts=self.alt_hosts
+        )
 
     def remove_repository(self, storage_type: ObjectStorageType) -> bool:
         """Remove the snapshot repository for the given storage type.
@@ -357,7 +359,7 @@ class SnapshotsManager(BaseManager):
             bool: True if repository was removed or did not exist, False if removal failed.
         """
         try:
-            self.opensearch_client.remove_repository(
+            self.opensearch_client.remove_snapshots_repository(
                 object_storage_type=storage_type,
                 alt_hosts=self.alt_hosts,
             )
@@ -377,10 +379,13 @@ class SnapshotsManager(BaseManager):
             str: The ID of the created snapshot.
         """
         object_storage_type = self.state.storage_type
+        alt_hosts = self.alt_hosts
         # Create a new snapshot
+        if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
+            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
-            alt_hosts=self.alt_hosts,
+            alt_hosts=alt_hosts,
         )
         return snapshot_id
 
@@ -439,11 +444,12 @@ class SnapshotsManager(BaseManager):
 
         """
         object_storage_type = self.state.storage_type
+        alt_hosts = self.alt_hosts
         # Fetch the snapshot with the corresponding ID
         try:
             if not (
                 snapshot := self.opensearch_client.get_snapshot(
-                    object_storage_type, snapshot_id, alt_hosts=self.alt_hosts
+                    object_storage_type, snapshot_id, alt_hosts=alt_hosts
                 )
             ):
                 logger.error("Backup %s not found", snapshot_id)
@@ -454,15 +460,17 @@ class SnapshotsManager(BaseManager):
                 "Backup %s could not be fetched. Error: %s." % (snapshot_id, str(e))
             )
 
-        # close indices that were snapshotted if they still exist, so they can be restored
-        self.close_snapshot_indices(snapshot)
-        # start the restore
-        logger.info("Starting restore of snapshot %s.", snapshot_id)
         try:
+            if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
+                self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+            # close indices that were snapshotted if they still exist, so they can be restored
+            self.close_snapshot_indices(snapshot)
+            # start the restore
+            logger.info("Starting restore of snapshot %s.", snapshot_id)
             non_restored_indices = self.opensearch_client.restore_snapshot(
                 object_storage_type=object_storage_type,
                 snapshot=snapshot,
-                alt_hosts=self.alt_hosts,
+                alt_hosts=alt_hosts,
             )
             if not non_restored_indices:
                 return
@@ -548,7 +556,9 @@ class SnapshotsManager(BaseManager):
 
         # all units have saved the latest credentials
         logger.info("All peer-cluster units have saved the latest backup credentials.")
-        self.opensearch_client.verify_repository(object_storage_type, alt_hosts=self.alt_hosts)
+        self.opensearch_client.verify_snapshots_repository(
+            object_storage_type, alt_hosts=self.alt_hosts
+        )
 
     @property
     def is_operation_in_progress(self) -> bool:
