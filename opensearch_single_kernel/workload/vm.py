@@ -12,6 +12,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
+from platform import machine
 from types import SimpleNamespace
 
 from charmlibs import pathops
@@ -19,7 +20,7 @@ from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
+from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISIONS
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -110,7 +111,8 @@ class VMWorkload(BaseWorkload):
             cache = snap.SnapCache()
             opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
-            opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
+            revision = OPENSEARCH_SNAP_REVISIONS[machine()]
+            opensearch_snap.ensure(snap.SnapState.Latest, revision=revision)
             opensearch_snap.connect("process-control")
             self.opensearch_snap = opensearch_snap
             if not opensearch_snap.held:

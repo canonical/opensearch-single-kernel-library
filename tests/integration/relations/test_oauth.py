@@ -49,9 +49,19 @@ logger = logging.getLogger(__name__)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy(
-    ops_test: OpsTest, charm, series, ops_test_k8s: OpsTest, charm_resources, substrate
+    ops_test: OpsTest,
+    charm,
+    series,
+    ops_test_k8s: OpsTest,
+    charm_resources,
+    substrate,
+    architecture,
 ):
     """Deploy OpenSearch, data integrator and identity platform (K8s) simultaneously."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     k8s_ops = ops_test_k8s if substrate == "vm" else ops_test
     await gather(
         ops_test.model.deploy(
@@ -79,11 +89,15 @@ async def test_deploy(
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate):
+async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate, architecture: str):
     """Establish all the required relations.
 
     Connects OpenSearch, data integrator and identity platform (cross-model).
     """
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     if substrate == "k8s":
         # if we're on k8s, we already have identity platform deployed in the same model,
         # so we just relate to it
@@ -112,11 +126,15 @@ async def test_setup_relations(ops_test: OpsTest, k8s_model: Model, substrate):
 
 
 @pytest.mark.abort_on_fail
-async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model):
+async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model, architecture: str):
     """Configure new OAuth client on Hydra (identity platform).
 
     Also, acquire corresponding access token for the further testing.
     """
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     # Ensure Hydra is active before running the action
     await k8s_model.wait_for_idle(apps=["hydra"], status="active", timeout=300)
 
@@ -183,12 +201,16 @@ async def test_setup_oauth(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
+async def test_oauth_access(ops_test: OpsTest, k8s_model: Model, architecture: str):
     """Check access to the OpenSearch with an access token, acquired earlier.
 
     Ensure that roles mapping works correctly by elevating user
     to the admin role and checking access to the admin endpoint.
     """
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     # read oauth info from file if it was written in the previous test, so we can run
     # this test independently
     if Path("oauth_info.json").exists():
@@ -231,8 +253,12 @@ async def test_oauth_access(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_second_client(ops_test: OpsTest, k8s_model: Model):
+async def test_deploy_second_client(ops_test: OpsTest, k8s_model: Model, architecture: str):
     """Deploy and configure second data integrator."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     await ops_test.model.deploy(
         DATA_INTEGRATOR_NAME,
         application_name=SECOND_DATA_INTEGRATOR_NAME,
@@ -244,12 +270,16 @@ async def test_deploy_second_client(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
+async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model, architecture: str):
     """Change roles mapping from first data integrator user to second one.
 
     Ensure, that admin permissions from the first one is removed, while role
     from the second one is added.
     """
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     action = (
         await ops_test.model.applications[SECOND_DATA_INTEGRATOR_NAME]
         .units[0]
@@ -296,8 +326,12 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
 
 
 @pytest.mark.abort_on_fail
-async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
+async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model, architecture: str):
     """Ensure that all of the oauth clients permissions are removed with clean roles mapping."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     await ops_test.model.applications["opensearch"].set_config(original_opensearch_config)
     await ops_test.model.wait_for_idle(apps=["opensearch"], status="active")
 
@@ -312,9 +346,19 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
 
 @pytest.mark.abort_on_fail
 async def test_setup_large_cluster(
-    ops_test: OpsTest, charm, series, k8s_model: Model, substrate, charm_resources
+    ops_test: OpsTest,
+    charm,
+    series,
+    k8s_model: Model,
+    substrate,
+    charm_resources,
+    architecture: str,
 ):
     """Replace the Opensearch application with a large deployment cluster."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     logger.info("Remove Opensearch application")
     await ops_test.model.remove_application("opensearch", block_until_done=True)
     await ops_test.model.remove_application(SECOND_DATA_INTEGRATOR_NAME, block_until_done=True)
@@ -383,9 +427,13 @@ async def test_setup_large_cluster(
 
 @pytest.mark.abort_on_fail
 async def test_oauth_relation_restricted(
-    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate, architecture: str
 ):
     """Ensure OAuth cannot be enabled if related to non-main-orchestrator."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     logger.info(f"Integrating {DATA_APP} with OAuth - this will result in blocked status")
     if substrate == "k8s":
         await ops_test.model.integrate(f"{DATA_APP}:oauth", "hydra")
@@ -427,9 +475,13 @@ async def test_oauth_relation_restricted(
 
 @pytest.mark.abort_on_fail
 async def test_oauth_access_large_cluster(
-    ops_test: OpsTest, charm, series, k8s_model: Model, substrate
+    ops_test: OpsTest, charm, series, k8s_model: Model, substrate, architecture: str
 ):
     """Relate to main orchestrator and verify access with OAuth."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since kratos-external-idp-integrator is not available for arm64"
+        )
     logger.info(f"Integrating {MAIN_APP} with oauth")
     if substrate == "k8s":
         await ops_test.model.integrate(f"{MAIN_APP}:oauth", "hydra")

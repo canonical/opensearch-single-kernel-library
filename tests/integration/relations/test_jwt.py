@@ -47,9 +47,13 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 3}
 
 @pytest.mark.abort_on_fail
 async def test_deploy_small_cluster(
-    charm, series, ops_test: OpsTest, charm_resources, substrate
+    charm, series, ops_test: OpsTest, charm_resources, substrate, architecture
 ) -> None:
     """Deploy OpenSearch and JWT integrator, configure and integrate them."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since jwt-integrator is not available for arm64"
+        )
     await ops_test.model.set_config(MODEL_CONFIG)
 
     await ops_test.model.deploy(
@@ -83,8 +87,12 @@ async def test_deploy_small_cluster(
 
 
 @pytest.mark.abort_on_fail
-async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
+async def test_configure_and_use_jwt(ops_test: OpsTest, architecture: str) -> None:
     """Configure JWT authentication and access the cluster with the token."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since jwt-integrator is not available for arm64"
+        )
     global generated_jwt
     generated_jwt = generate_json_web_token()
 
@@ -156,9 +164,13 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_configure_and_use_jwt_large_cluster(
-    charm, series, ops_test: OpsTest, substrate, charm_resources
+    charm, series, ops_test: OpsTest, substrate, charm_resources, architecture
 ) -> None:
     """Create a large deployment of OpenSearch."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since jwt-integrator is not available for arm64"
+        )
     logger.info("Create large deployment cluster of Opensearch")
     await asyncio.gather(
         ops_test.model.deploy(
