@@ -32,7 +32,8 @@ def _mock_backup(
 ):
     # Mocks
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
         return_value=deployment_desc_return_value,
     )
@@ -181,6 +182,11 @@ def test_list_backups_when_json_requested_then_json_is_returned(
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_repository_created",
         return_value=True,
+    )
+    # A "failed" snapshot makes list_snapshots fetch its per-shard failure reasons.
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
+        return_value={"snapshot": "2025-01-01T09:00:00Z", "state": "FAILED"},
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
@@ -1083,17 +1089,15 @@ def _cfg(*, secret_key: str = "{}", bucket: str = "bkt", base_path: str = "base/
     """Build an ObjectStorageConfig mock for GCS."""
     cfg = Mock()
     cfg.gcs = Mock()
-    cfg.gcs.credentials = Mock()
-    cfg.gcs.credentials.secret_key = secret_key
+    cfg.gcs.secret_key = secret_key
     cfg.gcs.bucket = bucket
-    cfg.gcs.base_path = base_path
+    cfg.gcs.path = base_path
     return cfg
 
 
 def test_create_gcs_bucket_when_credentials_block_missing_then_return_false():
     cfg = Mock()
-    cfg.gcs = Mock()
-    cfg.gcs.credentials = None
+    cfg.gcs = None
 
     assert object_storage.verify_gcs_credentials(cfg) is False
 

@@ -45,7 +45,7 @@ class HealthManager(BaseManager):
         local_app_only: bool = True,
     ) -> str:
         """Fetch the current cluster status."""
-        if not (deployment_desc := self.state.application.deployment_desc):
+        if not (deployment_desc := self.state.application.deployment_description):
             return HealthColors.UNKNOWN
 
         # the health depends on data nodes, for large deployments: an ML cluster
@@ -117,7 +117,7 @@ class HealthManager(BaseManager):
         """Compute health statuses. ``recompute=True`` may wait briefly for green."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        if not self.state.application.is_security_index_initialised:
+        if not self.state.application.security_index_initialised:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         status = self.get(wait_for_green_first=recompute)

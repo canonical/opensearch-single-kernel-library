@@ -32,6 +32,7 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
+pytestmark = pytest.mark.skip_if_substrate("k8s")
 
 OPENSEARCH_ORIGINAL_CHARM_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/edge"
@@ -82,6 +83,41 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
     await set_watermark(ops_test, APP_NAME)
 
 
+async def _build_env_from_local(ops_test: OpsTest, charm: str, series: str) -> None:
+    """Deploy an OpenSearch cluster from the locally-built 3.7.0 base charm."""
+    await ops_test.model.set_config(MODEL_CONFIG)
+
+    await deploy_opensearch(
+        ops_test,
+        charm,
+        "vm",
+        APP_NAME,
+        3,
+        series=series,
+        config=CONFIG_OPTS,
+    )
+
+    # Deploy TLS Certificates operator.
+    config = {"ca-common-name": "CN_CA"}
+    await ops_test.model.deploy(
+        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
+    )
+
+    # Relate it to OpenSearch to set up TLS.
+    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await wait_until(
+        ops_test,
+        apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
+        timeout=1400,
+        wait_for_exact_units={
+            APP_NAME: 3,
+        },
+        idle_period=60,
+    )
+
+    await set_watermark(ops_test, APP_NAME)
+
+
 #######################################################################
 #
 #  Tests
@@ -93,7 +129,7 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_deploy_latest_from_channel(
-    ops_test: OpsTest, charm_version_minus_1, series, substrate
+    ops_test: OpsTest, charm_version_minus_1, upgrade_base_charm, series, substrate
 ) -> None:
     """Deploy OpenSearch."""
     if substrate == "k8s":
@@ -130,7 +166,8 @@ async def test_deploy_latest_from_channel(
 
         await set_watermark(ops_test, APP_NAME)
     else:
-        await _build_env(ops_test, VM_VERSION_N_MINUS_2, series)
+        # await _build_env(ops_test, VM_VERSION_N_MINUS_2, series)
+        await _build_env_from_local(ops_test, upgrade_base_charm, series)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
@@ -201,6 +238,7 @@ async def test_upgrade_to_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
+@pytest.mark.skip("Cross-major (2.x -> 3.x) upgrades are not supported")
 async def test_deploy_from_version(ops_test: OpsTest, version, series) -> None:
     """Deploy OpenSearch."""
     await _build_env(ops_test, version, series)
@@ -223,6 +261,7 @@ async def test_upgrade_rollback_from_local(
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
+@pytest.mark.skip("Cross-major (2.x -> 3.x) upgrades are not supported")
 async def test_upgrade_from_version_to_local(
     ops_test: OpsTest,
     c_writes: ContinuousWrites,

@@ -27,7 +27,7 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     NotificationsStatuses,
 )
-from opensearch_single_kernel.core.models import SmtpConfig
+from opensearch_single_kernel.core.smtp import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SecretError,
@@ -262,7 +262,7 @@ class NotificationsManager(BaseManager):
             )
         )
 
-        if not (deployment_desc := self.state.application.deployment_desc):
+        if not (deployment_desc := self.state.application.deployment_description):
             return status_list
 
         if not self.state.smtp_relations:

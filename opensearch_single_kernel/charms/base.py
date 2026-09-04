@@ -10,12 +10,17 @@ from time import time_ns
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusHandler
+from dpcharmlibs.interfaces import (
+    RequirerCommonModel,
+    ResourceProviderEventHandler,
+)
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import EventSource
 from ops.charm import CharmEvents
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
+    CLIENT_RELATION,
     GCS_RELATION,
     PEER_RELATION,
     S3_RELATION,
@@ -105,6 +110,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             S3Requirer(self, S3_RELATION),
             AzureStorageRequirer(self, AZURE_RELATION),
             GCSRequirer(self, GCS_RELATION),
+            ResourceProviderEventHandler(
+                self, relation_name=CLIENT_RELATION, request_model=RequirerCommonModel
+            ),
         )
 
         # Managers
@@ -176,9 +184,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         if on_other_units or not on_current_unit:
             if only_by_leader:
-                self.state.application.update_ts = time_ns()
+                self.state.application.update_ts = str(time_ns())
             else:
-                self.state.server.update_ts = time_ns()
+                self.state.server.update_ts = str(time_ns())
 
         if on_current_unit:
             self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)

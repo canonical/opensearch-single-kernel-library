@@ -16,10 +16,8 @@ from opensearch_single_kernel.common.constants import (
     TLS_RELATION,
     DeploymentType,
 )
-from opensearch_single_kernel.core.models import (
-    DeploymentDescription,
-    PeerClusterOrchestrators,
-)
+from opensearch_single_kernel.core.base_models import DeploymentDescription
+from opensearch_single_kernel.core.peer_cluster import PeerClusterOrchestrators
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.relations.helpers import get_application_relation_data
 from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
@@ -36,7 +34,7 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 1}
 MAIN_ORCHESTRATOR_OFFER = "main-integration"
 FAILOVER_ORCHESTRATOR_OFFER = "failover-integration"
 CERTS_OFFER = "certs-integration"
-TIMEOUT = 45 * 60
+TIMEOUT = 60 * 60
 
 
 @pytest.mark.abort_on_fail

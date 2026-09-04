@@ -38,7 +38,7 @@ TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VM_VERSION_N = "2.19.4"
+VM_VERSION_N = "3.7.0"
 VM_VERSION_N_MINUS_1 = "2.18.0"
 VM_VERSION_N_MINUS_2 = "2.17.0"
 
@@ -120,8 +120,8 @@ def refresh(
 def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
     if substrate == "k8s":
-        cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        cmd = f"juju ssh --model {model} --container opensearch {unit} 'cd $OPENSEARCH_HOME && $OPENSEARCH_BIN/opensearch --version'"
+        shell = True
     else:
         # opensearch.opensearch-bin not exposed in older snap revisions
         cmd = [
@@ -136,11 +136,16 @@ def get_version_on_unit(unit: str, model: str, substrate):
             "snap",
             "run",
             "--shell",
-            "opensearch.daemon",
+            "opensearch-charmed.daemon",
             "-c",
             "$OPENSEARCH_BIN/opensearch --version",
         ]
-        output = subprocess.check_output(cmd, text=True)
+        shell = False
+
+    # Retry to absorb transient `juju ssh`/`juju exec` connection flakiness.
+    for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+        with attempt:
+            output = subprocess.check_output(cmd, shell=shell, text=True).strip()
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 

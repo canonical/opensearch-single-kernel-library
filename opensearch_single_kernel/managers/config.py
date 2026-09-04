@@ -13,7 +13,8 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
-from opensearch_single_kernel.core.models import Node, OpenSearchProfile
+from opensearch_single_kernel.core.base_models import Node
+from opensearch_single_kernel.core.profiles import OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -152,12 +153,12 @@ class ConfigManager(BaseManager):
             if public_ip := self.workload.get_host_public_ip():
                 publish_hosts.add(public_ip)
         return {
-            "cluster.name": self.state.application.deployment_desc.config.cluster_name,
+            "cluster.name": self.state.application.deployment_description.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
             "http.publish_host": sorted(publish_hosts),
             "node.roles": sorted(roles),
-            "node.attr.app_id": self.state.application.deployment_desc.app.id,
+            "node.attr.app_id": self.state.application.deployment_description.app.id,
             "path.data": self.workload.paths.data.as_posix(),
             "path.logs": self.workload.paths.logs.as_posix(),
             "path.home": self.workload.paths.home.as_posix(),
@@ -185,9 +186,7 @@ class ConfigManager(BaseManager):
             {
                 "cluster.initial_cluster_manager_nodes": sorted(cm_names),
             }
-            if cm_names
-            and "cluster_manager" in roles
-            and self.state.server.is_bootstrap_contributor
+            if cm_names and "cluster_manager" in roles and self.state.server.bootstrap_contributor
             else {}
         )
 
@@ -198,7 +197,7 @@ class ConfigManager(BaseManager):
         """
         return (
             {"plugins.security.authcz.admin_dn": [tls_subject]}
-            if (tls_subject := self.state.application.tls_subject)
+            if (tls_subject := self.state.application.admin_subject)
             else {}
         )
 
@@ -214,7 +213,7 @@ class ConfigManager(BaseManager):
             layer = "transport"
             keystore_pwd = self.state.server.transport_keystore_password
 
-        truststore_pwd = self.state.application.tls_truststore_password
+        truststore_pwd = self.state.application.admin_truststore_password
 
         if not (truststore_pwd and keystore_pwd):
             return {}
@@ -239,7 +238,7 @@ class ConfigManager(BaseManager):
 
         return (
             deployment_desc.config.data_temperature
-            if (deployment_desc := self.state.application.deployment_desc)
+            if (deployment_desc := self.state.application.deployment_description)
             else None
         )
 
@@ -249,7 +248,7 @@ class ConfigManager(BaseManager):
         if node := self.state.node_config:
             return node.roles
 
-        if self.state.application.deployment_desc:
+        if self.state.application.deployment_description:
             return self.state.computed_roles()
 
         return []
@@ -356,7 +355,28 @@ class ConfigManager(BaseManager):
 
         Intended for authc category in opensearch-security/config.yml config file.
         """
-        jwt_config = self.state.server.jwt_auth_configuration
+        jwt_config = self.state.jwt
+        if jwt_config:
+            config_opts = {
+                "signing_key": jwt_config.signing_key,
+                "jwt_header": jwt_config.jwt_header,
+                "jwt_url_parameter": jwt_config.jwt_url_parameter,
+                "roles_key": jwt_config.roles_key,
+                "subject_key": jwt_config.subject_key,
+                "required_audience": jwt_config.required_audience,
+                "required_issuer": jwt_config.required_issuer,
+                "jwt_clock_skew_tolerance_seconds": jwt_config.jwt_clock_skew_tolerance_seconds,
+            }
+        else:
+            config_opts = {
+                "signing_key": "base64 encoded HMAC key or public RSA/ECDSA pem key",
+                "jwt_header": "Authorization",
+                "jwt_url_parameter": None,
+                "roles_key": None,
+                "subject_key": None,
+                "jwt_clock_skew_tolerance_seconds": 30,
+            }
+
         return {
             "jwt_auth_domain": {
                 "description": "Authenticate via Json Web Token",
@@ -366,27 +386,7 @@ class ConfigManager(BaseManager):
                 "http_authenticator": {
                     "type": "jwt",
                     "challenge": False,
-                    "config": (
-                        {
-                            "signing_key": jwt_config.signing_key,
-                            "jwt_header": jwt_config.jwt_header,
-                            "jwt_url_parameter": jwt_config.jwt_url_parameter,
-                            "roles_key": jwt_config.roles_key,
-                            "subject_key": jwt_config.subject_key,
-                            "required_audience": jwt_config.required_audience,
-                            "required_issuer": jwt_config.required_issuer,
-                            "jwt_clock_skew_tolerance_seconds": jwt_config.jwt_clock_skew_tolerance_seconds,
-                        }
-                        if jwt_config
-                        else {
-                            "signing_key": "base64 encoded HMAC key or public RSA/ECDSA pem key",
-                            "jwt_header": "Authorization",
-                            "jwt_url_parameter": None,
-                            "roles_key": None,
-                            "subject_key": None,
-                            "jwt_clock_skew_tolerance_seconds": 30,
-                        }
-                    ),
+                    "config": config_opts,
                 },
                 "authentication_backend": {"type": "noop"},
             }
@@ -512,7 +512,7 @@ class ConfigManager(BaseManager):
         Returns:
             whether the configuration changed and restart required.
         """
-        current_profile = self.state.server.profile
+        current_profile = self.state.server.opensearch_profile
         logger.debug("current profile: %s, config profile: %s", current_profile, profile)
         if current_profile is None or current_profile != profile:
             heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
@@ -520,7 +520,7 @@ class ConfigManager(BaseManager):
                 "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
             self._update_jvm_heap_size(heap_size)
-            self.state.server.profile = profile
+            self.state.server.opensearch_profile = profile
             return True
         return False
 

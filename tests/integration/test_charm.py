@@ -182,7 +182,7 @@ async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
     # 3. change password and verify the new password works and old password not
     password0 = (await get_secrets(ops_test, leader_id))["password"]
     result = await run_action(ops_test, leader_id, "set-password", {"password": "new_pwd"})
-    password1 = result.response.get("admin-password")
+    password1 = result.response.get("admin")
     assert password1
     assert password1 == (await get_secrets(ops_test, leader_id))["password"]
 
@@ -196,7 +196,7 @@ async def test_actions_rotate_admin_password(ops_test: OpsTest) -> None:
 
     # 4. change password with auto-generated one
     result = await run_action(ops_test, leader_id, "set-password")
-    password2 = result.response.get("admin-password")
+    password2 = result.response.get("admin")
     assert password2
 
     http_resp_code = await http_request(ops_test, "GET", test_url, resp_status_code=True)
@@ -220,7 +220,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
     # run the action w/o password parameter
     password0 = (await get_secrets(ops_test, leader_id, user))["password"]
     result = await run_action(ops_test, leader_id, "set-password", {"username": user})
-    password1 = result.response.get(f"{user}-password")
+    password1 = result.response.get(f"{user}")
     assert password1 != password0
 
     # 1. change password with auto-generated one
@@ -249,7 +249,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
     result = await run_action(
         ops_test, leader_id, "set-password", {"username": user, "password": "new_pwd"}
     )
-    password1 = result.response.get(f"{user}-password")
+    password1 = result.response.get(f"{user}")
     assert password1
     assert password1 == (await get_secrets(ops_test, leader_id, user))["password"]
 
@@ -285,12 +285,14 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
             [
                 "juju",
                 "ssh",
+                "-m",
+                ops_test.model.info.name,
                 f"opensearch/{leader_id}",
                 "--",
                 "sudo",
                 "snap",
                 "info",
-                "opensearch",
+                "opensearch-charmed",
                 "--color=never",
                 "--unicode=always",
             ],
@@ -315,7 +317,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
         f"{APP_NAME}/{leader_id}",
         "--",
         "sudo",
-        "opensearch.opensearch-bin",
+        "opensearch-charmed.opensearch-bin",
         "--version",
     ]
 
@@ -367,7 +369,7 @@ async def test_all_units_have_internal_users_synced(
     filename = (
         "/etc/opensearch/opensearch-security/internal_users.yml"
         if substrate == "k8s"
-        else "/var/snap/opensearch/current/etc/opensearch/opensearch-security/internal_users.yml"
+        else "/var/snap/opensearch-charmed/current/etc/opensearch/opensearch-security/internal_users.yml"
     )
 
     leader_conf = get_conf_as_dict(ops_test, leader_name, filename, substrate)

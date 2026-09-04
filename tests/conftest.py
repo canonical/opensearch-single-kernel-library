@@ -53,3 +53,9 @@ def opensearch_base_path(substrate) -> Path:
 def opensearch_minus_1_base_path() -> Path:
     """The base path for the files of the n-1 opensearch charm."""
     return _TESTS_DIR / "charms/opensearch_k8s_2.19.4_test_charm"
+
+
+@pytest.fixture
+def opensearch_upgrade_base_path() -> Path:
+    """Base path for the 3.7.0 charm used as the VM upgrade starting point."""
+    return _TESTS_DIR / "charms/opensearch_3.7.0_test_charm"

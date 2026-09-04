@@ -25,10 +25,11 @@ def lock_rel_id(harness):
 
 
 @pytest.fixture
-def mock_deployment_desc(mocker):
-    """Patch deployment_desc and the file-based internal-user operations it triggers."""
+def mock_deployment_description(mocker):
+    """Patch deployment_description and the file-based internal-user operations it triggers."""
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
@@ -50,7 +51,7 @@ def test_node_lock_no_online_hosts_init_leader(harness, lock_rel_id):
 
 @responses.activate
 def test_node_lock_has_online_hosts_init_leader(
-    harness, lock_rel_id, mock_deployment_desc, mocker
+    harness, lock_rel_id, mock_deployment_description, mocker
 ):
     """Initially no one has the lock if there is a leader."""
     mocker.patch("socket.create_connection")
@@ -64,7 +65,7 @@ def test_node_lock_has_online_hosts_init_leader(
 
 
 def test_node_lock_no_online_hosts_leader_acquire_lock_via_databag(
-    harness, lock_rel_id, mock_deployment_desc, monkeypatch
+    harness, lock_rel_id, mock_deployment_description, monkeypatch
 ):
     """Leader acquires lock via peer databag when no online nodes are present."""
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
@@ -73,12 +74,9 @@ def test_node_lock_no_online_hosts_leader_acquire_lock_via_databag(
     # If the charm code raises an uncaught exception later in the Juju event,
     # the lock will be reverted to its previous value.
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
     assert not harness.charm.lock_manager.acquire()
 
-    assert (
-        harness.get_relation_data(lock_rel_id, harness.charm.unit.name)["lock-requested"] == "True"
-    )
+    assert harness.charm.state.server_lock.lock_requested is True
 
     # A new event introduces a new Juju context ID.
     # At this point the leader can take the lock.
@@ -88,7 +86,7 @@ def test_node_lock_no_online_hosts_leader_acquire_lock_via_databag(
 
 @responses.activate
 def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
-    harness, lock_rel_id, mock_deployment_desc, mocker, monkeypatch
+    harness, lock_rel_id, mock_deployment_description, mocker, monkeypatch
 ):
     """Leader acquires lock via OpenSearch document when online nodes are present."""
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
@@ -109,7 +107,7 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
     mock_response_lock_not_requested(host)
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.charm.state.application_lock.unit_with_lock = "non-default-value"
 
     # The leader acquires the lock via the OpenSearch document without waiting for another
     # Juju event.
@@ -119,7 +117,7 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
 
 
 def test_node_lock_no_online_nodes_departing_node_doesnt_break(
-    harness, lock_rel_id, mock_deployment_desc, monkeypatch
+    harness, lock_rel_id, mock_deployment_description, monkeypatch
 ):
     """Departing unit may be part of the relation while having no entry in the databag.
 
@@ -128,7 +126,7 @@ def test_node_lock_no_online_nodes_departing_node_doesnt_break(
     monkeypatch.setenv("JUJU_CONTEXT_ID", "juju-context-id")
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.charm.state.application_lock.unit_with_lock = "non-default-value"
 
     # We simulate a departing node by removing it from the relation.
     harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")
@@ -140,7 +138,7 @@ def test_node_lock_no_online_nodes_departing_node_doesnt_break(
 
 @responses.activate
 def test_node_lock_has_online_nodes_departing_node_doesnt_break(
-    harness, lock_rel_id, mock_deployment_desc, mocker, monkeypatch
+    harness, lock_rel_id, mock_deployment_description, mocker, monkeypatch
 ):
     """Departing unit may be part of the relation while having no entry in the databag.
 
@@ -164,7 +162,7 @@ def test_node_lock_has_online_nodes_departing_node_doesnt_break(
     mock_response_lock_not_requested(host)
 
     harness.set_leader(is_leader=True)
-    harness.update_relation_data(lock_rel_id, harness.charm.app.name, {"unit-with-lock": ""})
+    harness.charm.state.application_lock.unit_with_lock = "non-default-value"
 
     # We simulate a departing node by removing it from the relation.
     harness.remove_relation_unit(lock_rel_id, f"{harness.charm.app.name}/1")
