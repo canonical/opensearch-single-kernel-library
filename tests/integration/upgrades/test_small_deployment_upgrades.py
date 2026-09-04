@@ -14,10 +14,15 @@ from ..ha.helpers import (
     assert_continuous_writes_consistency,
     assert_continuous_writes_increasing,
 )
-from ..helpers import APP_NAME, app_name, deploy_opensearch, set_watermark, wait_until
+from ..helpers import APP_NAME, app_name, set_watermark, wait_until
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     K8S_VERSION_N,
+    K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_REVISION,
+    OPENSEARCH_CHANNEL,
+    OPENSEARCH_CHARM,
+    OPENSEARCH_K8S_CHARM,
     PROFILES_REVISION,
     UPGRADE_PARAMS,
     VM_VERSION_N,
@@ -32,10 +37,6 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
-
-OPENSEARCH_ORIGINAL_CHARM_NAME = "opensearch"
-OPENSEARCH_CHANNEL = "2/edge"
-
 charm = None
 
 
@@ -46,19 +47,35 @@ charm = None
 #######################################################################
 
 
-async def _build_env(ops_test: OpsTest, version: str, series) -> None:
+async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None:
     """Deploy OpenSearch cluster from a given revision."""
     await ops_test.model.set_config(MODEL_CONFIG)
 
-    revision = VM_VERSION_TO_REVISION[version][series]
+    if substrate == "k8s":
+        if version not in K8S_VERSION_TO_REVISION:
+            pytest.skip(f"Version {version} is not available for k8s upgrade tests")
+        revision = K8S_VERSION_TO_REVISION[version][series]
+        charm = OPENSEARCH_K8S_CHARM
+    else:
+        revision = VM_VERSION_TO_REVISION[version][series]
+        charm = OPENSEARCH_CHARM
+
+    logger.info(
+        "Deploying %s (revision: %s, series: %s, channel: %s)",
+        charm,
+        revision,
+        series,
+        OPENSEARCH_CHANNEL,
+    )
     await ops_test.model.deploy(
-        OPENSEARCH_ORIGINAL_CHARM_NAME,
+        charm,
         application_name=APP_NAME,
         num_units=3,
         channel=OPENSEARCH_CHANNEL,
         revision=revision,
         series=series,
-        config=CONFIG_OPTS if revision > PROFILES_REVISION else {},
+        config=CONFIG_OPTS if (substrate == "k8s" or revision > PROFILES_REVISION) else {},
+        trust=substrate == "k8s",
     )
 
     # Deploy TLS Certificates operator.
@@ -92,45 +109,11 @@ async def _build_env(ops_test: OpsTest, version: str, series) -> None:
 @pytest.mark.group(id="happy_path_upgrade")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_latest_from_channel(
-    ops_test: OpsTest, charm_version_minus_1, series, substrate
-) -> None:
+async def test_deploy_latest_from_channel(ops_test: OpsTest, series, substrate) -> None:
     """Deploy OpenSearch."""
-    if substrate == "k8s":
-        # Deploy from the local 2.18 charm to have n-1 version available
-        # TODO: Once revision released deploy from channel and remove local charm
-        await ops_test.model.set_config(MODEL_CONFIG)
-        charm_resources = {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
-        await deploy_opensearch(
-            ops_test,
-            charm_version_minus_1,
-            substrate,
-            APP_NAME,
-            3,
-            series=series,
-            config=CONFIG_OPTS,
-            resources=charm_resources,
-        )
-        # Deploy TLS Certificates operator.
-        config = {"ca-common-name": "CN_CA"}
-        await ops_test.model.deploy(
-            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
-        )
-        # Relate it to OpenSearch to set up TLS.
-        await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
-        await wait_until(
-            ops_test,
-            apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
-            timeout=1400,
-            wait_for_exact_units={
-                APP_NAME: 3,
-            },
-            idle_period=60,
-        )
-
-        await set_watermark(ops_test, APP_NAME)
-    else:
-        await _build_env(ops_test, VM_VERSION_N_MINUS_2, series)
+    # On K8s we use version n-1 since n-2 is not available on the channel, while on VM we use n-2.
+    version = VM_VERSION_N_MINUS_2 if substrate == "vm" else K8S_VERSION_N_MINUS_1
+    await _build_env(ops_test, version, series, substrate)
 
 
 @pytest.mark.group(id="happy_path_upgrade")
@@ -201,9 +184,9 @@ async def test_upgrade_to_local(
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_deploy_from_version(ops_test: OpsTest, version, series) -> None:
+async def test_deploy_from_version(ops_test: OpsTest, version, series, substrate) -> None:
     """Deploy OpenSearch."""
-    await _build_env(ops_test, version, series)
+    await _build_env(ops_test, version, series, substrate)
 
 
 @pytest.mark.parametrize("version", UPGRADE_PARAMS)
