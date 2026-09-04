@@ -4,6 +4,10 @@
 # never ran or the collector died mid-run. Hence no `set -e`.
 set -uo pipefail
 
+DIR_POINTER="${RUNNER_TEMP:-/tmp}/.ci-telemetry-dir"
+if [ -z "${CI_TELEMETRY_DIR:-}" ] && [ -s "$DIR_POINTER" ]; then
+  CI_TELEMETRY_DIR="$(cat "$DIR_POINTER")"
+fi
 CI_TELEMETRY_DIR="${CI_TELEMETRY_DIR:-${RUNNER_TEMP:-/tmp}/ci-telemetry}"
 BUNDLE_PATH="${BUNDLE_PATH:-$(dirname "$CI_TELEMETRY_DIR")/ci-telemetry-bundle.tar.zst}"
 PIDFILE="$CI_TELEMETRY_DIR/telegraf.pid"
@@ -50,7 +54,7 @@ if [ -z "$PID" ]; then
   [ -n "$PID" ] && echo "ci-telemetry: pidfile unreadable, matched collector by config path (pid $PID)"
 fi
 
-if [ -n "$PID" ] && "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
+if [ -n "$PID" ] && [[ "$PID" =~ ^[0-9]+$ ]] && "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
   echo "ci-telemetry: stopping telegraf (pid $PID)"
   "${SUDO[@]}" kill -TERM "$PID" 2>/dev/null || true
   for _ in $(seq 1 15); do
@@ -79,16 +83,21 @@ fi
 # directory while we archive it.
 if [ -s "$LAUNCHER_PIDFILE" ]; then
   LAUNCHER_PID="$(cat "$LAUNCHER_PIDFILE")"
-  for _ in $(seq 1 10); do
-    kill -0 "$LAUNCHER_PID" 2>/dev/null || break
-    sleep 1
-  done
+  if [[ "$LAUNCHER_PID" =~ ^[0-9]+$ ]]; then
+    for _ in $(seq 1 10); do
+      kill -0 "$LAUNCHER_PID" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+      kill -TERM "$LAUNCHER_PID" 2>/dev/null || true
+    fi
+  fi
 fi
-rm -f "$PIDFILE" "$LAUNCHER_PIDFILE"
+rm -f "$PIDFILE" "$LAUNCHER_PIDFILE" "$DIR_POINTER"
 
 # telegraf may have run as root — hand files back so artifact upload can read them
 if [ ${#SUDO[@]} -gt 0 ]; then
-  "${SUDO[@]}" chown -R "$(id -u):$(id -g)" "$CI_TELEMETRY_DIR" 2>/dev/null || true
+  "${SUDO[@]}" chown -R -h "$(id -u):$(id -g)" "$CI_TELEMETRY_DIR" 2>/dev/null || true
 fi
 
 # --- bundle --------------------------------------------------------------------

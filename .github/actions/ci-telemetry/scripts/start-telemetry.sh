@@ -40,19 +40,24 @@ for var in CI_TELEMETRY_DIR GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_REPOSITORY \
   TELEGRAF_ENV+=("${var}=${!var}")
 done
 
-# --- sanity -------------------------------------------------------------------
-if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  echo "ci-telemetry: already running (pid $(cat "$PIDFILE"))" >&2
-  exit 1
-fi
-mkdir -p "$CI_TELEMETRY_DIR"
-
 # Telegraf needs root for some /proc reads; sudo scrubs the environment, hence
 # the explicit `env` prefix on launch rather than exported variables.
 SUDO=()
 if sudo -n true 2>/dev/null; then
   SUDO=(sudo -n)
 fi
+
+# --- sanity -------------------------------------------------------------------
+PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+if [ -z "$PID" ] && [ ${#SUDO[@]} -gt 0 ]; then
+  PID="$("${SUDO[@]}" cat "$PIDFILE" 2>/dev/null || true)"
+fi
+if [ -n "$PID" ] && [[ "$PID" =~ ^[0-9]+$ ]] && "${SUDO[@]}" kill -0 "$PID" 2>/dev/null; then
+  echo "ci-telemetry: already running (pid $PID)" >&2
+  exit 1
+fi
+mkdir -p "$CI_TELEMETRY_DIR"
+echo "$CI_TELEMETRY_DIR" > "${RUNNER_TEMP:-/tmp}/.ci-telemetry-dir"
 
 # --- install pinned Telegraf (static binary) ----------------------------------
 case "$(uname -m)" in
@@ -130,8 +135,29 @@ if ! env "${TELEGRAF_ENV[@]}" "$TELEGRAF_BIN" --config "$RESOLVED_CONF" --test >
   exit 1
 fi
 
-: > "$CI_TELEMETRY_DIR/metrics.json"
-rm -f "$PIDFILE"
+rm -f "$CI_TELEMETRY_DIR/metrics.json" "$PIDFILE"
+touch "$CI_TELEMETRY_DIR/metrics.json"
+
+abort_startup() {
+  local msg="$1"
+  echo "$msg" >&2
+  [ -f "$CI_TELEMETRY_DIR/telegraf.log" ] && cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
+  if [ -n "${LAUNCHER_PID:-}" ] && kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+    kill -TERM "$LAUNCHER_PID" 2>/dev/null || true
+  fi
+  local pid=""
+  if [ -s "$PIDFILE" ]; then
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    if [ -z "$pid" ] && [ ${#SUDO[@]} -gt 0 ]; then
+      pid="$("${SUDO[@]}" cat "$PIDFILE" 2>/dev/null || true)"
+    fi
+  fi
+  if [ -n "$pid" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+    "${SUDO[@]}" kill -KILL "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PIDFILE" "$LAUNCHER_PIDFILE"
+  exit 1
+}
 
 # --pidfile makes Telegraf record its own pid. Capturing $! instead would record
 # the pid of the sudo wrapper, so liveness checks and SIGTERM would target sudo
@@ -147,17 +173,13 @@ echo "$LAUNCHER_PID" > "$LAUNCHER_PIDFILE"
 for _ in $(seq 1 20); do
   sleep 1
   if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
-    echo "ci-telemetry: telegraf died at startup, log follows:" >&2
-    cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
-    exit 1
+    abort_startup "ci-telemetry: telegraf died at startup, log follows:"
   fi
   [ -s "$CI_TELEMETRY_DIR/metrics.json" ] && [ -s "$PIDFILE" ] && break
 done
 
 if [ ! -s "$PIDFILE" ]; then
-  echo "ci-telemetry: telegraf never wrote a pidfile, log follows:" >&2
-  cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
-  exit 1
+  abort_startup "ci-telemetry: telegraf never wrote a pidfile, log follows:"
 fi
 
 # Telegraf creates the pidfile with mode 0640. Running under sudo that makes it
@@ -168,9 +190,7 @@ if [ ${#SUDO[@]} -gt 0 ]; then
 fi
 
 if [ ! -s "$CI_TELEMETRY_DIR/metrics.json" ]; then
-  echo "ci-telemetry: no metrics after 20s, log follows:" >&2
-  cat "$CI_TELEMETRY_DIR/telegraf.log" >&2
-  exit 1
+  abort_startup "ci-telemetry: no metrics after 20s, log follows:"
 fi
 
 echo "ci-telemetry: running (pid $(cat "$PIDFILE")), writing $CI_TELEMETRY_DIR/metrics.json"

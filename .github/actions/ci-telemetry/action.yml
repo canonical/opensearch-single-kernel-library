@@ -63,6 +63,7 @@ runs:
     # inputs.phase is interpolated via env, not into the script body: `run:`
     # templating would evaluate a caller-supplied value as shell.
     - name: Validate phase
+      if: always()
       shell: bash
       env:
         PHASE: ${{ inputs.phase }}
@@ -74,10 +75,22 @@ runs:
 
     - name: Resolve artifact name
       id: resolve
+      if: always()
       shell: bash
       env:
-        ARTIFACT_NAME: ${{ inputs.artifact-name || format('ci-telemetry-{0}-{1}-{2}', github.run_id, github.run_attempt, github.job) }}
-      run: echo "artifact-name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+        ARTIFACT_NAME_INPUT: ${{ inputs.artifact-name }}
+        DEFAULT_NAME: ${{ format('ci-telemetry-{0}-{1}-{2}', github.run_id, github.run_attempt, github.job) }}
+        NAME_FILE: ${{ runner.temp }}/.ci-telemetry-artifact-name
+      run: |
+        if [ -n "$ARTIFACT_NAME_INPUT" ]; then
+          RESOLVED="$ARTIFACT_NAME_INPUT"
+          echo "$RESOLVED" > "$NAME_FILE"
+        elif [ -s "$NAME_FILE" ]; then
+          RESOLVED="$(cat "$NAME_FILE")"
+        else
+          RESOLVED="$DEFAULT_NAME"
+        fi
+        echo "artifact-name=$RESOLVED" >> "$GITHUB_OUTPUT"
 
     - name: Restore cached Telegraf
       if: ${{ inputs.phase == 'start' && inputs.cache-telegraf == 'true' }}
@@ -98,7 +111,7 @@ runs:
 
     - name: Stop telemetry
       id: stop
-      if: ${{ inputs.phase == 'stop' }}
+      if: ${{ always() && inputs.phase == 'stop' }}
       shell: bash
       env:
         CI_TELEMETRY_DIR: ${{ inputs.telemetry-dir }}
@@ -108,7 +121,7 @@ runs:
     # Path comes from the stop step rather than being restated here: the bundle
     # extension changes when zstd is unavailable.
     - name: Upload telemetry artifact
-      if: ${{ inputs.phase == 'stop' && steps.stop.outputs.bundle-path != '' }}
+      if: ${{ always() && inputs.phase == 'stop' && steps.stop.outputs.bundle-path != '' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: ${{ steps.resolve.outputs.artifact-name }}

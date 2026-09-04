@@ -58,8 +58,8 @@ tar -xf ci-telemetry-bundle.tar.zst
 jq -r '.metrics[]|select(.name=="procstat").tags.process_name' metrics.json | sort -u
 
 # stall time: the highest-signal metric for "the tests were randomly slow"
-jq -r '.metrics[]|select(.name=="pressure")
-       |"\(.timestamp) \(.tags.resource) \(.fields.some_avg10)"' metrics.json
+jq -r '.metrics[]|select(.name=="pressure" and .tags.type=="some")
+       |"\(.timestamp) \(.tags.resource) avg10=\(.fields.avg10)% total=\(.fields.total // 0)us"' metrics.json
 
 # inodes remaining — a failure mode that looks like nothing else
 jq -r '.metrics[]|select(.name=="disk")|"\(.tags.path) \(.fields.inodes_free)"' metrics.json
