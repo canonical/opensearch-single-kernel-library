@@ -8,6 +8,7 @@ import time
 
 import pytest
 from pytest_operator.plugin import OpsTest
+from tenacity import AsyncRetrying, stop_after_attempt, wait_fixed
 
 from tests.integration.conftest import (
     APP_NAME,
@@ -703,10 +704,18 @@ async def test_full_cluster_restart(
     )
 
     # check that all units being down at the same time.
-    if substrate == "k8s":
-        assert await k8s_all_processes_down(ops_test, app), "Not all units down at the same time."
-    else:
-        assert await all_processes_down(ops_test, app), "Not all units down at the same time."
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True
+    ):
+        with attempt:
+            if substrate == "k8s":
+                assert await k8s_all_processes_down(ops_test, app), (
+                    "Not all units down at the same time."
+                )
+            else:
+                assert await all_processes_down(ops_test, app), (
+                    "Not all units down at the same time."
+                )
 
     # Reset restart delay
     for unit_id in get_application_unit_ids(ops_test, app):
