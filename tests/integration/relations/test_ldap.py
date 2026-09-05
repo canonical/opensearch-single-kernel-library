@@ -173,7 +173,6 @@ async def test_deploy(
     charm: str,
     series: str,
     k8s_model: Model,
-    data_integrator_charm: str,
     charm_resources: dict[str, str],
     substrate: Substrate,
 ):
@@ -207,16 +206,22 @@ async def test_deploy(
             trust=True,
         ),
         model.deploy(
-            data_integrator_charm,
+            DATA_INTEGRATOR_NAME,
+            revision=500,
+            channel="latest/edge",
             application_name=DATA_INTEGRATOR_NAME,
             config=DATA_INTEGRATOR_CONFIG,
         ),
         model.deploy(
-            data_integrator_charm,
+            DATA_INTEGRATOR_NAME,
+            revision=500,
+            channel="latest/edge",
             application_name=SEARCH_ADMIN_DATA_INTEGRATOR_NAME,
         ),
         model.deploy(
-            data_integrator_charm,
+            DATA_INTEGRATOR_NAME,
+            revision=500,
+            channel="latest/edge",
             application_name=SEARCH_READONLY_DATA_INTEGRATOR_NAME,
         ),
     )
