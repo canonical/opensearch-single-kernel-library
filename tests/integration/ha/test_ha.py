@@ -8,6 +8,7 @@ import time
 
 import pytest
 from pytest_operator.plugin import OpsTest
+from tenacity import AsyncRetrying, stop_after_attempt, wait_fixed
 
 from tests.integration.conftest import (
     APP_NAME,
@@ -211,7 +212,7 @@ async def test_kill_db_process_node_with_primary_shard(
     # verify the node with the old primary successfully joined the rest of the fleet
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
@@ -265,7 +266,7 @@ async def test_kill_db_process_node_with_elected_cm(
     # verify the node with the old elected cm successfully joined back the rest of the fleet
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
@@ -319,7 +320,7 @@ async def test_freeze_db_process_node_with_primary_shard(
         units_ips[first_unit_with_primary_shard],
         retries=3,
         app=app,
-        timeout=30,
+        timeout=5,
     )
     assert not is_node_up
 
@@ -356,19 +357,25 @@ async def test_freeze_db_process_node_with_primary_shard(
         "OpenSearch service hasn't restarted."
     )
 
+    # verify the node with the old primary re-joined the fleet, before the shard assertions:
+    # the shard view is only meaningful once the node is back in `_nodes`.
+    # queried on `reachable_ip`, the leader may be the unit that was just frozen.
+    assert await check_cluster_formation_successful(
+        ops_test,
+        reachable_ip,
+        get_application_unit_names(ops_test, app=app),
+        app=app,
+        stop_after_attempt=2,
+    ), "Node did not re-join the cluster after being un-frozen."
+
     # fetch unit hosting the new primary shard of the previous index
     shards = await get_shards_by_index(
-        ops_test, leader_unit_ip, ContinuousWrites.INDEX_NAME, app=app
+        ops_test, reachable_ip, ContinuousWrites.INDEX_NAME, app=app
     )
 
     # check that the unit previously hosting the primary shard now hosts a replica
     units_with_r_shards = [shard.unit_id for shard in shards if not shard.is_prim]
     assert first_unit_with_primary_shard in units_with_r_shards
-
-    # verify the node with the old primary successfully joined back the rest of the fleet
-    assert await check_cluster_formation_successful(
-        ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app)
-    )
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
@@ -410,7 +417,9 @@ async def test_freeze_db_process_node_with_elected_cm(
     time.sleep(10)
 
     # verify the unit is not reachable
-    is_node_up = await is_up(ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app)
+    is_node_up = await is_up(
+        ops_test, units_ips[first_elected_cm_unit_id], retries=3, app=app, timeout=5
+    )
     assert not is_node_up
 
     await assert_continuous_writes_increasing(c_writes)
@@ -440,10 +449,15 @@ async def test_freeze_db_process_node_with_elected_cm(
         "OpenSearch service hasn't restarted."
     )
 
-    # verify the previously elected CM node successfully joined back the rest of the fleet
+    # verify the previously elected CM node re-joined the fleet.
+    # queried on `reachable_ip`, the leader may be the unit that was just frozen.
     assert await check_cluster_formation_successful(
-        ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+        ops_test,
+        reachable_ip,
+        get_application_unit_names(ops_test, app=app),
+        app=app,
+        stop_after_attempt=2,
+    ), "Previously elected CM node did not re-join the cluster after being un-frozen."
 
     # continuous writes checks
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
@@ -497,7 +511,7 @@ async def test_restart_db_process_node_with_elected_cm(
     # verify the previously elected CM node successfully joined back the rest of the fleet
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
 
@@ -566,7 +580,7 @@ async def test_restart_db_process_node_with_primary_shard(
     # verify the node with the old primary successfully joined the rest of the fleet
     assert await check_cluster_formation_successful(
         ops_test, leader_unit_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     await assert_continuous_writes_consistency(ops_test, c_writes, [app])
 
@@ -641,7 +655,7 @@ async def test_full_cluster_crash(
     # check all nodes successfully joined the same cluster
     assert await check_cluster_formation_successful(
         ops_test, leader_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     await assert_continuous_writes_increasing(c_writes)
 
@@ -690,10 +704,18 @@ async def test_full_cluster_restart(
     )
 
     # check that all units being down at the same time.
-    if substrate == "k8s":
-        assert await k8s_all_processes_down(ops_test, app), "Not all units down at the same time."
-    else:
-        assert await all_processes_down(ops_test, app), "Not all units down at the same time."
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True
+    ):
+        with attempt:
+            if substrate == "k8s":
+                assert await k8s_all_processes_down(ops_test, app), (
+                    "Not all units down at the same time."
+                )
+            else:
+                assert await all_processes_down(ops_test, app), (
+                    "Not all units down at the same time."
+                )
 
     # Reset restart delay
     for unit_id in get_application_unit_ids(ops_test, app):
@@ -720,7 +742,7 @@ async def test_full_cluster_restart(
     # check all nodes successfully joined the same cluster
     assert await check_cluster_formation_successful(
         ops_test, leader_ip, get_application_unit_names(ops_test, app=app), app=app
-    )
+    ), "Not all nodes joined the cluster."
 
     await assert_continuous_writes_increasing(c_writes)
 

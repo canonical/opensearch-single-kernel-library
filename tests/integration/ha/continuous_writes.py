@@ -266,7 +266,11 @@ class ContinuousWrites:
 
         def _client(_data) -> OpenSearch:
             return opensearch_client(
-                _data.hosts, "admin", _data.password, ContinuousWrites.CERT_PATH
+                _data.hosts,
+                "admin",
+                _data.password,
+                ContinuousWrites.CERT_PATH,
+                max_retries=0,
             )
 
         write_value = starting_number
@@ -279,7 +283,7 @@ class ContinuousWrites:
         client = _client(data)
 
         while True:
-            if not data_queue.empty():  # currently evaluates to false as we don't make updates
+            if not data_queue.empty():  # `update()` was called with a refreshed conf
                 data = data_queue.get(False)
                 client.close()
                 client = _client(data)
@@ -321,8 +325,10 @@ class ContinuousWrites:
 
         client.close()
 
+    # Retry once for a short blip. Longer failures go back to the `_run` loop, which
+    # gets fresh hosts first.
     @staticmethod
-    @retry(reraise=True, stop=stop_after_attempt(3), wait=wait_random(min=1, max=2))
+    @retry(reraise=True, stop=stop_after_attempt(2), wait=wait_random(min=1, max=2))
     def _bulk(client: OpenSearch, write_value: int) -> None:
         """Bulk Index group of docs."""
         data = []
@@ -344,7 +350,7 @@ class ContinuousWrites:
             raise BulkIndexError()
 
     @staticmethod
-    @retry(reraise=True, stop=stop_after_attempt(3), wait=wait_random(min=1, max=2))
+    @retry(reraise=True, stop=stop_after_attempt(2), wait=wait_random(min=1, max=2))
     def _index(client: OpenSearch, write_value: int) -> None:
         """Index single document."""
         client.index(
