@@ -136,7 +136,7 @@ async def _build_env(
 
     # integrate TLS to all applications
     for app in list(APPS.keys()):
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # When deploying LD in VM we are deploying 2.18 which is different from K8s version
     units_statuses = None

@@ -73,6 +73,7 @@ target-version = "py310"
 line-length = 99
 exclude = [
   "opensearch_single_kernel/lib",
+  "tests/charms/data-integrator",
   "tests/charms/**/lib",
   "tests/integration/**/lib",
 ]
@@ -97,7 +98,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.codespell]
-skip = "*.lock,single_kernel_opensearch_dashboards/lib,tests/charms/*/lib,tests/integration/*/lib"
+skip = "*.lock,single_kernel_opensearch_dashboards/lib,tests/charms/data-integrator,tests/charms/*/lib,tests/integration/*/lib"
 
 [tool.poetry]
 requires-poetry = ">=2.0.0"

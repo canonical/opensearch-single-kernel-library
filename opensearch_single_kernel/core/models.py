@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
 from hashlib import md5
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator, Literal, NamedTuple
 
 import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -884,6 +884,47 @@ class SmtpConfig:
     group_id: str
     channel_id: str
     transport_security: SmtpTransportSecurity
+
+
+class ExternalClientRequestedEntity(NamedTuple):
+    """Model class for the entity credentials requested on a client relation.
+
+    Attributes:
+        username: username of the requested entity.
+        password: password of the requested entity.
+    """
+
+    username: str
+    password: str
+
+
+class ExternalClientEntityPermission(Model):
+    """Model class for a single permission entry requested on a client relation."""
+
+    resource_name: list[str]
+    resource_type: Literal["index_permissions"]
+    privileges: list[str]
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return {
+            self.resource_type: [
+                {
+                    "index_patterns": self.resource_name,
+                    "allowed_actions": self.privileges,
+                }
+            ]
+        }
+
+
+class ExternalClientEntityPermissions(RootModel[list[ExternalClientEntityPermission]]):
+    """Model class for the entity permissions requested on a client relation."""
+
+    root: list[ExternalClientEntityPermission] = Field(min_length=1, max_length=1)
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return self.root[0].to_role_permissions()
 
 
 class JWTAuthConfiguration(Model):

@@ -106,8 +106,10 @@ class ConfigManager(BaseManager):
                 "dynamic": {
                     "authc": self._security_authc_static_config()
                     | self._security_authc_jwt_config()
-                    | self._security_authc_oauth_config(),
-                    "authz": self._security_authz_static_config(),
+                    | self._security_authc_oauth_config()
+                    | self._security_authc_ldap_config(),
+                    "authz": self._security_authz_static_config()
+                    | self._security_authz_ldap_config(),
                 },
             },
         }
@@ -277,7 +279,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via HTTP Basic against internal users database",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 4,
+                "order": 5,
                 "http_authenticator": {
                     "type": "basic",
                     "challenge": True,
@@ -290,7 +292,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via SSL client certificates",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 2,
+                "order": 3,
                 "http_authenticator": {
                     "type": "clientcert",
                     "challenge": False,
@@ -301,7 +303,7 @@ class ConfigManager(BaseManager):
             "kerberos_auth_domain": {
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 6,
+                "order": 7,
                 "http_authenticator": {
                     "type": "kerberos",
                     "challenge": True,
@@ -313,7 +315,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via proxy",
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 3,
+                "order": 4,
                 "http_authenticator": {
                     "type": "proxy",
                     "challenge": False,
@@ -323,31 +325,6 @@ class ConfigManager(BaseManager):
                     },
                 },
                 "authentication_backend": {"type": "noop"},
-            },
-            "ldap": {
-                "description": "Authenticate via LDAP or Active Directory",
-                "http_enabled": False,
-                "transport_enabled": False,
-                "order": 5,
-                "http_authenticator": {
-                    "type": "basic",
-                    "challenge": False,
-                },
-                "authentication_backend": {
-                    "type": "ldap",
-                    "config": {
-                        "enable_ssl": False,
-                        "enable_start_tls": False,
-                        "enable_ssl_client_auth": False,
-                        "verify_hostnames": True,
-                        "hosts": ["localhost:8389"],
-                        "bind_dn": None,
-                        "password": None,
-                        "userbase": "ou=people,dc=example,dc=com",
-                        "usersearch": "(sAMAccountName={0})",
-                        "username_attribute": None,
-                    },
-                },
             },
         }
 
@@ -405,7 +382,7 @@ class ConfigManager(BaseManager):
                     # NOTE: Order value needs to be lower than basic_internal_auth_domain section,
                     # which is set to 4 by default. Only available number is 1, if we want a
                     # different number, all other numbers need to be reshuffled.
-                    "order": 1,
+                    "order": 2,
                     "http_authenticator": {
                         "type": "openid",
                         "challenge": False,
@@ -426,6 +403,73 @@ class ConfigManager(BaseManager):
             }
             if self.state.server.oauth_openid_connect_url
             else {}
+        )
+
+    def _security_authc_ldap_config(self) -> dict[str, Any]:
+        """Get set of LDAP security config options for the Opensearch.
+
+        Intended for authc category in opensearch-security/config.yml config file.
+        """
+        return (
+            {
+                "ldap": {
+                    "http_enabled": True,
+                    "transport_enabled": True,
+                    "order": 1,
+                    "http_authenticator": {
+                        "type": "basic",
+                        "challenge": False,
+                    },
+                    "authentication_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": True,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "pemtrustedcas_filepath": self.workload.paths.ldap_chain.as_posix(),
+                            "hosts": [
+                                url.removeprefix("ldaps://") for url in ldap_data.ldaps_urls
+                            ],
+                            "bind_dn": ldap_data.bind_dn,
+                            "password": ldap_data.bind_password,
+                            "userbase": self.state.config.get("ldap_user_base", ""),
+                            "usersearch": self.state.config.get("ldap_user_search", ""),
+                            "username_attribute": "cn",
+                        },
+                    },
+                }
+            }
+            if (ldap_data := self.state.ldap_data)
+            and ldap_data.ldaps_urls
+            and self.workload.exists(self.workload.paths.ldap_chain)
+            else {
+                "ldap": {
+                    "description": "Authenticate via LDAP or Active Directory",
+                    "http_enabled": False,
+                    "transport_enabled": False,
+                    "order": 1,
+                    "http_authenticator": {
+                        "type": "basic",
+                        "challenge": False,
+                    },
+                    "authentication_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": False,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "hosts": ["localhost:8389"],
+                            "bind_dn": None,
+                            "password": None,
+                            "userbase": "ou=people,dc=example,dc=com",
+                            "usersearch": "(sAMAccountName={0})",
+                            "username_attribute": None,
+                        },
+                    },
+                }
+            }
         )
 
     @staticmethod
@@ -467,6 +511,44 @@ class ConfigManager(BaseManager):
                 "authorization_backend": {"type": "ldap"},
             },
         }
+
+    def _security_authz_ldap_config(self) -> dict[str, Any]:
+        """Get set of LDAP security config options for the Opensearch.
+
+        Intended for authz category in opensearch-security/config.yml config file.
+        """
+        return (
+            {
+                "ldap_roles": {
+                    "http_enabled": True,
+                    "transport_enabled": True,
+                    "authorization_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": True,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "pemtrustedcas_filepath": self.workload.paths.ldap_chain.as_posix(),
+                            "hosts": [
+                                url.removeprefix("ldaps://") for url in ldap_data.ldaps_urls
+                            ],
+                            "bind_dn": ldap_data.bind_dn,
+                            "password": ldap_data.bind_password,
+                            "userbase": self.state.config.get("ldap_user_base", ""),
+                            "usersearch": self.state.config.get("ldap_user_search", ""),
+                            "userrolename": self.state.config.get("ldap_user_rolename", ""),
+                            "rolename": self.state.config.get("ldap_role_name_attr", ""),
+                            "rolesearch_enabled": False,
+                            "resolve_nested_roles": False,
+                        },
+                    },
+                },
+            }
+            if (ldap_data := self.state.ldap_data) and ldap_data.ldaps_urls
+            # and self.workload.exists(self.workload.paths.ldap_chain)
+            else {}
+        )
 
     def update_seeds_config(self, nodes: list[Node] | None = None) -> bool:
         """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config.

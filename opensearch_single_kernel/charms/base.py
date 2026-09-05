@@ -17,6 +17,8 @@ from ops.charm import CharmEvents
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     GCS_RELATION,
+    LDAP_CERTIFICATE_TRANSFER_RELATION,
+    LDAP_RELATION,
     PEER_RELATION,
     S3_RELATION,
     SMTP_RELATION,
@@ -44,6 +46,7 @@ from opensearch_single_kernel.events.external_clients import (
 )
 from opensearch_single_kernel.events.jwt import JWTEventsHandler
 from opensearch_single_kernel.events.keystore import KeystoreEventsHandler
+from opensearch_single_kernel.events.ldap import LdapEventsHandler
 from opensearch_single_kernel.events.notifications import NotificationsEvents
 from opensearch_single_kernel.events.oauth import OAuthEventsHandler
 from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
@@ -51,6 +54,10 @@ from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandle
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
+from opensearch_single_kernel.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
+    CertificateTransferRequires,
+)
+from opensearch_single_kernel.lib.charms.glauth_k8s.v0.ldap import LdapRequirer
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
@@ -59,6 +66,7 @@ from opensearch_single_kernel.managers.external_clients import ExternalClientsMa
 from opensearch_single_kernel.managers.health import HealthManager
 from opensearch_single_kernel.managers.internal_users import InternalUsersManager
 from opensearch_single_kernel.managers.keystore import KeystoreManager
+from opensearch_single_kernel.managers.ldap import LdapManager
 from opensearch_single_kernel.managers.lock import LockManager
 from opensearch_single_kernel.managers.notification import NotificationsManager
 from opensearch_single_kernel.managers.peer_cluster import PeerClusterManager
@@ -105,6 +113,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             S3Requirer(self, S3_RELATION),
             AzureStorageRequirer(self, AZURE_RELATION),
             GCSRequirer(self, GCS_RELATION),
+            LdapRequirer(self, LDAP_RELATION),
+            CertificateTransferRequires(self, LDAP_CERTIFICATE_TRANSFER_RELATION),
         )
 
         # Managers
@@ -113,6 +123,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.cluster_manager = ClusterManager(self.state, self.workload)
         self.exclusions_manager = NodesExclusionsManager(self.state, self.workload)
         self.external_clients_manager = ExternalClientsManager(self.state, self.workload)
+        self.ldap_manager = LdapManager(self.state, self.workload)
         self.lock_manager = LockManager(self.state, self.workload)
         self.profiles_manager = ProfilesManager(self.state, self.workload)
         self.health_manager = HealthManager(self.state, self.workload)
@@ -142,6 +153,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.cos_events = CosEventsHandler(self)
         self.jwt_events = JWTEventsHandler(self)
         self.oauth_events = OAuthEventsHandler(self)
+        self.ldap_events = LdapEventsHandler(self)
 
         # Re-dispatch deferred events once pebble is ready; without this, a slow pebble startup
         # leaves the charm stuck with all events deferred and no trigger to replay them.
@@ -161,6 +173,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.snapshots_manager,
             self.internal_users_manager,
             self.external_clients_manager,
+            self.ldap_manager,
             self.notifications_manager,
         )
 

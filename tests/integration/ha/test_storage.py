@@ -64,7 +64,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
@@ -284,7 +284,7 @@ async def test_storage_reuse_in_new_cluster_after_app_removal(
     )
     return_code, _, _ = await ops_test.juju(*deploy_cluster_with_storage_cmd.split())
     assert return_code == 0, f"Failed to deploy app with storage {storage_ids[0]}"
-    await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # wait for cluster to be deployed
     # app status might be blocked because not all shards are assigned

@@ -1,0 +1,52 @@
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+options:
+  database-name:
+    type: string
+    default:
+    description: The desired database name for which the access will be granted (this parameter is needed for MongoDB, MySQL and PostgreSQL).
+  topic-name:
+    type: string
+    default:
+    description: The topic name for which the access is granted (this parameter is needed for Kafka).
+  index-name:
+    type: string
+    default:
+    description: The index name for which the access is granted (this parameter is needed for OpenSearch).
+  prefix-name:
+    type: string
+    default:
+    description: The prefix for which the access is granted (this parameter is needed for etcd, Valkey).
+  keyspace-name:
+    type: string
+    default:
+    description: Keyspace
+  entity-type:
+    type: string
+    default:
+    description: Type of entity to create upon integration. Possible values are USER or GROUP.
+  entity-permissions:
+    type: string
+    default:
+    description: List of permissions to assigned to the custom entity, in JSON format.
+  extra-user-roles:
+    type: string
+    default:
+    description: a comma-separated list of values that contains the required extra roles, e.g. `admin` in case of a database or `producer`, `consumer` in case of Kafka.
+  extra-group-roles:
+    type: string
+    default:
+    description: a comma-separated list of values that contains the required extra roles, e.g. `admin` in case of a database or `producer`, `consumer` in case of Kafka.
+  consumer-group-prefix:
+    type: string
+    default:
+    description: the required consumer group prefix for Kafka. (This is an optional parameter that could be specified in case of `consumer` role is set).
+  mtls-cert:
+    type: string
+    default:
+    description: The client certificate for which the access is granted (this parameter is needed for etcd).
+  requested-entities-secret:
+    type: string
+    default:
+    description: Secret URI containing a mapping of requested entity name to password. Password value of None, requests random password. Requires secrets support.
