@@ -274,7 +274,7 @@ class TlsManager(BaseManager):
         if secret:
             key = secret.get("key") if secret.get("key") else None
             password = secret.get("key-password", None)
-        # If we are renewing, need to generate new key
+
         if key is None:
             key = generate_private_key()
         else:
