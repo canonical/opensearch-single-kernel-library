@@ -571,7 +571,11 @@ class OpenSearchApplication(RelationState):
     @property
     def admin_secrets(self) -> dict[str, str]:
         """Get the admin secrets dict."""
-        return self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        try:
+            return self.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val, peek=True) or {}
+        except ModelError:
+            logger.debug("Admin secrets not set yet.")
+            return {}
 
     @property
     def tls_truststore_password(self) -> str | None:
