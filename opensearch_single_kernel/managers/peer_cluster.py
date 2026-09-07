@@ -427,29 +427,6 @@ class PeerClusterManager(BaseManager):
         orchestrators.delete(event_src_cluster_type)
         self.state.application.orchestrators = orchestrators
 
-    def cleanup_error_in_relation_data(self) -> None:
-        """Clean up the error data in relation data when the error is resolved."""
-        app_m = self.state.application
-        if not app_m:
-            return
-        relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
-        keys_to_remove = [
-            key
-            for key in app_m.model_extra
-            if (key.startswith("error_from_provider") or key.startswith("error_from_requirer"))
-            and int(key.split("-")[-1]) not in relation_ids
-        ]
-        if keys_to_remove:
-            with app_m.update():
-                for key in keys_to_remove:
-                    error_message = app_m.model_extra.get(key, "")
-                    status = PeerClusterRelErrorData.get_status_from_message(error_message)
-                    if status:
-                        self.state.remove_status_if_present(
-                            status, scope="app", component=self.name
-                        )
-                    app_m.model_extra.pop(key, None)
-
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).
 
@@ -502,13 +479,10 @@ class PeerClusterManager(BaseManager):
                 orchestrators
                 and not orchestrators.main_app
                 and orchestrators.failover_app
-                # On scale-up from 0, the cluster manager owns these statuses.
+                # On scale-up from 0, cluster manager owns these statuses.
                 and Directive.WAIT_FOR_PEER_CLUSTER_RELATION
                 not in self.state.application.deployment_description.pending_directives
             ):
-                # The main orchestrator departed but a failover is still registered: either
-                # enough apps are cut off to promote the failover, or we cannot reach a
-                # majority yet and must report that main was removed without one.
                 if self.should_promote_failover_to_main():
                     status_list.append(
                         PeerClusterStatuses.PEER_CLUSTER_WAITING_FOR_FAILOVER_PROMOTION.value

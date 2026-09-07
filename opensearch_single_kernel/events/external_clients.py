@@ -74,7 +74,7 @@ class ExternalClientsEventsHandler(Object):
         )
 
     def _on_resource_requested(self, event: ResourceRequestedEvent) -> None:
-        """Handle client resource-requested event (previously index-requested)."""
+        """Handle client resource-requested event."""
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
                 "Modifying relations during an upgrade is not supported."
@@ -236,7 +236,6 @@ class ExternalClientsEventsHandler(Object):
             self.update_external_client_endpoints(
                 event.relation, omit_endpoints={departing_unit_ip}
             )
-
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
             event.relation
         )

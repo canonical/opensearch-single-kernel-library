@@ -327,12 +327,6 @@ AZURE_PEER_SECRET_KEYS = [
     AZURE_CREDENTIALS,
 ]
 GCS_CREDENTIALS = "gcs-creds"
-# Secret fields to propagate per object-storage cloud, keyed by field name.
-OBJECT_STORAGE_SECRET_FIELDS: dict[str, tuple[str, ...]] = {
-    "s3": ("access_key", "secret_key", "tls_ca_chain"),
-    "azure": ("storage_account", "secret_key"),
-    "gcs": ("secret_key",),
-}
 S3_CA_ALIAS = "s3-snapshots-gateway"
 STORE_PASSWORD = "changeit"
 S3_REPOSITORY = "s3-repository"

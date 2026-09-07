@@ -62,6 +62,4 @@ class LockServerStateModel(RelationModel, PeerModel):
 
     def trigger_relation_changed(self) -> None:
         """Trigger relation changed event on other units by writing to a dummy field."""
-        # `JUJU_CONTEXT_ID` is used only as a value guaranteed to differ from the previous
-        # one: rewriting an unchanged value would not emit a peer relation-changed event.
         self.trigger = os.environ.get("JUJU_CONTEXT_ID", "")

@@ -94,9 +94,8 @@ class TlsManager(BaseManager):
                 self.reconcile_k8s_runtime_resources()
             except (OpenSearchFileOperationError, OpenSearchCmdError) as e:
                 logger.warning(f"Error during TLS runtime resources reconciliation: {e}")
-                # If we cannot access the filesystem or a store command fails (e.g. a
-                # transiently mismatched cert/key pair), we assume TLS is not ready and
-                # let a later event retry.
+                # If we cannot access the filesystem or a store command fails, we assume TLS is not
+                # ready and let a later event retry.
                 return False
 
         resources = [
@@ -416,8 +415,7 @@ class TlsManager(BaseManager):
 
         Returns:
             True once the resources are stored. False if the caller should defer and
-            retry: either a fleet-wide CA rotation is still in progress (certs must not
-            be written until it completes), or a filesystem/command error occurred.
+            retry.
         """
         if not self.state.ca_rotation_complete_in_cluster:
             return False
@@ -593,9 +591,6 @@ class TlsManager(BaseManager):
             if not (cert and key and keystore_password):
                 continue
 
-            # The cert and key are stored as separate secrets updated at different times
-            # (key at CSR generation, cert when the signed cert arrives), so during a rotation
-            # they can be mismatched. openssl rejects it and returns an error
             try:
                 self.store_key_pair(
                     name=cert_type.val,
@@ -849,25 +844,6 @@ class TlsManager(BaseManager):
 
         else:
             setattr(self.state.server, f"http_{secret_name}", value)
-
-    def cleanup_peer_cluster_error_relation_data(self) -> None:
-        """Clean up the error data in relation data when the error is resolved."""
-        model = self.state.application
-
-        if not model or not model.model_extra:
-            return
-
-        relation_ids = [rel.id for rel in self.state.peer_cluster_relations]
-        keys_to_clear = [
-            key
-            for key in model.model_extra
-            if key.startswith("error_from_tls-") and int(key.split("-")[-1]) not in relation_ids
-        ]
-
-        if keys_to_clear:
-            with model.update():
-                for key in keys_to_clear:
-                    model.model_extra[key] = None
 
     @override
     def get_statuses(  # noqa: C901

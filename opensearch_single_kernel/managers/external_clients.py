@@ -169,8 +169,7 @@ class ExternalClientsManager(BaseManager):
         """Gather version, TLS CA and endpoint data for a client relation response.
 
         Returns None when the workload version or admin TLS material can't be resolved;
-        the caller should defer in that case. `nodes` is supplied by the caller so this
-        manager does not depend on the cluster manager.
+        the caller should defer in that case.
         """
         try:
             version = self.workload.version

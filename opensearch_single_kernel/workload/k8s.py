@@ -514,12 +514,8 @@ class K8sWorkload(BaseWorkload):
             args: additional command line arguments
             stdin: string input to be passed on the standard input
             use_errors_replace: if True, tolerate non-UTF-8 bytes in stdout/stderr
-                (e.g. `openssl pkcs12` dumps, which may contain raw bytes in Bag
-                Attributes) by decoding with errors="replace" instead of strict
-                UTF-8. Pebble's exec() has no `errors=` knob, so we request raw
-                bytes (encoding=None) and decode them ourselves; requesting
-                strict UTF-8 decoding on such output crashes Pebble's background
-                I/O thread and hangs wait_output() forever.
+             by decoding with errors="replace" instead of strict
+                UTF-8.
 
         Returns:
             SimpleNamespace with cmd, out, err, return code attributes
