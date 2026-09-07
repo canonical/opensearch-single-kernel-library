@@ -381,8 +381,7 @@ class SnapshotsManager(BaseManager):
         object_storage_type = self.state.storage_type
         alt_hosts = self.alt_hosts
         # Create a new snapshot
-        if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
-            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+        self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
         snapshot_id = self.opensearch_client.create_snapshot(
             object_storage_type=object_storage_type,
             alt_hosts=alt_hosts,
@@ -461,8 +460,7 @@ class SnapshotsManager(BaseManager):
             )
 
         try:
-            if object_storage_type in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]:
-                self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
+            self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
             # close indices that were snapshotted if they still exist, so they can be restored
             self.close_snapshot_indices(snapshot)
             # start the restore

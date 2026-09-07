@@ -318,7 +318,11 @@ class SnapshotsEventsHandler(Object):
             event.fail(error_message)
             return
 
-        if not self.charm.keystore_manager.reload():
+        if (
+            self.charm.state.storage_type
+            in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]
+            and not self.charm.keystore_manager.reload()
+        ):
             event.fail("Failed to reload keystore.")
             return
 
@@ -385,7 +389,11 @@ class SnapshotsEventsHandler(Object):
             event.fail(error_message)
             return
 
-        if not self.charm.keystore_manager.reload():
+        if (
+            self.charm.state.storage_type
+            in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]
+            and not self.charm.keystore_manager.reload()
+        ):
             event.fail("Failed to reload keystore.")
             return
 
