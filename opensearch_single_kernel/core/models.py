@@ -901,7 +901,7 @@ class ExternalClientRequestedEntity(NamedTuple):
 class ExternalClientEntityPermission(Model):
     """Model class for a single permission entry requested on a client relation."""
 
-    resource_name: list[str]
+    resource_name: str
     resource_type: Literal["index_permissions"]
     privileges: list[str]
 
@@ -910,7 +910,7 @@ class ExternalClientEntityPermission(Model):
         return {
             self.resource_type: [
                 {
-                    "index_patterns": self.resource_name,
+                    "index_patterns": [self.resource_name],
                     "allowed_actions": self.privileges,
                 }
             ]

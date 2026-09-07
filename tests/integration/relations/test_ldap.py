@@ -35,7 +35,7 @@ SEARCH_ADMIN_DATA_INTEGRATOR_NAME = "search-admin-data-integrator"
 SEARCH_ADMIN_DATA_INTEGRATOR_CONFIG = {
     "index-name": "search-admin-index",
     "entity-type": "GROUP",
-    "entity-permissions": '[{"resource_name":["search-index"],"resource_type":"index_permissions","privileges":["read","search","get","write"]}]',
+    "entity-permissions": '[{"resource_name":"search-index","resource_type":"index_permissions","privileges":["read","search","get","write"]}]',
 }
 SEARCH_ADMIN_ROLE = "search-admin"
 SEARCH_ADMIN_LDAP_AUTHORIZATION = "Basic YWxpY2U6YWxpY2VwYXNzd29yZA=="  # alice:alicepassword
@@ -44,7 +44,7 @@ SEARCH_READONLY_DATA_INTEGRATOR_NAME = "search-readonly-data-integrator"
 SEARCH_READONLY_DATA_INTEGRATOR_CONFIG = {
     "index-name": "search-readonly-index",
     "entity-type": "GROUP",
-    "entity-permissions": '[{"resource_name":["search-index"],"resource_type":"index_permissions","privileges":["read","search","get"]}]',
+    "entity-permissions": '[{"resource_name":"search-index","resource_type":"index_permissions","privileges":["read","search","get"]}]',
 }
 SEARCH_READONLY_ROLE = "search-readonly"
 SEARCH_READONLY_LDAP_AUTHORIZATION = "Basic Ym9iOmJvYnBhc3N3b3Jk"  # bob:bobpassword
