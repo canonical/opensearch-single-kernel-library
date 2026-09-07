@@ -11,6 +11,7 @@ from ops import (
     ActionEvent,
     Object,
     RelationBrokenEvent,
+    RelationChangedEvent,
     RelationCreatedEvent,
 )
 
@@ -57,6 +58,9 @@ class TLSEventsHandler(Object):
             self.charm.on[TLS_RELATION].relation_created, self._on_tls_relation_created
         )
         self.framework.observe(
+            self.charm.on[TLS_RELATION].relation_changed, self._on_tls_relation_changed
+        )
+        self.framework.observe(
             self.charm.on[TLS_RELATION].relation_broken, self._on_tls_relation_broken
         )
 
@@ -97,6 +101,9 @@ class TLSEventsHandler(Object):
             return
 
         try:
+            old_csr = (self.charm.tls_manager.get_secrets_for_cert_type(cert_type) or {}).get(
+                "csr"
+            )
             secrets = {
                 "key": event.params.get("key", None),
                 "key-password": event.params.get("password", None),
@@ -104,7 +111,17 @@ class TLSEventsHandler(Object):
             csr = self.charm.tls_manager.create_certificate_signing_request(
                 scope, cert_type, secret=secrets
             )
-            self.certs.request_certificate_creation(certificate_signing_request=csr)
+
+            if not old_csr:
+                self.certs.request_certificate_creation(certificate_signing_request=csr)
+            # In case user provide a key and password already in current CSR
+            elif old_csr.rstrip() == csr.decode().rstrip():
+                self.request_certificate_reissue(cert_type)
+            else:
+                self.certs.request_certificate_renewal(
+                    old_certificate_signing_request=old_csr.encode("utf-8"),
+                    new_certificate_signing_request=csr,
+                )
 
         except ValueError as e:
             event.fail(str(e))
@@ -309,28 +326,93 @@ class TLSEventsHandler(Object):
         for peer_cluster_server in peer_clusters_servers:
             del peer_cluster_server.tls_configured
         try:
-            scope, cert_type, secrets = self.charm.tls_manager.find_secret(
-                event.certificate, "cert"
-            )
+            scope, cert_type, _ = self.charm.tls_manager.find_secret(event.certificate, "cert")
             logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
 
-        old_csr = secrets["csr"].encode("utf-8")
+        self.request_certificate_reissue(cert_type)
 
-        new_csr = self.charm.tls_manager.create_certificate_signing_request(
-            scope=scope, cert_type=cert_type, secret=secrets, tls_file=False, renew=True
+    def request_certificate_reissue(self, cert_type: CertType) -> None:
+        """Request certificate to be reissued
+
+        This is done by revoking the current certificate and waiting for the provider to drop it
+        before re-requesting it. This is necessary because the provider will ignore a request
+        for a certificate that is already issued.
+        """
+        secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+        if not (csr := (secrets or {}).get("csr")):
+            logger.warning("No CSR stored for %s, nothing to reissue.", cert_type.val)
+            return
+
+        self.certs.request_certificate_revocation(csr.encode("utf-8"))
+
+        self.charm.state.server.certs_reissue_pending = (
+            self.charm.state.server.certs_reissue_pending | {cert_type.val}
         )
-        self.certs.request_certificate_renewal(
-            old_certificate_signing_request=old_csr,
-            new_certificate_signing_request=new_csr,
+        logger.info(
+            "Revoked the CSR of %s, awaiting the provider before re-requesting it.",
+            cert_type.val,
         )
+
+    def reconcile_pending_reissues(self) -> None:
+        """Check if CSR has been revoked and request new one."""
+        if not self.charm.state.tls_relation:
+            return
+
+        if not (pending := self.charm.state.server.certs_reissue_pending):
+            return
+
+        provider_csrs = {cert.csr.rstrip() for cert in self.certs.get_provider_certificates()}
+
+        still_pending = set()
+        for cert_type_val in pending:
+            try:
+                cert_type = CertType(cert_type_val)
+            except ValueError:
+                logger.warning("Unknown cert type %s flagged for reissue.", cert_type_val)
+                continue
+
+            secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+            # If we have already dropped the CSR from our secrets, we cannot re-request it anymore.
+            if not (csr := (secrets or {}).get("csr")):
+                logger.warning(
+                    "No CSR stored for %s anymore, dropping its pending reissue.", cert_type_val
+                )
+                continue
+
+            # If CSR is still present in relation data
+            if csr.rstrip() in provider_csrs:
+                logger.info(
+                    "Provider still holds a certificate for %s, retrying its reissue later.",
+                    cert_type_val,
+                )
+                still_pending.add(cert_type_val)
+                continue
+            # CSR dropped, request new one
+            self.certs.request_certificate_creation(
+                certificate_signing_request=csr.encode("utf-8")
+            )
+            logger.info("Re-requested the CSR of %s.", cert_type_val)
+
+        if still_pending:
+            self.charm.state.server.certs_reissue_pending = still_pending
+        else:
+            del self.charm.state.server.certs_reissue_pending
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
         """Handle a cert that was revoked or has expired"""
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
+
+    def _on_tls_relation_changed(self, _: RelationChangedEvent) -> None:
+        """Handle the TLS relation changed event.
+
+        This is mainly used for checking if the provider has dropped the
+        revoked certificates, so we can re-request them.
+        """
+        self.reconcile_pending_reissues()
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""

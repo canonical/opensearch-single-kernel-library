@@ -267,7 +267,6 @@ class TlsManager(BaseManager):
         cert_type: CertType,
         secret: dict[str, str] | None = None,
         tls_file: bool = True,
-        renew: bool = False,
     ) -> bytes:
         """Create CSR and save certificate key and password in secrets."""
         key = None
@@ -275,8 +274,7 @@ class TlsManager(BaseManager):
         if secret:
             key = secret.get("key") if secret.get("key") else None
             password = secret.get("key-password", None)
-        # If we are renewing, need to generate new key
-        if key is None or renew:
+        if key is None:
             key = generate_private_key()
         else:
             if tls_file:
@@ -284,10 +282,8 @@ class TlsManager(BaseManager):
 
         if type(key) is str:
             key = key.encode("utf-8")
-        # If we are renewing, then don't use old password
-        if renew:
-            password = None
-        elif password is not None:
+
+        if password is not None:
             password = password.encode("utf-8")
 
         subject = self._get_certificate_subject(cert_type)
