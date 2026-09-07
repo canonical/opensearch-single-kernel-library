@@ -320,6 +320,8 @@ class TLSEventsHandler(Object):
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
     ) -> None:
         """Request the new certificate when old certificate is expiring."""
+        logger.info("Received event type %s", type(event).__name__)
+
         del self.charm.state.server.tls_configured
 
         peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
@@ -346,6 +348,7 @@ class TLSEventsHandler(Object):
             logger.warning("No CSR stored for %s, nothing to reissue.", cert_type.val)
             return
 
+        logger.debug("Revoking the CSR of %s to request a new one.", cert_type.val)
         self.certs.request_certificate_revocation(csr.encode("utf-8"))
 
         self.charm.state.server.certs_reissue_pending = (
@@ -358,9 +361,6 @@ class TLSEventsHandler(Object):
 
     def reconcile_pending_reissues(self) -> None:
         """Check if CSR has been revoked and request new one."""
-        if not self.charm.state.tls_relation:
-            return
-
         if not (pending := self.charm.state.server.certs_reissue_pending):
             return
 
