@@ -359,8 +359,18 @@ class TLSEventsHandler(Object):
             cert_type.val,
         )
 
-    def reconcile_pending_reissues(self) -> None:
-        """Check if CSR has been revoked and request new one."""
+    def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
+        """Handle a cert that was revoked or has expired"""
+        logger.debug("Received certificate invalidation. Reason: %s", event.reason)
+        self._on_certificate_expiring(event)
+
+    def _on_tls_relation_changed(self, _: RelationChangedEvent) -> None:
+        """Handle the TLS relation changed event.
+
+        This is mainly used for checking if the provider has dropped the
+        revoked certificates, so we can re-request them.
+        """
+        # If no pending certificates just skip
         if not (pending := self.charm.state.server.certs_reissue_pending):
             return
 
@@ -400,19 +410,6 @@ class TLSEventsHandler(Object):
             self.charm.state.server.certs_reissue_pending = still_pending
         else:
             del self.charm.state.server.certs_reissue_pending
-
-    def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
-        """Handle a cert that was revoked or has expired"""
-        logger.debug("Received certificate invalidation. Reason: %s", event.reason)
-        self._on_certificate_expiring(event)
-
-    def _on_tls_relation_changed(self, _: RelationChangedEvent) -> None:
-        """Handle the TLS relation changed event.
-
-        This is mainly used for checking if the provider has dropped the
-        revoked certificates, so we can re-request them.
-        """
-        self.reconcile_pending_reissues()
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""

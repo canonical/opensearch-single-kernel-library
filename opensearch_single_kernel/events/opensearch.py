@@ -435,9 +435,6 @@ class OpenSearchEventsHandler(Object):
             logger.debug("update_status: Detected CA rotation complete in cluster")
             self.charm.tls_manager.finalize_ca_certs_rotation()
 
-        # Safeguard for reissue taking multiple hooks
-        self.charm.tls_events.reconcile_pending_reissues()
-
         # If relation not broken - leave
         if self.charm.state.tls_relation:
             return
