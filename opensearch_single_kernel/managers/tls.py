@@ -283,7 +283,7 @@ class TlsManager(BaseManager):
 
         if type(key) is str:
             key = key.encode("utf-8")
-        # If we are renewing, then don't use old password
+
         if password is not None:
             password = password.encode("utf-8")
 
