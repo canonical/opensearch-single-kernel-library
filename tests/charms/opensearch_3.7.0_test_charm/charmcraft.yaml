@@ -82,7 +82,7 @@ parts:
       echo "setuptools-scm<10.0.0" > constraints.txt
       craftctl default
 
-      # Change revision for snap 
+      # Change revision for snap
       constants_files=$(find "$CRAFT_PART_INSTALL/venv" -path "*opensearch_single_kernel/common/constants.py")
       if [ -z "$constants_files" ]; then
         echo "ERROR: could not locate opensearch_single_kernel/common/constants.py to pin the snap revision" >&2
