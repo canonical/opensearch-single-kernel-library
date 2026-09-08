@@ -39,7 +39,7 @@ TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VM_VERSION_N = "2.19.6"
+VM_VERSION_N = "3.8.0"
 VM_VERSION_N_MINUS_1 = "2.18.0"
 VM_VERSION_N_MINUS_2 = "2.17.0"
 
@@ -48,9 +48,16 @@ VM_VERSION_TO_REVISION = {
     VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
 }
 
-K8S_VERSION_N = "2.19.6"
-K8S_VERSION_N_MINUS_1 = "2.19.5"
-K8S_VERSION_TO_REVISION = {K8S_VERSION_N_MINUS_1: {"jammy": 8, "noble": 7}}
+K8S_VERSION_N = "3.8.0"
+K8S_VERSION_N_MINUS_1 = "3.7.0"
+K8S_VERSION_TO_RESOURCE = {
+    K8S_VERSION_N_MINUS_1: {
+        "opensearch-image": (
+            "ghcr.io/canonical/opensearch-charmed:3.7.0-26.04_edge"
+            "@sha256:9f3288fd110a691696ba91e115f3ea9f345e76b7c25b7ef469054559eea079fc"
+        )
+    }
+}
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
 
@@ -119,8 +126,8 @@ def refresh(
 def get_version_on_unit(unit: str, model: str, substrate):
     """Returns version of OpenSearch running on given unit"""
     if substrate == "k8s":
-        cmd = f"juju ssh --model {model} --container opensearch {unit} '$OPENSEARCH_BIN/opensearch --version'"
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        cmd = f"juju ssh --model {model} --container opensearch {unit} 'cd $OPENSEARCH_HOME && $OPENSEARCH_BIN/opensearch --version'"
+        shell = True
     else:
         # opensearch.opensearch-bin not exposed in older snap revisions
         cmd = [
@@ -135,11 +142,16 @@ def get_version_on_unit(unit: str, model: str, substrate):
             "snap",
             "run",
             "--shell",
-            "opensearch.daemon",
+            "opensearch-charmed.daemon",
             "-c",
             "$OPENSEARCH_BIN/opensearch --version",
         ]
-        output = subprocess.check_output(cmd, text=True)
+        shell = False
+
+    # Retry to absorb transient `juju ssh`/`juju exec` connection flakiness.
+    for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
+        with attempt:
+            output = subprocess.check_output(cmd, shell=shell, text=True).strip()
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 

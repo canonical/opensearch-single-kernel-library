@@ -87,7 +87,7 @@ async def test_check_opensearch_transport(ops_test: OpsTest) -> None:
     for id in ids_to_addr.keys():
         hosts = (
             subprocess.check_output(
-                f"juju ssh opensearch/{id} -- sudo cat /var/snap/opensearch/current/etc/opensearch/unicast_hosts.txt".split()
+                f"juju ssh opensearch/{id} -- sudo cat /var/snap/opensearch-charmed/current/etc/opensearch/unicast_hosts.txt".split()
             )
             .decode()
             .rsplit()

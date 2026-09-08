@@ -22,7 +22,7 @@ from opensearch_single_kernel.utils.status import format_status
 
 def _manager(*, deployment_type=DeploymentType.MAIN_ORCHESTRATOR, smtp_relations=None):
     state = MagicMock()
-    state.application.deployment_desc = SimpleNamespace(typ=deployment_type)
+    state.application.deployment_description = SimpleNamespace(typ=deployment_type)
     state.smtp_relations = smtp_relations if smtp_relations is not None else []
     state.statuses.get.return_value = SimpleNamespace(root=[])
     workload = MagicMock()

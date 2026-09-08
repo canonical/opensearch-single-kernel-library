@@ -7,6 +7,7 @@ This module manages OpenSearch keystore access and lifecycle.
 """
 
 import logging
+from enum import Enum
 
 from tenacity import retry, retry_if_result, stop_after_attempt, wait_fixed
 
@@ -15,17 +16,24 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.core.models import (
-    AzureRelDataCredentials,
-    GcsRelDataCredentials,
-    ObjectStorageCredentials,
-    S3RelDataCredentials,
-)
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.storage import (
+    AzureRelData,
+    GcsRelData,
+    S3RelData,
+)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+class KeystoreReloadResult(Enum):
+    """Outcome of a keystore reload attempt."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    RELOAD_FAILED = "reload_failed"
 
 
 class KeystoreManager(BaseManager):
@@ -50,30 +58,28 @@ class KeystoreManager(BaseManager):
     def put_object_storage_credentials(
         self,
         object_storage_type: ObjectStorageType,
-        object_storage_credentials: ObjectStorageCredentials,
+        object_storage: S3RelData | AzureRelData | GcsRelData | None,
         gcs_file_path: str | None = None,
     ) -> None:
         """Put object storage credentials in the keystore."""
-        if object_storage_type == ObjectStorageType.S3 and isinstance(
-            object_storage_credentials, S3RelDataCredentials
-        ):
+        if object_storage_type == ObjectStorageType.S3 and isinstance(object_storage, S3RelData):
             self.put_entries(
                 {
-                    "s3.client.default.access_key": object_storage_credentials.access_key,
-                    "s3.client.default.secret_key": object_storage_credentials.secret_key,
+                    "s3.client.default.access_key": object_storage.access_key or "",
+                    "s3.client.default.secret_key": object_storage.secret_key or "",
                 }
             )
         elif object_storage_type == ObjectStorageType.AZURE and isinstance(
-            object_storage_credentials, AzureRelDataCredentials
+            object_storage, AzureRelData
         ):
             self.put_entries(
                 {
-                    "azure.client.default.account": object_storage_credentials.storage_account,
-                    "azure.client.default.key": object_storage_credentials.secret_key,
+                    "azure.client.default.account": object_storage.storage_account or "",
+                    "azure.client.default.key": object_storage.secret_key or "",
                 }
             )
         elif object_storage_type == ObjectStorageType.GCS and isinstance(
-            object_storage_credentials, GcsRelDataCredentials
+            object_storage, GcsRelData
         ):
             if gcs_file_path is None:
                 raise ValueError(
@@ -179,26 +185,28 @@ class KeystoreManager(BaseManager):
         wait=wait_fixed(2),
         retry_error_callback=lambda _: False,
     )
-    def reload(self) -> bool:
+    def reload(self) -> KeystoreReloadResult:
         """Reload the keystore.
 
         Returns:
-            whether a reload was successful.
+            The outcome of the reload attempt.
         """
         try:
             self._create_if_needed()
             self.workload.run_cmd(self.keystore, "upgrade")
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
             logger.error("Keystore operation failed: %s", e)
-            return False
+            return KeystoreReloadResult.ERROR
 
-        if not self.workload.is_service_started():
-            # service not running, settings will be picked up at startup
-            logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
-            return True
+        if not self.workload.is_service_started() or not self.opensearch_client.is_node_up():
+            # Secure settings are read from the keystore at
+            # OpenSearch startup, so there is nothing to reload live and doing so would abort
+            # an in-progress bootstrap and deadlock the node-lock handshake.
+            logger.debug("Opensearch not up. Keystore settings will be loaded at start time.")
+            return KeystoreReloadResult.SUCCESS
 
         if not self.opensearch_client.reload_secure_settings():
-            return False
+            return KeystoreReloadResult.RELOAD_FAILED
 
         logger.debug("Keystore reload successful")
-        return True
+        return KeystoreReloadResult.SUCCESS

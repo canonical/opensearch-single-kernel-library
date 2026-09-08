@@ -13,7 +13,7 @@ from overrides import override
 from opensearch_single_kernel.common.constants import PerformanceType
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.profiles import (
     OpenSearchProfile,
     ProductionProfile,
     TestingProfile,
@@ -131,7 +131,7 @@ class ProfilesManager(BaseManager):
     @property
     def profile(self) -> OpenSearchProfile:
         """Get the current profile."""
-        return self.state.server.profile or self.get_config_profile()
+        return self.state.server.opensearch_profile or self.get_config_profile()
 
     def get_config_profile(self) -> OpenSearchProfile:
         """Get the current config profile."""

@@ -7,51 +7,37 @@
 from typing import Any
 
 from opensearch_single_kernel.common.constants import (
-    HASH_POSTFIX,
-    OPENSEARCH_SYSTEM_USERS,
-    PW_POSTFIX,
     SECRETS_LABEL_SEPARATOR,
     Scope,
 )
 
 
-def user_from_hash_key(key):
-    """Which user is referred to by key?"""
-    for user in OPENSEARCH_SYSTEM_USERS:
-        if key == hash_key(user):
-            return user
-
-
-def password_key(username: str) -> str:
-    """Unified key to store password secrets specific to a user."""
-    return f"{username}-{PW_POSTFIX}"
-
-
-def hash_key(username: str) -> str:
-    """Unified key to store password secrets specific to a user."""
-    return f"{username}-{HASH_POSTFIX}"
-
-
-def breakdown_label(label: str) -> dict[str, Any]:
+def breakdown_label(label: str | None) -> dict[str, Any]:
     """Return meaningful components resolved from a secret label."""
-    components = label.split(SECRETS_LABEL_SEPARATOR)
-    if len(components) < 3 or len(components) > 4:
-        raise ValueError(f"Invalid label {label}")
+    if not label:
+        raise ValueError("No label to breakdown")
 
-    scope = Scope[components[1].upper()]
+    parts = label.split(SECRETS_LABEL_SEPARATOR)
 
-    if scope == Scope.APP:
-        key = components[2]
-        unit_id = None
+    if not (3 <= len(parts) <= 4):
+        raise ValueError(f"Invalid label format: {label}")
+
+    if len(parts) == 3:
+        relation_name, application_name, scope_raw = parts
+        group = "extra"
     else:
-        key = components[3]
-        unit_id = int(components[2])
+        relation_name, application_name, scope_raw, group = parts
+
+    try:
+        scope = Scope(scope_raw.lower())
+    except ValueError:
+        raise ValueError(f"Invalid scope '{scope_raw}' in label")
 
     return {
-        "application_name": components[0],
+        "relation_name": relation_name,
+        "application_name": application_name,
         "scope": scope,
-        "unit_id": unit_id,
-        "key": key,
+        "group": group,
     }
 
 

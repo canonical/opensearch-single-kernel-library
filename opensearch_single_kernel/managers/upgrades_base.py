@@ -31,8 +31,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.upgrades import (
+    UnitUpgradesState,
+    UpgradeVersions,
+)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.status import (
     cached_non_running_statuses,
@@ -169,7 +172,7 @@ class UpgradesManagerBase(BaseManager):
         logger.debug("Running pre-upgrade checks")
 
         try:
-            deployment_desc = self.state.application.deployment_desc
+            deployment_desc = self.state.application.deployment_description
             if not deployment_desc:
                 raise OpenSearchUpgradePrecheckError("Deployment description not available")
 
@@ -179,10 +182,7 @@ class UpgradesManagerBase(BaseManager):
             )
 
             # Check if all units are marked as started in peer relation data
-            peer_relation = self.state.peer_relation
-            all_units_started = peer_relation is not None and all(
-                peer_relation.data[unit].get("started") for unit in self.state.all_units
-            )
+            all_units_started = all(server.started for server in self.state.application_servers)
 
             if (
                 not all_units_started
@@ -250,7 +250,9 @@ class UpgradesManagerBase(BaseManager):
                 )
             else:
                 # Separated the command and passed 'N' via stdin to match the K8s behavior
-                output = self.workload.run_cmd("opensearch.node", "override-version", stdin="N\n")
+                output = self.workload.run_cmd(
+                    "opensearch-charmed.node", "override-version", stdin="N\n"
+                )
 
             # Optional: strip() the output if your framework doesn't do it automatically
             if isinstance(output, str):
@@ -284,7 +286,7 @@ class UpgradesManagerBase(BaseManager):
         if self.state.substrate == Substrates.K8S:
             self.workload.run_script("bin/opensearch-node", "override-version", stdin="y\n")
         else:
-            self.workload.run_cmd("opensearch.node", "override-version", stdin="y\n")
+            self.workload.run_cmd("opensearch-charmed.node", "override-version", stdin="y\n")
 
     @property
     def compatibility_matrix(self) -> dict[str, set[str]]:
@@ -330,8 +332,8 @@ class UpgradesManagerBase(BaseManager):
         # 4. The version in application databag match the version in file
         return (
             self.in_progress
-            and self.state.server_upgrade.unit.name
-            == self.state.sorted_upgrades_units[0].unit.name
+            and self.state.server_upgrade.component.name
+            == self.state.sorted_upgrades_units[0].component.name
             and self.is_compatible
             and self.state.application_upgrade.versions.workload_parsed
             == self.current_versions.workload_parsed

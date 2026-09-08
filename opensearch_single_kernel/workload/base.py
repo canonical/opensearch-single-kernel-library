@@ -94,7 +94,7 @@ class Paths:
     @property
     def opensearch_keystore_binary(self) -> str:
         """Name of the opensearch-keystore binary."""
-        return "opensearch.keystore"
+        return "opensearch-charmed.keystore"
 
     @property
     def data(self) -> PathProtocol:
@@ -220,6 +220,7 @@ class BaseWorkload(ABC):
             LookupError,
             NotADirectoryError,
             PermissionError,
+            PebbleError,
             pathops.PebbleConnectionError,
             ValueError,
         ) as e:
@@ -290,7 +291,7 @@ class BaseWorkload(ABC):
         """
         try:
             return path.exists()
-        except (PermissionError, pathops.PebbleConnectionError) as e:
+        except (PermissionError, PebbleError, pathops.PebbleConnectionError) as e:
             raise OpenSearchFileOperationError(e)
 
     def unlink(self, path: pathops.PathProtocol, missing_ok: bool = False) -> None:
@@ -306,6 +307,7 @@ class BaseWorkload(ABC):
             FileNotFoundError,
             IsADirectoryError,
             PermissionError,
+            PebbleError,
             pathops.PebbleConnectionError,
         ) as e:
             raise OpenSearchFileOperationError(e)

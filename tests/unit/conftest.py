@@ -38,7 +38,7 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
         fake_snap.held = True
         mocker.patch(
             "opensearch_single_kernel.workload.vm.snap.SnapCache",
-            return_value={"opensearch": fake_snap},
+            return_value={"opensearch-charmed": fake_snap},
         )
         # Unit tests should not run Juju CLI (such as unit-get public-address).
         # VM workload callers can fall back to state.host_ip populated by harness.add_network.
@@ -148,7 +148,6 @@ def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None)
         "object_storage.S3Requirer.get_storage_connection_info",
         return_value=DEFAULT_S3_INFO,
     )
-
     info = info or DEFAULT_S3_INFO
     if ca is not None:
         info["tls_ca_chain"] = ca

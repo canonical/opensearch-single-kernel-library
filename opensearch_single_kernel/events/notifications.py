@@ -68,7 +68,7 @@ class NotificationsEvents(Object):
             event: Smtp credentials available event
         """
         smtp_data = None
-        if not (deployment_desc := self.charm.state.application.deployment_desc):
+        if not (deployment_desc := self.charm.state.application.deployment_description):
             logger.debug("Deployment not ready. Deferring event.")
             event.defer()
             return

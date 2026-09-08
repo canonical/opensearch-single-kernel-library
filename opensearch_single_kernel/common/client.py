@@ -34,7 +34,11 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
+from opensearch_single_kernel.core.base_models import (
+    App,
+    Node,
+)
+from opensearch_single_kernel.core.storage import ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     repository_type,
@@ -85,19 +89,23 @@ class OpenSearchClient:
         if object_storage_type == ObjectStorageType.S3:
             settings = {
                 "bucket": object_storage_config.s3.bucket,
-                "base_path": object_storage_config.s3.base_path,
+                "base_path": object_storage_config.s3.path,
                 "region": object_storage_config.s3.region,
                 "endpoint": object_storage_config.s3.endpoint,
+                # restore pre https://github.com/opensearch-project/OpenSearch/pull/22144
+                # settings, not sure what to do about it
+                # but for now it works same as pre 3.8.0
+                "server_side_encryption_type": "bucket_default",
             }
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
                 "container": object_storage_config.azure.container,
-                "base_path": object_storage_config.azure.base_path,
+                "base_path": object_storage_config.azure.path,
             }
         elif object_storage_type == ObjectStorageType.GCS:
             settings = {
                 "bucket": object_storage_config.gcs.bucket,
-                "base_path": object_storage_config.gcs.base_path,
+                "base_path": object_storage_config.gcs.path,
             }
 
         repo_type = repository_type(object_storage_type)
@@ -563,7 +571,13 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("DELETE", f"{USER_ROLE_ENDPOINT}/{role_name}")
+            resp = self.request(
+                "DELETE",
+                f"{USER_ROLE_ENDPOINT}/{role_name}",
+                retries=3,
+                wait_strategy=wait_fixed(3),
+                ignore_retry_on=[404],
+            )
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -645,7 +659,13 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
+            resp = self.request(
+                "DELETE",
+                f"{USER_ENDPOINT}/{user_name}",
+                retries=3,
+                wait_strategy=wait_fixed(3),
+                ignore_retry_on=[404],
+            )
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -721,7 +741,13 @@ class OpenSearchClient:
             OpenSearchHttpError: If the request fails, or if role is empty
         """
         try:
-            resp = self.request("DELETE", f"{USER_ROLESMAPPING_ENDPOINT}/{role}")
+            resp = self.request(
+                "DELETE",
+                f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
+                retries=3,
+                wait_strategy=wait_fixed(3),
+                ignore_retry_on=[404],
+            )
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 resp = {

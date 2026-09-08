@@ -12,7 +12,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.core.models import Node
+from opensearch_single_kernel.core.base_models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import format_unit_name
@@ -90,13 +90,13 @@ class NodesExclusionsManager(BaseManager):
     def cleanup(self, scope: Scope) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
-        units_to_cleanup = self._units_to_cleanup(list(state.voting_exclusions_to_delete))
+        units_to_cleanup = self._units_to_cleanup(list(state.delete_voting_exclusions))
         self._delete_voting(units_to_cleanup, scope)
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(
             self.api_or_state_node, allocations_to_cleanup
         ):
-            state.update({"allocation-exclusions-to-delete": ""})
+            state.allocation_exclusions_to_delete = set()
 
     def add_to_cleanup_list(self, unit_name: str, scope: Scope) -> None:
         """Add Voting and alloc exclusions for a target unit.
@@ -109,7 +109,7 @@ class NodesExclusionsManager(BaseManager):
         state.allocation_exclusions_to_delete = state.allocation_exclusions_to_delete.union(
             {unit_name}
         )
-        state.voting_exclusions_to_delete = state.voting_exclusions_to_delete.union({unit_name})
+        state.delete_voting_exclusions = state.delete_voting_exclusions.union({unit_name})
 
     def _units_to_cleanup(self, removable: list[str]) -> set[str] | None:
         """Deletes all units that have left the cluster via Juju.
@@ -123,7 +123,7 @@ class NodesExclusionsManager(BaseManager):
             A set of unit names that should be removed from the voting exclusion list, or None
             if there are no units to remove.
         """
-        if not (deployment_desc := self.state.application.deployment_desc) or not removable:
+        if not (deployment_desc := self.state.application.deployment_description) or not removable:
             return set()
 
         # if self._charm.opensearch_peer_cm.is_provider(typ="main") and (
@@ -167,12 +167,12 @@ class NodesExclusionsManager(BaseManager):
                 alt_hosts=self.alt_hosts,
             )
             if scope == Scope.APP:
-                self.state.application.voting_exclusions_to_delete = to_add.union(
-                    self.state.application.voting_exclusions_to_delete
+                self.state.application.delete_voting_exclusions = to_add.union(
+                    self.state.application.delete_voting_exclusions
                 )
             else:
-                self.state.server.voting_exclusions_to_delete = to_add.union(
-                    self.state.server.voting_exclusions_to_delete
+                self.state.server.delete_voting_exclusions = to_add.union(
+                    self.state.server.delete_voting_exclusions
                 )
 
             # The voting excl. API returns a status only
@@ -234,12 +234,12 @@ class NodesExclusionsManager(BaseManager):
 
             # Finally, we clean up the VOTING_TO_DELETE
             if scope == Scope.APP:
-                self.state.application.voting_exclusions_to_delete = (
-                    self.state.application.voting_exclusions_to_delete - exclusions
+                self.state.application.delete_voting_exclusions = (
+                    self.state.application.delete_voting_exclusions - exclusions
                 )
             else:
-                self.state.server.voting_exclusions_to_delete = (
-                    self.state.server.voting_exclusions_to_delete - exclusions
+                self.state.server.delete_voting_exclusions = (
+                    self.state.server.delete_voting_exclusions - exclusions
                 )
 
             return True

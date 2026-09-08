@@ -16,7 +16,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState
+from opensearch_single_kernel.core.upgrades import UnitUpgradesState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
@@ -91,7 +91,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
             action_event.fail(message)
             return
 
-        self.state.application_upgrade.upgrade_resumed = True
+        self.state.application_upgrade.set_upgrade_resumed(True)
         message = "Upgrade resumed."
         action_event.set_results({"result": message})
         logger.debug(f"Resume upgrade event succeeded: {message}")
@@ -108,7 +108,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         assert self.state.server_upgrade.snap_revision != OPENSEARCH_SNAP_REVISION
         assert self.state.application_upgrade.versions
         for index, unit in enumerate(self.state.sorted_upgrades_units):
-            if unit.unit == self.state.server.unit:
+            if unit.component == self.state.server.unit:
                 # Higher number units have already upgraded
                 if index == 0:
                     if (
@@ -139,7 +139,9 @@ class UpgradesManagerVM(UpgradesManagerBase):
                 or unit.unit_state is not UnitUpgradesState.HEALTHY
             ):
                 # Waiting for higher number units to upgrade
-                logger.debug(f"Upgrade not authorized. Waiting for {unit.unit.name=} to upgrade")
+                logger.debug(
+                    f"Upgrade not authorized. Waiting for {unit.component.name=} to upgrade"
+                )
                 return False
         return False
 
@@ -165,7 +167,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         """
         assert self.state.application_upgrade.versions
         for index, server in enumerate(self.state.sorted_upgrades_units):
-            if server.unit == self.state.server.unit:
+            if server.component == self.state.server.unit:
                 is_rollback = (
                     self.state.application_upgrade.versions.charm == self.current_versions.charm
                 )
@@ -184,7 +186,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         restart.)
         """
         return {
-            server.unit.name: server.snap_revision
+            server.component.name: server.snap_revision
             for server in self.state.sorted_upgrades_units
             if server.snap_revision
         }
