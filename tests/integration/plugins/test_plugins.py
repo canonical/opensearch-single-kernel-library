@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 from pytest_operator.plugin import OpsTest
-from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from opensearch_single_kernel.common.statuses import NotificationsStatuses
 from opensearch_single_kernel.utils.status import format_status
