@@ -89,7 +89,7 @@ parts:
         exit 1
       fi
       for constants_file in $constants_files; do
-        sed -i 's/^OPENSEARCH_SNAP_REVISION = .*/OPENSEARCH_SNAP_REVISION = "65"
+        sed -i 's/^OPENSEARCH_SNAP_REVISION = .*/OPENSEARCH_SNAP_REVISION = "65"  # pinned for upgrade tests/' "$constants_file"
         grep -q '^OPENSEARCH_SNAP_REVISION = "49"' "$constants_file" || {
           echo "ERROR: failed to pin OPENSEARCH_SNAP_REVISION in $constants_file" >&2
           exit 1
