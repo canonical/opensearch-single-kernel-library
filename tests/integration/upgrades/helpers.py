@@ -32,6 +32,7 @@ from ..helpers import (
 
 OPENSEARCH_CHARM = "opensearch"
 OPENSEARCH_CHANNEL = "2/edge"
+OPENSEARCH_K8S_CHARM = "opensearch-k8s"
 PROFILES_REVISION = 185
 
 TIMEOUT = 2400
