@@ -40,8 +40,6 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.skip_if_substrate("k8s")
-
 MAIN_APP = "main"
 FAILOVER_APP = "failover"
 
@@ -191,7 +189,7 @@ async def test_deploy_starting_version(
 ) -> None:
     """Build and deploy the charm for large deployment tests."""
     if substrate == "k8s":
-        # Deploy from the local 2.19.4 charm to have n-1 version available
+        # Deploy from the local 3.7.0 base charm to have n-1 version available
         # TODO: Once revision released deploy from channel and remove local charm
         await _build_env(
             ops_test,

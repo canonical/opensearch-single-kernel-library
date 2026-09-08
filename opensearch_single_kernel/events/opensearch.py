@@ -1130,7 +1130,7 @@ class OpenSearchEventsHandler(Object):
         try:
             self.charm.stop_opensearch(restart=True)
             logger.info("Restarting OpenSearch.")
-        except OpenSearchStopError as e:
+        except (OpenSearchStopError, OpenSearchHAError) as e:
             logger.info("Error while Restarting Opensearch: %s", e)
             logger.exception(e)
             self.charm.lock_manager.release()

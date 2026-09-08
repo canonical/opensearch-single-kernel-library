@@ -20,6 +20,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
+    OpenSearchHAError,
     OpenSearchHttpError,
     OpenSearchInstallError,
     OpenSearchReconcilePartitionError,
@@ -341,7 +342,7 @@ class UpgradesEventsHandler(Object):
         logger.debug("Stopping OpenSearch before upgrade")
         try:
             self.charm.stop_opensearch(restart=True)
-        except OpenSearchStopError as e:
+        except (OpenSearchStopError, OpenSearchHAError) as e:
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()

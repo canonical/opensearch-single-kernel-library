@@ -18,6 +18,8 @@ from ..helpers import APP_NAME, app_name, deploy_opensearch, set_watermark, wait
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     K8S_VERSION_N,
+    K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_RESOURCE,
     PROFILES_REVISION,
     UPGRADE_PARAMS,
     VM_VERSION_N,
@@ -31,8 +33,6 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-pytestmark = pytest.mark.skip_if_substrate("k8s")
 
 OPENSEARCH_ORIGINAL_CHARM_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/edge"
@@ -133,10 +133,10 @@ async def test_deploy_latest_from_channel(
 ) -> None:
     """Deploy OpenSearch."""
     if substrate == "k8s":
-        # Deploy from the local 2.18 charm to have n-1 version available
+        # Deploy from the local 3.7.0 base charm to have n-1 version available
         # TODO: Once revision released deploy from channel and remove local charm
         await ops_test.model.set_config(MODEL_CONFIG)
-        charm_resources = {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
+        charm_resources = K8S_VERSION_TO_RESOURCE[K8S_VERSION_N_MINUS_1]
         await deploy_opensearch(
             ops_test,
             charm_version_minus_1,

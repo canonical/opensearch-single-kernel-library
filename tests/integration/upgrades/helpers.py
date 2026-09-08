@@ -47,10 +47,15 @@ VM_VERSION_TO_REVISION = {
     VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
 }
 
-K8S_VERSION_N = "2.19.5"
-K8S_VERSION_N_MINUS_1 = "2.19.4"
+K8S_VERSION_N = "3.8.0"
+K8S_VERSION_N_MINUS_1 = "3.7.0"
 K8S_VERSION_TO_RESOURCE = {
-    K8S_VERSION_N_MINUS_1: {"opensearch-image": "ghcr.io/canonical/opensearch:2.19.4-24.04_edge"}
+    K8S_VERSION_N_MINUS_1: {
+        "opensearch-image": (
+            "ghcr.io/canonical/opensearch-charmed:3.7.0-26.04_edge"
+            "@sha256:9f3288fd110a691696ba91e115f3ea9f345e76b7c25b7ef469054559eea079fc"
+        )
+    }
 }
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
