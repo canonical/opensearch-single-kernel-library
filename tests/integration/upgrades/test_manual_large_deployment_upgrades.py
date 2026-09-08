@@ -23,6 +23,7 @@ from .helpers import (
     IDLE_PERIOD,
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_REVISION,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
     OPENSEARCH_K8S_CHARM,
@@ -78,7 +79,7 @@ async def _build_env(
     tls_config = {"ca-common-name": "CN_CA"}
 
     if substrate == "k8s":
-        revision = None
+        revision = K8S_VERSION_TO_REVISION[version][series]
         config = {"profile": "testing"}
         charm = OPENSEARCH_K8S_CHARM
     else:
@@ -193,7 +194,9 @@ async def test_upgrade_to_n_minus_1(
     revision = VM_VERSION_TO_REVISION[VM_VERSION_N_MINUS_1][series]
     for app in list(APPS.keys()):
         await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_2, substrate)
-        await assert_upgrade_to_revision(ops_test, app, revision)
+        await assert_upgrade_to_revision(
+            ops_test, app, revision, substrate=substrate, c_writes=c_writes
+        )
         await assert_version_units(ops_test, app, VM_VERSION_N_MINUS_1, substrate)
 
     # continuous writes checks
@@ -220,6 +223,7 @@ async def test_upgrade_to_local(
             charm=charm,
             substrate=substrate,
             charm_resources=charm_resources,
+            c_writes=c_writes,
         )
         await assert_version_units(ops_test, app, version_n, substrate)
         if substrate == "k8s":
@@ -276,7 +280,9 @@ async def test_upgrade_from_version_to_local(
 ) -> None:
     """Test upgrade from usptream to local charm."""
     for app in [APP_NAME, FAILOVER_APP, MAIN_APP]:
-        await assert_upgrade_to_local(ops_test, app=app, charm=charm, substrate=substrate)
+        await assert_upgrade_to_local(
+            ops_test, app=app, charm=charm, substrate=substrate, c_writes=c_writes
+        )
         await assert_version_units(ops_test, app, VM_VERSION_N, substrate)
 
     # continuous writes checks

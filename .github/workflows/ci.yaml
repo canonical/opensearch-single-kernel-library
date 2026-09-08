@@ -183,7 +183,7 @@ jobs:
 
   integration-test:
     name: Integration test charm
-    uses: ./.github/workflows/integration_test.yaml
+    uses: $/.github/workflows/integration_test.yaml
     needs:
       - build
     with:

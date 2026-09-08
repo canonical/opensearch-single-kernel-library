@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: ./.github/workflows/ci.yaml
+    uses: $/.github/workflows/ci.yaml
     secrets:
       CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
       AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
@@ -101,7 +101,7 @@ jobs:
       - release-part1
       - release-part2
       - wait-for-pypi-available
-    uses: ./.github/workflows/bump_dependent_charms.yaml
+    uses: $/.github/workflows/bump_dependent_charms.yaml
     with:
       version: ${{ needs.release-part1.outputs.git-tag }}
       base_branch: ${{ github.ref_name }}
