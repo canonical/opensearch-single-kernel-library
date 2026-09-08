@@ -26,3 +26,6 @@ rules:
   secrets-inherit:
     ignore:
       - ci.yaml:178
+  # Since actionlint don't support $/.. syntax
+  self-repository:
+    disable: true
