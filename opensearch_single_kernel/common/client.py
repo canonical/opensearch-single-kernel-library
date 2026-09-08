@@ -92,6 +92,10 @@ class OpenSearchClient:
                 "base_path": object_storage_config.s3.path,
                 "region": object_storage_config.s3.region,
                 "endpoint": object_storage_config.s3.endpoint,
+                # restore pre https://github.com/opensearch-project/OpenSearch/pull/22144
+                # settings, not sure what to do about it
+                # but for now it works same as pre 3.8.0
+                "server_side_encryption_type": "bucket_default",
             }
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
