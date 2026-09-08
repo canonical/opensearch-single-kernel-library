@@ -152,7 +152,10 @@ class ExtraUserRolePermissions(Enum):
     # Default user has CRUD in a specific index. Update index_patterns to include the index to
     # which these permissions are applied.
     DEFAULT = {
-        "cluster_permissions": ["cluster_monitor"],
+        "cluster_permissions": [
+            "cluster_monitor",
+            "indices:data/write/bulk",
+        ],
         "index_permissions": [
             {
                 "index_patterns": [],
