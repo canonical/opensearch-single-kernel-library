@@ -288,6 +288,10 @@ class OpenSearchProfile(ABC):
             )
         return _1GB_IN_KB
 
+    def get_native_memory_threshold(self) -> int:
+        """Get the ML Commons native memory circuit breaker threshold (% of host RAM)."""
+        return 90
+
     def __hash__(self):
         """Get the hash of the profile."""
         return hash(self.type)
@@ -329,6 +333,16 @@ class TestingProfile(OpenSearchProfile):
     """
 
     type = PerformanceType.TESTING
+
+    def get_native_memory_threshold(self) -> int:
+        """Get the ML Commons native memory circuit breaker threshold (% of host RAM).
+
+        Testing clusters typically run all units on a single memory-constrained host,
+        where loading an ML model can briefly push RAM usage above the default 90%
+        threshold, failing ML requests with a TRANSIENT circuit_breaking_exception.
+        100 disables the breaker.
+        """
+        return 100
 
     @property
     def memory_requirements(self) -> ProfileMemoryRequirements:

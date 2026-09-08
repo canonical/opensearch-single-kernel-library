@@ -157,7 +157,7 @@ async def test_build_large_deployment(
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, TLS_CERTIFICATES_APP_NAME],
         wait_for_exact_units=APP_UNITS | {TLS_CERTIFICATES_APP_NAME: 1},
         idle_period=IDLE_PERIOD,
-        timeout=3000,
+        timeout=2400,
     )
 
 

@@ -443,14 +443,6 @@ class TLSEventsHandler(Object):
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
         except OpenSearchError as e:
             event.fail(f"Failed changing the password: {e}")
-        except RuntimeError as e:
-            # From:
-            # https://github.com/canonical/operator/blob/ \
-            #     eb52cef1fba4df2f999f88902fb39555fb6de52f/ops/charm.py
-            # if str(e) == "cannot defer action events":
-            #    event.fail("Cluster is not ready to update this password. Try again later.")
-            # else:
-            event.fail(f"Failed with unknown error: {e}")
 
     def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""

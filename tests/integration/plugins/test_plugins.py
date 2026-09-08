@@ -1482,18 +1482,10 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     payload = {
         "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
     }
-    # Model can cause memory usage spike of over 90% on machines with limited RAM capacity.
-    # Because of this spike, the following action may fail with status
-    # HTTP 429: "Memory Circuit Breaker is open, please check your resources!".
-    # This error is transient and should be retried.
-    for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(60 * 5), reraise=True):
-        with attempt:
-            response = await http_request(
-                ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload
-            )
-            assert len(response.get("hits", {}).get("hits", [])) > 0, (
-                f"Neural search did not yield results: {response}"
-            )
+    response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
+    assert len(response.get("hits", {}).get("hits", [])) > 0, (
+        f"Neural search did not yield results: {response}"
+    )
 
     # clean up resources
     response = await http_request(ops_test, "GET", f"{base_url}/_plugins/_ml/models/{model_id}")
