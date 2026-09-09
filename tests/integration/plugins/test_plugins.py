@@ -1515,6 +1515,16 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_ltr/_featureset"
 
+    # LTR plugin can also cause memory spike resulting in transient HTTP 429
+    # "Memory Circuit Breaker is open" responses, so we temporarily disable this check.
+    # Unlike neural search plugin, this plugin's breaker is controlled by different option.
+    await http_request(
+        ops_test,
+        "PUT",
+        f"{base_url}/_cluster/settings",
+        {"persistent": {"ltr.breaker.enabled": False}},
+    )
+
     # initialize default feature store
     response = await http_request(ops_test, "PUT", f"{base_url}/_ltr")
     assert response.get("acknowledged"), "LTR index not created"
