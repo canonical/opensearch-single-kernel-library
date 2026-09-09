@@ -68,7 +68,6 @@ class ConfigManager(BaseManager):
         config = (
             self._opensearch_static_config()
             | self._opensearch_general_config(roles)
-            | self._opensearch_profile_config()
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
@@ -163,14 +162,6 @@ class ConfigManager(BaseManager):
             "path.logs": self.workload.paths.logs.as_posix(),
             "path.home": self.workload.paths.home.as_posix(),
         }
-
-    def _opensearch_profile_config(self) -> dict[str, Any]:
-        """Profile-specific settings written to opensearch.yml."""
-        if profile := self.state.server.profile:
-            return {
-                "plugins.ml_commons.native_memory_threshold": profile.get_native_memory_threshold()
-            }
-        return {}
 
     def _opensearch_temperature_config(self) -> dict[str, Any]:
         """Optional data temperature settings written to opensearch.yml."""
