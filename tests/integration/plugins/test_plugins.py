@@ -1448,6 +1448,15 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     base_url = f"https://{leader_unit_ip}:9200"
 
+    # Enabling model can cause memory spike resulting in transient HTTP 429
+    # "Memory Circuit Breaker is open" responses, so we temporarily disable this check.
+    await http_request(
+        ops_test,
+        "PUT",
+        f"{base_url}/_cluster/settings",
+        {"persistent": {"plugins.ml_commons.jvm_heap_memory_threshold": 100}},
+    )
+
     # get model id used for ingesting documents to this index
     # ingest pipeline with id {INGEST_PIPELINE_ID} was created during flow framework test
     response = await http_request(
