@@ -1506,17 +1506,6 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     )
     await http_request(ops_test, "DELETE", f"{base_url}/_ingest/pipeline/{INGEST_PIPELINE_ID}")
 
-    # clean up resources
-    response = await http_request(ops_test, "GET", f"{base_url}/_plugins/_ml/models/{model_id}")
-    model_group_id = response["model_group_id"]
-
-    await http_request(ops_test, "POST", f"{base_url}/_plugins/_ml/models/{model_id}/_undeploy")
-    await http_request(ops_test, "DELETE", f"{base_url}/_plugins/_ml/models/{model_id}")
-    await http_request(
-        ops_test, "DELETE", f"{base_url}/_plugins/_ml/model_groups/{model_group_id}"
-    )
-    await http_request(ops_test, "DELETE", f"{base_url}/_ingest/pipeline/{INGEST_PIPELINE_ID}")
-
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
