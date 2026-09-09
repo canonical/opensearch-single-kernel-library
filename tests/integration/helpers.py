@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 # It's better to block stdin so terminal don't break after the test (e.g. Ctrl+C and lines alignment)
 NO_TTY_STDIN = b""
 
+# How much of a unit's OpenSearch log to print when a unit is being debugged in-test.
+DEBUG_LOG_LINES = 500
+
 # Keep the existing connect/read timeout used by http_request.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
 EmptyBlockedStatus = StatusObject(
@@ -890,24 +893,47 @@ async def http_request(  # noqa: C901
 async def debug_failed_unit(
     ops_test: OpsTest, app: str, endpoint: str, level: int = logging.DEBUG
 ) -> None:
-    """Print the logs of a unit failing with a certain set of statuses."""
+    """Print the workload logs and config of a unit failing with a certain set of statuses."""
     unit_ip = endpoint[8:].split(":")[0]
 
     ids_ips = await get_application_unit_ids_ips(ops_test, app=app)
     unit_id = [u_id for u_id, u_ip in ids_ips.items() if u_ip == unit_ip][0]
+    unit = f"{app}/{unit_id}"
 
-    root = "/var/snap/opensearch"
-    files_to_debug = [
-        f"{root}/common/logs/{app}-{ops_test.model_name}.log",
-        f"{root}/current/config/opensearch.yml",
-        f"{root}/current/config/unicast_hosts.txt",
-    ]
-    bin_cmd = "exec" if juju_version_major() > 2 else "run"
-    for f in files_to_debug:
-        logger.log(level, f"{f}:\n")
+    substrate = ops_test.request.config.option.substrate
+    if substrate == "k8s":
+        # The workload container runs as root and the rock has no sudo.
+        logs = "/var/log/opensearch"
+        conf = "/etc/opensearch"
+        sudo = ""
+    else:
+        logs = "/var/snap/opensearch/common/var/log/opensearch"
+        conf = "/var/snap/opensearch/current/etc/opensearch"
+        sudo = "sudo "
 
-        get_logs_cmd = f"{bin_cmd} --unit {app}/{unit_id} -- sudo cat {f}"
-        _, out, err = await ops_test.juju(*get_logs_cmd.split(), stdin=NO_TTY_STDIN)
+    # The server log is named after the cluster, not after the application, so it is globbed.
+    # gc.log is excluded, being megabytes of JVM noise, and the tail is bounded: the complete logs
+    # of every unit are collected as a CI artifact by scripts/collect_opensearch_logs.sh.
+    commands = {
+        f"{logs} (last {DEBUG_LOG_LINES} lines per file)": (
+            f"{sudo}find {logs} -name '*.log' ! -name 'gc.log*' -size +0 "
+            f"-exec tail -n {DEBUG_LOG_LINES} {{}} +"
+        ),
+        f"{conf}/opensearch.yml": f"{sudo}cat {conf}/opensearch.yml",
+        f"{conf}/unicast_hosts.txt": f"{sudo}cat {conf}/unicast_hosts.txt",
+    }
+
+    for description, command in commands.items():
+        logger.log(level, f"{unit} {description}:\n")
+
+        # The command has to be a single argument: `juju ssh` joins its arguments and lets the
+        # remote shell split them again, so quoting is lost on anything passed separately.
+        argv = ["ssh", "-m", ops_test.model.info.name]
+        if substrate == "k8s":
+            argv += ["--container", "opensearch"]
+        argv += [unit, command]
+
+        _, out, err = await ops_test.juju(*argv, stdin=NO_TTY_STDIN)
         logger.log(level, f"out:\n{out}\n---\nerr:\n{err}")
 
         logger.log(level, "\n\n------------------\n\n")
