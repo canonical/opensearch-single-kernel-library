@@ -421,7 +421,7 @@ def _cleanup_exec_process(process: Any) -> None:
 
 def wait_for_process_output(
     process: Any, masked_command: str, original_command: str
-) -> tuple[str, str]:
+) -> tuple[str | bytes, str | bytes | None]:
     """Wait for process to complete and return output.
 
     Args:
@@ -430,7 +430,8 @@ def wait_for_process_output(
         original_command: Original command string for error messages.
 
     Returns:
-        tuple[str, str]: (stdout, stderr). stderr is typically empty when
+        tuple: (stdout, stderr), as str unless exec() was called with
+        ``encoding=None``, in which case both are bytes. stderr is None when
         combine_stderr=True was used for exec().
 
     Raises:

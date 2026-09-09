@@ -513,7 +513,7 @@ class K8sWorkload(BaseWorkload):
             command: command to run, can contain arguments
             args: additional command line arguments
             stdin: string input to be passed on the standard input
-            use_errors_replace: ignored in K8s (kept for interface compatibility)
+            use_errors_replace: decode the command output with errors="replace"
 
         Returns:
             SimpleNamespace with cmd, out, err, return code attributes
@@ -531,11 +531,27 @@ class K8sWorkload(BaseWorkload):
 
             cmd_list = build_command_list(command_with_args)
 
-            process = self.container.exec(
-                cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
-            )
+            # OpenSSL's "pkcs12 -in" output may contain non-UTF-8 bytes in Bag Attributes
+            # (e.g., friendlyName: debian:netlock_arany_=class_gold=_fQtanúsítvány.pem). When Python
+            # decodes stdout/stderr as UTF-8, this can raise UnicodeDecodeError.
+            if use_errors_replace:
+                process = self.container.exec(
+                    cmd_list,
+                    stdin=stdin.encode("utf-8") if stdin is not None else None,
+                    encoding=None,
+                    combine_stderr=True,
+                    timeout=30,
+                )
+            else:
+                process = self.container.exec(
+                    cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
+                )
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", "replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", "replace")
             logger.debug(
                 "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
             )
