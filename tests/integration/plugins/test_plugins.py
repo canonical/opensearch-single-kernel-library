@@ -626,7 +626,13 @@ async def test_monitoring_user_fetch_prometheus_data(ops_test, substrate, deploy
 
 @pytest.mark.parametrize("deploy_type", ALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_prometheus_monitor_user_password_change(ops_test, deploy_type: str, substrate):
+async def test_prometheus_monitor_user_password_change(
+    ops_test, deploy_type: str, substrate: str, architecture: str
+):
+    if architecture == "arm64" and substrate == "k8s":
+        pytest.skip(
+            "Skipping test on arm64 since prometheus-k8s and grafana-k8s are not available for arm64."
+        )
     # Password change applied as expected
     app = APP_NAME if deploy_type == "small_deployment" else MAIN_ORCHESTRATOR_NAME
 

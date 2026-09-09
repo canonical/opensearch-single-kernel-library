@@ -48,9 +48,9 @@ async def ops_test_k8s(
 
 
 @pytest.fixture(scope="module")
-async def application_charm() -> str:
+async def application_charm(architecture: str) -> str:
     """Build the application charm."""
-    return "./tests/integration/relations/opensearch_provider/application-charm/application_ubuntu@24.04-amd64.charm"
+    return f"./tests/integration/relations/opensearch_provider/application-charm/application_ubuntu@24.04-{architecture}.charm"
 
 
 @pytest.fixture(scope="module")

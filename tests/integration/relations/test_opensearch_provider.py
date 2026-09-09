@@ -18,6 +18,7 @@ from tests.integration.conftest import (
     SERIES,
 )
 from tests.integration.helpers import (
+    EmptyActiveStatus,
     EmptyBlockedStatus,
     get_application_unit_ids,
     get_leader_unit_id,
@@ -249,7 +250,7 @@ async def get_secret_data(ops_test, secret_uri):
 
 
 @pytest.mark.abort_on_fail
-async def test_dashboard_relation(ops_test: OpsTest, architecture: str):
+async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrate: str):
     """Test we can create relations with admin permissions."""
     if architecture == "arm64":
         pytest.skip(
@@ -267,6 +268,11 @@ async def test_dashboard_relation(ops_test: OpsTest, architecture: str):
     await wait_until(
         ops_test,
         apps=ALL_APPS,
+        apps_statuses=(
+            {DASHBOARDS_APP_NAME: [EmptyActiveStatus, EmptyBlockedStatus]}
+            if substrate == "k8s"
+            else None
+        ),
         idle_period=70,
     )
 
