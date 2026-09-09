@@ -592,44 +592,31 @@ def test_on_certificate_available(harness, mocker):
 
 
 def test_on_certificate_expiring(harness, mocker, substrate):
-    """Test _on_certificate_available event."""
+    """Test _on_certificate_expiring event."""
     request_certificate_creation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
-    deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
+    request_certificate_revocation = mocker.patch(
+        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
     )
-    if substrate != "vm":
-        mocker.patch(
-            "opensearch_single_kernel.core.state.ClusterState.fqdn",
-            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
-            new_callable=PropertyMock,
-        )
     csr = "csr_12345"
     cert = "cert_12345"
-    key = create_utf8_encoded_private_key()
     secret_key = CertType.UNIT_TRANSPORT.val
 
     harness.charm.state.secrets.put_object(
         Scope.UNIT,
         secret_key,
-        {"csr": csr, "cert": cert, "key": key},
-    )
-
-    deployment_desc.return_value = DeploymentDescription(
-        config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
-        start=StartMode.WITH_GENERATED_ROLES,
-        pending_directives=[],
-        typ=DeploymentType.MAIN_ORCHESTRATOR,
-        app=App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name),
-        state=DeploymentState(value=State.ACTIVE),
+        {"csr": csr, "cert": cert},
     )
 
     event_mock = MagicMock(certificate=cert)
     harness.charm.tls_events._on_certificate_expiring(event_mock)
 
-    request_certificate_creation.assert_called_once()
+    # the certificate is revoked, and the reissue is deferred until the provider drops it
+    request_certificate_revocation.assert_called_once_with(csr.encode("utf-8"))
+    request_certificate_creation.assert_not_called()
+    assert harness.charm.state.server.certs_reissue_pending == {CertType.UNIT_TRANSPORT.val}
+    assert not harness.charm.state.server.tls_configured
 
 
 def test_on_certificate_invalidated(harness, mocker, substrate):
@@ -637,40 +624,27 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
     request_certificate_creation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
-    deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
+    request_certificate_revocation = mocker.patch(
+        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
     )
-    if substrate != "vm":
-        mocker.patch(
-            "opensearch_single_kernel.core.state.ClusterState.fqdn",
-            return_value="opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
-            new_callable=PropertyMock,
-        )
     csr = "csr_12345"
     cert = "cert_12345"
-    key = create_utf8_encoded_private_key()
     secret_key = CertType.UNIT_TRANSPORT.val
 
     harness.charm.state.secrets.put_object(
         Scope.UNIT,
         secret_key,
-        {"csr": csr, "cert": cert, "key": key},
+        {"csr": csr, "cert": cert},
     )
 
-    deployment_desc.return_value = DeploymentDescription(
-        config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
-        start=StartMode.WITH_GENERATED_ROLES,
-        pending_directives=[],
-        typ=DeploymentType.MAIN_ORCHESTRATOR,
-        app=App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name),
-        state=DeploymentState(value=State.ACTIVE),
-    )
-
-    event_mock = MagicMock(certificate=cert)
+    event_mock = MagicMock(certificate=cert, reason="revoked")
     harness.charm.tls_events._on_certificate_invalidated(event_mock)
 
-    request_certificate_creation.assert_called_once()
+    # invalidation delegates to the expiring flow: revoke and defer the reissue
+    request_certificate_revocation.assert_called_once_with(csr.encode("utf-8"))
+    request_certificate_creation.assert_not_called()
+    assert harness.charm.state.server.certs_reissue_pending == {CertType.UNIT_TRANSPORT.val}
+    assert not harness.charm.state.server.tls_configured
 
 
 # Testing store_new_ca() function
