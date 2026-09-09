@@ -78,12 +78,6 @@ def charm(substrate: Substrate, opensearch_base_path: Path, ubuntu_base: str) ->
 
 
 @pytest.fixture
-def charm_version_minus_1(opensearch_minus_1_base_path: Path, ubuntu_base: str) -> str:
-    """The OpenSearch charm path for version n-1, to deploy charms, according to the substrate."""
-    return str(opensearch_minus_1_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
-
-
-@pytest.fixture
 def charm_resources(substrate: Substrate) -> dict[str, str]:
     """Resources to pass to `juju deploy` for the OpenSearch charm.
 
