@@ -12,7 +12,6 @@ from ops import (
     Object,
 )
 
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
     CertificateAvailableEvent,
     CertificateRemovedEvent,
@@ -99,7 +98,7 @@ class LdapEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.workload.unlink(self.charm.workload.paths.ldap_chain)
+        self.charm.workload.unlink(self.charm.workload.paths.ldap_chain, missing_ok=True)
         if not self.charm.state.is_non_main_orchestrator:
             self._update_security_config(event)
 
@@ -141,11 +140,9 @@ class LdapEventsHandler(Object):
             event.defer()
             return
 
-        try:
-            self.charm.cluster_manager.apply_security_config(
-                admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
-            )
-        except OpenSearchCmdError as e:
-            logger.debug(f"Error when updating the security index: {e.out}")
+        if not self.charm.cluster_manager.apply_security_config(
+            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+        ):
+            logger.debug("Error when updating the security index")
             event.defer()
             return

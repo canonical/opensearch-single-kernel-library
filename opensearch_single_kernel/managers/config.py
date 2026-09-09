@@ -9,6 +9,7 @@ from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
+    OPENSEARCH_USERS,
     CertType,
     Substrates,
 )
@@ -414,7 +415,7 @@ class ConfigManager(BaseManager):
             {
                 "ldap": {
                     "http_enabled": True,
-                    "transport_enabled": True,
+                    "transport_enabled": False,
                     "order": 1,
                     "http_authenticator": {
                         "type": "basic",
@@ -521,7 +522,7 @@ class ConfigManager(BaseManager):
             {
                 "ldap_roles": {
                     "http_enabled": True,
-                    "transport_enabled": True,
+                    "transport_enabled": False,
                     "authorization_backend": {
                         "type": "ldap",
                         "config": {
@@ -541,12 +542,14 @@ class ConfigManager(BaseManager):
                             "rolename": self.state.config.get("ldap_role_name_attr", ""),
                             "rolesearch_enabled": False,
                             "resolve_nested_roles": False,
+                            "skip_users": sorted(OPENSEARCH_USERS),
                         },
                     },
                 },
             }
-            if (ldap_data := self.state.ldap_data) and ldap_data.ldaps_urls
-            # and self.workload.exists(self.workload.paths.ldap_chain)
+            if (ldap_data := self.state.ldap_data)
+            and ldap_data.ldaps_urls
+            and self.workload.exists(self.workload.paths.ldap_chain)
             else {}
         )
 
