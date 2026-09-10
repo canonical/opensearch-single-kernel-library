@@ -552,8 +552,13 @@ class K8sWorkload(BaseWorkload):
                 stdout = stdout.decode("utf-8", "replace")
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", "replace")
+            # Logs should be truncated to avoid exceeding text limit OSError:
+            # [Errno 7] Argument list too long: 'juju-log').
             logger.debug(
-                "%s:\nstdout: %s\nstderr: %s\nreturncode: 0", masked_command, stdout, stderr
+                "%s:\nstdout: %.2000s\nstderr: %.2000s\nreturncode: 0",
+                masked_command,
+                stdout,
+                stderr,
             )
 
             # err is typically empty because combine_stderr=True merges stderr into stdout

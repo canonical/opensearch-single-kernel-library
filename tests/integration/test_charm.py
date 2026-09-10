@@ -18,7 +18,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
 from tests.helpers import Substrate
-from tests.integration.ha.continuous_writes import ContinuousWrites
+from tests.integration.ha.continuous_writes import ContinuousWrites, ReplicationMode
 
 from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from .ha.helpers import (
@@ -78,7 +78,7 @@ async def test_deploy_and_remove_single_unit(
 
     c_writes = ContinuousWrites(ops_test, APP_NAME)
     try:
-        await c_writes.start()
+        await c_writes.start(repl_mode=ReplicationMode.WITH_AT_LEAST_0_REPL)
         await assert_continuous_writes_increasing(c_writes)
         await assert_continuous_writes_consistency(ops_test, c_writes, [APP_NAME])
 

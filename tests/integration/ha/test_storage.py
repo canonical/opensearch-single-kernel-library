@@ -80,7 +80,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_storage_reuse_after_scale_down(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_0_repl_writes_runner
 ):
     """Check storage is reused and data accessible after scaling down and up."""
     app = (await app_name(ops_test)) or APP_NAME
@@ -168,7 +168,7 @@ async def test_storage_reuse_after_scale_down(
 
 @pytest.mark.abort_on_fail
 async def test_storage_reuse_after_scale_to_zero(
-    ops_test: OpsTest, c_writes: ContinuousWrites, c_writes_runner
+    ops_test: OpsTest, c_writes: ContinuousWrites, c_0_repl_writes_runner
 ):
     """Check storage is reused and data accessible after scaling down and up."""
     app = (await app_name(ops_test)) or APP_NAME
