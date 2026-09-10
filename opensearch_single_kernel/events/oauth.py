@@ -21,7 +21,6 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
 )
-from opensearch_single_kernel.core.models import DeploymentType
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
     ClientConfig,
     OAuthRequirer,
@@ -67,9 +66,9 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         """Handler for `relation_created` event."""
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.state.is_non_main_orchestrator:
+            # in large deployments, OAuth config must only be handled by the main orchestrator
+            # this is a safeguard to avoid different sources for applying security configuration
             logger.warning("OAuth relation created on non-main orchestrator.")
 
     def _on_oauth_relation_changed(self, event: EventBase) -> None:
@@ -77,9 +76,9 @@ class OAuthEventsHandler(Object):
 
         Updates the security config.yml with the OIDC info and update the cluster.
         """
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.state.is_non_main_orchestrator:
+            # in large deployments, OAuth config must only be handled by the main orchestrator
+            # this is a safeguard to avoid different sources for applying security configuration
             return
 
         if not (relation := self.charm.state.oauth_relation):
@@ -119,9 +118,7 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.state.is_non_main_orchestrator:
             return
 
         if (

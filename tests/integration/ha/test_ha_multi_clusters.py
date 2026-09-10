@@ -60,7 +60,7 @@ async def test_build_and_deploy(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
         status="active",
@@ -100,7 +100,7 @@ async def test_multi_clusters_db_isolation(
     if substrate == "k8s":
         deploy_kwargs["resources"] = charm_resources
     await ops_test.model.deploy(charm, **deploy_kwargs)
-    await ops_test.model.integrate(SECOND_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{SECOND_APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # wait
     await wait_until(

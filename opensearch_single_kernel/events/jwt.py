@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
 )
-from opensearch_single_kernel.core.models import DeploymentType
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -50,10 +49,9 @@ class JWTEventsHandler(Object):
 
     def _on_jwt_relation_created(self, _: RelationCreatedEvent) -> None:
         """Handle relation creation."""
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
-            # Only the main orchestrator applies JWT config.
+        if self.charm.state.is_non_main_orchestrator:
+            # in large deployments, JWT configuration must only be handled by the main orchestrator
+            # this is a safeguard to avoid different sources for applying security configuration
             logger.warning("JWT relation created on non-main orchestrator.")
 
     def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
@@ -66,9 +64,7 @@ class JWTEventsHandler(Object):
 
     def _on_jwt_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle the removal of the relation."""
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.state.is_non_main_orchestrator:
             return
 
         del self.charm.state.server.jwt_auth_configuration
@@ -89,9 +85,7 @@ class JWTEventsHandler(Object):
 
     def _validate_and_apply_jwt_auth_config(self, event: EventBase) -> None:
         """Check the provided configuration and apply, if valid."""
-        if (
-            deployment_desc := self.charm.state.application.deployment_desc
-        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+        if self.charm.state.is_non_main_orchestrator:
             return
 
         if not self.charm.state.application.is_security_index_initialised:

@@ -11,7 +11,6 @@ platforms:
   ubuntu@22.04:amd64:
   ubuntu@24.04:amd64:
 
-
 charm-libs:
   - lib: data_platform_libs.data_interfaces
     version: "0"
@@ -35,6 +34,10 @@ charm-libs:
     version: "0"
   - lib: tls_certificates_interface.tls_certificates
     version: "3"
+  - lib: glauth_k8s.ldap
+    version: "0"
+  - lib: certificate_transfer_interface.certificate_transfer
+    version: "0"
 
 parts:
   charm:

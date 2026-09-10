@@ -359,9 +359,9 @@ async def test_setup_large_cluster(
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
         if substrate == "k8s":
-            await ops_test.model.integrate(app, "self-signed-certificates")
+            await ops_test.model.integrate(f"{app}:certificates", "self-signed-certificates")
         else:
-            await ops_test.model.integrate(app, "certificates")
+            await ops_test.model.integrate(f"{app}:certificates", "certificates")
 
     # integrate large deployment cluster
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
