@@ -224,7 +224,7 @@ async def test_tls_expiration(
         sudo = "sudo"
     cmd = f"juju ssh {APP_NAME}/{unit_id} {sudo} sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
     logger.info(f"Running command: {cmd}")
-    subprocess.check_output(cmd, shell=True)
+    subprocess.check_output(cmd, shell=True, stdin=subprocess.DEVNULL)
 
     # Relate OpenSearch to TLS and wait until all is settled
     logger.info("Integrating OpenSearch with TLS Certificates operator")

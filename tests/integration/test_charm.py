@@ -18,7 +18,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
 from tests.helpers import Substrate
-from tests.integration.ha.continuous_writes import ContinuousWrites
+from tests.integration.ha.continuous_writes import ContinuousWrites, ReplicationMode
 
 from .conftest import APP_NAME, CONFIG_OPTS, MODEL_CONFIG
 from .ha.helpers import (
@@ -78,7 +78,7 @@ async def test_deploy_and_remove_single_unit(
 
     c_writes = ContinuousWrites(ops_test, APP_NAME)
     try:
-        await c_writes.start()
+        await c_writes.start(repl_mode=ReplicationMode.WITH_AT_LEAST_0_REPL)
         await assert_continuous_writes_increasing(c_writes)
         await assert_continuous_writes_consistency(ops_test, c_writes, [APP_NAME])
 
@@ -295,6 +295,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
                 "--unicode=always",
             ],
             text=True,
+            stdin=subprocess.DEVNULL,
         ).replace("\r\n", "\n")
     )["installed"].split()
     logger.info(f"Installed snap: {installed_info}")
@@ -334,6 +335,7 @@ async def test_check_workload_version(ops_test: OpsTest, substrate) -> None:
 
     proc = await asyncio.create_subprocess_exec(
         *command,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -400,7 +402,7 @@ async def test_add_users_and_calling_update_status(ops_test: OpsTest) -> None:
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
         # Adding it fixed the issue.
-        subprocess.run(shlex.split(exec_cmd))
+        subprocess.run(shlex.split(exec_cmd), stdin=subprocess.DEVNULL)
     except Exception as e:
         logger.error(
             f"Failed to apply state: process exited with {e.returncode}; "

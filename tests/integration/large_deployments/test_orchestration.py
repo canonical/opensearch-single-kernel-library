@@ -162,7 +162,7 @@ async def test_demotion_through_relation_removal(ops_test: OpsTest) -> None:
 
     for app in [FAILOVER_APP, DATA_APP, DATA_APP_TWO]:
         await main_app.remove_relation(
-            f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster"
+            f"{MAIN_APP}:peer-cluster-orchestrator", f"{app}:peer-cluster", block_until_done=True
         )
 
     await wait_until(
@@ -283,7 +283,9 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     )
 
     await failover_app.remove_relation(
-        f"{FAILOVER_APP}:peer-cluster-orchestrator", f"{MAIN_APP}:peer-cluster"
+        f"{FAILOVER_APP}:peer-cluster-orchestrator",
+        f"{MAIN_APP}:peer-cluster",
+        block_until_done=True,
     )
 
     await ops_test.model.integrate(

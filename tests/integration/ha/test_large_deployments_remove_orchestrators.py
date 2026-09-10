@@ -132,7 +132,7 @@ async def test_build_and_deploy(
 async def test_large_deployment_sever_main_failover_relation(ops_test: OpsTest) -> None:
     """Test that the main-failover relation can be removed and re-added."""
     await ops_test.model.applications[MAIN_APP].remove_relation(
-        f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}"
+        f"{MAIN_APP}:{REL_ORCHESTRATOR}", f"{FAILOVER_APP}:{REL_PEER}", block_until_done=True
     )
     await wait_until(
         ops_test,

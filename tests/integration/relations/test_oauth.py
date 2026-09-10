@@ -378,6 +378,7 @@ async def test_setup_large_cluster(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP, DATA_INTEGRATOR_NAME],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        timeout=2400,
     )
 
 
@@ -413,10 +414,13 @@ async def test_oauth_relation_restricted(
 
     logger.info(f"Remove relation with {DATA_APP}")
     if substrate == "k8s":
-        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth hydra"
+        await ops_test.model.applications[DATA_APP].remove_relation(
+            f"{DATA_APP}:oauth", "hydra", block_until_done=True
+        )
     else:
-        remove_relation_cmd = f"remove-relation {DATA_APP}:oauth oauth"
-    await ops_test.juju(*remove_relation_cmd.split(), check=True)
+        await ops_test.model.applications[DATA_APP].remove_relation(
+            f"{DATA_APP}:oauth", "oauth:oauth", block_until_done=True
+        )
 
     await wait_until(
         ops_test,
