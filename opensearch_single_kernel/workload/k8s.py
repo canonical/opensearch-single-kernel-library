@@ -108,12 +108,12 @@ class K8sPaths(BasePaths):
     def jdk(self) -> PathProtocol:
         """Return path to the jdk directory.
 
-        For K8s containers, JDK is installed at /usr/lib/jvm/java-21-openjdk-amd64
+        For K8s containers, JDK is installed at /usr/lib/jvm/java-21-openjdk
 
         Returns:
             PathProtocol: path to JDK installation directory.
         """
-        return self.root / OpenSearchPaths.JDK.val
+        return self.root / "usr/lib/jvm/java-21-openjdk"
 
     @property
     def tmp(self) -> PathProtocol:
