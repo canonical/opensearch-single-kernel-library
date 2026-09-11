@@ -114,7 +114,7 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 226 # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 241 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
     steps:
@@ -126,6 +126,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Records host state (CPU/steal, PSI stall time, memory, disk + inodes, I/O,
+      # network, per-process) for the whole job, and uploads it as an artifact even
+      # when the job fails. Started here rather than just before spread so that
+      # concierge/LXD/k8s bootstrap is covered too.
+      #
+      # continue-on-error: telemetry must never fail a 180-minute integration job.
+      # The stop phase already cannot fail; the start phase runs under `set -e`.
+      #
+      # TODO: pin to a released tag once canonical/flake0's collect/plot actions
+      # are merged to main -- this trial points at the feature branch they're
+      # still developed on.
+      - name: Start telemetry
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: canonical/flake0/.github/actions/collect@feat/add-plot-action
+        with:
+          phase: start
+          extra-config: ${{ github.workspace }}/.github/collect-opensearch.conf
       - name: Set up environment
         timeout-minutes: 5
         run: sudo snap install charmcraft --classic
@@ -211,3 +229,25 @@ jobs:
         timeout-minutes: 1
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
         run: df --human-readable
+      # Last steps in the job: flush, bundle and upload telemetry, then render a
+      # health dashboard from it. `if: always()` because the failed runs are the
+      # ones worth having telemetry for.
+      #
+      # artifact-name is explicit and not optional here: upload-artifact@v4 rejects
+      # duplicate names, and both actions' defaults are unique per run and job but
+      # not per matrix entry.
+      - name: Stop telemetry
+        id: collect
+        timeout-minutes: 5
+        if: always()
+        uses: canonical/flake0/.github/actions/collect@feat/add-plot-action
+        with:
+          phase: stop
+          artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}
+      - name: Render telemetry dashboard
+        timeout-minutes: 5
+        if: always()
+        uses: canonical/flake0/.github/actions/plot@feat/add-plot-action
+        with:
+          bundle-path: ${{ steps.collect.outputs.bundle-path }}
+          artifact-name: flake0-plot-${{ matrix.job.name_in_artifact }}
