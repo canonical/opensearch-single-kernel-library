@@ -51,10 +51,12 @@ class LdapEventsHandler(Object):
     def _on_ldap_ready(self, event: LdapReadyEvent) -> None:
         """Handle the LDAP integration event."""
         if not self.charm.workload.can_connect:
+            logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
-        if self.charm.state.is_non_main_orchestrator:
+        if not self.charm.state.is_main_orchestrator:
+            logger.debug("Not the main orchestrator. Early exiting event.")
             return
 
         if not (
@@ -62,12 +64,15 @@ class LdapEventsHandler(Object):
                 relation=event.relation
             )
         ):
+            logger.debug("LDAP relation data absent. Early exiting event.")
             return
 
         if not ldap_data.ldaps_urls:
+            logger.debug("LDAPS urls absent. Early exiting event.")
             return
 
         if not self.charm.workload.exists(self.charm.workload.paths.ldap_chain):
+            logger.debug("LDAP certificates absent. Early exiting event.")
             return
 
         self._update_security_config(event)
@@ -75,32 +80,48 @@ class LdapEventsHandler(Object):
     def _on_ldap_unavailable(self, event: LdapUnavailableEvent) -> None:
         """Handle the removal of LDAP integration."""
         if not self.charm.workload.can_connect:
+            logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
-        if not self.charm.state.is_non_main_orchestrator:
-            self._update_security_config(event)
+        if not self.charm.state.is_main_orchestrator:
+            logger.debug("Not the main orchestrator. Early exiting event.")
+            return
+
+        self._update_security_config(event)
 
     def _on_ldap_certificate_available(self, event: CertificateAvailableEvent) -> None:
         """Handle the receiving of LDAP certificates."""
         if not self.charm.workload.can_connect:
+            logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
+        logger.debug("Writing ldap certificates files")
         full_chain = "\n".join(event.chain)
         self.charm.workload.write_text(full_chain, self.charm.workload.paths.ldap_chain)
-        if not self.charm.state.is_non_main_orchestrator:
-            self._update_security_config(event)
+
+        if not self.charm.state.is_main_orchestrator:
+            logger.debug("Not the main orchestrator. Early exiting event.")
+            return
+
+        self._update_security_config(event)
 
     def _on_ldap_certificate_removed(self, event: CertificateRemovedEvent) -> None:
         """Handle the removal of LDAP certificates."""
         if not self.charm.workload.can_connect:
+            logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
+        logger.debug("Removing ldap certificates files")
         self.charm.workload.unlink(self.charm.workload.paths.ldap_chain, missing_ok=True)
-        if not self.charm.state.is_non_main_orchestrator:
-            self._update_security_config(event)
+
+        if not self.charm.state.is_main_orchestrator:
+            logger.debug("Not the main orchestrator. Early exiting event.")
+            return
+
+        self._update_security_config(event)
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Handle config-related changes to security config.
@@ -109,20 +130,27 @@ class LdapEventsHandler(Object):
         during which the LDAP is connected.
         """
         if not self.charm.workload.can_connect:
+            logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
-        if not self.charm.state.is_non_main_orchestrator:
-            self._update_security_config(event)
+        if not self.charm.state.is_main_orchestrator:
+            logger.debug("Not the main orchestrator. Early exiting event.")
+            return
+
+        self._update_security_config(event)
 
     def _update_security_config(self, event: EventBase) -> None:
         """Update & apply the security config."""
+        logger.debug("Updating security config")
         self.charm.config_manager.update_security_config()
 
         if not self.charm.unit.is_leader():
+            logger.debug("Not the leader unit. Early exiting event.")
             return
 
         if not (admin_secrets := self.charm.state.application.admin_secrets):
+            logger.debug("Admin secrets absent. Deferring event.")
             event.defer()
             return
 
@@ -134,15 +162,18 @@ class LdapEventsHandler(Object):
             return
 
         if not self.charm.cluster_manager.workload.is_service_started():
+            logger.debug("Workload not running. Deferring event.")
+            event.defer()
             return
 
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            logger.debug("OpenSearch not ready. Deferring event.")
             event.defer()
             return
 
         if not self.charm.cluster_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
-            logger.debug("Error when updating the security index")
+            logger.debug("Error while updating the security index. Deferring event.")
             event.defer()
             return

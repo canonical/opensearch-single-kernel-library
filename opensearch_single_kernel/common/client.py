@@ -522,7 +522,6 @@ class OpenSearchClient:
         self,
         role_name: str,
         permissions: dict[str, str] | None = None,
-        action_groups: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Creates a role with the given permissions.
 
@@ -532,7 +531,6 @@ class OpenSearchClient:
         Args:
             role_name: name of the role
             permissions: A valid dict of existing opensearch permissions.
-            action_groups: A valid dict of existing opensearch action groups.
 
         Raises:
             OpenSearchHttpError: If the role creation request fails.
@@ -545,7 +543,6 @@ class OpenSearchClient:
             f"{USER_ROLE_ENDPOINT}/{role_name}",
             payload={
                 **(permissions or {"index_permissions": []}),
-                **(action_groups or {}),
             },
         )
 

@@ -66,7 +66,7 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         """Handler for `relation_created` event."""
-        if self.charm.state.is_non_main_orchestrator:
+        if not self.charm.state.is_main_orchestrator:
             # in large deployments, OAuth config must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
             logger.warning("OAuth relation created on non-main orchestrator.")
@@ -76,7 +76,7 @@ class OAuthEventsHandler(Object):
 
         Updates the security config.yml with the OIDC info and update the cluster.
         """
-        if self.charm.state.is_non_main_orchestrator:
+        if not self.charm.state.is_main_orchestrator:
             # in large deployments, OAuth config must only be handled by the main orchestrator
             # this is a safeguard to avoid different sources for applying security configuration
             return
@@ -118,7 +118,7 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
-        if self.charm.state.is_non_main_orchestrator:
+        if not self.charm.state.is_main_orchestrator:
             return
 
         if (

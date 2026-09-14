@@ -49,6 +49,13 @@ SEARCH_READONLY_DATA_INTEGRATOR_CONFIG = {
 SEARCH_READONLY_ROLE = "search-readonly"
 SEARCH_READONLY_LDAP_AUTHORIZATION = "Basic Ym9iOmJvYnBhc3N3b3Jk"  # bob:bobpassword
 
+# LDAP authorization header -> the backend role OpenSearch must resolve for that user.
+# The role name comes from the `ou` of the user's LDAP group (see ldap.ldif).
+LDAP_BACKEND_ROLES = {
+    SEARCH_ADMIN_LDAP_AUTHORIZATION: SEARCH_ADMIN_ROLE,
+    SEARCH_READONLY_LDAP_AUTHORIZATION: SEARCH_READONLY_ROLE,
+}
+
 MAIN_APP = "opensearch-main"
 DATA_APP = "opensearch-data"
 POSTGRESQL_K8S = "postgresql-k8s"
@@ -324,7 +331,7 @@ async def test_ldap_authenticated(ops_test: OpsTest, substrate: Substrate) -> No
     main_app_ips = await get_application_unit_ips(ops_test, MAIN_APP)
     data_app_ips = await get_application_unit_ips(ops_test, DATA_APP)
     for ip in [*main_app_ips, *data_app_ips]:
-        for authorization in (SEARCH_ADMIN_LDAP_AUTHORIZATION, SEARCH_READONLY_LDAP_AUTHORIZATION):
+        for authorization, backend_role in LDAP_BACKEND_ROLES.items():
             # Wait for LDAP propagation over the cluster
             for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
                 with attempt:
@@ -334,6 +341,10 @@ async def test_ldap_authenticated(ops_test: OpsTest, substrate: Substrate) -> No
                         verify=False,
                     )
                     assert result.status_code == 200
+                    # The LDAP authz backend must resolve the user's group into a
+                    # backend role, even before any role mapping exists for it.
+                    authinfo = result.json()
+                    assert backend_role in authinfo["backend_roles"], authinfo
 
             result = requests.get(
                 f"https://{ip}:9200/search-index/_search",

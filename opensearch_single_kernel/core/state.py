@@ -1366,10 +1366,8 @@ class ClusterState(Object):
         )
 
     @property
-    def is_non_main_orchestrator(self) -> bool:
-        """Get whether the current application is a sub-cluster in large deployment."""
+    def is_main_orchestrator(self) -> bool:
+        """Get whether the current application is not a sub-cluster."""
         return (
-            (deployment_desc := self.application.deployment_desc) is not None
-            and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
-            and bool(self.peer_cluster_relations or self.peer_cluster_orchestrator_relations)
-        )
+            deployment_desc := self.application.deployment_desc
+        ) is None or deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

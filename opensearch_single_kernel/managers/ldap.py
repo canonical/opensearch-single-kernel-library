@@ -34,7 +34,7 @@ class LdapManager(BaseManager):
         if scope != "app" or not self.state.ldap_relation:
             return [GeneralStatuses.ACTIVE_IDLE.value]
 
-        if self.state.is_non_main_orchestrator:
+        if not self.state.is_main_orchestrator:
             status_list.append(LdapStatuses.RELATION_INVALID.value)
         elif not (ldap_data := self.state.ldap_data):
             status_list.append(LdapStatuses.LDAP_DATA_UNAVAILABLE.value)
