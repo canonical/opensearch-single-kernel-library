@@ -2,6 +2,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import asyncio
 import logging
 import subprocess
 import time
@@ -24,10 +25,12 @@ from tests.integration.helpers import (
     get_application_unit_ids_ips,
     get_application_unit_ips_names,
     get_application_unit_names,
+    get_application_units,
     get_leader_unit_id,
     get_leader_unit_ip,
     run_action,
     wait_until,
+    wait_until_condition_on_units,
 )
 from tests.integration.tls.helpers import (
     check_security_index_initialised,
@@ -164,6 +167,111 @@ async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
         updated_certs["http_certificates_list"][0]["not_before"]
         > current_certs["http_certificates_list"][0]["not_before"]
     )
+
+
+async def juju_ssh_unit(ops_test: OpsTest, unit_name: str, cmd: str, timeout: int = 45) -> str:
+    _, stdout, _ = await asyncio.wait_for(
+        ops_test.juju(
+            "ssh", "--model", ops_test.model_full_name, unit_name, "--", cmd, check=True
+        ),
+        timeout=timeout,
+    )
+    return stdout
+
+
+async def request_cert_with_expiry_time(
+    ops_test: OpsTest, unit_id: int, series: str, expiry_time: int, cert_type: str
+) -> float:
+    unit_name = f"{APP_NAME}/{unit_id}"
+
+    search_expression = "expire=self[.]_get_next_secret_expiry_time(certificate)"
+    replace_expression = f"expire=timedelta(seconds={expiry_time})"
+    python_version = "python3.12" if series == "noble" else "python3.10"
+    lib_file = f"/var/lib/juju/agents/unit-opensearch-{unit_id}/charm/venv/lib/{python_version}/site-packages/opensearch_single_kernel/lib/charms/tls_certificates_interface/v3/tls_certificates.py"
+    backup_file = f"{lib_file}.backup"
+
+    # back up libfile
+    await juju_ssh_unit(ops_test, unit_name, f"sudo cp {lib_file} {backup_file}")
+    try:
+        # replace lib
+        cmd = f"sudo sed -i 's/{search_expression}/{replace_expression}/g' {lib_file}"
+        logger.info(f"Running command on {unit_name}: {cmd}")
+        await juju_ssh_unit(ops_test, unit_name, cmd)
+
+        requested_at = time.monotonic()
+
+        # request cert
+        action = await run_action(
+            ops_test,
+            unit_id,
+            "set-tls-private-key",
+            params={"category": cert_type},
+        )
+
+        assert action.status == "completed", (
+            f"Failed to request a new cert `{cert_type}` on `{unit_name}`"
+        )
+
+        # wait for units to settle before restoring lib
+        await wait_until(
+            ops_test, apps=[APP_NAME], wait_for_exact_units=len(UNIT_IDS), timeout=120
+        )
+
+        return requested_at
+    finally:
+        # restore libfile
+        await juju_ssh_unit(ops_test, unit_name, f"sudo mv {backup_file} {lib_file}")
+
+
+async def force_leader_change(ops_test: OpsTest, leader_id: int) -> None:
+    unit_name = f"{APP_NAME}/{leader_id}"
+
+    logger.info("Killing juju agent on current leader: %s", unit_name)
+    units = await get_application_units(ops_test, APP_NAME)
+    machine_id = next(unit.machine_id for unit in units if unit.id == leader_id)
+    service = f"jujud-machine-{machine_id}.service"
+
+    try:
+        # kill juju agent on leader
+        await juju_ssh_unit(ops_test, unit_name, f"sudo systemctl stop {service}")
+
+        # wait for leader change
+        await wait_until_condition_on_units(
+            ops_test,
+            APP_NAME,
+            condition=lambda units: any(unit.is_leader and unit.id != leader_id for unit in units),
+            timeout=120,
+            wait_msg="Waiting for leader change",
+        )
+    finally:
+        # restart juju agent
+        await juju_ssh_unit(ops_test, unit_name, f"sudo systemctl start {service}")
+
+
+@pytest.mark.skip_if_substrate("k8s")
+@pytest.mark.abort_on_fail
+async def test_leader_change(ops_test: OpsTest, series) -> None:
+    leader_id = await get_leader_unit_id(ops_test)
+    unit_name = f"{APP_NAME}/{leader_id}"
+
+    # request new cert with short secret expiry
+    requested_at = await request_cert_with_expiry_time(
+        ops_test, leader_id, series, SECRET_EXPIRY_TIME, "app-admin"
+    )
+
+    # force leadership change
+    await force_leader_change(ops_test, leader_id)
+
+    assert time.monotonic() - requested_at < SECRET_EXPIRY_TIME, (
+        "Leader change time exceeded cert expiry"
+    )
+    assert await get_leader_unit_id(ops_test) != leader_id, "Leader did not change"
+
+    logger.info("Waiting for secret expiry on %s", unit_name)
+    await asyncio.sleep(SECRET_EXPIRY_TIME)
+
+    # former leader will be in failed state
+    await wait_until(ops_test, apps=[APP_NAME], wait_for_exact_units=len(UNIT_IDS), timeout=120)
 
 
 @pytest.mark.abort_on_fail
