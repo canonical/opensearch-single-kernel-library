@@ -168,7 +168,10 @@ async def test_deploy_glauth(
     if substrate == "vm":
         await asyncio.gather(
             k8s_model.create_offer(f"{LDAP_APP_NAME}:ldap", LDAP_OFFER),
-            k8s_model.create_offer(f"{LDAP_APP_NAME}:send-ca-cert", LDAP_CERT_OFFER),
+            # GLAuth only speaks certificate-transfer v0; take the CA from the provider that issued
+            # GLAuth's own certificate instead
+            # k8s_model.create_offer(f"{LDAP_APP_NAME}:send-ca-cert", LDAP_CERT_OFFER),
+            k8s_model.create_offer(f"{TLS_CERTIFICATES_APP_NAME}:send-ca-cert", LDAP_CERT_OFFER),
             k8s_model.create_offer(f"{TLS_CERTIFICATES_APP_NAME}:certificates", CERT_OFFER),
         )
 
@@ -312,14 +315,18 @@ async def test_ldap_cert_not_connected(ops_test: OpsTest, k8s_model: Model) -> N
 async def test_ldap_authenticated(ops_test: OpsTest, substrate: Substrate) -> None:
     assert (model := ops_test.model)
 
+    # GLAuth only speaks certificate-transfer v0; take the CA from the provider that issued
+    # GLAuth's own certificate instead
     await asyncio.gather(
         model.integrate(
             f"{MAIN_APP}:ldap-certificate-transfer",
-            LDAP_CERT_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:send-ca-cert",
+            # LDAP_CERT_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:send-ca-cert",
+            LDAP_CERT_OFFER if substrate == "vm" else f"{TLS_CERTIFICATES_APP_NAME}:send-ca-cert",
         ),
         model.integrate(
             f"{DATA_APP}:ldap-certificate-transfer",
-            LDAP_CERT_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:send-ca-cert",
+            # LDAP_CERT_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:send-ca-cert",
+            LDAP_CERT_OFFER if substrate == "vm" else f"{TLS_CERTIFICATES_APP_NAME}:send-ca-cert",
         ),
     )
 

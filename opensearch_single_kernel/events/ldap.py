@@ -6,16 +6,12 @@
 import logging
 from typing import TYPE_CHECKING
 
-from ops import (
-    ConfigChangedEvent,
-    EventBase,
-    Object,
+from charmlibs.interfaces.certificate_transfer import (
+    CertificatesAvailableEvent,
+    CertificatesRemovedEvent,
 )
+from ops import ConfigChangedEvent, EventBase, Object
 
-from opensearch_single_kernel.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
-    CertificateAvailableEvent,
-    CertificateRemovedEvent,
-)
 from opensearch_single_kernel.lib.charms.glauth_k8s.v0.ldap import (
     LdapReadyEvent,
     LdapUnavailableEvent,
@@ -39,11 +35,11 @@ class LdapEventsHandler(Object):
             self.charm.state.ldap_requirer.on.ldap_unavailable, self._on_ldap_unavailable
         )
         self.framework.observe(
-            self.charm.state.ldap_certificate_transfer_requires.on.certificate_available,
+            self.charm.state.ldap_certificate_transfer_requires.on.certificate_set_updated,
             self._on_ldap_certificate_available,
         )
         self.framework.observe(
-            self.charm.state.ldap_certificate_transfer_requires.on.certificate_removed,
+            self.charm.state.ldap_certificate_transfer_requires.on.certificates_removed,
             self._on_ldap_certificate_removed,
         )
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
@@ -90,16 +86,23 @@ class LdapEventsHandler(Object):
 
         self._update_security_config(event)
 
-    def _on_ldap_certificate_available(self, event: CertificateAvailableEvent) -> None:
+    def _on_ldap_certificate_available(self, event: CertificatesAvailableEvent) -> None:
         """Handle the receiving of LDAP certificates."""
         if not self.charm.workload.can_connect:
             logger.debug("Workload connection failure. Deferring event.")
             event.defer()
             return
 
+        if not (
+            ca_certs := self.charm.state.ldap_certificate_transfer_requires.get_all_certificates()
+        ):
+            logger.debug("Ldap certificates not published by provider. Early exiting event.")
+            return
+
         logger.debug("Writing ldap certificates files")
-        full_chain = "\n".join(event.chain)
-        self.charm.workload.write_text(full_chain, self.charm.workload.paths.ldap_chain)
+        self.charm.workload.write_text(
+            "\n".join(sorted(ca_certs)), self.charm.workload.paths.ldap_chain
+        )
 
         if not self.charm.state.is_main_orchestrator:
             logger.debug("Not the main orchestrator. Early exiting event.")
@@ -107,7 +110,7 @@ class LdapEventsHandler(Object):
 
         self._update_security_config(event)
 
-    def _on_ldap_certificate_removed(self, event: CertificateRemovedEvent) -> None:
+    def _on_ldap_certificate_removed(self, event: CertificatesRemovedEvent) -> None:
         """Handle the removal of LDAP certificates."""
         if not self.charm.workload.can_connect:
             logger.debug("Workload connection failure. Deferring event.")

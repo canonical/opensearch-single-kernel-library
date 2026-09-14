@@ -12,6 +12,9 @@ import socket
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Literal
 
+from charmlibs.interfaces.certificate_transfer import (
+    CertificateTransferRequires,
+)
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
@@ -81,9 +84,6 @@ from opensearch_single_kernel.core.secrets import OpenSearchSecrets
 from opensearch_single_kernel.core.upgrade_relation import (
     UpgradeAppState,
     UpgradeServerState,
-)
-from opensearch_single_kernel.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
-    CertificateTransferRequires,
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,

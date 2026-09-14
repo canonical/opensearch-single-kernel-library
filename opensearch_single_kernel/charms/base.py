@@ -9,6 +9,9 @@ from abc import ABC, abstractmethod
 from time import time_ns
 
 import ops
+from charmlibs.interfaces.certificate_transfer import (
+    CertificateTransferRequires,
+)
 from data_platform_helpers.advanced_statuses import StatusHandler
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import EventSource
@@ -54,9 +57,6 @@ from opensearch_single_kernel.events.peer_cluster import PeerClusterEventsHandle
 from opensearch_single_kernel.events.snapshots import SnapshotsEventsHandler
 from opensearch_single_kernel.events.tls import TLSEventsHandler
 from opensearch_single_kernel.events.upgrades import UpgradesEventsHandler
-from opensearch_single_kernel.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
-    CertificateTransferRequires,
-)
 from opensearch_single_kernel.lib.charms.glauth_k8s.v0.ldap import LdapRequirer
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.managers.cluster import ClusterManager

@@ -36,8 +36,6 @@ charm-libs:
     version: "3"
   - lib: glauth_k8s.ldap
     version: "0"
-  - lib: certificate_transfer_interface.certificate_transfer
-    version: "0"
 
 parts:
   charm:
