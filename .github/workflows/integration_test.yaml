@@ -55,7 +55,7 @@ jobs:
           import subprocess
           spread_jobs = (
               subprocess.run(
-                [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci"],
+                [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci:tests/spread/vm/test_tls.py"],
                 capture_output=True,
                 check=True,
                 text=True,

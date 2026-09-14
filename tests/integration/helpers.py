@@ -468,6 +468,7 @@ async def wait_until_condition_on_units(
     app: str,
     condition: Callable[[list[Unit]], bool],
     timeout: int = 1200,
+    wait_msg: str = "Waiting for condition"
 ) -> None:
     """Block and wait until a condition is met on the units in `app` or timeout."""
     try:
@@ -479,10 +480,10 @@ async def wait_until_condition_on_units(
         )
         for attempt in Retrying(stop=stop_after_delay(timeout), wait=wait_fixed(10)):
             with attempt:
-                logger.info("Waiting for condition...")
+                logger.info("%s...", wait_msg)
                 units = await get_application_units(ops_test, app)
                 if condition(units):
-                    logger.info(f"{now()} -- Waiting for condition: complete.\n\n\n")
+                    logger.info(f"{now()} -- {wait_msg}: complete.\n\n\n")
                     return
                 raise Exception
     except RetryError:
