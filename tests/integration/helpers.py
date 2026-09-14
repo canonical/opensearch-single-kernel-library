@@ -468,7 +468,7 @@ async def wait_until_condition_on_units(
     app: str,
     condition: Callable[[list[Unit]], bool],
     timeout: int = 1200,
-    wait_msg: str = "Waiting for condition"
+    wait_msg: str = "Waiting for condition",
 ) -> None:
     """Block and wait until a condition is met on the units in `app` or timeout."""
     try:

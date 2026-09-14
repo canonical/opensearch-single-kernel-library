@@ -168,15 +168,20 @@ async def test_tls_renewal(ops_test: OpsTest, substrate) -> None:
         > current_certs["http_certificates_list"][0]["not_before"]
     )
 
+
 async def juju_ssh_unit(ops_test: OpsTest, unit_name: str, cmd: str, timeout: int = 45) -> str:
     _, stdout, _ = await asyncio.wait_for(
         ops_test.juju(
             "ssh", "--model", ops_test.model_full_name, unit_name, "--", cmd, check=True
-        ), timeout=timeout
+        ),
+        timeout=timeout,
     )
     return stdout
 
-async def request_cert_with_expiry_time(ops_test: OpsTest, unit_id: int, series: str, expiry_time: int, cert_type: str) -> float:
+
+async def request_cert_with_expiry_time(
+    ops_test: OpsTest, unit_id: int, series: str, expiry_time: int, cert_type: str
+) -> float:
     unit_name = f"{APP_NAME}/{unit_id}"
 
     search_expression = "expire=self[.]_get_next_secret_expiry_time(certificate)"
@@ -194,7 +199,7 @@ async def request_cert_with_expiry_time(ops_test: OpsTest, unit_id: int, series:
         await juju_ssh_unit(ops_test, unit_name, cmd)
 
         requested_at = time.monotonic()
-        
+
         # request cert
         action = await run_action(
             ops_test,
@@ -203,15 +208,20 @@ async def request_cert_with_expiry_time(ops_test: OpsTest, unit_id: int, series:
             params={"category": cert_type},
         )
 
-        assert action.status == "completed", f"Failed to request a new cert `{cert_type}` on `{unit_name}`"
+        assert action.status == "completed", (
+            f"Failed to request a new cert `{cert_type}` on `{unit_name}`"
+        )
 
         # wait for units to settle before restoring lib
-        await wait_until(ops_test, apps=[APP_NAME], wait_for_exact_units=len(UNIT_IDS), timeout=120)
+        await wait_until(
+            ops_test, apps=[APP_NAME], wait_for_exact_units=len(UNIT_IDS), timeout=120
+        )
 
         return requested_at
     finally:
         # restore libfile
         await juju_ssh_unit(ops_test, unit_name, f"sudo mv {backup_file} {lib_file}")
+
 
 async def force_leader_change(ops_test: OpsTest, leader_id: int) -> None:
     unit_name = f"{APP_NAME}/{leader_id}"
@@ -227,11 +237,11 @@ async def force_leader_change(ops_test: OpsTest, leader_id: int) -> None:
 
         # wait for leader change
         await wait_until_condition_on_units(
-            ops_test, 
-            APP_NAME, 
+            ops_test,
+            APP_NAME,
             condition=lambda units: any(unit.is_leader and unit.id != leader_id for unit in units),
             timeout=120,
-            wait_msg="Waiting for leader change"
+            wait_msg="Waiting for leader change",
         )
     finally:
         # restart juju agent
@@ -245,12 +255,16 @@ async def test_leader_change(ops_test: OpsTest, series) -> None:
     unit_name = f"{APP_NAME}/{leader_id}"
 
     # request new cert with short secret expiry
-    requested_at = await request_cert_with_expiry_time(ops_test, leader_id, series, SECRET_EXPIRY_TIME, "app-admin")
+    requested_at = await request_cert_with_expiry_time(
+        ops_test, leader_id, series, SECRET_EXPIRY_TIME, "app-admin"
+    )
 
     # force leadership change
     await force_leader_change(ops_test, leader_id)
 
-    assert time.monotonic() - requested_at < SECRET_EXPIRY_TIME, "Leader change time exceeded cert expiry"
+    assert time.monotonic() - requested_at < SECRET_EXPIRY_TIME, (
+        "Leader change time exceeded cert expiry"
+    )
     assert await get_leader_unit_id(ops_test) != leader_id, "Leader did not change"
 
     logger.info("Waiting for secret expiry on %s", unit_name)
@@ -258,6 +272,7 @@ async def test_leader_change(ops_test: OpsTest, series) -> None:
 
     # former leader will be in failed state
     await wait_until(ops_test, apps=[APP_NAME], wait_for_exact_units=len(UNIT_IDS), timeout=120)
+
 
 @pytest.mark.abort_on_fail
 async def test_tls_expiration(
