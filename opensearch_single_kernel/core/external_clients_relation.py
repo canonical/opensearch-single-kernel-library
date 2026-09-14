@@ -5,20 +5,31 @@
 
 """State collection for external client relation."""
 
-from ops.model import Application, Relation
+import logging
 
+from ops.model import Application, Relation
+from pydantic import ValidationError
+
+from opensearch_single_kernel.core.models import (
+    ExternalClientEntityPermissions,
+    ExternalClientRequestedEntity,
+)
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ExternalOpenSearchClient(RelationState):
     """State collection for a single related external opensearch client."""
 
+    relation: Relation
+
     def __init__(
         self,
-        relation: Relation | None,
+        relation: Relation,
         data_interface: Data,
         component: Application,
         relation_name: str,
@@ -104,3 +115,60 @@ class ExternalOpenSearchClient(RelationState):
     def extra_user_roles(self, roles: str) -> None:
         """Set the extra user roles for this relation."""
         self.update({"extra-user-roles": roles})
+
+    @property
+    def extra_group_roles(self) -> list[str]:
+        """Get the extra group roles for this relation."""
+        return [
+            role.strip() for role in self.relation_data.get("extra-group-roles", "").split(",")
+        ]
+
+    @property
+    def entity_type(self) -> str:
+        """Get entity type of this relation."""
+        return self.relation_data.get("entity-type", "")
+
+    @property
+    def entity_permissions(self) -> dict[str, list[dict[str, list[str]]]] | None:
+        """Receive, validate and reformat entity permissions into OpenSearch role permissions.
+
+        If request is invalid or absent the None is returned and error is logged.
+        """
+        if not (raw := self.relation_data.get("entity-permissions")):
+            return None
+        try:
+            return ExternalClientEntityPermissions.model_validate_json(raw).to_role_permissions()
+        except ValidationError as e:
+            logger.error(
+                "Invalid entity-permissions field in client relation %d: %s",
+                self.relation.id,
+                e,
+            )
+            return None
+
+    @property
+    def requested_entity_secret(self) -> str | None:
+        """Get entity secret id for this relation."""
+        return self.relation_data.get("requested-entity-secret")
+
+    def get_requested_entity(self) -> ExternalClientRequestedEntity | None:
+        """Retrieve and validate entity from requested entity secret using model.
+
+        If content is invalid or absent the None is returned and error is logged.
+        """
+        if not (requested_entity := self.requested_entity_secret):
+            logger.info(
+                "No requested entities secret provided for GROUP requirer relation %d",
+                self.relation.id,
+            )
+            return None
+        requested_entity = requested_entity.split(":")
+        if len(requested_entity) != 2:
+            logger.error(
+                "Invalid requested entities secret content for GROUP requirer relation %d",
+                self.relation.id,
+            )
+            return None
+        return ExternalClientRequestedEntity(
+            username=requested_entity[0], password=requested_entity[1]
+        )

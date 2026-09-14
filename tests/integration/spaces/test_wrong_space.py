@@ -57,7 +57,7 @@ async def test_build_and_deploy(ops_test: OpsTest, charm, series, lxd_spaces, su
         config=config,
     )
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],

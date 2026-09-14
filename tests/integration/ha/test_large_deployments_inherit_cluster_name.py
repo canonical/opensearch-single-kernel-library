@@ -120,7 +120,7 @@ async def test_build_and_deploy_not_autogen(
         MAIN_APP_NOT_AUTOGEN,
         INVALID_FAILOVER_APP,
     ]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # confirm all apps are blocked due to missing data node or waiting for relation
     await wait_until(
@@ -199,7 +199,7 @@ async def test_build_and_deploy_autogen(
         FAILOVER_APP_AUTOGEN,
         DATA_APP_AUTOGEN,
     ]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # confirm all apps are blocked due to missing data node or waiting for relation
     await wait_until(

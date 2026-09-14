@@ -1,0 +1,41 @@
+dn: ou=users,dc=glauth,dc=com
+objectClass: posixGroup
+ou: users
+gidNumber: 5500
+
+dn: ou=opensearch,ou=users,dc=glauth,dc=com
+objectClass: posixGroup
+ou: opensearch
+gidNumber: 5501
+
+dn: ou=search-readonly,ou=opensearch,ou=users,dc=glauth,dc=com
+objectClass: posixGroup
+ou: search-readonly
+gidNumber: 5502
+
+dn: ou=search-admin,ou=opensearch,ou=users,dc=glauth,dc=com
+objectClass: posixGroup
+ou: search-admin
+gidNumber: 5503
+
+dn: cn=bob,ou=search-readonly,ou=opensearch,ou=users,dc=glauth,dc=com
+changetype: add
+objectClass: posixAccount
+uidNumber: 5003
+gidNumber: 5502
+cn: bob
+sn: bob
+uid: bob
+mail: bob@example.com
+userPassword: {SHA256}bc786c379d8b4334faa1f5ed4428d53ed5fbf6247a5974a72eac7fd5c13410d8
+
+dn: cn=alice,ou=search-admin,ou=opensearch,ou=users,dc=glauth,dc=com
+changetype: add
+objectClass: posixAccount
+uidNumber: 5004
+gidNumber: 5503
+cn: alice
+sn: alice
+uid: alice
+mail: alice@example.com
+userPassword: {SHA256}cb824cd5fe4950a77e36776d275f8f7039682babd490d5da3bc8fd31f4c2254c

@@ -237,7 +237,11 @@ class OpenSearchClient:
             True if snapshot is running else False
         """
         response = self.request(
-            "GET", "_snapshot/_status", alt_hosts=alt_hosts, retries=3, wait_strategy=wait_fixed(3)
+            "GET",
+            "_snapshot/_status",
+            alt_hosts=alt_hosts,
+            retries=3,
+            wait_strategy=wait_fixed(3),
         )
         return len(response.get("snapshots", [])) > 0
 
@@ -518,7 +522,6 @@ class OpenSearchClient:
         self,
         role_name: str,
         permissions: dict[str, str] | None = None,
-        action_groups: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Creates a role with the given permissions.
 
@@ -528,7 +531,6 @@ class OpenSearchClient:
         Args:
             role_name: name of the role
             permissions: A valid dict of existing opensearch permissions.
-            action_groups: A valid dict of existing opensearch action groups.
 
         Raises:
             OpenSearchHttpError: If the role creation request fails.
@@ -539,7 +541,9 @@ class OpenSearchClient:
         resp = self.request(
             "PUT",
             f"{USER_ROLE_ENDPOINT}/{role_name}",
-            payload={**(permissions or {}), **(action_groups or {})},
+            payload={
+                **(permissions or {"index_permissions": []}),
+            },
         )
 
         if resp.get("status") != "CREATED" and not (
@@ -686,12 +690,13 @@ class OpenSearchClient:
 
         return resp
 
-    def create_user_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+    def put_role_mapping(self, role: str, users: list[str], backend_roles: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 
         Args:
             role: name of the role for users being mapped to.
-            mapped_users: all the users, that should be mapped to the specified role.
+            users: all the users that should be mapped to the specified role.
+            backend_roles: all the backend roles in use of specified role.
 
         Raises:
             OpenSearchHttpError: If the request fails.
@@ -700,7 +705,7 @@ class OpenSearchClient:
             resp = self.request(
                 "PUT",
                 f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
-                payload={"users": mapped_users, "backend_roles": [role]},
+                payload={"users": users, "backend_roles": backend_roles},
             )
         except OpenSearchHttpError as e:
             logger.error("Couldn't create role mapping: %s", str(e))
@@ -942,7 +947,11 @@ class OpenSearchClient:
         return None
 
     def get_roles_by_unit_name(
-        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None, substrate: Substrates
+        self,
+        unit_name: str,
+        unit_number: int,
+        alt_hosts: list[str] | None,
+        substrate: Substrates,
     ) -> list[str]:
         """Get the list of the roles assigned to this node.
 
