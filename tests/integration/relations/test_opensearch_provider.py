@@ -104,6 +104,7 @@ async def test_create_relation(
             application_name=DASHBOARDS_APP_NAME,
             channel="2/edge",
             series=SERIES,
+            trust=substrate == "k8s",
         )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(

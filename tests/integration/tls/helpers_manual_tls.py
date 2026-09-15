@@ -42,9 +42,7 @@ class ProvidingCertificateFailedError(Exception):
 class CSR(NamedTuple):
     """CSR represents the information about a certificate signing request."""
 
-    relation_id: str
-    application_name: str
-    unit_name: str
+    relation_id: int
     csr: bytes
     is_ca: bool
 
@@ -63,12 +61,11 @@ class CSR(NamedTuple):
             CSR: The CSR object.
 
         """
+        # manual-tls-certificates returns csr and relation_id
         return cls(
-            relation_id=csr["relation_id"],
-            application_name=csr["application_name"],
-            unit_name=csr["unit_name"],
+            relation_id=int(csr["relation_id"]),
             csr=csr["csr"].encode(),
-            is_ca=csr["is_ca"],
+            is_ca=csr.get("is_ca", "false").lower() == "true",
         )
 
 
@@ -145,12 +142,12 @@ class ManualTLSAgent:
             ca_key=self.ca_key,
             is_ca=csr.is_ca,
         )
-        logger.info("Generated certificate for %s", csr.unit_name)
+        logger.info("Generated certificate for %s", csr.relation_id)
         # Send the certificate back to the charm
         action = await self.tls_unit.run_action(
             "provide-certificate",
-            relation_id=csr.relation_id,
             **{
+                "relation-id": str(csr.relation_id),
                 "certificate": base64.b64encode(certificate).decode(),
                 "ca-certificate": base64.b64encode(self.ca).decode(),
                 "certificate-signing-request": base64.b64encode(
@@ -160,10 +157,10 @@ class ManualTLSAgent:
         )
         action = await action.wait()
         if action.status != "completed":
-            message = f"Failed to provide certificate for {csr.unit_name}"
+            message = f"Failed to provide certificate for {csr.relation_id} : {action.safe_data.get('message', 'Unknown error')}"
             logging.error(message)
             raise ProvidingCertificateFailedError(message)
-        logger.info("Provided certificate to %s", csr.unit_name)
+        logger.info("Provided certificate to %s", csr.relation_id)
 
     async def process_queue(self) -> None:
         """Process the certificate signing requests in the queue."""
