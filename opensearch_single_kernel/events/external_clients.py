@@ -101,13 +101,24 @@ class ExternalClientsEventsHandler(Object):
             component_name=self.charm.external_clients_manager.name,
         )
 
-        if not self._create_index(event, index_name):
+        try:
+            self.charm.external_clients_manager.opensearch_client.create_index(index_name)
+        except OpenSearchHttpError as e:
+            logger.error(
+                f"Failed to create index {index_name} for client relation {event.relation.id}: {e}"
+            )
+            event.defer()
             return
 
-        credentials = self._create_user(event, index_name)
-        if not credentials:
+        try:
+            logger.debug(f"Creating user for {index_name} with: {event.request.extra_user_roles}")
+            username, pwd = self.charm.external_clients_manager.create_opensearch_users(
+                index_name, event.relation, extra_user_roles=event.request.extra_user_roles
+            )
+        except OpenSearchUserMgmtError as err:
+            logger.error(err)
+            event.defer()
             return
-        username, pwd = credentials
 
         try:
             nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
@@ -115,7 +126,7 @@ class ExternalClientsEventsHandler(Object):
             logger.error("unable to get nodes %s", str(e))
             nodes = []
 
-        conn_data = self.charm.external_clients_manager.get_connection_data(nodes)
+        conn_data = self.charm.external_clients_manager.get_connection_data(event.relation, nodes)
         if not conn_data:
             event.defer()
             return
@@ -156,33 +167,6 @@ class ExternalClientsEventsHandler(Object):
             )
             return None
         return index_name
-
-    def _create_index(self, event: ResourceRequestedEvent, index_name: str) -> bool:
-        """Attempts to create an OpenSearch index. Returns True on success."""
-        try:
-            self.charm.external_clients_manager.opensearch_client.create_index(index_name)
-        except OpenSearchHttpError as e:
-            logger.error(
-                f"Failed to create index {index_name} for client relation {event.relation.id}: {e}"
-            )
-            event.defer()
-            return False
-        return True
-
-    def _create_user(
-        self, event: ResourceRequestedEvent, index_name: str
-    ) -> tuple[str, str] | None:
-        """Creates a user and returns a (username, password) tuple, or None on failure."""
-        try:
-            logger.debug(f"Creating user for {index_name} with: {event.request.extra_user_roles}")
-            credentials = self.charm.external_clients_manager.create_opensearch_users(
-                index_name, event.relation, extra_user_roles=event.request.extra_user_roles
-            )
-        except OpenSearchUserMgmtError as err:
-            logger.error(err)
-            event.defer()
-            return None
-        return credentials
 
     def update_users_on_secret_change(self, event: SecretChangedEvent) -> bool:
         """React to a system-user password-hash secret change.
@@ -332,9 +316,4 @@ class ExternalClientsEventsHandler(Object):
                 updated = True
 
         if updated:
-            version = relation.data[relation.app].get("version", "v0") if relation.app else "v0"
-
-            if version == "v0":
-                relation.data[self.charm.app].update({"endpoints": new_endpoints})
-            else:
-                self.charm.state.opensearch_provides.set_responses(relation.id, responses)
+            self.charm.state.opensearch_provides.set_responses(relation.id, responses)

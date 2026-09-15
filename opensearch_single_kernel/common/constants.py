@@ -154,7 +154,7 @@ class ExtraUserRolePermissions(Enum):
     DEFAULT = {
         "cluster_permissions": [
             "cluster_monitor",
-            "indices:data/write/bulk",
+            "cluster_composite_ops",
         ],
         "index_permissions": [
             {
@@ -165,6 +165,7 @@ class ExtraUserRolePermissions(Enum):
                 "allowed_actions": [
                     "indices_monitor",
                     "data_access",
+                    "indices_all",
                 ],
             }
         ],
@@ -215,14 +216,6 @@ COS_USER = "monitor"
 COS_ROLE = "readall_and_monitor"
 OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
-
-# Maps an internal user to its (password, hashed_password) field names on
-# OpenSearchAppPeerModel.
-USER_SECRET_FIELDS: dict[str, tuple[str, str]] = {
-    ADMIN_USER: ("admin_password", "admin_hashed_password"),
-    KIBANA_SERVER_USER: ("kibana_server_password", "kibana_server_hashed_password"),
-    COS_USER: ("monitor_password", "monitor_hashed_password"),
-}
 
 GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
 

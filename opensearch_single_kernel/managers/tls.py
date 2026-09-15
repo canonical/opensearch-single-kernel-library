@@ -793,7 +793,7 @@ class TlsManager(BaseManager):
         blocked_msg, should_sever_relation = None, False
 
         if self.all_tls_resources_stored():  # compare CAs
-            if self.state.application.admin_ca_cert != peer_cluster_rel_data.admin_ca_cert:
+            if self.state.server.transport_ca_cert != peer_cluster_rel_data.admin_ca_cert:
                 blocked_msg = PeerClusterErrorDataStatuses.CA_CERTIFICATE_MISMATCH_BETWEEN_CLUSTERS.value.message
                 should_sever_relation = True
 

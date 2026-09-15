@@ -11,8 +11,11 @@ from typing import TYPE_CHECKING
 
 from ops import Object
 
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.events.custom_events import ReloadKeystoreEvent
-from opensearch_single_kernel.managers.keystore import KeystoreReloadResult
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -35,16 +38,13 @@ class KeystoreEventsHandler(Object):
 
     def _on_reload(self, event: ReloadKeystoreEvent) -> None:
         """Handle keystore reload event."""
-        result = self.charm.keystore_manager.reload()
-        if result is KeystoreReloadResult.SUCCESS:
-            return
-
-        if result is KeystoreReloadResult.RELOAD_FAILED:
-            logger.warning(
-                "Keystore secure-settings reload failed; restarting OpenSearch to apply settings."
-            )
-            self.charm.restart_opensearch_event.emit()
-            return
-
-        logger.error("Keystore reload failed.")
-        event.defer()
+        try:
+            if not self.charm.keystore_manager.reload():
+                logger.warning(
+                    "Keystore secure-settings reload failed; "
+                    "restarting OpenSearch to apply settings."
+                )
+                self.charm.restart_opensearch_event.emit()
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Keystore reload failed: %s", e)
+            event.defer()

@@ -4,10 +4,8 @@
 
 """Models for the peer-cluster relations."""
 
-import json
 import logging
 import re
-from hashlib import sha1
 from typing import Literal, Optional
 
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -27,7 +25,6 @@ from opensearch_single_kernel.core.base_models import (
     PlainModel,
     PluginConfigInfo,
     _sort_nested_dicts,
-    stripped_or_none,
 )
 from opensearch_single_kernel.core.relation_base import (
     AdminSecretStr,
@@ -217,55 +214,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
             return handler(self)
         return BaseCommonModel.serialize_model(self, handler, info)
 
-    def apply_rel_data(self, source: "PeerClusterAppModel") -> None:
-        """Copy orchestrator-broadcast fields from source into this relation's databag."""
-        with self.update() as m:
-            m.deployment_description = source.deployment_description
-            m.security_index_initialised = source.security_index_initialised
-            m.first_data_node = source.first_data_node or ""
-            m.nodes_config = source.nodes_config
-            m.plugin_config_info = source.plugin_config_info
-            # Passwords
-            m.admin_password = source.admin_password
-            m.admin_hashed_password = source.admin_hashed_password
-            m.kibana_server_password = source.kibana_server_password
-            m.kibana_server_hashed_password = source.kibana_server_hashed_password
-            m.monitor_password = source.monitor_password
-            m.monitor_hashed_password = source.monitor_hashed_password
-            # Plugin secrets
-            m.plugin_secrets = source.plugin_secrets
-            # Admin TLS secrets
-            m.admin_truststore_password = stripped_or_none(source.admin_truststore_password)
-            m.admin_keystore_password = stripped_or_none(source.admin_keystore_password)
-            m.admin_subject = stripped_or_none(source.admin_subject)
-            m.admin_key = stripped_or_none(source.admin_key)
-            m.admin_key_password = stripped_or_none(source.admin_key_password)
-            m.admin_csr = stripped_or_none(source.admin_csr)
-            m.admin_chain = stripped_or_none(source.admin_chain)
-            m.admin_cert = stripped_or_none(source.admin_cert)
-            m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
-
-            digest_source = source.model_dump(mode="json", context={"skip_secrets": True})
-            m.rel_data_hash = sha1(json.dumps(digest_source, sort_keys=True).encode()).hexdigest()
-
-    def set_backup_secrets(
-        self, cloud: str, reldata: "S3RelData | AzureRelData | GcsRelData | None"
-    ) -> None:
-        """Store a cloud's secret credentials in the top-level backup-secret fields.
-
-        Passing `reldata=None` clears the fields (e.g. the backup relation went away).
-        Call inside an `update()`
-        """
-        if cloud == "s3":
-            self.s3_access_key = getattr(reldata, "access_key", None)
-            self.s3_secret_key = getattr(reldata, "secret_key", None)
-            self.s3_tls_ca_chain = getattr(reldata, "tls_ca_chain", None)
-        elif cloud == "azure":
-            self.azure_storage_account = getattr(reldata, "storage_account", None)
-            self.azure_secret_key = getattr(reldata, "secret_key", None)
-        elif cloud == "gcs":
-            self.gcs_secret_key = getattr(reldata, "secret_key", None)
-
     def backup_reldata(self, cloud: str) -> "S3RelData | AzureRelData | GcsRelData | None":
         """Reconstruct a cloud's RelData from the backup secrets."""
         if cloud == "s3":
@@ -288,41 +236,6 @@ class PeerClusterAppModel(RelationModel, BaseCommonModel):
                 return None
             return GcsRelData.model_construct(secret_key=self.gcs_secret_key)
         return None
-
-    def clear_rel_data(self) -> None:
-        """Reset all orchestrator-broadcast fields to their defaults."""
-        with self.update() as m:
-            m.deployment_description = None
-            m.security_index_initialised = False
-            m.first_data_node = ""
-            m.nodes_config = {}
-            m.plugin_config_info = {}
-            m.admin_password = None
-            m.admin_hashed_password = None
-            m.kibana_server_password = None
-            m.kibana_server_hashed_password = None
-            m.monitor_password = None
-            m.monitor_hashed_password = None
-            m.plugin_secrets = None
-            m.admin_truststore_password = None
-            m.admin_keystore_password = None
-            m.admin_subject = None
-            m.admin_key = None
-            m.admin_key_password = None
-            m.admin_csr = None
-            m.admin_chain = None
-            m.admin_cert = None
-            m.admin_ca_cert = None
-            # Backup storage secrets
-            m.s3_access_key = None
-            m.s3_secret_key = None
-            m.s3_tls_ca_chain = None
-            m.azure_storage_account = None
-            m.azure_secret_key = None
-            m.gcs_secret_key = None
-            # emptying the secret fields above deletes the backing group secrets, so
-            # drop the marker to let initialize_empty_secrets() re-create them later
-            m.pc_secrets_initialized = False
 
     def initialize_empty_secrets(self) -> None:
         """Pre-create peer cluster relation secret groups to prevent log spam.

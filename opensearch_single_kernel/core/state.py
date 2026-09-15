@@ -328,13 +328,13 @@ class ClusterState(Object):
             return None
 
     def peer_cluster_by_relation_id(
-        self, is_provider: bool, relation_id: int, remote: bool = False
+        self, relation_id: int, is_provider: bool, remote: bool = False
     ) -> PeerClusterAppModel | None:
         """Return the current related peer cluster if any.
 
         Args:
-            is_provider: whether the current cluster is provider or requirer in the relation.
             relation_id: the relation id of the peer cluster relation to look for.
+            is_provider: whether the current cluster is provider or requirer in the relation.
             remote: whether to return the remote databag (related to current)
               or the local one (current cluster as part of the relation).
         """

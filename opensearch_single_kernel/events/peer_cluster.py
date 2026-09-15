@@ -225,7 +225,7 @@ class PeerClusterEventsHandler(Object):
 
         if not (
             trigger_app := self.charm.state.application.cluster_fleet_apps_rels.get(
-                str(event.relation.id)
+                event.relation.id
             )
         ):
             logger.debug("Trigger app not found for relation id %s. Skipping.", event.relation.id)
@@ -422,7 +422,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         # aggregate all CMs (main + failover if any)
-        remote_peer_cluster.cm_nodes = self.charm.peer_cluster_manager.cm_nodes(orchestrators)
+        remote_peer_cluster.nodes_config = {
+            node.name: node for node in self.charm.peer_cluster_manager.cm_nodes(orchestrators)
+        }
 
         # recompute the deployment desc
         self._reconcile_deployment_desc_from_peer_cluster_data(remote_peer_cluster)
@@ -477,14 +479,11 @@ class PeerClusterEventsHandler(Object):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
 
     def check_credentials_with_missing_relations(self) -> None:
-        """Track whether credentials exist for plugins/backups without a relation."""
+        """Track whether credentials exist for plugins without a relation."""
         if not self.charm.unit.is_leader():
             return
 
-        if (
-            self.charm.plugin_manager.missing_plugins_relations()
-            or self.charm.snapshots_manager.missing_backup_relations()
-        ):
+        if self.charm.plugin_manager.missing_plugins_relations():
             self.charm.state.application.missing_relations = True
             return
 
@@ -528,7 +527,7 @@ class PeerClusterEventsHandler(Object):
     def _set_security_conf(self, data: PeerClusterAppModel) -> None:
         """Store security related config."""
         # set admin secrets
-        self.charm.state.application.update_from_peer_cluster_rel_data(data)
+        self.charm.peer_cluster_manager.update_local_app_from_peer_cluster_rel_data(data)
 
         # store the app admin TLS resources if not stored
         logger.debug("Storing TLS resources from peer cluster relation data.")

@@ -4,6 +4,7 @@
 
 """Handler for plugins events."""
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -51,7 +52,9 @@ class PluginEventsHandler(Object):
 
             # start locally tracking secret and write transferred keys to keystore
             content = self.charm.plugin_manager.get_plugin_secret(label)
-            keys_to_add = content.get("keys")
+            if not content:
+                continue
+            keys_to_add = json.loads(content).get("keys")
 
             self.charm.keystore_manager.put_entries(keys_to_add)
             cleanup = {"keys": list(keys_to_add.keys())}

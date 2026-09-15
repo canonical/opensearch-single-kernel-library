@@ -29,6 +29,7 @@ from opensearch_single_kernel.common.statuses import (
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
+    stripped_or_none,
 )
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
@@ -98,6 +99,37 @@ class PeerClusterManager(BaseManager):
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.update(related_cluster_fleet_apps)
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
+
+    def update_local_app_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
+        """Unmarshal: update the local app peer model using peer cluster relation data."""
+        with self.state.application.update() as m:
+            m.first_data_node = peer_data.first_data_node
+            m.nodes_config = peer_data.nodes_config
+
+            m.admin_password = stripped_or_none(peer_data.admin_password)
+            m.admin_hashed_password = peer_data.admin_hashed_password
+            m.kibana_server_password = peer_data.kibana_server_password
+            m.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
+            m.monitor_password = peer_data.monitor_password
+            m.monitor_hashed_password = peer_data.monitor_hashed_password
+
+            m.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
+            m.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
+            m.admin_subject = stripped_or_none(peer_data.admin_subject)
+            m.admin_key = stripped_or_none(peer_data.admin_key)
+            m.admin_key_password = stripped_or_none(peer_data.admin_key_password)
+            m.admin_csr = stripped_or_none(peer_data.admin_csr)
+            m.admin_chain = stripped_or_none(peer_data.admin_chain)
+            m.admin_cert = stripped_or_none(peer_data.admin_cert)
+            m.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
+
+            if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
+                m.admin_user_initialized = True
+
+            if peer_data.plugin_config_info:
+                m.plugin_config_info = peer_data.plugin_config_info
+            if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
+                m.plugin_secrets = peer_data.plugin_secrets
 
     def update_main_orchestrator_registered(self, rel_id: int, value: bool) -> None:
         """Update whether the main orchestrator is registered in the relation data."""

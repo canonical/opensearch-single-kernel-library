@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
+from opensearch_single_kernel.core.base_models import stripped_or_none
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -56,7 +57,16 @@ class InternalUsersManager(BaseManager):
             True if the user was created or updated, False if an error occurred.
         """
         # Leader is to set new password and hash, others populate existing hash locally
-        password_secret = self.state.application.get_user_secret(user)
+        if user == ADMIN_USER:
+            # admin_password may hold a single-space placeholder to force secret
+            # creation (see initialize_empty_secrets)
+            password_secret = stripped_or_none(self.state.application.admin_password)
+        elif user == KIBANA_SERVER_USER:
+            password_secret = self.state.application.kibana_server_password
+        elif user == COS_USER:
+            password_secret = self.state.application.monitor_password
+        else:
+            raise ValueError(f"User {user} is not an internal user.")
         if password_secret and not update:
             try:
                 self.save_user_locally(user)
@@ -118,7 +128,15 @@ class InternalUsersManager(BaseManager):
     def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, self.state.application.get_user_secret(user, hashed=True))
+        if user == ADMIN_USER:
+            hashed_pwd = self.state.application.admin_hashed_password
+        elif user == KIBANA_SERVER_USER:
+            hashed_pwd = self.state.application.kibana_server_hashed_password
+        elif user == COS_USER:
+            hashed_pwd = self.state.application.monitor_hashed_password
+        else:
+            raise ValueError(f"User {user} is not an internal user.")
+        self.put_internal_user(user, hashed_pwd)
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users.

@@ -4,7 +4,9 @@
 
 """OpenSearch Peer Cluster Orchestrator manager."""
 
+import json
 import logging
+from hashlib import sha1
 
 from opensearch_single_kernel.common.constants import (
     COS_USER,
@@ -23,6 +25,7 @@ from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuse
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
+    stripped_or_none,
 )
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
@@ -31,6 +34,11 @@ from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.storage import (
+    AzureRelData,
+    GcsRelData,
+    S3RelData,
+)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.object_storage import (
     storage_config_from_connection_info,
@@ -132,13 +140,16 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_peer_cluster.trigger = cluster_type
                 local_peer_cluster.orchestrators = orchestrators
                 if remote_peer_cluster:
-                    local_peer_cluster.apply_rel_data(remote_peer_cluster)
+                    self.apply_rel_data(local_peer_cluster, remote_peer_cluster)
                 logger.debug(
                     f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
                 )
 
                 # share object-storage backup credentials with the requirer sub-cluster
                 self.broadcast_backup_secrets(local_peer_cluster)
+
+                if remote_peer_cluster:
+                    self.refresh_hash(local_peer_cluster, remote_peer_cluster)
 
                 # there is no error to broadcast - we clear any previously broadcasted error
                 if not rel_err_data:
@@ -165,7 +176,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             ("gcs", ObjectStorageType.GCS),
         ):
             if not getattr(self.state, f"{cloud}_relation"):
-                local_peer_cluster.set_backup_secrets(cloud, None)
+                self.set_backup_secrets(local_peer_cluster, cloud, None)
                 continue
             try:
                 connection_info = self.state.get_storage_connection_info_from_relation(
@@ -182,7 +193,145 @@ class PeerClusterOrchestratorManager(BaseManager):
                 continue
             reldata = getattr(config, cloud, None) if config else None
             if reldata is not None:
-                local_peer_cluster.set_backup_secrets(cloud, reldata)
+                self.set_backup_secrets(local_peer_cluster, cloud, reldata)
+
+    def set_backup_secrets(
+        self,
+        local_peer_cluster: PeerClusterAppModel,
+        cloud: str,
+        reldata: S3RelData | AzureRelData | GcsRelData | None,
+    ) -> None:
+        """Store a cloud's secret credentials in the top-level backup-secret fields.
+
+        Passing ``reldata=None`` clears the fields (e.g. the backup relation went away).
+        Call inside an ``update()`` on ``local_peer_cluster``.
+        """
+        if cloud == "s3":
+            local_peer_cluster.s3_access_key = getattr(reldata, "access_key", None)
+            local_peer_cluster.s3_secret_key = getattr(reldata, "secret_key", None)
+            local_peer_cluster.s3_tls_ca_chain = getattr(reldata, "tls_ca_chain", None)
+        elif cloud == "azure":
+            local_peer_cluster.azure_storage_account = getattr(reldata, "storage_account", None)
+            local_peer_cluster.azure_secret_key = getattr(reldata, "secret_key", None)
+        elif cloud == "gcs":
+            local_peer_cluster.gcs_secret_key = getattr(reldata, "secret_key", None)
+
+    def apply_rel_data(
+        self, local_peer_cluster: PeerClusterAppModel, source: PeerClusterAppModel
+    ) -> None:
+        """Copy orchestrator-broadcast fields from ``source`` into the relation databag."""
+        with local_peer_cluster.update() as m:
+            m.deployment_description = source.deployment_description
+            m.security_index_initialised = source.security_index_initialised
+            m.first_data_node = source.first_data_node or ""
+            m.nodes_config = source.nodes_config
+            m.plugin_config_info = source.plugin_config_info
+            # Passwords
+            m.admin_password = source.admin_password
+            m.admin_hashed_password = source.admin_hashed_password
+            m.kibana_server_password = source.kibana_server_password
+            m.kibana_server_hashed_password = source.kibana_server_hashed_password
+            m.monitor_password = source.monitor_password
+            m.monitor_hashed_password = source.monitor_hashed_password
+            # Plugin secrets
+            m.plugin_secrets = source.plugin_secrets
+            # Admin TLS secrets
+            m.admin_truststore_password = stripped_or_none(source.admin_truststore_password)
+            m.admin_keystore_password = stripped_or_none(source.admin_keystore_password)
+            m.admin_subject = stripped_or_none(source.admin_subject)
+            m.admin_key = stripped_or_none(source.admin_key)
+            m.admin_key_password = stripped_or_none(source.admin_key_password)
+            m.admin_csr = stripped_or_none(source.admin_csr)
+            m.admin_chain = stripped_or_none(source.admin_chain)
+            m.admin_cert = stripped_or_none(source.admin_cert)
+            m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
+
+    def refresh_hash(
+        self, local_peer_cluster: PeerClusterAppModel, source: PeerClusterAppModel
+    ) -> None:
+        """Recompute ``rel_data_hash`` over the full payload, secrets included."""
+        non_secret = source.model_dump(mode="json", context={"skip_secrets": True})
+        secret_values = {
+            name: getattr(local_peer_cluster, name)
+            for name, field in type(local_peer_cluster).model_fields.items()
+            if field.exclude
+        }
+        local_peer_cluster.rel_data_hash = sha1(
+            json.dumps([non_secret, secret_values], sort_keys=True).encode()
+        ).hexdigest()
+
+    def clear_rel_data(self, local_peer_cluster: PeerClusterAppModel) -> None:
+        """Reset all orchestrator-broadcast fields to their defaults."""
+        with local_peer_cluster.update() as m:
+            m.deployment_description = None
+            m.security_index_initialised = False
+            m.first_data_node = ""
+            m.nodes_config = {}
+            m.plugin_config_info = {}
+            m.admin_password = None
+            m.admin_hashed_password = None
+            m.kibana_server_password = None
+            m.kibana_server_hashed_password = None
+            m.monitor_password = None
+            m.monitor_hashed_password = None
+            m.plugin_secrets = None
+            m.admin_truststore_password = None
+            m.admin_keystore_password = None
+            m.admin_subject = None
+            m.admin_key = None
+            m.admin_key_password = None
+            m.admin_csr = None
+            m.admin_chain = None
+            m.admin_cert = None
+            m.admin_ca_cert = None
+            # Backup storage secrets
+            m.s3_access_key = None
+            m.s3_secret_key = None
+            m.s3_tls_ca_chain = None
+            m.azure_storage_account = None
+            m.azure_secret_key = None
+            m.gcs_secret_key = None
+            # emptying the secret fields above deletes the backing group secrets, so
+            # drop the marker to let initialize_empty_secrets() re-create them later
+            m.pc_secrets_initialized = False
+
+    def to_peer_cluster_rel_data(
+        self,
+        security_index_initialised: bool | None,
+        first_data_node: str | None,
+        cm_nodes: dict[str, Node],
+    ) -> PeerClusterAppModel:
+        """Marshal: construct the peer cluster rel data from the local app peer model."""
+        app = self.state.application
+        is_main_orchestrator = (
+            app.deployment_description is not None
+            and app.deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
+        )
+        copied_data: dict = {
+            "deployment_description": app.deployment_description,
+            "admin_password": stripped_or_none(app.admin_password),
+            "admin_hashed_password": app.admin_hashed_password,
+            "kibana_server_password": app.kibana_server_password,
+            "kibana_server_hashed_password": app.kibana_server_hashed_password,
+            "monitor_password": app.monitor_password,
+            "monitor_hashed_password": app.monitor_hashed_password,
+            "admin_truststore_password": stripped_or_none(app.admin_truststore_password),
+            "admin_keystore_password": stripped_or_none(app.admin_keystore_password),
+            "admin_subject": stripped_or_none(app.admin_subject),
+            "admin_key": stripped_or_none(app.admin_key),
+            "admin_key_password": stripped_or_none(app.admin_key_password),
+            "admin_csr": stripped_or_none(app.admin_csr),
+            "admin_chain": stripped_or_none(app.admin_chain),
+            "admin_cert": stripped_or_none(app.admin_cert),
+            "admin_ca_cert": stripped_or_none(app.admin_ca_cert),
+            "security_index_initialised": security_index_initialised,
+            "first_data_node": first_data_node or "",
+            "nodes_config": cm_nodes,
+            "plugin_config_info": app.plugin_config_info if is_main_orchestrator else None,
+            "plugin_secrets": (app.plugin_secrets or "") if is_main_orchestrator else "",
+        }
+
+        return PeerClusterAppModel(**copied_data)
 
     def build_peer_cluster_rel_data(self) -> PeerClusterAppModel | None:
         """Build and return the peer cluster rel data to be shared with requirer sub-clusters."""
@@ -206,7 +355,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 f"Could not fetch nodes in related {deployment_description.typ} sub-cluster"
             )
 
-        return self.state.application.to_peer_cluster_rel_data(
+        return self.to_peer_cluster_rel_data(
             cm_nodes=cm_nodes,
             security_index_initialised=self.state.security_index_initialised_in_all_clusters,
             first_data_node=self.first_data_node_in_all_clusters,
@@ -437,7 +586,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         # store the trigger app (not current) with relation id, useful for departed rel event
         if trigger_rel_id and p_cluster_app:
             cluster_fleet_apps_rels = self.state.application.cluster_fleet_apps_rels
-            update_cluster_fleet(cluster_fleet_apps_rels, p_cluster_app, key=str(trigger_rel_id))
+            update_cluster_fleet(cluster_fleet_apps_rels, p_cluster_app, key=trigger_rel_id)
             self.state.application.cluster_fleet_apps_rels = cluster_fleet_apps_rels
 
     def promote_failover(self) -> None:
@@ -482,7 +631,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             is_provider=True, relation_id=rel_id, remote=False
         )
         if local_peer_cluster:
-            local_peer_cluster.clear_rel_data()
+            self.clear_rel_data(local_peer_cluster)
             del local_peer_cluster.rel_data_hash
             del local_peer_cluster.error_data
             del local_peer_cluster.cluster_fleet_apps

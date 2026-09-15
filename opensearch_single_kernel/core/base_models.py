@@ -76,7 +76,7 @@ class PlainModel(ABC, BaseModel):
 
 
 class App(PlainModel):
-    """Data class representing an application."""
+    """Pydantic model representing an application."""
 
     id: str | None = None
     short_id: str | None = None

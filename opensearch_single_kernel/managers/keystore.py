@@ -7,7 +7,6 @@ This module manages OpenSearch keystore access and lifecycle.
 """
 
 import logging
-from enum import Enum
 
 from tenacity import retry, retry_if_result, stop_after_attempt, wait_fixed
 
@@ -26,14 +25,6 @@ from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-
-class KeystoreReloadResult(Enum):
-    """Outcome of a keystore reload attempt."""
-
-    SUCCESS = "success"
-    ERROR = "error"
-    RELOAD_FAILED = "reload_failed"
 
 
 class KeystoreManager(BaseManager):
@@ -185,28 +176,29 @@ class KeystoreManager(BaseManager):
         wait=wait_fixed(2),
         retry_error_callback=lambda _: False,
     )
-    def reload(self) -> KeystoreReloadResult:
+    def reload(self) -> bool:
         """Reload the keystore.
 
         Returns:
-            The outcome of the reload attempt.
+            whether the live reload of secure settings succeeded. A restart is
+            required to apply the settings when this is False.
+
+        Raises:
+            OpenSearchCmdError: if a keystore bin command fails.
+            OpenSearchFileOperationError: if a keystore file operation fails.
         """
-        try:
-            self._create_if_needed()
-            self.workload.run_cmd(self.keystore, "upgrade")
-        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
-            logger.error("Keystore operation failed: %s", e)
-            return KeystoreReloadResult.ERROR
+        self._create_if_needed()
+        self.workload.run_cmd(self.keystore, "upgrade")
 
         if not self.workload.is_service_started() or not self.opensearch_client.is_node_up():
             # Secure settings are read from the keystore at
             # OpenSearch startup, so there is nothing to reload live and doing so would abort
             # an in-progress bootstrap and deadlock the node-lock handshake.
             logger.debug("Opensearch not up. Keystore settings will be loaded at start time.")
-            return KeystoreReloadResult.SUCCESS
+            return True
 
         if not self.opensearch_client.reload_secure_settings(alt_hosts=self.alt_hosts):
-            return KeystoreReloadResult.RELOAD_FAILED
+            return False
 
         logger.debug("Keystore reload successful")
-        return KeystoreReloadResult.SUCCESS
+        return True

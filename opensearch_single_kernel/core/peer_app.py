@@ -10,21 +10,14 @@ from typing import Optional
 from dpcharmlibs.interfaces import PeerModel, UserSecretStr
 from pydantic import Field, field_serializer, field_validator
 
-from opensearch_single_kernel.common.constants import (
-    ADMIN_USER,
-    USER_SECRET_FIELDS,
-    DeploymentType,
-)
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
     PluginConfigInfo,
     _sort_nested_dicts,
-    stripped_or_none,
 )
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
-    PeerClusterAppModel,
     PeerClusterOrchestrators,
 )
 from opensearch_single_kernel.core.relation_base import (
@@ -81,7 +74,7 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
     cluster_fleet_apps: dict[str, PeerClusterApp] = Field(default_factory=dict)
     # Peer-cluster fleet apps learned through peer-cluster relations (from other apps in the
     # fleet), keyed by relation id.
-    cluster_fleet_apps_rels: dict[str, PeerClusterApp] = Field(default_factory=dict)
+    cluster_fleet_apps_rels: dict[int, PeerClusterApp] = Field(default_factory=dict)
     # Which app in the fleet act as the main/failover orchestrator.
     orchestrators: Optional[PeerClusterOrchestrators] = Field(
         default_factory=PeerClusterOrchestrators
@@ -157,85 +150,3 @@ class OpenSearchAppPeerModel(RelationModel, PeerModel):
                 m.admin_password = " "
             if not m.admin_key_password:
                 m.admin_key_password = " "
-
-    def get_user_secret(self, user: str, hashed: bool = False) -> str | None:
-        """Read a user's password (or hashed password) off the model's user secrets."""
-        fields = USER_SECRET_FIELDS.get(user)
-        if fields is None:
-            raise ValueError(f"User {user} is not an internal user.")
-
-        field_name = fields[1] if hashed else fields[0]
-        value = getattr(self, field_name)
-        # admin_password may hold a single-space placeholder to force secret
-        # creation (see initialize_empty_secrets)
-        if user == ADMIN_USER and not hashed:
-            return stripped_or_none(value)
-        return value
-
-    def to_peer_cluster_rel_data(
-        self,
-        security_index_initialised: bool | None,
-        first_data_node: str | None,
-        cm_nodes: dict[str, Node],
-    ) -> PeerClusterAppModel:
-        """Marshal: Construct the peer cluster rel data from the local app peer model."""
-        is_main_orchestrator = (
-            self.deployment_description is not None
-            and self.deployment_description.typ == DeploymentType.MAIN_ORCHESTRATOR
-        )
-        copied_data: dict = {
-            "deployment_description": self.deployment_description,
-            "admin_password": stripped_or_none(self.admin_password),
-            "admin_hashed_password": self.admin_hashed_password,
-            "kibana_server_password": self.kibana_server_password,
-            "kibana_server_hashed_password": self.kibana_server_hashed_password,
-            "monitor_password": self.monitor_password,
-            "monitor_hashed_password": self.monitor_hashed_password,
-            "admin_truststore_password": stripped_or_none(self.admin_truststore_password),
-            "admin_keystore_password": stripped_or_none(self.admin_keystore_password),
-            "admin_subject": stripped_or_none(self.admin_subject),
-            "admin_key": stripped_or_none(self.admin_key),
-            "admin_key_password": stripped_or_none(self.admin_key_password),
-            "admin_csr": stripped_or_none(self.admin_csr),
-            "admin_chain": stripped_or_none(self.admin_chain),
-            "admin_cert": stripped_or_none(self.admin_cert),
-            "admin_ca_cert": stripped_or_none(self.admin_ca_cert),
-            "security_index_initialised": security_index_initialised,
-            "first_data_node": first_data_node or "",
-            "nodes_config": cm_nodes,
-            "plugin_config_info": self.plugin_config_info if is_main_orchestrator else None,
-            "plugin_secrets": (self.plugin_secrets or "") if is_main_orchestrator else "",
-        }
-
-        return PeerClusterAppModel(**copied_data)
-
-    def update_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
-        """Unmarshal: Update the local app peer model using data from a peer cluster relation."""
-        with self.update() as m:
-            m.first_data_node = peer_data.first_data_node
-            m.nodes_config = peer_data.nodes_config
-
-            m.admin_password = stripped_or_none(peer_data.admin_password)
-            m.admin_hashed_password = peer_data.admin_hashed_password
-            m.kibana_server_password = peer_data.kibana_server_password
-            m.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
-            m.monitor_password = peer_data.monitor_password
-            m.monitor_hashed_password = peer_data.monitor_hashed_password
-
-            m.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
-            m.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
-            m.admin_subject = stripped_or_none(peer_data.admin_subject)
-            m.admin_key = stripped_or_none(peer_data.admin_key)
-            m.admin_key_password = stripped_or_none(peer_data.admin_key_password)
-            m.admin_csr = stripped_or_none(peer_data.admin_csr)
-            m.admin_chain = stripped_or_none(peer_data.admin_chain)
-            m.admin_cert = stripped_or_none(peer_data.admin_cert)
-            m.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
-
-            if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
-                m.admin_user_initialized = True
-
-            if peer_data.plugin_config_info:
-                m.plugin_config_info = peer_data.plugin_config_info
-            if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
-                m.plugin_secrets = peer_data.plugin_secrets

@@ -165,7 +165,7 @@ class ExternalClientsManager(BaseManager):
         users[str(relation_id)] = user
         self.state.application.client_relation_users = users
 
-    def get_connection_data(self, nodes: list[Node]) -> dict | None:
+    def get_connection_data(self, relation: Relation, nodes: list[Node]) -> dict | None:
         """Gather version, TLS CA and endpoint data for a client relation response.
 
         Returns None when the workload version or admin TLS material can't be resolved;
@@ -186,11 +186,12 @@ class ExternalClientsManager(BaseManager):
         return {
             "version": version,
             "tls_ca": tls_ca,
-            "endpoints": self.get_relation_endpoints(nodes),
+            "endpoints": self.get_relation_endpoints(relation, nodes),
         }
 
     def get_relation_endpoints(
         self,
+        relation: Relation,
         nodes: list[Node],
         omit_endpoints: set[str] | None = None,
     ) -> str:
@@ -204,7 +205,11 @@ class ExternalClientsManager(BaseManager):
         if not nodes:
             # `get_nodes()` returns [] when the cluster is unreachable: keep current endpoints.
             logger.debug("No nodes provided, keeping the currently advertised endpoints.")
-            return
+            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            for response in responses or []:
+                if response.endpoints:
+                    return response.endpoints
+            return ""
 
         omit_endpoints = omit_endpoints or set()
         ips = {node.ip for node in nodes}

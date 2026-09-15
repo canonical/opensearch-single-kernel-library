@@ -18,6 +18,9 @@ from ops import (
 )
 
 from opensearch_single_kernel.common.constants import (
+    ADMIN_USER,
+    COS_USER,
+    KIBANA_SERVER_USER,
     OLD_CA_ALIAS,
     OPENSEARCH_USERS,
     TLS_RELATION,
@@ -30,6 +33,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchFileOperationError,
 )
+from opensearch_single_kernel.core.base_models import stripped_or_none
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
     CertificateExpiringEvent,
@@ -476,7 +480,17 @@ class TLSEventsHandler(Object):
             event.fail("TLS certificates not configured yet.")
             return
 
-        password = self.charm.state.application.get_user_secret(user_name)
+        if user_name == ADMIN_USER:
+            # admin_password may hold a single-space placeholder to force
+            # secret creation (see initialize_empty_secrets)
+            password = stripped_or_none(self.charm.state.application.admin_password)
+        elif user_name == KIBANA_SERVER_USER:
+            password = self.charm.state.application.kibana_server_password
+        elif user_name == COS_USER:
+            password = self.charm.state.application.monitor_password
+        else:
+            event.fail(f"User {user_name} is not an internal user.")
+            return
 
         event.set_results(
             {

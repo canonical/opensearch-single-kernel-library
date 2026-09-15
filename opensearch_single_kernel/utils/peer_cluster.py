@@ -11,10 +11,12 @@ from opensearch_single_kernel.core.peer_cluster import (
 
 
 def update_cluster_fleet(
-    fleet_dict: dict[str, dict[str, PeerClusterApp]], app: PeerClusterApp, key: str | None = None
+    fleet_dict: dict[str | int, PeerClusterApp],
+    app: PeerClusterApp,
+    key: str | int | None = None,
 ) -> None:
     """Update fleet dictionary with the app, or remove the entry if no planned units."""
-    if not key:
+    if key is None:
         key = app.app.id
 
     if app.planned_units == 0:

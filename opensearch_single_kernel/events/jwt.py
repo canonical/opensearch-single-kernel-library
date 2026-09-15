@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from dpcharmlibs.interfaces import (
+    AuthenticationUpdatedEvent,
     RequirerCommonModel,
     ResourceRequirerEventHandler,
 )
@@ -55,6 +56,10 @@ class JWTEventsHandler(Object):
             self.charm.on[JWT_CONFIG_RELATION].relation_broken,
             self._on_jwt_relation_broken,
         )
+        self.framework.observe(
+            self.jwt_interface.on.authentication_updated,
+            self._on_jwt_authentication_updated,
+        )
 
     def _on_jwt_relation_created(self, _: RelationCreatedEvent) -> None:
         """Handle relation creation."""
@@ -88,7 +93,18 @@ class JWTEventsHandler(Object):
 
         self._validate_and_apply_jwt_auth_config(event)
 
-    def _validate_and_apply_jwt_auth_config(self, event: RelationChangedEvent) -> None:
+    def _on_jwt_authentication_updated(self, event: AuthenticationUpdatedEvent) -> None:
+        """Handle a rotated JWT secret delivered via the secret-changed."""
+        parsed_config = self.charm.state.jwt
+
+        if not parsed_config:
+            logger.debug("No valid JWT configuration found in the databag yet, deferring.")
+            event.defer()
+            return
+
+        self._validate_and_apply_jwt_auth_config(event)
+
+    def _validate_and_apply_jwt_auth_config(self, event: EventBase) -> None:
         """Check the provided configuration and apply, if valid."""
         if (
             deployment_desc := self.charm.state.application.deployment_description
