@@ -29,7 +29,8 @@ def test_on_install(harness, substrate):
 def test_on_leader_elected(harness, mocker):
     """Test on leader elected event."""
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
@@ -73,7 +74,7 @@ def test_on_leader_elected(harness, mocker):
     set_running_status.reset_mock()
 
     # Set admin user initialized
-    harness.charm.state.application.is_admin_user_initialized = True
+    harness.charm.state.application.admin_user_initialized = True
     # Make sure that admin user is updated even if it is already initialised
     harness.charm.on.leader_elected.emit()
     purge_initial_default_users.assert_called_once()
@@ -89,7 +90,8 @@ def test_on_leader_elected(harness, mocker):
 
 def test_on_leader_elected_index_initialised(harness, mocker):
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         return_value=deployment_descriptions["ok"],
         new_callable=PropertyMock,
     )
@@ -104,7 +106,7 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 
     # security_index_initialised
     harness.set_leader(True)
-    harness.charm.state.application.is_security_index_initialised = True
+    harness.charm.state.application.security_index_initialised = True
 
     # Reset mocks
     purge_initial_default_users.reset_mock()
@@ -115,8 +117,8 @@ def test_on_leader_elected_index_initialised(harness, mocker):
     purge_initial_default_users.assert_not_called()
 
     # admin_user_initialized
-    harness.charm.state.application.is_security_index_initialised = False
-    harness.charm.state.application.is_admin_user_initialized = True
+    harness.charm.state.application.security_index_initialised = False
+    harness.charm.state.application.admin_user_initialized = True
     harness.charm.on.leader_elected.emit()
     put_or_update_internal_user_leader.assert_has_calls(
         [
@@ -135,7 +137,8 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
     lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
@@ -149,7 +152,8 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
         "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored"
     )
     is_admin_user_initialized = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.is_admin_user_initialized",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.admin_user_initialized",
+        create=True,
         new_callable=PropertyMock,
     )
     update_opensearch_config = mocker.patch(
@@ -188,7 +192,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     should_ignore_lock.return_value = False
     harness.set_leader(True)
     is_node_up.return_value = True
-    harness.charm.state.application.is_security_index_initialised = True
+    harness.charm.state.application.security_index_initialised = True
     is_admin_user_initialized.reset_mock()
     harness.charm.on.start.emit()
     all_tls_resources_stored.assert_not_called()
@@ -196,7 +200,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
 
     # test when setup not complete
     is_node_up.return_value = False
-    harness.charm.state.application.update({"security_index_initialised": ""})
+    harness.charm.state.application.security_index_initialised = False
     all_tls_resources_stored.return_value = False
     is_admin_user_initialized.return_value = False
     harness.charm.on.start.emit()
@@ -231,7 +235,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     # initialisation of the security index
     get_nodes.reset_mock()
     update_opensearch_config.reset_mock()
-    harness.charm.state.application.update({"security_index_initialised": ""})
+    harness.charm.state.application.security_index_initialised = False
     can_service_start.return_value = True
     check_profile_requirements.return_value = True
     harness.set_leader(True)
@@ -254,19 +258,35 @@ def test_app_peers_data(harness):
     """Test getting data from the app relation data bag."""
     # Need to set leader to update the application state
     harness.set_leader(True)
-
-    assert harness.charm.state.application.relation_data.get("app-key") is None
-
-    harness.charm.state.application.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.application.relation_data.get("app-key") == "app-val"
+    assert harness.charm.state.application.bootstrap_contributors_count == 0
+    harness.charm.state.application.bootstrap_contributors_count = 1222
+    assert harness.charm.state.application.bootstrap_contributors_count == 1222
 
 
 def test_unit_peers_data(harness):
     """Test getting data from the unit relation data bag."""
-    assert harness.charm.state.server.relation_data.get("app-key") is None
+    assert harness.charm.state.server.started is None
+    harness.charm.state.server.started = "yeses"
+    assert harness.charm.state.server.started == "yeses"
 
-    harness.charm.state.server.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.server.relation_data.get("app-key") == "app-val"
+
+def test_app_peers_data_secret(harness):
+    """Test getting data from the app relation data bag."""
+    # Need to set leader to update the application state
+    harness.set_leader(True)
+    # The app admin secret group already exists (initialize_empty_secrets writes an
+    # admin_key_password placeholder), so the lib's extract_secrets surfaces an unset
+    # key in that group as None rather than the field's "" default.
+    assert harness.charm.state.application.admin_keystore_password is None
+    harness.charm.state.application.admin_keystore_password = "yeses"
+    assert harness.charm.state.application.admin_keystore_password == "yeses"
+
+
+def test_unit_peers_data_secret(harness):
+    """Test getting data from the unit relation data bag."""
+    assert harness.charm.state.server.transport_keystore_password == ""
+    harness.charm.state.server.transport_keystore_password = "yeses"
+    assert harness.charm.state.server.transport_keystore_password == "yeses"
 
 
 def test_host_ip(harness):
@@ -276,13 +296,14 @@ def test_host_ip(harness):
 
 def test_unit_name(harness, mocker):
     """Test current unit name."""
-    deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+    deployment_description = mocker.patch(
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
-    deployment_desc.return_value = deployment_descriptions["ok"]
+    deployment_description.return_value = deployment_descriptions["ok"]
 
-    app_short_id = deployment_desc().app.short_id
+    app_short_id = deployment_description().app.short_id
     assert (
         harness.charm.state.unit_name == f"{harness.charm.state.application.name}-0.{app_short_id}"
     )

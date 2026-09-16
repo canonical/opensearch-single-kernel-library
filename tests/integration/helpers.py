@@ -886,7 +886,7 @@ async def debug_failed_unit(
     ids_ips = await get_application_unit_ids_ips(ops_test, app=app)
     unit_id = [u_id for u_id, u_ip in ids_ips.items() if u_ip == unit_ip][0]
 
-    root = "/var/snap/opensearch"
+    root = "/var/snap/opensearch-charmed"
     files_to_debug = [
         f"{root}/common/logs/{app}-{ops_test.model_name}.log",
         f"{root}/current/config/opensearch.yml",

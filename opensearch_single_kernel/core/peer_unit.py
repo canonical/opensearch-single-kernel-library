@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Models for the opensearch-peers relation (unit databags)."""
+
+import logging
+from typing import Optional
+
+from dpcharmlibs.interfaces import (
+    PeerModel,
+)
+from pydantic import Field, field_serializer, field_validator
+
+from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.core.base_models import (
+    PluginConfigInfo,
+    _sort_nested_dicts,
+)
+from opensearch_single_kernel.core.profiles import (
+    OpenSearchProfile,
+    ProductionProfile,
+    TestingProfile,
+)
+from opensearch_single_kernel.core.relation_base import (
+    HttpSecretStr,
+    RelationModel,
+    TransportSecretStr,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class OpenSearchServerPeerModel(RelationModel, PeerModel):
+    """Peer model to the OpenSearch unit state.
+
+    Plain databag fields and the unit's transport/HTTP-layer TLS Juju secret-group fields
+    all live on this single model.
+    """
+
+    # --- Secret-group fields (transport-layer TLS) ---
+    transport_key: TransportSecretStr = Field(default="")
+    transport_key_password: TransportSecretStr = Field(default="")
+    transport_csr: TransportSecretStr = Field(default="")
+    transport_chain: TransportSecretStr = Field(default="")
+    transport_cert: TransportSecretStr = Field(default="")
+    transport_ca_cert: TransportSecretStr = Field(default="")
+    transport_truststore_password: TransportSecretStr = Field(default="")
+    transport_subject: TransportSecretStr = Field(default="")
+    transport_keystore_password: TransportSecretStr = Field(default="")
+
+    # --- Secret-group fields (HTTP-layer TLS) ---
+    http_keystore_password: HttpSecretStr = Field(default="")
+    http_key: HttpSecretStr = Field(default="")
+    http_key_password: HttpSecretStr = Field(default="")
+    http_csr: HttpSecretStr = Field(default="")
+    http_chain: HttpSecretStr = Field(default="")
+    http_cert: HttpSecretStr = Field(default="")
+    http_ca_cert: HttpSecretStr = Field(default="")
+    http_truststore_password: HttpSecretStr = Field(default="")
+    http_subject: HttpSecretStr = Field(default="")
+
+    # Performance profile ("testing"/"production") applied to this unit's JVM/OpenSearch config.
+    # None means "not yet set" callers fall back to the profile configured via charm config.
+    profile: Optional[PerformanceType] = Field(default=None)
+    # Whether this unit was one of the initial seed nodes used to bootstrap the cluster.
+    bootstrap_contributor: bool = Field(default=False)
+    # Whether this unit has been removed from the cluster_manager-eligible role.
+    cluster_manager_removed: bool = Field(default=False)
+    # Timestamp set once the unit's OpenSearch service has started; unset
+    # means "not started".
+    started: Optional[str] = Field(default=None)
+    # Whether this unit is currently mid CA-rotation
+    tls_ca_renewing: bool = Field(default=False)
+    # Whether this unit has finished renewing to the new CA.
+    tls_ca_renewed: bool = Field(default=False)
+    # Whether this unit's TLS certificates are fully configured.
+    tls_configured: bool = Field(default=False)
+    # Last time application's databag was updated; used to force relation-changed hook
+    update_ts: str = Field(default="")
+    # Timestamp of the last time this unit checked its certificates for upcoming expiry.
+    certs_exp_checked_at: str = Field(default="1970-01-01 00:00:00")
+    # Allocation-exclusion entries application still needs to remove from the cluster
+    # shard allocation exclusion settings.
+    allocation_exclusions_to_delete: set[str] = Field(default_factory=set)
+    # Voting-exclusion entries application still needs to remove from the cluster voting config.
+    delete_voting_exclusions: set[str] = Field(default_factory=set)
+    # Last known IP address of this unit.
+    last_host_ip: str = Field(default="")
+    # Plugin configuration metadata unit is responsible for, key is plugin label
+    plugin_config_info: dict[str, PluginConfigInfo] = Field(default_factory=dict)
+    oauth_openid_connect_url: str = Field(default="")
+    # Set when this unit is departing the oauth relation.
+    oauth_departing: bool = Field(default=False)
+    # Set when this specific unit is departing/scaling down. Used to skip relation-broken
+    # triggered by the unit's own removal.
+    unit_dying: bool = Field(default=False)
+    # PID of this unit's running pebble-observer subprocess, or None if not started/stopped.
+    pebble_observer_pid: Optional[int] = Field(default=None)
+
+    @field_serializer("plugin_config_info")
+    def _sort_plugin_config_info(self, value: dict) -> dict:
+        """Sort nested dicts so serialized databag output is stable and order-independent."""
+        return _sort_nested_dicts(value)
+
+    @field_validator("allocation_exclusions_to_delete", "delete_voting_exclusions", mode="before")
+    @classmethod
+    def parse_comma_separated_strings(cls, v):
+        """Parse the comma-separated databag string into a list, dropping empty entries."""
+        if isinstance(v, str):
+            return list(filter(None, v.split(",")))
+        return v
+
+    @field_serializer("allocation_exclusions_to_delete", "delete_voting_exclusions")
+    def serialize_comma_separated_strings(self, v: set[str]) -> str:
+        """Serialize the set to a sorted, comma-separated string for stable databag output."""
+        return ",".join(sorted(v))
+
+    @field_validator("started", mode="before")
+    @classmethod
+    def coerce_to_str(cls, v):
+        """Ensure non-None values are always strings, even if the databag returns a float/int."""
+        if v is None:
+            return None
+        return str(v)
+
+    @field_validator("update_ts", mode="before")
+    @classmethod
+    def coerce_update_ts_to_str(cls, v):
+        """Ensure update_ts is always a string, even if the databag returns a float/int."""
+        if v is None:
+            return ""
+        return str(v)
+
+    @property
+    def opensearch_profile(self) -> Optional[OpenSearchProfile]:
+        """Current profile of the unit, as an OpenSearchProfile instance."""
+        if not self.profile:
+            return None
+        return (
+            ProductionProfile() if self.profile == PerformanceType.PRODUCTION else TestingProfile()
+        )
+
+    @opensearch_profile.setter
+    def opensearch_profile(self, value: OpenSearchProfile) -> None:
+        """Set current profile of the unit from an OpenSearchProfile instance."""
+        self.profile = value.type
+
+    @property
+    def unit_id(self) -> int:
+        """The id of the unit this model is bound to, from its unit name."""
+        return int(self.component.name.split("/")[1])
+
+    @property
+    def unit(self):
+        """The ops.Unit this model is bound to (alias of `component`)."""
+        return self.component
+
+    def initialize_empty_secrets(self) -> None:
+        """Initialize empty unit-level secrets to prevent log spam."""
+        # Use truthy placeholders only for fields whose secrets don't exist yet
+        with self.update() as m:
+            if not m.transport_key_password:
+                m.transport_key_password = " "
+            if not m.http_key_password:
+                m.http_key_password = " "

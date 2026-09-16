@@ -14,7 +14,10 @@ from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import OPENSEARCH_HTTP_PORT, Substrates
 from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.common.statuses import GeneralStatuses
-from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.base_models import (
+    App,
+    Node,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -40,7 +43,7 @@ class BaseManager(ManagerStatusProtocol):
             self.workload,
             self.state.node_host,
             OPENSEARCH_HTTP_PORT,
-            self.state.application.admin_password,
+            (self.state.application.admin_password or "").strip() or None,
         )
 
     @property
@@ -58,8 +61,8 @@ class BaseManager(ManagerStatusProtocol):
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.update([node.ip for node in nodes_conf.values()])
 
-        if peer_cm_rel_data := self.state.get_rel_data_from_main_orchestrator():
-            all_hosts.update([node.ip for node in peer_cm_rel_data.cm_nodes])
+        if peer_cm_rel_data := self.state.main_orchestrator_app:
+            all_hosts.update([node.ip for node in peer_cm_rel_data.nodes_config.values()])
 
         if not all_hosts:
             return None

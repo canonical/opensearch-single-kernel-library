@@ -20,8 +20,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState
-from opensearch_single_kernel.core.state import ClusterState, UpgradeServerState
+from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.upgrades import (
+    UnitUpgradesState,
+    UpgradeServerModel,
+)
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
@@ -163,7 +166,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             )
         if action_event:
             assert len(units) >= 2
-            if self.partition > int(units[1].unit.name.split("/")[-1]):
+            if self.partition > int(units[1].component.name.split("/")[-1]):
                 message = "Highest number unit is unhealthy. Upgrade will not resume."
                 raise OpenSearchReconcilePartitionError(message=message)
             if force:
@@ -224,7 +227,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
 
     def _determine_partition(
-        self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
+        self, units: list[UpgradeServerModel], action_event: ops.ActionEvent | None, force: bool
     ) -> int:
         """Determine the new partition to use.
 
@@ -236,7 +239,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """
         if not self.in_progress:
             return 0
-        logger.debug(f"{self.state.server_upgrade.relation_data=}")
+        logger.debug(f"{self.state.server_upgrade=}")
         logger.debug(f"{action_event=}, {force=}, {self.in_progress=}")
         for upgrade_order_index, server_upgrade_unit in enumerate(units):
             logger.debug(f"{upgrade_order_index=}, {server_upgrade_unit=}")
@@ -245,17 +248,17 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             workload_container_versions = self.k8s_client.list_revisions()
             app_container_version = self.k8s_client.get_revision()
             logger.debug(
-                f"{server_upgrade_unit.unit.name=}, {state=}, {workload_container_versions=}, {app_container_version=}"
+                f"{server_upgrade_unit.component.name=}, {state=}, {workload_container_versions=}, {app_container_version=}"
             )
             if (
                 not force and state is not UnitUpgradesState.HEALTHY
             ) or workload_container_versions[
-                server_upgrade_unit.unit.name
+                server_upgrade_unit.component.name
             ] != app_container_version:
                 if not action_event and upgrade_order_index == 1:
                     # User confirmation needed to resume upgrade (i.e. upgrade second unit)
-                    return int(units[0].unit.name.split("/")[-1])
-                return int(server_upgrade_unit.unit.name.split("/")[-1])
+                    return int(units[0].component.name.split("/")[-1])
+                return int(server_upgrade_unit.component.name.split("/")[-1])
         return 0
 
     @property

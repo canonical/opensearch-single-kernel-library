@@ -14,17 +14,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
-    AZURE_CREDENTIALS,
-    AZURE_RELATION,
-    GCS_CREDENTIALS,
-    GCS_RELATION,
     S3_CA_ALIAS,
-    S3_CREDENTIALS,
-    S3_RELATION,
     STORE_PASSWORD,
     DeploymentType,
     ObjectStorageType,
-    Scope,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -39,17 +32,15 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
-    PeerClusterStatuses,
     SnapshotsStatuses,
 )
-from opensearch_single_kernel.core.models import (
-    AzureRelDataCredentials,
-    GcsRelDataCredentials,
-    ObjectStorageConfig,
-    PeerClusterRelData,
-    S3RelDataCredentials,
-)
 from opensearch_single_kernel.core.state import ClusterState
+from opensearch_single_kernel.core.storage import (
+    AzureRelData,
+    GcsRelData,
+    ObjectStorageConfig,
+    S3RelData,
+)
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     list_cas,
@@ -66,7 +57,6 @@ from opensearch_single_kernel.utils.object_storage import (
 )
 from opensearch_single_kernel.utils.status import (
     cached_non_running_statuses,
-    format_status,
     running_statuses,
 )
 from opensearch_single_kernel.workload.base import BaseWorkload
@@ -86,7 +76,7 @@ class SnapshotsManager(BaseManager):
 
     def read_snapshots_data_from_peer_cluster(
         self,
-    ) -> tuple[dict[str, str] | None, list[ObjectStorageType]]:
+    ) -> tuple[S3RelData | AzureRelData | GcsRelData | None, list[ObjectStorageType]]:
         """Read snapshots configuration data from peer cluster relation.
 
         Raises:
@@ -97,9 +87,15 @@ class SnapshotsManager(BaseManager):
             Tuple of (snapshots config dict if found, list of object storage types to clean).
         """
         # Read peer data
-        s3_info = self.s3_info_from_peer_cluster
-        azure_info = self.azure_info_from_peer_cluster
-        gcs_info = self.gcs_info_from_peer_cluster
+        s3_info = self.storage_relation_data_from_peer_cluster(
+            object_storage_type=ObjectStorageType.S3
+        )
+        azure_info = self.storage_relation_data_from_peer_cluster(
+            object_storage_type=ObjectStorageType.AZURE
+        )
+        gcs_info = self.storage_relation_data_from_peer_cluster(
+            object_storage_type=ObjectStorageType.GCS
+        )
         backends_enabled = [
             bool(s3_info),
             bool(azure_info),
@@ -134,7 +130,32 @@ class SnapshotsManager(BaseManager):
 
         return info_to_save, object_storage_types_to_clean
 
-    def set_credentials_saved(self, credentials: dict[str, str] | None) -> None:
+    @staticmethod
+    def credentials_hash(
+        credentials: S3RelData | AzureRelData | GcsRelData,
+    ) -> str:
+        """Hash the secret credentials of a storage relation model."""
+        if isinstance(credentials, S3RelData):
+            credential_dict = {
+                "access_key": credentials.access_key,
+                "secret_key": credentials.secret_key,
+                "s3_tls_ca_chain": credentials.tls_ca_chain,
+            }
+        elif isinstance(credentials, AzureRelData):
+            credential_dict = {
+                "storage_account": credentials.storage_account,
+                "secret_key": credentials.secret_key,
+            }
+        else:
+            credential_dict = {
+                "secret_key": credentials.secret_key,
+            }
+
+        return hash_credentials(credential_dict)
+
+    def set_credentials_saved(
+        self, credentials: S3RelData | AzureRelData | GcsRelData | None
+    ) -> None:
         """Set in the peer relation data that credentials have been saved."""
         orchestrators = self.state.application.orchestrators
 
@@ -143,7 +164,7 @@ class SnapshotsManager(BaseManager):
 
         # set the credentials_saved in the unit data bag with the main orchestrator
         peer_cluster_server = self.state.local_peer_cluster_server_by_relation_id(
-            is_provider=True, relation_id=orchestrators.main_rel_id
+            is_provider=False, relation_id=orchestrators.main_rel_id
         )
 
         if not peer_cluster_server:
@@ -154,7 +175,23 @@ class SnapshotsManager(BaseManager):
             del peer_cluster_server.snapshots_credentials_saved
             return
 
-        peer_cluster_server.snapshots_credentials_saved = hash_credentials(credentials)
+        peer_cluster_server.snapshots_credentials_saved = self.credentials_hash(credentials)
+
+    def has_saved_backup_credentials(self) -> bool:
+        """Whether this unit currently has a stored backup-credentials marker."""
+        orchestrators = self.state.application.orchestrators
+
+        if not orchestrators or orchestrators.main_app is None:
+            return False
+
+        peer_cluster_server = self.state.local_peer_cluster_server_by_relation_id(
+            is_provider=False, relation_id=orchestrators.main_rel_id
+        )
+
+        if not peer_cluster_server:
+            return False
+
+        return peer_cluster_server.snapshots_credentials_saved is not None
 
     def validate_storage_config(
         self, config: ObjectStorageConfig, storage_type: ObjectStorageType
@@ -172,18 +209,9 @@ class SnapshotsManager(BaseManager):
         """
         if (
             not config
-            or (
-                storage_type == ObjectStorageType.S3
-                and (not config.s3 or not config.s3.credentials)
-            )
-            or (
-                storage_type == ObjectStorageType.AZURE
-                and (not config.azure or not config.azure.credentials)
-            )
-            or (
-                storage_type == ObjectStorageType.GCS
-                and (not config.gcs or not config.gcs.credentials)
-            )
+            or (storage_type == ObjectStorageType.S3 and not config.s3)
+            or (storage_type == ObjectStorageType.AZURE and not config.azure)
+            or (storage_type == ObjectStorageType.GCS and not config.gcs)
         ):
             raise OpenSearchBackupRelationDataIncompleteError()
 
@@ -516,24 +544,12 @@ class SnapshotsManager(BaseManager):
         object_storage_config: ObjectStorageConfig,
     ) -> None:
         """Verify that the stored credentials are valid."""
-        credential_dict = {}
-        if object_storage_config.s3:
-            credential_dict = {
-                "access_key": object_storage_config.s3.credentials.access_key,
-                "secret_key": object_storage_config.s3.credentials.secret_key,
-                "s3_tls_ca_chain": object_storage_config.s3.tls_ca_chain,
-            }
-        elif object_storage_config.azure:
-            credential_dict = {
-                "storage_account": object_storage_config.azure.credentials.storage_account,
-                "secret_key": object_storage_config.azure.credentials.secret_key,
-            }
-        elif object_storage_config.gcs:
-            credential_dict = {
-                "secret_key": object_storage_config.gcs.credentials.secret_key,
-            }
-
-        credentials_hash = hash_credentials(credential_dict)
+        credentials = (
+            object_storage_config.s3 or object_storage_config.azure or object_storage_config.gcs
+        )
+        credentials_hash = (
+            self.credentials_hash(credentials) if credentials else hash_credentials({})
+        )
         logger.info(
             "Verifying credentials for %s with hash %s",
             object_storage_type,
@@ -569,114 +585,30 @@ class SnapshotsManager(BaseManager):
             self.alt_hosts
         ) or self.opensearch_client.is_restore_in_progress(self.alt_hosts)
 
-    def missing_backup_relations(self) -> list[str]:
-        """Get the current backup missing relations."""
-        backup_relations = [
-            rel_name
-            for rel_name, label in [
-                (S3_RELATION, S3_CREDENTIALS),
-                (AZURE_RELATION, AZURE_CREDENTIALS),
-                (GCS_RELATION, GCS_CREDENTIALS),
-            ]
-            if self.state.secrets.has(Scope.APP, label)
-        ]
-        return [
-            relation_name
-            for relation_name in backup_relations
-            if not self.state.relation_exists(relation_name)
-        ]
-
-    def update_backup_credentials_from_peer_relation(self, data: PeerClusterRelData) -> None:
-        """Update backup credentials based on data from peer relation."""
-        if s3_creds := data.credentials.s3:
-            self.state.secrets.put_object(
-                Scope.APP, S3_CREDENTIALS, s3_creds.to_dict(by_alias=True)
-            )
-        else:
-            # Set the S3 credentials to empty
-            self.state.secrets.put_object(
-                Scope.APP,
-                S3_CREDENTIALS,
-                S3RelDataCredentials().to_dict(by_alias=True),
-            )
-
-        if azure_creds := data.credentials.azure:
-            self.state.secrets.put_object(
-                Scope.APP, AZURE_CREDENTIALS, azure_creds.to_dict(by_alias=True)
-            )
-        else:
-            # Set Azure credentials to empty
-            self.state.secrets.put_object(
-                Scope.APP,
-                AZURE_CREDENTIALS,
-                AzureRelDataCredentials().to_dict(by_alias=True),
-            )
-
-        if gcs_creds := data.credentials.gcs:
-            self.state.secrets.put_object(
-                Scope.APP, GCS_CREDENTIALS, gcs_creds.to_dict(by_alias=True)
-            )
-        else:
-            # Set GCS credentials to empty
-            self.state.secrets.put_object(
-                Scope.APP,
-                GCS_CREDENTIALS,
-                GcsRelDataCredentials().to_dict(by_alias=True),
-            )
-
-    @property
-    def s3_info_from_peer_cluster(self) -> dict[str, str] | None:
-        """Read S3 credentials from peer cluster relation."""
-        data = self.state.get_rel_data_from_main_orchestrator()
-        if not data or not data.credentials or not data.credentials.s3:
-            logger.warning("no S3 credentials found.")
+    def storage_relation_data_from_peer_cluster(
+        self, object_storage_type: ObjectStorageType
+    ) -> S3RelData | AzureRelData | GcsRelData | None:
+        """Returns storage credentials broadcast by the main orchestrator."""
+        data = self.state.main_orchestrator_app
+        if not data:
+            logger.warning("no relation data from orchestrator found.")
             return None
 
-        if not (data.credentials.s3.access_key and data.credentials.s3.secret_key):
-            logger.warning("no access key or secret key found.")
+        cloud = {
+            ObjectStorageType.S3: "s3",
+            ObjectStorageType.S3_PCLUSTER: "s3",
+            ObjectStorageType.AZURE: "azure",
+            ObjectStorageType.AZURE_PCLUSTER: "azure",
+            ObjectStorageType.GCS: "gcs",
+            ObjectStorageType.GCS_PCLUSTER: "gcs",
+        }.get(object_storage_type)
+        if cloud is None:
             return None
 
-        # CA chain may be published separately
-        logger.debug("S3 CA secret: %s", data.credentials.s3.s3_tls_ca_chain)
-        return {
-            "access_key": data.credentials.s3.access_key,
-            "secret_key": data.credentials.s3.secret_key,
-            "s3_tls_ca_chain": data.credentials.s3.s3_tls_ca_chain,
-        }
-
-    @property
-    def azure_info_from_peer_cluster(self) -> dict[str, str] | None:
-        """Read Azure credentials from peer cluster relation."""
-        data = self.state.get_rel_data_from_main_orchestrator()
-        if not data or not data.credentials or not data.credentials.azure:
-            logger.warning("no azure credentials found.")
-            return None
-
-        if not (data.credentials.azure.storage_account and data.credentials.azure.secret_key):
-            logger.debug("Azure storage credentials are incomplete.")
-            return None
-
-        return {
-            "storage_account": data.credentials.azure.storage_account,
-            "secret_key": data.credentials.azure.secret_key,
-        }
-
-    @property
-    def gcs_info_from_peer_cluster(self) -> dict[str, str] | None:
-        """Read GCS credentials from peer cluster relation."""
-        data = self.state.get_rel_data_from_main_orchestrator()
-
-        if not data or not data.credentials or not data.credentials.gcs:
-            logger.warning("no gcs credentials found.")
-            return None
-
-        if not data.credentials.gcs.secret_key:
-            logger.debug("GCS storage credentials are incomplete.")
-            return None
-
-        return {
-            "secret_key": data.credentials.gcs.secret_key,
-        }
+        reldata = data.backup_reldata(cloud)
+        if reldata is None:
+            logger.warning("no %s credentials found in peer-cluster data.", cloud)
+        return reldata
 
     @override
     def get_statuses(  # noqa: C901
@@ -698,7 +630,7 @@ class SnapshotsManager(BaseManager):
             )
         )
 
-        deployment_desc = self.state.application.deployment_desc
+        deployment_desc = self.state.application.deployment_description
         if not deployment_desc:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
@@ -743,14 +675,5 @@ class SnapshotsManager(BaseManager):
             except OpenSearchBackupCredentialsIncorrectError:
                 status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
                 return status_list
-
-        if missing_relations := self.missing_backup_relations():
-            status_list.append(
-                format_status(
-                    PeerClusterStatuses.PEER_CLUSTER_MISSING_RELATIONS.value,
-                    {"relation": missing_relations[0]},
-                )
-            )
-            return status_list
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

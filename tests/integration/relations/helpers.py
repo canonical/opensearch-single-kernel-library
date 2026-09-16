@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+import json
 import logging
 import socket
 from typing import Optional
@@ -19,6 +20,32 @@ from tenacity import (
 from tests.integration.helpers import run_action
 
 
+async def _get_show_unit_relation_info(
+    ops_test: OpsTest,
+    unit_name: str,
+    relation_name: str,
+    relation_id: str = None,
+) -> list:
+    """Helper to fetch and filter relation info from juju show-unit."""
+    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
+    if not raw_data:
+        raise ValueError(f"no unit info could be grabbed for {unit_name}")
+    data = yaml.safe_load(raw_data)
+    # Filter the data based on the relation name.
+    relation_data = [
+        v for v in data[unit_name].get("relation-info", []) if v["endpoint"] == relation_name
+    ]
+
+    if relation_id:
+        # Filter the data based on the relation id.
+        relation_data = [v for v in relation_data if str(v["relation-id"]) == str(relation_id)]
+    if not relation_data:
+        raise ValueError(
+            f"no relation data could be grabbed on relation with endpoint {relation_name}"
+        )
+    return relation_data
+
+
 async def get_application_relation_data(
     ops_test: OpsTest,
     unit_name: str,
@@ -26,89 +53,70 @@ async def get_application_relation_data(
     key: str,
     relation_id: str = None,
 ) -> Optional[str]:
-    """Get relation data for an application.
-
-    Args:
-        ops_test: The ops test framework instance
-        unit_name: The name of the unit
-        relation_name: name of the relation to get connection data from
-        key: key of data to be retrieved
-        relation_id: id of the relation to get connection data from
-
-    Returns:
-        the data that was requested or None
-            if no data in the relation
-
-    Raises:
-        ValueError if it's not possible to get application unit data
-            or if there is no data for the particular relation endpoint
-            and/or alias.
-    """
-    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
-    if not raw_data:
-        raise ValueError(f"no unit info could be grabbed for {unit_name}")
-    data = yaml.safe_load(raw_data)
-    # Filter the data based on the relation name.
-    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
-    if relation_id:
-        # Filter the data based on the relation id.
-        relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
-    if not relation_data:
-        raise ValueError(
-            f"no relation data could be grabbed on relation with endpoint {relation_name}"
-        )
-    return relation_data[0]["application-data"].get(key)
-
-
-async def get_unit_relation_data(
-    ops_test: OpsTest,
-    unit_name: str,
-    target_unit_name: str,
-    relation_name: str,
-    key: str,
-    relation_id: str = None,
-) -> Optional[str]:
-    """Get relation data for an application.
-
-    Args:
-        ops_test: The ops test framework instance
-        unit_name: The name of the unit
-        relation_name: name of the relation to get connection data from
-        key: key of data to be retrieved
-        relation_id: id of the relation to get connection data from
-
-    Returns:
-        the data that was requested or None
-            if no data in the relation
-
-    Raises:
-        ValueError if it's not possible to get application unit data
-            or if there is no data for the particular relation endpoint
-            and/or alias.
-    """
-    raw_data = (await ops_test.juju("show-unit", unit_name))[1]
-    if not raw_data:
-        raise ValueError(f"no unit info could be grabbed for {unit_name}")
-    data = yaml.safe_load(raw_data)
-    # Filter the data based on the relation name.
-    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == relation_name]
-    if relation_id:
-        # Filter the data based on the relation id.
-        relation_data = [v for v in relation_data if v["relation-id"] == relation_id]
-    if not relation_data:
-        raise ValueError(
-            f"no relation data could be grabbed on relation with endpoint {relation_name}"
-        )
-    # Consider the case we are dealing with subordinate charms, e.g. grafana-agent
-    # The field "relation-units" is structured slightly different.
-    for idx in range(len(relation_data)):
-        if target_unit_name in relation_data[idx]["related-units"]:
-            break
-    else:
-        return {}
-    return (
-        relation_data[idx]["related-units"].get(target_unit_name, {}).get("data", {}).get(key, {})
+    """Get relation data for an application."""
+    relation_data = await _get_show_unit_relation_info(
+        ops_test, unit_name, relation_name, relation_id
     )
+    return relation_data[0].get("application-data", {}).get(key)
+
+
+async def get_secret_uri_from_relation(
+    ops_test: OpsTest,
+    app_unit: str,
+    relation_name: str,
+    is_v0: bool = True,
+) -> str:
+    """Return the secret-user URI from either a v0 or v1 relation databag."""
+    if not is_v0:
+        requests_str = await get_application_relation_data(
+            ops_test, app_unit, relation_name, "requests"
+        )
+        data = json.loads(requests_str)
+        first_response = data[0]
+        return first_response["secret-user"]
+    return await get_application_relation_data(ops_test, app_unit, relation_name, "secret-user")
+
+
+async def get_endpoints_from_relation(
+    ops_test: OpsTest,
+    app_unit: str,
+    relation_name: str,
+    is_v0: bool = True,
+) -> str:
+    """Return the endpoints string from either a v0 or v1 relation databag."""
+    if not is_v0:
+        requests_str = await get_application_relation_data(
+            ops_test, app_unit, relation_name, "requests"
+        )
+        data = json.loads(requests_str)
+        first_response = data[0]
+        return first_response["endpoints"]
+    return await get_application_relation_data(ops_test, app_unit, relation_name, "endpoints")
+
+
+async def get_version_from_relation(
+    ops_test: OpsTest,
+    app_unit: str,
+    relation_name: str,
+    is_v0: bool = True,
+) -> str:
+    """Return the version string from either a v0 or v1 relation databag."""
+    if not is_v0:
+        requests_str = await get_application_relation_data(
+            ops_test, app_unit, relation_name, "requests"
+        )
+        data = json.loads(requests_str)
+        first_response = data[0]
+        return first_response["version"]
+    return await get_application_relation_data(ops_test, app_unit, relation_name, "version")
+
+
+async def get_secret_data(ops_test: OpsTest, secret_uri: str) -> dict:
+    """Retrieve secret data using juju show-secret."""
+    secret_unique_id = secret_uri.split("/")[-1]
+    complete_command = f"show-secret {secret_uri} --reveal --format=json"
+    _, stdout, _ = await ops_test.juju(*complete_command.split())
+    return json.loads(stdout)[secret_unique_id]["content"]["Data"]
 
 
 async def wait_for_relation_joined_between(

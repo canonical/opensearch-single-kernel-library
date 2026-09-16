@@ -14,7 +14,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchProvidedRolesException
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,
@@ -62,11 +62,12 @@ p_units = [
 def test_can_start(harness, mocker):
     """Test the can_start logic."""
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         return_value=None,
         new_callable=PropertyMock,
     )
-    assert not harness.charm.state.application.deployment_desc
+    assert not harness.charm.state.application.deployment_description
 
     # with different directives
     for directives, expected in [
@@ -75,7 +76,7 @@ def test_can_start(harness, mocker):
         ([Directive.SHOW_STATUS, Directive.WAIT_FOR_PEER_CLUSTER_RELATION], False),
         ([Directive.INHERIT_CLUSTER_NAME], False),
     ]:
-        deployment_desc = DeploymentDescription(
+        deployment_description = DeploymentDescription(
             config=PeerClusterConfig(
                 cluster_name="logs",
                 init_hold=False,
@@ -90,8 +91,9 @@ def test_can_start(harness, mocker):
             profile="production",
         )
         mocker.patch(
-            "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-            return_value=deployment_desc,
+            "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+            create=True,
+            return_value=deployment_description,
             new_callable=PropertyMock,
         )
         can_start = harness.charm.cluster_manager.no_blocking_directives()
@@ -109,7 +111,8 @@ def test_pre_validate_roles_change(harness, mocker):
         new_callable=PropertyMock,
     )
     mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
         return_value=DeploymentDescription(
             config=user_configs["roles_ok"],
@@ -132,20 +135,20 @@ def test_pre_validate_roles_change(harness, mocker):
             return_value=[
                 Node(
                     name=node.name.replace("/", "-")
-                    + f".{harness.charm.state.application.deployment_desc.app.short_id}",
+                    + f".{harness.charm.state.application.deployment_description.app.short_id}",
                     roles=["data"],
                     ip="1.1.1.1",
-                    app=harness.charm.state.application.deployment_desc.app,
+                    app=harness.charm.state.application.deployment_description.app,
                     unit_number=int(node.name.split("/")[-1]),
                 )
                 for node in p_units
             ]
             + [
                 Node(
-                    name=f"node-5.{harness.charm.state.application.deployment_desc.app.short_id}",
+                    name=f"node-5.{harness.charm.state.application.deployment_description.app.short_id}",
                     roles=["data"],
                     ip="2.2.2.2",
-                    app=harness.charm.state.application.deployment_desc.app,
+                    app=harness.charm.state.application.deployment_description.app,
                     unit_number=5,
                 )
             ],
@@ -181,10 +184,10 @@ def test_pre_validate_roles_change(harness, mocker):
             return_value=[
                 Node(
                     name=node.name.replace("/", "-")
-                    + f".{harness.charm.state.application.deployment_desc.app.short_id}",
+                    + f".{harness.charm.state.application.deployment_description.app.short_id}",
                     roles=["data"],
                     ip="1.1.1.1",
-                    app=harness.charm.state.application.deployment_desc.app,
+                    app=harness.charm.state.application.deployment_description.app,
                     unit_number=int(node.name.split("/")[-1]),
                 )
                 for node in p_units

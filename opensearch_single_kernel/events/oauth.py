@@ -20,8 +20,8 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_REDIRECT_URI,
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
+    DeploymentType,
 )
-from opensearch_single_kernel.core.models import DeploymentType
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
     ClientConfig,
     OAuthRequirer,
@@ -68,7 +68,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         """Handler for `relation_created` event."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             logger.warning("OAuth relation created on non-main orchestrator.")
 
@@ -78,7 +78,7 @@ class OAuthEventsHandler(Object):
         Updates the security config.yml with the OIDC info and update the cluster.
         """
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
@@ -89,7 +89,7 @@ class OAuthEventsHandler(Object):
             logger.debug("Oauth relation not yet set up")
             return
 
-        if not self.charm.state.application.is_security_index_initialised:
+        if not self.charm.state.application.security_index_initialised:
             logger.debug("Deferring oauth relation changed event as cluster is not ready yet")
             event.defer()
             return
@@ -102,12 +102,16 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (admin_secrets := self.charm.state.application.admin_secrets):
+        if (
+            not self.charm.state.application.admin_truststore_password
+            or not self.charm.state.application.admin_keystore_password
+        ):
+            logger.debug("Admin truststore or keystore password is missing, deferring")
             event.defer()
             return
 
         if not self.charm.cluster_manager.apply_security_config(
-            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+            self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
             return
@@ -115,18 +119,18 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handler for `relation_departed` event."""
         if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
-            self.charm.state.server.set_relation_departing(event.relation)
+            self.charm.state.server.unit_dying = True
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
         if (
-            deployment_desc := self.charm.state.application.deployment_desc
+            deployment_desc := self.charm.state.application.deployment_description
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
         if (
-            self.charm.state.server.get_relation_departing(event.relation)
-            or not self.charm.state.application.is_security_index_initialised
+            self.charm.state.server.unit_dying
+            or not self.charm.state.application.security_index_initialised
         ):
             return
 
@@ -136,11 +140,15 @@ class OAuthEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not (admin_secrets := self.charm.state.application.admin_secrets):
+        if (
+            not self.charm.state.application.admin_truststore_password
+            or not self.charm.state.application.admin_keystore_password
+        ):
+            logger.debug("Admin truststore or keystore password is missing, deferring")
             event.defer()
             return
         if not self.charm.cluster_manager.apply_security_config(
-            admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
+            self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
             return

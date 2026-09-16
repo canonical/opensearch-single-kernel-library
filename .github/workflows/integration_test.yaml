@@ -195,6 +195,36 @@ jobs:
         timeout-minutes: 3
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
         run: sudo juju debug-log --color --replay --no-tail | tee ~/logs/juju-debug-log.txt
+      - name: OpenSearch logs
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        env:
+          SPREAD_JOB: ${{ matrix.job.spread_job }}
+        run: |
+          # Pull the OpenSearch workload logs off every unit so they are captured
+          # as CI artifacts alongside the juju logs.
+          set -uo pipefail
+          units=$(
+            sudo juju status --format json \
+              | jq -r '.applications | to_entries[]
+                       | select(.value.charm | test("opensearch"))
+                       | (.value.units // {}) | keys[]'
+          )
+          for unit in $units; do
+            dest="$HOME/logs/opensearch/${unit//\//_}"
+            mkdir -p "$dest"
+            if [[ "$SPREAD_JOB" == *"/k8s/"* ]]; then
+              # K8s: logs live in the `opensearch` workload container.
+              sudo juju ssh --container opensearch "$unit" \
+                'tar -C /var/log/opensearch -cf - .' 2>/dev/null \
+                | tar -C "$dest" -xf - || true
+            else
+              # VM: logs are root-owned under the snap common directory.
+              sudo juju ssh "$unit" \
+                'sudo tar -C /var/snap/opensearch-charmed/common/var/log/opensearch -cf - .' 2>/dev/null \
+                | tar -C "$dest" -xf - || true
+            fi
+          done
       - name: jhack tail
         timeout-minutes: 3
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}

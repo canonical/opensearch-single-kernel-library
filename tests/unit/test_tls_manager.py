@@ -22,7 +22,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import TlsStatuses
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.base_models import (
     App,
     DeploymentDescription,
     DeploymentState,
@@ -227,11 +227,10 @@ def test_k8s_runtime_tls_ready_does_not_require_cacerts_p12(harness, mocker):
     related) made the K8s readiness fast-path always False, so restore_tls_files_from_secrets ran
     on every hook. OpenSearch's own truststore is ca.p12, not cacerts.p12.
     """
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"ca-cert": "ca", "truststore-password": "tspwd"},
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_ca_cert = "ca"
+    harness.charm.state.application.admin_truststore_password = "tspwd"
 
     # Everything OpenSearch actually needs exists; only cacerts.p12 is absent.
     def exists(path):
@@ -245,7 +244,8 @@ def test_k8s_runtime_tls_ready_does_not_require_cacerts_p12(harness, mocker):
 def test_get_sans(harness, mocker, substrate):
     """Test the SANs returned depending on the cert type."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
@@ -346,31 +346,32 @@ def test_find_secret(harness):
     event_data_cert = "cert_abcd12345"
     event_data_csr = "csr_abcd12345"
 
-    assert harness.charm.tls_manager.find_secret(event_data_cert, "cert") is None
-    assert harness.charm.tls_manager.find_secret(event_data_csr, "csr") is None
+    assert harness.charm.tls_manager.find_event_secret_type(event_data_cert, "cert") is None
+    assert harness.charm.tls_manager.find_event_secret_type(event_data_csr, "csr") is None
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT, CertType.UNIT_TRANSPORT.val, {"cert": event_data_cert}
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.APP, CertType.APP_ADMIN.val, {"csr": event_data_csr}
-    )
+    harness.charm.state.server.transport_cert = event_data_cert
+    harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = event_data_csr
 
-    scope, certtype, secret = harness.charm.tls_manager.find_secret(event_data_cert, "cert")
+    (
+        scope,
+        cert_type,
+    ) = harness.charm.tls_manager.find_event_secret_type(event_data_cert, "cert")
     assert scope == Scope.UNIT
-    assert certtype == CertType.UNIT_TRANSPORT
-    assert secret["cert"] == event_data_cert
+    assert cert_type == CertType.UNIT_TRANSPORT
+    assert harness.charm.state.server.transport_cert == event_data_cert
 
-    scope, certtype, secret = harness.charm.tls_manager.find_secret(event_data_csr, "csr")
+    scope, cert_type = harness.charm.tls_manager.find_event_secret_type(event_data_csr, "csr")
     assert scope == Scope.APP
-    assert certtype == CertType.APP_ADMIN
-    assert secret["csr"] == event_data_csr
+    assert cert_type == CertType.APP_ADMIN
+    assert harness.charm.state.application.admin_csr == event_data_csr
 
 
 def test_on_relation_created_admin(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -399,16 +400,17 @@ def test_on_relation_created_admin(harness, mocker):
     harness.charm.tls_events._on_tls_relation_created(event_mock)
 
     assert create_certificate_signing_request.mock_calls == [
-        mock.call(Scope.APP, CertType.APP_ADMIN),
-        mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
-        mock.call(Scope.UNIT, CertType.UNIT_HTTP),
+        mock.call(CertType.APP_ADMIN),
+        mock.call(CertType.UNIT_TRANSPORT),
+        mock.call(CertType.UNIT_HTTP),
     ]
 
 
 def test_on_relation_created_only_main_orchestrator_requests_application_cert(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -419,19 +421,17 @@ def test_on_relation_created_only_main_orchestrator_requests_application_cert(ha
         app=App(model_uuid=harness.charm.model.uuid, name=harness.charm.app.name),
         state=DeploymentState(value=State.ACTIVE),
     )
-    # Truststore password is required
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"truststore-password": "abc"},
-    )
-
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
+
+    # Truststore password is required
+    harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_truststore_password = "abc"
+
     create_certificate_signing_request = mocker.patch(
         "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request"
     )
@@ -440,19 +440,19 @@ def test_on_relation_created_only_main_orchestrator_requests_application_cert(ha
     )
     event_mock = MagicMock()
 
-    harness.set_leader(is_leader=True)
     harness.charm.tls_events._on_tls_relation_created(event_mock)
 
     assert create_certificate_signing_request.mock_calls == [
-        mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
-        mock.call(Scope.UNIT, CertType.UNIT_HTTP),
+        mock.call(CertType.UNIT_TRANSPORT),
+        mock.call(CertType.UNIT_HTTP),
     ]
 
 
 def test_on_relation_created_non_admin(harness, mocker):
     """Test on certificate relation created event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = DeploymentDescription(
@@ -476,19 +476,15 @@ def test_on_relation_created_non_admin(harness, mocker):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     event_mock = MagicMock()
-
-    truststore_password = "12345"
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"truststore-password": truststore_password},
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_truststore_password = "12345"
 
     harness.set_leader(is_leader=False)
     harness.charm.tls_events._on_tls_relation_created(event_mock)
     assert create_certificate_signing_request.mock_calls == [
-        mock.call(Scope.UNIT, CertType.UNIT_TRANSPORT),
-        mock.call(Scope.UNIT, CertType.UNIT_HTTP),
+        mock.call(CertType.UNIT_TRANSPORT),
+        mock.call(CertType.UNIT_HTTP),
     ]
 
 
@@ -511,7 +507,8 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
 
@@ -534,7 +531,8 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
 def test_on_certificate_available(harness, mocker):
     """Test _on_certificate_available event."""
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     deployment_desc.return_value = deployment_descriptions["ok"]
@@ -564,30 +562,20 @@ def test_on_certificate_available(harness, mocker):
     chain = ["chain_12345"]
     ca = "ca_12345"
     keystore_password = "keystore_12345"
-    secret_key = CertType.UNIT_TRANSPORT.val
-
-    harness.set_leader(is_leader=True)
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"truststore-password": "truststore_12345"},
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        secret_key,
-        {"csr": csr, "keystore-password": keystore_password},
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.server.transport_csr = csr
+    harness.charm.state.server.transport_truststore_password = "truststore_12345"
+    harness.charm.state.server.transport_keystore_password = keystore_password
 
     event_mock = MagicMock(certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca)
     harness.charm.tls_events._on_certificate_available(event_mock)
 
-    assert harness.charm.state.server.transport_secrets == {
-        "csr": csr,
-        "chain": chain[0],
-        "cert": cert,
-        "ca-cert": ca,
-        "keystore-password": keystore_password,
-    }
+    assert harness.charm.state.server.transport_csr == csr
+    assert harness.charm.state.server.transport_chain == chain[0]
+    assert harness.charm.state.server.transport_cert == cert
+    assert harness.charm.state.server.transport_ca_cert == ca
+    assert harness.charm.state.server.transport_keystore_password == keystore_password
     on_tls_conf_set.assert_called()
 
 
@@ -597,7 +585,8 @@ def test_on_certificate_expiring(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     if substrate != "vm":
@@ -609,13 +598,10 @@ def test_on_certificate_expiring(harness, mocker, substrate):
     csr = "csr_12345"
     cert = "cert_12345"
     key = create_utf8_encoded_private_key()
-    secret_key = CertType.UNIT_TRANSPORT.val
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        secret_key,
-        {"csr": csr, "cert": cert, "key": key},
-    )
+    harness.charm.state.server.transport_csr = csr
+    harness.charm.state.server.transport_cert = cert
+    harness.charm.state.server.transport_key = key
 
     deployment_desc.return_value = DeploymentDescription(
         config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
@@ -638,7 +624,8 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     if substrate != "vm":
@@ -650,13 +637,10 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
     csr = "csr_12345"
     cert = "cert_12345"
     key = create_utf8_encoded_private_key()
-    secret_key = CertType.UNIT_TRANSPORT.val
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        secret_key,
-        {"csr": csr, "cert": cert, "key": key},
-    )
+    harness.charm.state.server.transport_csr = csr
+    harness.charm.state.server.transport_cert = cert
+    harness.charm.state.server.transport_key = key
 
     deployment_desc.return_value = DeploymentDescription(
         config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
@@ -676,7 +660,8 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
 # Testing store_new_ca() function
 def test_truststore_password_secret(harness, mocker, substrate):
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch("opensearch_single_kernel.utils.certificates.store_ca_chain")
@@ -712,11 +697,11 @@ def test_store_new_ca_threads_keep_previous(harness, mocker):
         "opensearch_single_kernel.managers.tls.store_ca_chain", return_value=True
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"ca-cert": "ca", "truststore-password": "tspwd", "chain": "ca"},
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_ca_cert = "ca"
+    harness.charm.state.application.admin_truststore_password = "tspwd"
+    harness.charm.state.application.admin_chain = "ca"
 
     harness.charm.tls_manager.store_new_ca(
         CertType.APP_ADMIN, create_store_pwd=False, keep_previous=False
@@ -740,11 +725,11 @@ def test_restore_tls_files_from_secrets_does_not_rotate_ca(harness, mocker):
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.store_key_pair")
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {"ca-cert": "ca", "truststore-password": "tspwd", "chain": "ca"},
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_ca_cert = "ca"
+    harness.charm.state.application.admin_truststore_password = "tspwd"
+    harness.charm.state.application.admin_chain = "ca"
 
     harness.charm.tls_manager.restore_tls_files_from_secrets()
 
@@ -779,21 +764,18 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     new_cert = "new_cert"
     new_chain = ["new_chain"]
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-        },
-    )
+    harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_key = key
+    harness.charm.state.application.admin_ca_cert = ca
+    harness.charm.state.application.admin_cert = "old_cert"
+    harness.charm.state.application.admin_keystore_password = "keystore_12345"
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
+
     # Purposefully not adding unit certificates, to also trigger corner-case checks
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -829,8 +811,6 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         state=DeploymentState(value=State.ACTIVE),
     )
 
-    harness.set_leader(is_leader=True)
-
     original_status_app = harness.model.app.status
     original_status_unit = harness.model.unit.status
     harness.charm.restart_opensearch_event = MagicMock()
@@ -845,15 +825,13 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
     assert harness.model.unit.status == original_status_unit
 
     # The new certificate is now replacing the old one in Peer Relation secrets
-    assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-        "csr": csr,
-        "key": key,
-        "ca-cert": ca,
-        "cert": new_cert,
-        "chain": new_chain[0],
-        "truststore-password": "truststore_12345",
-        "keystore-password": "keystore_12345",
-    }
+    assert harness.charm.state.application.admin_csr == csr
+    assert harness.charm.state.application.admin_key == key
+    assert harness.charm.state.application.admin_ca_cert == ca
+    assert harness.charm.state.application.admin_cert == new_cert
+    assert harness.charm.state.application.admin_chain == new_chain[0]
+    assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+    assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
 
 
 # NOTE: Syntax: parametrized has to be the outermost decorator
@@ -888,47 +866,32 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
 
     new_cert = "new_cert"
     new_chain = ["new_chain"]
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_key = key
+    harness.charm.state.application.admin_ca_cert = ca
+    harness.charm.state.application.admin_cert = "old_cert"
+    harness.charm.state.application.admin_keystore_password = keystore_password
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-            "keystore-password": keystore_password,
-            "truststore-password": "truststore_12345",
-        },
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_TRANSPORT,
-        {
-            "csr": f"{CertType.UNIT_TRANSPORT.val}-csr",
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-        },
-    )
+    harness.charm.state.server.transport_csr = f"{CertType.UNIT_TRANSPORT.val}-csr"
+    harness.charm.state.server.transport_key = key
+    harness.charm.state.server.transport_ca_cert = ca
+    harness.charm.state.server.transport_cert = "old_cert"
+    harness.charm.state.server.transport_keystore_password = keystore_password
+    harness.charm.state.server.transport_truststore_password = "truststore_12345"
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_HTTP,
-        {
-            "csr": f"{CertType.UNIT_HTTP.val}-csr",
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-        },
-    )
+    harness.charm.state.server.http_csr = f"{CertType.UNIT_HTTP.val}-csr"
+    harness.charm.state.server.http_key = key
+    harness.charm.state.server.http_ca_cert = ca
+    harness.charm.state.server.http_cert = "old_cert"
+    harness.charm.state.server.http_keystore_password = keystore_password
+    harness.charm.state.server.http_truststore_password = "truststore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -982,15 +945,23 @@ def test_on_certificate_available_any_node_unit_cert_full_workflow(
     assert harness.model.unit.status == original_status_unit
 
     # The new certificate is now replacing the old one in Peer Relation secrets
-    assert harness.charm.state.secrets.get_object(Scope.UNIT, cert_type) == {
-        "csr": f"{cert_type}-csr",
-        "key": key,
-        "ca-cert": ca,
-        "cert": new_cert,
-        "chain": new_chain[0],
-        "keystore-password": keystore_password,
-        "truststore-password": "truststore_12345",
-    }
+    match cert_type:
+        case CertType.UNIT_HTTP.val:
+            assert harness.charm.state.server.http_csr == f"{cert_type}-csr"
+            assert harness.charm.state.server.http_key == key
+            assert harness.charm.state.server.http_ca_cert == ca
+            assert harness.charm.state.server.http_cert == new_cert
+            assert harness.charm.state.server.http_chain == new_chain[0]
+            assert harness.charm.state.server.http_keystore_password == keystore_password
+            assert harness.charm.state.server.http_truststore_password == "truststore_12345"
+        case CertType.UNIT_TRANSPORT.val:
+            assert harness.charm.state.server.transport_csr == f"{cert_type}-csr"
+            assert harness.charm.state.server.transport_key == key
+            assert harness.charm.state.server.transport_ca_cert == ca
+            assert harness.charm.state.server.transport_cert == new_cert
+            assert harness.charm.state.server.transport_chain == new_chain[0]
+            assert harness.charm.state.server.transport_keystore_password == keystore_password
+            assert harness.charm.state.server.transport_truststore_password == "truststore_12345"
 
     ##########################################################################
     # Tests below verify to the CA rotation cycle
@@ -1041,7 +1012,8 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     new_ca = "new_ca"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1065,17 +1037,13 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.temp_file"
     )
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": old_csr,
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-            "ca-cert": "old_ca_cert",
-            "cert": "old_cert",
-        },
-    )
+
+    harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = old_csr
+    harness.charm.state.application.admin_ca_cert = "old_ca_cert"
+    harness.charm.state.application.admin_cert = "old_cert"
+    harness.charm.state.application.admin_keystore_password = "keystore_12345"
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
     # NOTE: The event is issued with the old csr, i.e. the identifier of
     # the ongoing transaction. A new csr will be generated and saved in the second step
@@ -1120,14 +1088,12 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     # The new certificate is now replacing the old one in Peer Relation secrets
     # NOTE: INCONSISTENCY: The new cert and chain ARE saved into the secret
-    assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-        "csr": old_csr,
-        "cert": new_cert,
-        "chain": new_chain[0],
-        "truststore-password": "truststore_12345",
-        "keystore-password": "keystore_12345",
-        "ca-cert": new_ca,
-    }
+    assert harness.charm.state.application.admin_csr == old_csr
+    assert harness.charm.state.application.admin_ca_cert == new_ca
+    assert harness.charm.state.application.admin_cert == new_cert
+    assert harness.charm.state.application.admin_chain == new_chain[0]
+    assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+    assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
 
 
 @pytest.mark.parametrize(
@@ -1154,21 +1120,17 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_non_leader
     cert = "new_cert"
     chain = ["new_chain"]
     ca = "new_ca"
-
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-            "ca-cert": "old_ca_cert",
-            "cert": "old_cert",
-        },
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_ca_cert = "old_ca_cert"
+    harness.charm.state.application.admin_cert = "old_cert"
+    harness.charm.state.application.admin_keystore_password = "keystore_12345"
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1208,13 +1170,12 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_non_leader
     assert run_cmd.call_count == 0
     assert harness.model.unit.status == original_status
     harness.charm.restart_opensearch_event.emit.assert_not_called()
-    assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-        "csr": csr,
-        "keystore-password": "keystore_12345",
-        "truststore-password": "truststore_12345",
-        "ca-cert": "old_ca_cert",
-        "cert": "old_cert",
-    }
+
+    assert harness.charm.state.application.admin_csr == csr
+    assert harness.charm.state.application.admin_ca_cert == "old_ca_cert"
+    assert harness.charm.state.application.admin_cert == "old_cert"
+    assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+    assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
 
 
 # Mocks on functions we want to investigate
@@ -1247,7 +1208,8 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         - LEADER ONLY
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
@@ -1293,40 +1255,28 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
 
     new_ca = "new_ca"
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": old_csr,
-            "keystore-password": keystore_password,
-            "truststore-password": "truststore_12345",
-            "ca-cert": new_ca,
-            "key": old_key,
-            "subject": old_subject,
-        },
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_TRANSPORT.val,
-        {
-            "keystore-password": keystore_password,
-            "csr": "csr-transport",
-            "key": "key-transport",
-        },
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_HTTP.val,
-        {"keystore-password": keystore_password, "csr": "csr-http", "key": "key-http"},
-    )
-
     # Leader ONLY
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)
-        harness.charm.state.application.is_security_index_initialised = True
+        harness.charm.state.application.security_index_initialised = True
 
         # We passed the 1st stage of the certificate renewalV
         harness.charm.state.server.tls_ca_renewing = True
+
+    harness.charm.state.application.admin_csr = old_csr
+    harness.charm.state.application.admin_key = old_key
+    harness.charm.state.application.admin_ca_cert = new_ca
+    harness.charm.state.application.admin_keystore_password = keystore_password
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
+    harness.charm.state.application.admin_subject = old_subject
+
+    harness.charm.state.server.transport_csr = "csr-transport"
+    harness.charm.state.server.transport_key = "key-transport"
+    harness.charm.state.server.transport_keystore_password = keystore_password
+
+    harness.charm.state.server.http_csr = "csr-http"
+    harness.charm.state.server.http_key = "key-http"
+    harness.charm.state.server.http_keystore_password = keystore_password
 
     # Applies to ANY deployment type
     deployment_desc.return_value = DeploymentDescription(
@@ -1352,15 +1302,11 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     harness.charm.opensearch_events._post_start_init(event)
 
     # 'tls_ca_renewed' flag is set, new unit certificates were requested
-    assert harness.charm.state.server.tls_ca_renewed
-    new_app_admin_secret = harness.charm.state.secrets.get_object(
-        Scope.APP, CertType.APP_ADMIN.val
-    )
+    assert harness.charm.state.application.admin_csr != old_csr
+    assert harness.charm.state.application.admin_ca_cert == new_ca
+    assert harness.charm.state.application.admin_key == old_key
+    assert harness.charm.state.application.admin_subject != old_subject
 
-    assert new_app_admin_secret["csr"] != old_csr
-    assert new_app_admin_secret["ca-cert"] == new_ca
-    assert new_app_admin_secret["key"] == old_key
-    assert new_app_admin_secret["subject"] != old_subject
     # 1 for admin cert, 2 for unit certs
     assert generate_csr.call_count == 3
 
@@ -1387,7 +1333,7 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     # we store the decoded csr in the secret but pass it as bytes to the function
     assert (
         request_certificate_creation.call_args.kwargs["certificate_signing_request"].decode()
-        == new_app_admin_secret["csr"]
+        == harness.charm.state.application.admin_csr
     )
 
     add_status.assert_not_called()
@@ -1421,7 +1367,8 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         - any units
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
@@ -1467,39 +1414,25 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     csr_http_old = "csr-http-old"
     csr_transport_old = "csr-transport-old"
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "ca-cert": ca,
-        },
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_TRANSPORT.val,
-        {
-            "keystore-password": keystore_password,
-            "csr": csr_transport_old,
-            "key": "key-transport",
-        },
-    )
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_HTTP.val,
-        {
-            "keystore-password": keystore_password,
-            "csr": csr_http_old,
-            "key": "key-http",
-        },
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_ca_cert = ca
+    harness.charm.state.application.admin_keystore_password = keystore_password
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
+
+    harness.charm.state.server.transport_csr = csr_transport_old
+    harness.charm.state.server.transport_key = "key-transport"
+    harness.charm.state.server.transport_keystore_password = keystore_password
+
+    harness.charm.state.server.http_csr = csr_http_old
+    harness.charm.state.server.http_key = "key-http"
+    harness.charm.state.server.http_keystore_password = keystore_password
 
     # Emphasizing: NON-leader
     harness.set_leader(is_leader=False)
     with harness.hooks_disabled():
-        harness.charm.state.application.is_security_index_initialised = True
+        harness.charm.state.application.security_index_initialised = True
 
         # We passed the 1st stage of the certificate renewalV
         harness.charm.state.server.tls_ca_renewing = True
@@ -1551,14 +1484,8 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         ]
     )
 
-    assert (
-        harness.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val)["csr"]
-        != csr_http_old
-    )
-    assert (
-        harness.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT.val)["csr"]
-        != csr_transport_old
-    )
+    assert harness.charm.state.server.http_csr != csr_http_old
+    assert harness.charm.state.server.transport_csr != csr_transport_old
 
     add_status.assert_not_called()
 
@@ -1583,7 +1510,8 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
 
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
 
@@ -1604,17 +1532,13 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
     key = "key"
     keystore_password = "keystore_12345"
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "ca-cert": ca,
-            "key": key,
-        },
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader=True)
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_key = key
+    harness.charm.state.application.admin_ca_cert = ca
+    harness.charm.state.application.admin_keystore_password = keystore_password
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
     event_mock = MagicMock(certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca)
 
@@ -1642,7 +1566,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
 
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)
-        harness.charm.state.application.is_security_index_initialised = True
+        harness.charm.state.application.security_index_initialised = True
 
         # We passed the 1st stage of the certificate renewalV
         harness.charm.state.server.tls_ca_renewing = True
@@ -1650,7 +1574,7 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
 
     harness.charm.tls_events._on_certificate_available(event_mock)
 
-    # NOTE: Currently store_new_tls_resources() is invoked twice for 'app-admin' cert.
+    # store_new_tls_resources() is invoked twice for 'app-admin' cert (4 run_cmd calls).
     assert run_cmd.call_count == 4
 
     # Exporting new certs
@@ -1664,19 +1588,18 @@ def test_on_certificate_available_ca_rotation_third_stage_leader_cert_app(
         in run_cmd.call_args_list[1].args[0]
     )
     assert str(harness.charm.workload.paths.certs) in str(tempfile.call_args_list[0][1]["dir"])
+
     assert harness.charm.state.server.tls_ca_renewed
     # Note that the old flag is left intact
     assert harness.charm.state.server.tls_ca_renewing
 
-    assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-        "csr": csr,
-        "cert": cert,
-        "chain": chain[0],
-        "truststore-password": "truststore_12345",
-        "keystore-password": "keystore_12345",
-        "key": key,
-        "ca-cert": ca,
-    }
+    assert harness.charm.state.application.admin_csr == csr
+    assert harness.charm.state.application.admin_key == key
+    assert harness.charm.state.application.admin_ca_cert == ca
+    assert harness.charm.state.application.admin_cert == cert
+    assert harness.charm.state.application.admin_chain == chain[0]
+    assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+    assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
 
     assert harness.model.unit.status.message == ""
     assert harness.model.unit.status == original_status
@@ -1722,7 +1645,8 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     keystore_password = "keystore_12345"
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     exists = mocker.patch("charmlibs.pathops.LocalPath.exists")
@@ -1746,46 +1670,32 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
     run_cmd = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd"
     )
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": "new_csr",
-            "keystore-password": keystore_password,
-            "truststore-password": "truststore_12345",
-            "ca-cert": ca,
-            "cert": "cert",
-            "key": "new_key",
-            "subject": "new_subject",
-            "chain": chain,
-        },
-    )
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_TRANSPORT,
-        {
-            "csr": f"{CertType.UNIT_TRANSPORT.val}-csr-new",
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-        },
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(True)
 
-    harness.charm.state.secrets.put_object(
-        Scope.UNIT,
-        CertType.UNIT_HTTP,
-        {
-            "csr": f"{CertType.UNIT_HTTP.val}-csr-new",
-            "truststore-password": "truststore_12345",
-            "keystore-password": keystore_password,
-            "key": key,
-            "ca-cert": ca,
-            "cert": "old_cert",
-        },
-    )
+    harness.charm.state.application.admin_csr = "new_csr"
+    harness.charm.state.application.admin_key = "new_key"
+    harness.charm.state.application.admin_ca_cert = ca
+    harness.charm.state.application.admin_cert = "cert"
+    harness.charm.state.application.admin_keystore_password = keystore_password
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
+    harness.charm.state.application.admin_subject = "new_subject"
+    harness.charm.state.application.admin_chain = chain
+
+    harness.charm.state.server.transport_csr = f"{CertType.UNIT_TRANSPORT.val}-csr-new"
+    harness.charm.state.server.transport_key = key
+    harness.charm.state.server.transport_ca_cert = ca
+    harness.charm.state.server.transport_cert = "old_cert"
+    harness.charm.state.server.transport_keystore_password = keystore_password
+    harness.charm.state.server.transport_truststore_password = "truststore_12345"
+
+    harness.charm.state.server.http_csr = f"{CertType.UNIT_HTTP.val}-csr-new"
+    harness.charm.state.server.http_key = key
+    harness.charm.state.server.http_ca_cert = ca
+    harness.charm.state.server.http_cert = "old_cert"
+    harness.charm.state.server.http_keystore_password = keystore_password
+    harness.charm.state.server.http_truststore_password = "truststore_12345"
 
     # The event is addressing the transaction identified by the new csr
     # for the corresponding cert type defined by the test parameter
@@ -1814,8 +1724,8 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
 
     with harness.hooks_disabled():
         harness.set_leader(True)
-        harness.charm.state.application.is_security_index_initialised = True
-        harness.charm.state.application.is_admin_user_initialized = True
+        harness.charm.state.application.security_index_initialised = True
+        harness.charm.state.application.admin_user_initialized = True
         harness.set_leader(leader)
 
         # We passed the 1st stage of the certificate renewalV
@@ -1890,7 +1800,8 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         - any unit
     """
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        create=True,
         new_callable=PropertyMock,
     )
     mocker.patch(
@@ -1919,17 +1830,14 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     chain = ["new_chain"]
     ca = "new_ca"
 
-    harness.charm.state.secrets.put_object(
-        Scope.APP,
-        CertType.APP_ADMIN.val,
-        {
-            "csr": csr,
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-            "ca-cert": "old_ca_cert",
-            "cert": "old_cert",
-        },
-    )
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+
+    harness.charm.state.application.admin_csr = csr
+    harness.charm.state.application.admin_ca_cert = "old_ca_cert"
+    harness.charm.state.application.admin_cert = "old_cert"
+    harness.charm.state.application.admin_keystore_password = "keystore_12345"
+    harness.charm.state.application.admin_truststore_password = "truststore_12345"
 
     read_stored_ca.return_value = "stored_ca"
 
@@ -1960,25 +1868,23 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         assert_run_cmd_matches(run_cmd, r"keytool -changealias -alias ca-0 -destalias old-ca-0")
         assert_run_cmd_matches(run_cmd, r"keytool -importcert.* *-alias ca-0")
         assert_tls_ca_rotation_status(harness)
-        assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-            "csr": csr,
-            "chain": "new_chain",
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-            "ca-cert": "new_ca",
-            "cert": "new_cert",
-        }
+
+        assert harness.charm.state.application.admin_csr == csr
+        assert harness.charm.state.application.admin_ca_cert == "new_ca"
+        assert harness.charm.state.application.admin_cert == "new_cert"
+        assert harness.charm.state.application.admin_chain == "new_chain"
+        assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+        assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
     else:
         # We have scope == Scope.APP, so we will skip the entire logic
         assert run_cmd.call_count == 0
         add_status.assert_not_called()
-        assert harness.charm.state.secrets.get_object(Scope.APP, CertType.APP_ADMIN.val) == {
-            "csr": csr,
-            "keystore-password": "keystore_12345",
-            "truststore-password": "truststore_12345",
-            "ca-cert": "old_ca_cert",
-            "cert": "old_cert",
-        }
+
+        assert harness.charm.state.application.admin_csr == csr
+        assert harness.charm.state.application.admin_ca_cert == "old_ca_cert"
+        assert harness.charm.state.application.admin_cert == "old_cert"
+        assert harness.charm.state.application.admin_keystore_password == "keystore_12345"
+        assert harness.charm.state.application.admin_truststore_password == "truststore_12345"
 
 
 # Mock to investigate/compare/alter
