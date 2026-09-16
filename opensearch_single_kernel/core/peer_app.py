@@ -13,12 +13,10 @@ from pydantic import Field, field_serializer, field_validator
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
-    PluginConfigInfo,
-    _sort_nested_dicts,
-)
-from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterApp,
     PeerClusterOrchestrators,
+    PluginConfigInfo,
+    _sort_nested_dicts,
 )
 from opensearch_single_kernel.core.relation_base import (
     AdminSecretStr,

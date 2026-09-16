@@ -34,9 +34,11 @@ from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     TlsStatuses,
 )
+from opensearch_single_kernel.core.base_models import (
+    PeerClusterRelErrorData,
+)
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
-    PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (

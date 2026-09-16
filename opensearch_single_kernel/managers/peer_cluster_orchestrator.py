@@ -25,13 +25,13 @@ from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuse
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
+    PeerClusterApp,
+    PeerClusterOrchestrators,
+    PeerClusterRelErrorData,
     stripped_or_none,
 )
 from opensearch_single_kernel.core.peer_cluster import (
-    PeerClusterApp,
     PeerClusterAppModel,
-    PeerClusterOrchestrators,
-    PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.core.storage import (

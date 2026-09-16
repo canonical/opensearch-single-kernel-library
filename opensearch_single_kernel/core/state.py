@@ -59,7 +59,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
-from opensearch_single_kernel.core.base_models import Node
+from opensearch_single_kernel.core.base_models import Node, PeerClusterApp
 from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
 from opensearch_single_kernel.core.lock import (
     LockAppStateModel,
@@ -67,7 +67,6 @@ from opensearch_single_kernel.core.lock import (
 )
 from opensearch_single_kernel.core.peer_app import OpenSearchAppPeerModel
 from opensearch_single_kernel.core.peer_cluster import (
-    PeerClusterApp,
     PeerClusterAppModel,
     PeerClusterServerModel,
 )

@@ -26,9 +26,11 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
 )
+from opensearch_single_kernel.core.base_models import (
+    PeerClusterRelErrorData,
+)
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
-    PeerClusterRelErrorData,
 )
 from opensearch_single_kernel.utils.peer_cluster import is_failover_promoted
 

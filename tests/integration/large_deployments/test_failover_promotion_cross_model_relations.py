@@ -16,8 +16,10 @@ from opensearch_single_kernel.common.constants import (
     TLS_RELATION,
     DeploymentType,
 )
-from opensearch_single_kernel.core.base_models import DeploymentDescription
-from opensearch_single_kernel.core.peer_cluster import PeerClusterOrchestrators
+from opensearch_single_kernel.core.base_models import (
+    DeploymentDescription,
+    PeerClusterOrchestrators,
+)
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 from tests.integration.relations.helpers import get_application_relation_data
 from tests.integration.tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL

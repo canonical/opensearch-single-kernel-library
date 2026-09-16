@@ -4,7 +4,7 @@
 
 """A set of utility functions for managing peer clusters."""
 
-from opensearch_single_kernel.core.peer_cluster import (
+from opensearch_single_kernel.core.base_models import (
     PeerClusterApp,
     PeerClusterOrchestrators,
 )

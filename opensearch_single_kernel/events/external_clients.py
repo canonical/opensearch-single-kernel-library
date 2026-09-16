@@ -298,7 +298,7 @@ class ExternalClientsEventsHandler(Object):
         try:
             nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
             new_endpoints = self.charm.external_clients_manager.get_relation_endpoints(
-                nodes, omit_endpoints=omit_endpoints
+                relation, nodes, omit_endpoints=omit_endpoints
             )
         except OpenSearchHttpError as e:
             logger.error("unable to get nodes %s", str(e))

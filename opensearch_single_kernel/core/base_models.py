@@ -9,11 +9,13 @@ Includes:
     - Common cluster-wide value objects (App, Node, DeploymentDescription, ...).
 """
 
+import re
 from abc import ABC
 from datetime import datetime
 from hashlib import md5
-from typing import Any
+from typing import Any, Literal
 
+from data_platform_helpers.advanced_statuses import StatusObject
 from pydantic import (
     BaseModel,
     Field,
@@ -29,6 +31,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
     State,
 )
+from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 
 
 def _sort_nested_dicts(obj: Any) -> Any:
@@ -231,3 +234,80 @@ class PluginConfigInfo(PlainModel):
         for key, items in cleanup.items():
             current = self.cleanup.setdefault(key, [])
             self.cleanup[key] = sorted(list(set(current) | set(items)))
+
+
+class PeerClusterRelErrorData(PlainModel):
+    """Error state model an orchestrator broadcasts over a peer-cluster relation."""
+
+    should_sever_relation: bool
+    should_wait: bool
+    blocked_message: str
+
+    def get_status(self) -> StatusObject | None:
+        """Get the status matching this error's blocked_message."""
+        return self.get_status_from_message(self.blocked_message)
+
+    @staticmethod
+    def get_status_from_message(message: str) -> StatusObject | None:
+        """Find the known PeerClusterErrorDataStatuses entry matching `message`.
+
+        Status templates contain "{...}" placeholders for dynamic parts; each template
+        is turned into a regex (placeholders become non-greedy wildcards) and matched
+        against the concrete message. The returned status carries the concrete message.
+        """
+        for status in PeerClusterErrorDataStatuses:
+            status_value: StatusObject = status.value
+            escaped_message = re.escape(status_value.message)
+            # Replace the (escaped) "{...}" placeholder blocks with non-greedy wildcards.
+            regex_pattern = "^" + re.sub(r"\\\{.*?\\}", r"(?s:.*?)", escaped_message) + "$"
+            if re.match(regex_pattern, message):
+                return status_value.model_copy(update={"message": message})
+        return None
+
+
+class PeerClusterOrchestrators(PlainModel):
+    """Model class for the PClusters registered main/failover clusters."""
+
+    _TYPES = Literal["main", "failover"]
+
+    main_rel_id: int = -1
+    main_app: App | None = None
+    failover_rel_id: int = -1
+    failover_app: App | None = None
+
+    def delete(self, typ: _TYPES) -> None:
+        """Delete an orchestrator from the current pair."""
+        if typ == "main":
+            self.main_rel_id = -1
+            self.main_app = None
+        else:
+            self.failover_rel_id = -1
+            self.failover_app = None
+
+    def promote_failover(self) -> None:
+        """Delete previous main orchestrator and promote failover if any."""
+        self.main_app = self.failover_app
+        self.main_rel_id = self.failover_rel_id
+        self.delete("failover")
+
+    def check_relation_conflict(self, trigger: str, relation_id: int) -> bool:
+        """Return whether the relation conflicts with an already connected orchestrator."""
+        data = self.to_dict()
+        return data.get(f"{trigger}_app") is not None and data.get(
+            f"{trigger}_rel_id", -1
+        ) not in [-1, relation_id]
+
+
+class PeerClusterApp(PlainModel):
+    """Model class for representing an application part of a large deployment."""
+
+    app: App
+    planned_units: int
+    units: list[str]
+    roles: list[str]
+
+    @field_validator("units", "roles")
+    @classmethod
+    def sort_list(cls, v):
+        """Returns deduplicated sorted list."""
+        return sorted(set(v))

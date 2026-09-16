@@ -96,6 +96,10 @@ class OpenSearchClient:
                 # settings, not sure what to do about it
                 # but for now it works same as pre 3.8.0
                 "server_side_encryption_type": "bucket_default",
+                # restore pre https://github.com/opensearch-project/OpenSearch/pull/18800
+                # settings, not sure what to do about it
+                # but for now it works same as pre 3.x
+                "s3_async_client_type": "netty",
             }
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
