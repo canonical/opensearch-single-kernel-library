@@ -83,7 +83,7 @@ class UpgradesEventsHandler(Object):
     def _on_upgrade_peer_relation_created(self, _) -> None:
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
-            self.charm.state.server_upgrade.update({"snap_revision": OPENSEARCH_SNAP_REVISION})
+            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
         self.charm.state.server_upgrade.update(
             {"workload_version": self.charm.upgrades_manager.current_versions.workload}
         )
@@ -384,7 +384,7 @@ class UpgradesEventsHandler(Object):
                     )
                     self.charm.lock_manager.release()
                     return
-        self.charm.state.server_upgrade.update({"snap_revision": OPENSEARCH_SNAP_REVISION})
+        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
         self.charm.state.server_upgrade.update(
             {"workload_version": self.charm.upgrades_manager.current_versions.workload}
         )

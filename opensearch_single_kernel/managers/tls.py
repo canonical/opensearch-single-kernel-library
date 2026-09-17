@@ -518,10 +518,10 @@ class TlsManager(BaseManager):
 
         # Mark this unit as tls configured
         if self.is_fully_configured():
-            self.state.server.update({"tls_configured": True})
+            self.state.server.tls_configured = True
             peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
-                peer_cluster_server.update({"tls_configured": True})
+                peer_cluster_server.tls_configured = True
         return True
 
     def reconcile_k8s_runtime_resources(self) -> None:

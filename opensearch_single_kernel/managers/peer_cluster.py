@@ -96,7 +96,7 @@ class PeerClusterManager(BaseManager):
         # Update the application peer databag
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.update(related_cluster_fleet_apps)
-        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
+        self.state.application.cluster_fleet_apps = cluster_fleet_apps
 
     def update_local_app_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
         """Unmarshal: update the local app peer model using peer cluster relation data."""
@@ -139,7 +139,7 @@ class PeerClusterManager(BaseManager):
         )
 
         if local_peer_cluster_data:
-            local_peer_cluster_data.update({"main_orchestrator_registered": value})
+            local_peer_cluster_data.main_orchestrator_registered = value
         else:
             logger.debug(
                 "No local peer cluster data found for relation id %s to update main_orchestrator_registered",
@@ -151,7 +151,7 @@ class PeerClusterManager(BaseManager):
         if local_peer_cluster_data := self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=rel_id, remote=False
         ):
-            local_peer_cluster_data.delete("main_orchestrator_registered")
+            del local_peer_cluster_data.main_orchestrator_registered
 
     def reconcile_orchestrators_from_provider_data(
         self,
@@ -371,7 +371,7 @@ class PeerClusterManager(BaseManager):
         if not local_peer_cluster:
             return None
 
-        local_peer_cluster.update({"security_index_initialised": True})
+        local_peer_cluster.security_index_initialised = True
 
     def cm_nodes(self, orchestrators: PeerClusterOrchestrators) -> list[Node]:
         """Fetch the cm nodes passed from the peer cluster relation not api call."""
@@ -436,9 +436,9 @@ class PeerClusterManager(BaseManager):
         if not local_peer_cluster:
             return
         if deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR:
-            local_peer_cluster.update({"is_candidate_failover_orchestrator": True})
+            local_peer_cluster.is_candidate_failover_orchestrator = True
         else:
-            local_peer_cluster.delete("is_candidate_failover_orchestrator")
+            del local_peer_cluster.is_candidate_failover_orchestrator
 
     def delete_departed_orchestrator(self, event_src_cluster_type: str) -> None:
         """Delete the orchestrator that left the relation from the state and cluster fleet."""
@@ -453,10 +453,10 @@ class PeerClusterManager(BaseManager):
 
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.pop(orchestrator_app_id, None)
-        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
+        self.state.application.cluster_fleet_apps = cluster_fleet_apps
 
         orchestrators.delete(event_src_cluster_type)
-        self.state.application.update({"orchestrators": orchestrators})
+        self.state.application.orchestrators = orchestrators
 
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).

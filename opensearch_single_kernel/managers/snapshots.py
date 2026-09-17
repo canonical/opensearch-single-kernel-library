@@ -172,7 +172,7 @@ class SnapshotsManager(BaseManager):
             return
 
         if credentials is None:
-            peer_cluster_server.delete("snapshots_credentials_saved")
+            del peer_cluster_server.snapshots_credentials_saved
             return
 
         peer_cluster_server.update(

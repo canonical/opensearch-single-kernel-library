@@ -78,7 +78,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             "Setting %r in upgrade peer relation app databag",
             self.current_versions,
         )
-        self.state.application_upgrade.update({"versions": self.current_versions})
+        self.state.application_upgrade.versions = self.current_versions
         logger.debug(
             "Set %r in upgrade peer relation app databag",
             self.current_versions,

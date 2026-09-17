@@ -215,7 +215,7 @@ class ExternalClientsEventsHandler(Object):
 
         if event.departing_unit.app == self.charm.unit.app:
             if event.departing_unit == self.charm.unit:
-                self.charm.state.server.update({"unit_dying": True})
+                self.charm.state.server.unit_dying = True
             departing_unit_ip = self.charm.state.unit_ip(event.departing_unit)
             self.update_external_client_endpoints(
                 event.relation, omit_endpoints={departing_unit_ip}

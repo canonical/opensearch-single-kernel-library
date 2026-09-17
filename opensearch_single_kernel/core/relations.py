@@ -10,11 +10,10 @@ import time
 from typing import Any, Optional
 
 import ops
-from dpcharmlibs.interfaces import (
-    OpsPeerRepositoryInterface,
-    OpsPeerUnitRepositoryInterface,
-    OpsRelationRepositoryInterface,
-)
+from dpcharmlibs.interfaces import OpsRepository, build_model, write_model
+from ops.model import SecretNotFoundError
+from pydantic import BaseModel
+from pydantic_core import PydanticSerializationError
 
 from opensearch_single_kernel.common.constants import PerformanceType
 from opensearch_single_kernel.core.base_models import (
@@ -24,11 +23,12 @@ from opensearch_single_kernel.core.base_models import (
     UnitUpgradesState,
 )
 from opensearch_single_kernel.core.relation_models import (
-    JWTAuthConfiguration,
     LockAppStateModel,
     LockServerStateModel,
     OpenSearchAppPeerModel,
     OpenSearchServerPeerModel,
+    PeerClusterAppModel,
+    PeerClusterServerModel,
     UpgradeAppModel,
     UpgradeServerModel,
 )
@@ -39,43 +39,68 @@ logger = logging.getLogger(__name__)
 class RelationState:
     """Base wrapper for models"""
 
+    # Wrapper-internal attributes that must never be routed to the databag. Used to avoid setattr on this fields
+    _RESERVED_ATTRS = frozenset(
+        {"repository", "component", "relation", "skip_secrets", "model", "unit"}
+    )
+
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerUnitRepositoryInterface[OpenSearchServerPeerModel]
-        | OpsPeerRepositoryInterface[OpenSearchAppPeerModel]
-        | OpsPeerRepositoryInterface[UpgradeAppModel]
-        | OpsPeerUnitRepositoryInterface[UpgradeServerModel]
-        | OpsPeerRepositoryInterface[LockAppStateModel]
-        | OpsPeerUnitRepositoryInterface[LockServerStateModel]
-        | OpsRelationRepositoryInterface[JWTAuthConfiguration],
-        component: ops.model.Unit | ops.model.Application | None,
+        model_cls: type[BaseModel],
+        repository: OpsRepository | None,
+        component: ops.model.Unit | ops.model.Application | None = None,
+        skip_secrets: bool = False,
     ) -> None:
-        self.relation = relation
-        self.interface = interface
-        self.component = component
-        self.model = (
-            self.interface.build_model(self.relation.id, component=self.component)
-            if relation is not None
-            else self.interface.model()
+        self.repository = repository
+        self.component = (
+            component if component is not None else getattr(repository, "component", None)
         )
+        self.relation = self.repository.relation if self.repository is not None else None
+        self.skip_secrets = skip_secrets
+        self.model = build_model(repository, model_cls) if repository else model_cls()
 
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown (non-private) reads to the underlying model."""
-        if name.startswith("_"):
-            raise AttributeError(name)
         model = self.__dict__.get("model")
         if model is None:
             raise AttributeError(name)
         return getattr(model, name)
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Update model-field writes to the databag."""
+        model = self.__dict__.get("model")
+        if (
+            name not in self._RESERVED_ATTRS
+            and model is not None
+            and name in type(model).__pydantic_fields__
+        ):
+            self.update({name: value})
+        else:
+            object.__setattr__(self, name, value)
+
     def __delattr__(self, name: str) -> None:
-        """Reset a model field to its default."""
-        self.delete(name)
+        """Reset a single model field to its default and write."""
+        self.reset(name)
+
+    def reset(self, *names: str) -> None:
+        """Reset the given model field(s) to their default(s) in a single write."""
+        if not self.repository or self.model is None:
+            logger.warning(
+                "Fields %s were attempted to be deleted on the relation before it exists.",
+                list(names),
+            )
+            return
+
+        for field in names:
+            field_info = type(self.model).__pydantic_fields__.get(field)
+            default = field_info.get_default(call_default_factory=True) if field_info else None
+            setattr(self.model, field, default)
+
+        self.write()
 
     def update(self, items: dict[str, Any]) -> None:
         """Apply the given field changes and update the whole model in a single write."""
-        if not self.relation or self.model is None:
+        if not self.repository or self.model is None:
             logger.warning(
                 "Fields %s were attempted to be written on the relation before it exists.",
                 list(items.keys()),
@@ -85,23 +110,30 @@ class RelationState:
         for field, value in items.items():
             setattr(self.model, field.replace("-", "_"), value)
 
-        self.interface.write_model(self.relation.id, self.model)
+        self.write()
 
-    def delete(self, *fields: str) -> None:
-        """Reset the given fields to their declared defaults (extras to None)."""
-        if not self.relation or self.model is None:
-            logger.warning(
-                "Fields %s were attempted to be deleted on the relation before it exists.",
-                list(fields),
+    def write(self) -> None:
+        """Write the whole model, falling back to non-secret fields if secrets are missing."""
+        try:
+            write_model(
+                self.repository,
+                self.model,
+                context={"skip_secrets": "true"} if self.skip_secrets else None,
             )
-            return
-
-        for field in fields:
-            field_info = type(self.model).__pydantic_fields__.get(field)
-            default = field_info.get_default(call_default_factory=True) if field_info else None
-            setattr(self.model, field, default)
-
-        self.interface.write_model(self.relation.id, self.model)
+        except (SecretNotFoundError, PydanticSerializationError) as e:
+            logger.warning(
+                "Secret unavailable while updating %s, writing non-secret fields only: %s",
+                type(self.model).__name__,
+                e,
+            )
+            try:
+                write_model(self.repository, self.model, context={"skip_secrets": "true"})
+            except (SecretNotFoundError, PydanticSerializationError) as e2:
+                logger.warning(
+                    "Skipping write for %s, fallback write failed: %s",
+                    type(self.model).__name__,
+                    e2,
+                )
 
 
 class LockApplication(RelationState):
@@ -111,11 +143,10 @@ class LockApplication(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerRepositoryInterface[LockAppStateModel],
+        repository: OpsRepository | None,
         component: ops.model.Application,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(LockAppStateModel, repository, component)
         self.unit = component
 
     def grant_lock(self, unit_name: str, own_unit_name: str) -> None:
@@ -143,7 +174,7 @@ class LockApplication(RelationState):
         """Release the lock and clear `leader_acquired_lock_after_juju_event_id`."""
         if not self.model.unit_with_lock:
             return
-        self.delete("unit_with_lock", "leader_acquired_lock_after_juju_event_id")
+        self.reset("unit_with_lock", "leader_acquired_lock_after_juju_event_id")
 
 
 class LockServer(RelationState):
@@ -153,16 +184,15 @@ class LockServer(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerUnitRepositoryInterface[LockServerStateModel],
+        repository: OpsRepository | None,
         component: ops.model.Unit,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(LockServerStateModel, repository, component)
         self.unit = component
 
     def trigger_relation_changed(self) -> None:
         """Trigger relation changed event on other units by writing to a dummy field."""
-        self.update({"trigger": os.environ.get("JUJU_CONTEXT_ID", "")})
+        self.trigger = os.environ.get("JUJU_CONTEXT_ID", "")
 
 
 class OpenSearchApplication(RelationState):
@@ -172,11 +202,10 @@ class OpenSearchApplication(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerRepositoryInterface[OpenSearchAppPeerModel],
+        repository: OpsRepository | None,
         component: ops.model.Application,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(OpenSearchAppPeerModel, repository, component)
         self.unit = component
 
     @property
@@ -210,11 +239,10 @@ class OpenSearchServer(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerUnitRepositoryInterface[OpenSearchServerPeerModel],
+        repository: OpsRepository | None,
         component: ops.model.Unit,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(OpenSearchServerPeerModel, repository, component)
         self.unit = component
 
     @property
@@ -252,11 +280,10 @@ class UpgradeApplication(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerRepositoryInterface[UpgradeAppModel],
+        repository: OpsRepository | None,
         component: ops.model.Application,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(UpgradeAppModel, repository, component)
         self.unit = component
 
     def set_upgrade_resumed(self, value: bool) -> None:
@@ -271,11 +298,10 @@ class UpgradeServer(RelationState):
 
     def __init__(
         self,
-        relation: ops.model.Relation | None,
-        interface: OpsPeerUnitRepositoryInterface[UpgradeServerModel],
+        repository: OpsRepository | None,
         component: ops.model.Unit,
     ):
-        super().__init__(relation, interface, component)
+        super().__init__(UpgradeServerModel, repository, component)
 
     @property
     def unit_number(self) -> int:
@@ -284,4 +310,53 @@ class UpgradeServer(RelationState):
 
     def set_unit_state(self, value: "UnitUpgradesState") -> None:
         """Set the unit upgrade state."""
-        self.update({"state": value.value})
+        self.state = value.value
+
+
+class PeerClusterApplication(RelationState):
+    """State/relation-data wrapper for a peer-cluster application databag."""
+
+    model: PeerClusterAppModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Application | None = None,
+        skip_secrets: bool = False,
+    ) -> None:
+        super().__init__(PeerClusterAppModel, repository, component, skip_secrets)
+
+    def empty_secret_placeholders(self) -> dict[str, Any]:
+        """Return the placeholder field changes that pre-create the secret groups."""
+        if self.model.pc_secrets_initialized:
+            return {}
+        return {
+            "admin_password": self.model.admin_password or " ",
+            "admin_cert": self.model.admin_cert or " ",
+            "plugin_secrets": self.model.plugin_secrets or " ",
+            "pc_secrets_initialized": True,
+        }
+
+    def initialize_empty_secrets(self) -> None:
+        """Pre-create the peer-cluster secret groups if they are not populated yet."""
+        if changes := self.empty_secret_placeholders():
+            self.update(changes)
+
+
+class PeerClusterServer(RelationState):
+    """State/relation-data wrapper for a single unit's peer-cluster databag."""
+
+    model: PeerClusterServerModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Unit | None = None,
+        skip_secrets: bool = False,
+    ) -> None:
+        super().__init__(PeerClusterServerModel, repository, component, skip_secrets)
+
+    @property
+    def unit(self) -> ops.model.Unit:
+        """The ops.Unit this wrapper's data is bound to."""
+        return self.component

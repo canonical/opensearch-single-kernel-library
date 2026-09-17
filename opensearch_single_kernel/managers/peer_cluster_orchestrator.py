@@ -33,7 +33,7 @@ from opensearch_single_kernel.core.base_models import (
 from opensearch_single_kernel.core.relation_models import (
     PeerClusterAppModel,
 )
-from opensearch_single_kernel.core.relations_cluster import PeerClusterApplication
+from opensearch_single_kernel.core.relations import PeerClusterApplication
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.core.storage import (
     AzureRelData,
@@ -103,14 +103,14 @@ class PeerClusterOrchestratorManager(BaseManager):
                 relation_id=event_rel_id, is_provider=True, remote=False
             )
             if local_peer_cluster:
-                local_peer_cluster.update({"trigger": cluster_type})
+                local_peer_cluster.trigger = cluster_type
 
         # update reported orchestrators on local orchestrator
         if cluster_type == "main":
             orchestrators.main_app = deployment_description.app
         else:
             orchestrators.failover_app = deployment_description.app
-        self.state.application.update({"orchestrators": orchestrators})
+        self.state.application.orchestrators = orchestrators
 
         should_wait = rel_err_data and rel_err_data.should_wait
 
@@ -556,7 +556,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             return False
 
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            local_peer_cluster.update({"error_data": rel_err_data})
+            local_peer_cluster.error_data = rel_err_data
 
         # delete trigger
         if local_peer_cluster := self.state.peer_cluster_by_relation_id(
@@ -567,7 +567,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_peer_cluster.relation.app.name,
                 rel_err_data.blocked_message,
             )
-            local_peer_cluster.delete("trigger")
+            del local_peer_cluster.trigger
         return True
 
     def save_cluster_fleet_apps(
@@ -594,15 +594,15 @@ class PeerClusterOrchestratorManager(BaseManager):
         if p_cluster_app:
             update_cluster_fleet(cluster_fleet_apps, p_cluster_app)
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            local_peer_cluster.update({"cluster_fleet_apps": cluster_fleet_apps})
+            local_peer_cluster.cluster_fleet_apps = cluster_fleet_apps
 
-        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
+        self.state.application.cluster_fleet_apps = cluster_fleet_apps
 
         # store the trigger app (not current) with relation id, useful for departed rel event
         if trigger_rel_id and p_cluster_app:
             cluster_fleet_apps_rels = self.state.application.cluster_fleet_apps_rels
             update_cluster_fleet(cluster_fleet_apps_rels, p_cluster_app, key=trigger_rel_id)
-            self.state.application.update({"cluster_fleet_apps_rels": cluster_fleet_apps_rels})
+            self.state.application.cluster_fleet_apps_rels = cluster_fleet_apps_rels
 
     def promote_failover(self) -> None:
         """Handle failover promotion to main orchestrator."""
@@ -610,16 +610,16 @@ class PeerClusterOrchestratorManager(BaseManager):
         # remove old main and promote new failover
         orchestrators = self.state.application.orchestrators
         orchestrators.promote_failover()
-        self.state.application.update({"orchestrators": orchestrators})
+        self.state.application.orchestrators = orchestrators
         for p_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            p_cluster.update({"trigger": "main"})
+            p_cluster.trigger = "main"
 
     def reconcile_security_index_initialised(self) -> None:
         """Check if security index is initialised in any cluster and update state."""
         if self.state.security_index_initialised_in_all_clusters:
-            self.state.application.update({"security_index_initialised": True})
+            self.state.application.security_index_initialised = True
             # clean up the first data node attribute when security index is initialised
-            self.state.application.delete("first_data_node")
+            del self.state.application.first_data_node
 
     def broadcast_new_failover_app(self, peer_cluster_app: PeerClusterApp) -> None:
         """Broadcasts the new failover in all the cluster fleet"""
@@ -633,7 +633,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             # Update the orchestrators
             orchestrators = local_p_cluster.orchestrators or PeerClusterOrchestrators()
             orchestrators.failover_app = candidate_failover_app
-            local_p_cluster.update({"orchestrators": orchestrators})
+            local_p_cluster.orchestrators = orchestrators
 
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""
@@ -647,7 +647,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         )
         if local_peer_cluster:
             self.clear_rel_data(local_peer_cluster)
-            local_peer_cluster.delete(
+            local_peer_cluster.reset(
                 "rel_data_hash",
                 "error_data",
                 "cluster_fleet_apps",

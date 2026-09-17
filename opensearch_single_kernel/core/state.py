@@ -32,7 +32,7 @@ from dpcharmlibs.interfaces import (
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
 from ops import Object, Relation, Unit
 from ops.model import RelationNotFoundError, SecretNotFoundError
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -77,12 +77,10 @@ from opensearch_single_kernel.core.relations import (
     LockServer,
     OpenSearchApplication,
     OpenSearchServer,
-    UpgradeApplication,
-    UpgradeServer,
-)
-from opensearch_single_kernel.core.relations_cluster import (
     PeerClusterApplication,
     PeerClusterServer,
+    UpgradeApplication,
+    UpgradeServer,
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
@@ -118,10 +116,7 @@ class ClusterState(Object):
         self.substrate = substrate
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
 
-        # only used for large deployments
-        self.repositories: dict[
-            tuple[Any, int, Any | None], RepositoryInterface[OpsRepository, BaseModel]
-        ] = {}
+        self.repositories: dict[tuple[Any, int, Any | None], OpsRepository] = {}
 
         self.peer_app_interface = OpsPeerRepositoryInterface(
             model=charm.model, relation_name=PEER_RELATION, data_model=OpenSearchAppPeerModel
@@ -242,7 +237,9 @@ class ClusterState(Object):
             return None
         return relation
 
-    def get_repository_from_interface(self, interface, relation: Relation | None, component):
+    def get_repository_from_interface(
+        self, interface, relation: Relation | None, component
+    ) -> OpsRepository | None:
         """Return a repository, or None if no relation."""
         if not relation:
             return None
@@ -256,13 +253,21 @@ class ClusterState(Object):
     @property
     def server_upgrade(self) -> UpgradeServer:
         """Get state of upgrade relation for current unit."""
-        return UpgradeServer(self.upgrade_relation, self.upgrade_unit_interface, self.model.unit)
+        return UpgradeServer(
+            self.get_repository_from_interface(
+                self.upgrade_unit_interface, self.upgrade_relation, self.model.unit
+            ),
+            self.model.unit,
+        )
 
     @property
     def application_upgrade(self) -> UpgradeApplication:
         """Get application state of upgrade relation."""
         return UpgradeApplication(
-            self.upgrade_relation, self.upgrade_app_interface, self.model.app
+            self.get_repository_from_interface(
+                self.upgrade_app_interface, self.upgrade_relation, self.model.app
+            ),
+            self.model.app,
         )
 
     @property
@@ -270,7 +275,12 @@ class ClusterState(Object):
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
-                UpgradeServer(self.upgrade_relation, self.upgrade_unit_interface, unit)
+                UpgradeServer(
+                    self.get_repository_from_interface(
+                        self.upgrade_unit_interface, self.upgrade_relation, unit
+                    ),
+                    unit,
+                )
                 for unit in sorted(
                     (self.model.unit, *self.upgrade_relation.units),
                     key=lambda unit: int(unit.name.split("/")[1]),
@@ -409,16 +419,26 @@ class ClusterState(Object):
 
     # -- Core Components
 
-    @cached_property
+    @property
     def server(self) -> OpenSearchServer:
         """Get the opensearch unit state."""
-        return OpenSearchServer(self.peer_relation, self.peer_unit_interface, self.model.unit)
+        return OpenSearchServer(
+            self.get_repository_from_interface(
+                self.peer_unit_interface, self.peer_relation, self.model.unit
+            ),
+            self.model.unit,
+        )
 
     @property
     def application_servers(self) -> list[OpenSearchServer]:
         """Return all opensearch servers using peer relation."""
         return [
-            OpenSearchServer(self.peer_relation, self.peer_unit_interface, unit)
+            OpenSearchServer(
+                self.get_repository_from_interface(
+                    self.peer_unit_interface, self.peer_relation, unit
+                ),
+                unit,
+            )
             for unit in self.all_units
         ]
 
@@ -427,10 +447,15 @@ class ClusterState(Object):
         """Whether this unit is the leader of the application."""
         return self.model.unit.is_leader()
 
-    @cached_property
+    @property
     def application(self) -> OpenSearchApplication:
         """Get the opensearch application state."""
-        return OpenSearchApplication(self.peer_relation, self.peer_app_interface, self.model.app)
+        return OpenSearchApplication(
+            self.get_repository_from_interface(
+                self.peer_app_interface, self.peer_relation, self.model.app
+            ),
+            self.model.app,
+        )
 
     def get_dashboards_relations(self) -> list[Relation]:
         """Return relations that have requested the kibana server role."""
@@ -505,7 +530,12 @@ class ClusterState(Object):
     @property
     def server_lock(self) -> LockServer:
         """Get state of lock relation for current unit."""
-        return LockServer(self.lock_relation, self.lock_unit_interface, self.model.unit)
+        return LockServer(
+            self.get_repository_from_interface(
+                self.lock_unit_interface, self.lock_relation, self.model.unit
+            ),
+            self.model.unit,
+        )
 
     @property
     def lock_granted_server(self) -> LockServer | None:
@@ -515,14 +545,24 @@ class ClusterState(Object):
             return None
 
         granted_unit = self.model.get_unit(lock_unit_name(granted_unit_name))
-        return LockServer(self.lock_relation, self.lock_unit_interface, granted_unit)
+        return LockServer(
+            self.get_repository_from_interface(
+                self.lock_unit_interface, self.lock_relation, granted_unit
+            ),
+            granted_unit,
+        )
 
     @property
     def server_locks(self) -> list[LockServer]:
         """Get state of lock relation for all units in it."""
         return (
             [
-                LockServer(self.lock_relation, self.lock_unit_interface, unit)
+                LockServer(
+                    self.get_repository_from_interface(
+                        self.lock_unit_interface, self.lock_relation, unit
+                    ),
+                    unit,
+                )
                 for unit in [self.model.unit, *self.lock_relation.units]
             ]
             if self.lock_relation
@@ -532,7 +572,12 @@ class ClusterState(Object):
     @property
     def application_lock(self) -> LockApplication:
         """Get application state of lock relation."""
-        return LockApplication(self.lock_relation, self.lock_app_interface, self.model.app)
+        return LockApplication(
+            self.get_repository_from_interface(
+                self.lock_app_interface, self.lock_relation, self.model.app
+            ),
+            self.model.app,
+        )
 
     # -- Cluster State Properties
 
@@ -693,15 +738,15 @@ class ClusterState(Object):
         # if this flag is set, the CA rotation routine is complete for this unit
         if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster:
             # both CA rotation and certs rotation completed in the cluster
-            self.server.delete("tls_ca_renewing", "tls_ca_renewed")
+            self.server.reset("tls_ca_renewing", "tls_ca_renewed")
             for peer_cluster_server in peer_cluster_servers:
-                peer_cluster_server.delete("tls_ca_renewing", "tls_ca_renewed")
+                peer_cluster_server.reset("tls_ca_renewing", "tls_ca_renewed")
             return
 
         # this means only the CA rotation completed, still need to create certificates
-        self.server.update({"tls_ca_renewed": True})
+        self.server.tls_ca_renewed = True
         for peer_cluster_server in peer_cluster_servers:
-            peer_cluster_server.update({"tls_ca_renewed": True})
+            peer_cluster_server.tls_ca_renewed = True
 
     @property
     def peer_unit_hosts(self) -> set[str]:
@@ -798,7 +843,7 @@ class ClusterState(Object):
             and self.is_failover_and_sole_data_app
             and not self.application.security_index_initialised
         ):
-            self.server.update({"cluster_manager_removed": True})
+            self.server.cluster_manager_removed = True
             if "cluster_manager" in computed_roles:
                 computed_roles.remove("cluster_manager")
 

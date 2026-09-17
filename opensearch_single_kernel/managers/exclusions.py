@@ -82,7 +82,7 @@ class NodesExclusionsManager(BaseManager):
                 state = self.state.application if scope == Scope.APP else self.state.server
                 current_allocations = state.allocation_exclusions_to_delete
                 current_allocations.add(node.name)
-                state.update({"allocation_exclusions_to_delete": current_allocations})
+                state.allocation_exclusions_to_delete = current_allocations
 
                 if raise_error:
                     raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
@@ -96,7 +96,7 @@ class NodesExclusionsManager(BaseManager):
         if allocations_to_cleanup and self._delete_allocations(
             self.api_or_state_node, allocations_to_cleanup
         ):
-            state.update({"allocation_exclusions_to_delete": set()})
+            state.allocation_exclusions_to_delete = set()
 
     def add_to_cleanup_list(self, unit_name: str, scope: Scope) -> None:
         """Add Voting and alloc exclusions for a target unit.

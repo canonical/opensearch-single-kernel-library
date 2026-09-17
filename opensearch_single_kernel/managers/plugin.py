@@ -93,7 +93,7 @@ class PluginManager(BaseManager):
         """Adds plugin configuration information to peer relation data"""
         state = self.state.application if scope == Scope.APP else self.state.server
         plugins = self._with_plugin_config(state.plugin_config_info, label, relation_name, cleanup)
-        state.update({"plugin_config_info": plugins})
+        state.plugin_config_info = plugins
 
     def put_notifications_plugin_smtp_config(
         self,
@@ -126,7 +126,7 @@ class PluginManager(BaseManager):
         plugins = state.plugin_config_info
         if label in plugins:
             del plugins[label]
-        state.update({"plugin_config_info": plugins})
+        state.plugin_config_info = plugins
 
     def remove_plugin_secrets(self) -> None:
         """Removes all plugin secrets and their corresponding config info."""

@@ -85,7 +85,7 @@ class ConfigManager(BaseManager):
         else:
             self.update_seeds_config()
 
-        self.state.server.update({"last_host_ip": self.state.host_ip})
+        self.state.server.last_host_ip = self.state.host_ip
         # rewrite() returns whether the on-disk YAML text changed after the update.
         return self.yaml_setter.rewrite(self.CONFIG_YML, config)
 
@@ -519,7 +519,7 @@ class ConfigManager(BaseManager):
                 "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
             self._update_jvm_heap_size(heap_size)
-            self.state.server.update({"profile": profile.type})
+            self.state.server.profile = profile.type
             return True
         return False
 

@@ -236,10 +236,10 @@ class TLSEventsHandler(Object):
             # -> request new certs -> get new certs -> on_tls_conf_set
             # -> delete both tls_ca_renewing and tls_ca_renewed
             if current_stored_ca:
-                self.charm.state.server.update({"tls_ca_renewing": True})
+                self.charm.state.server.tls_ca_renewing = True
                 peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
                 for peer_cluster_server in peer_clusters_servers:
-                    peer_cluster_server.update({"tls_ca_renewing": True})
+                    peer_cluster_server.tls_ca_renewing = True
                 logger.debug("Restarting opensearch due to CA rotation")
                 self.charm.restart_opensearch_event.emit()
                 event.defer()
@@ -330,11 +330,11 @@ class TLSEventsHandler(Object):
             )
             return
 
-        self.charm.state.server.delete("tls_configured")
+        del self.charm.state.server.tls_configured
 
         peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
         for peer_cluster_server in peer_clusters_servers:
-            peer_cluster_server.delete("tls_configured")
+            del peer_cluster_server.tls_configured
 
         secret_match = self.charm.tls_manager.find_event_secret_type(event.certificate, "cert")
         if secret_match is None:

@@ -124,7 +124,7 @@ class OAuthEventsHandler(Object):
     def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handler for `relation_departed` event."""
         if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
-            self.charm.state.server.update({"unit_dying": True})
+            self.charm.state.server.unit_dying = True
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
@@ -139,7 +139,7 @@ class OAuthEventsHandler(Object):
         ):
             return
 
-        self.charm.state.server.delete("oauth_openid_connect_url")
+        del self.charm.state.server.oauth_openid_connect_url
         self.charm.config_manager.update_security_config()
 
         if not self.charm.unit.is_leader():

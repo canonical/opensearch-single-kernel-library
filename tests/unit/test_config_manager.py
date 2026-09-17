@@ -113,7 +113,7 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
         new_callable=PropertyMock,
     )
     deployment_desc_mock = mocker.patch(
-        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.relation_models.OpenSearchAppPeerModel.deployment_description",
         create=True,
         new_callable=PropertyMock,
     )
@@ -152,7 +152,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
     yaml_conf_setter.base_path = tmp_config_path
 
     deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.peer_app.OpenSearchAppPeerModel.deployment_description",
+        "opensearch_single_kernel.core.relation_models.OpenSearchAppPeerModel.deployment_description",
         create=True,
         new_callable=PropertyMock,
     )
@@ -200,7 +200,7 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
         new_callable=PropertyMock,
     )
     is_bootstrap_contributor = mocker.patch(
-        "opensearch_single_kernel.core.peer_unit.OpenSearchServerPeerModel.bootstrap_contributor",
+        "opensearch_single_kernel.core.relation_models.OpenSearchServerPeerModel.bootstrap_contributor",
         create=True,
         return_value=True,
         new_callable=PropertyMock,
