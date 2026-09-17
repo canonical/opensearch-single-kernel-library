@@ -34,7 +34,7 @@ from opensearch_single_kernel.core.base_models import (
     PeerClusterRelErrorData,
     stripped_or_none,
 )
-from opensearch_single_kernel.core.peer_cluster import (
+from opensearch_single_kernel.core.relation_models import (
     PeerClusterAppModel,
 )
 from opensearch_single_kernel.core.state import ClusterState

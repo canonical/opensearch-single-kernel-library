@@ -54,7 +54,7 @@ from opensearch_single_kernel.core.base_models import (
     Node,
     PeerClusterConfig,
 )
-from opensearch_single_kernel.core.peer_cluster import PeerClusterAppModel
+from opensearch_single_kernel.core.relation_models import PeerClusterAppModel
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter

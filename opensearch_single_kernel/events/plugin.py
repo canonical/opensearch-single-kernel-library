@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class PluginEventsHandler(Object):
     """Events handler for OpenSearch plugin events"""
 
-    def __init__(self, charm: OpenSearchBaseCharm):
+    def __init__(self, charm: "OpenSearchBaseCharm"):
         super().__init__(charm, "plugin_events")
         self.charm = charm
         self.framework.observe(
