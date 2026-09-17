@@ -172,10 +172,12 @@ class SnapshotsManager(BaseManager):
             return
 
         if credentials is None:
-            del peer_cluster_server.snapshots_credentials_saved
+            peer_cluster_server.delete("snapshots_credentials_saved")
             return
 
-        peer_cluster_server.snapshots_credentials_saved = self.credentials_hash(credentials)
+        peer_cluster_server.update(
+            {"snapshots_credentials_saved": self.credentials_hash(credentials)}
+        )
 
     def has_saved_backup_credentials(self) -> bool:
         """Whether this unit currently has a stored backup-credentials marker."""

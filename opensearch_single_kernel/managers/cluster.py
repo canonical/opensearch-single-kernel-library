@@ -120,7 +120,7 @@ class ClusterManager(BaseManager):
             # new cluster
             deployment_desc = self._new_cluster_setup(user_config)
             logger.debug("New deployment_desc from new cluster setup: %s", deployment_desc)
-            self.state.application.deployment_description = deployment_desc
+            self.state.application.update({"deployment_description": deployment_desc})
             return False
         # update cluster deployment desc
         logger.debug("Existing deployment_desc before cluster setup: %s", current_deployment_desc)
@@ -130,7 +130,7 @@ class ClusterManager(BaseManager):
             return False
 
         # TODO: Should we add an entry on DeploymentDesc "errors" to reflect on status?
-        self.state.application.deployment_description = deployment_desc
+        self.state.application.update({"deployment_description": deployment_desc})
         return True
 
     def reconcile_cluster_config_with_relation_data(self, data: PeerClusterAppModel) -> None:  # noqa: C901
@@ -180,8 +180,12 @@ class ClusterManager(BaseManager):
         )
 
         logger.debug("new_deployment_desc: %s", new_deployment_desc)
-        self.state.application.deployment_description = new_deployment_desc
-        self.state.application.nodes_config = data.nodes_config
+        self.state.application.update(
+            {
+                "deployment_description": new_deployment_desc,
+                "nodes_config": data.nodes_config,
+            }
+        )
 
     def _new_cluster_setup(self, config: PeerClusterConfig) -> DeploymentDescription:
         """Build deployment description of a new cluster."""
@@ -377,8 +381,8 @@ class ClusterManager(BaseManager):
     def update_bootstrap_state(self, cleanup_application: bool = False) -> None:
         """Clean up bootstrap state and remove initial_cluster_manager_nodes from config"""
         if cleanup_application:
-            self.state.application.bootstrapped = True
-        del self.state.server.bootstrap_contributor
+            self.state.application.update({"bootstrapped": True})
+        self.state.server.delete("bootstrap_contributor")
 
     def should_initialise_security_index(self) -> bool:
         """Returns whether the unit should initialise the security index."""
@@ -438,7 +442,7 @@ class ClusterManager(BaseManager):
             "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
         )
         logger.info("securityadmin.sh execution completed successfully")
-        self.state.application.security_index_initialised = True
+        self.state.application.update({"security_index_initialised": True})
 
     def apply_security_config(self, file: str) -> bool:
         """Run the security_admin script for specified config file, avoiding changes to others.
@@ -539,7 +543,7 @@ class ClusterManager(BaseManager):
 
         deployment_desc.pending_directives.remove(directive)
         logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
-        self.state.application.deployment_description = deployment_desc
+        self.state.application.update({"deployment_description": deployment_desc})
 
     def compute_and_broadcast_updated_topology(self, current_nodes: list[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
@@ -582,7 +586,7 @@ class ClusterManager(BaseManager):
         if self.state.application.nodes_config == updated_nodes:
             return False
 
-        self.state.application.nodes_config = updated_nodes
+        self.state.application.update({"nodes_config": updated_nodes})
         return True
 
     def configure_bootstrap_contributors(
@@ -612,10 +616,12 @@ class ClusterManager(BaseManager):
                     contribute_to_bootstrap = True
 
                     if self.state.is_app_leader:
-                        self.state.application.bootstrap_contributors_count = cms_in_bootstrap + 1
+                        self.state.application.update(
+                            {"bootstrap_contributors_count": cms_in_bootstrap + 1}
+                        )
 
                     # indicates that this unit is part of the "initial cm nodes"
-                    self.state.server.bootstrap_contributor = True
+                    self.state.server.update({"bootstrap_contributor": True})
         return contribute_to_bootstrap
 
     @property
@@ -688,13 +694,11 @@ class ClusterManager(BaseManager):
     def cleanup_on_last_unit_removal(self) -> None:
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
-            del self.state.application.bootstrap_contributors_count
-            del self.state.application.nodes_config
+            self.state.application.delete("bootstrap_contributors_count", "nodes_config")
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
-                del self.state.application.security_index_initialised
-                del self.state.application.bootstrapped
+                self.state.application.delete("security_index_initialised", "bootstrapped")
 
     def flush_translog_to_disk(self) -> None:
         """Flush OpenSearch translog to disk."""
@@ -746,7 +750,7 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        del self.state.server.started
+        self.state.server.delete("started")
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -781,7 +785,7 @@ class ClusterManager(BaseManager):
             if deployment_desc.state.value == State.BLOCKED_WAITING_FOR_RELATION:
                 deployment_desc.state = DeploymentState(value=State.ACTIVE)
         deployment_desc.pending_directives.append(Directive.SHOW_STATUS)
-        self.state.application.deployment_description = deployment_desc
+        self.state.application.update({"deployment_description": deployment_desc})
 
     def demote_deployment_type(self) -> None:
         """Update the deployment type of the current deployment desc."""
@@ -799,7 +803,7 @@ class ClusterManager(BaseManager):
         )
         deployment_desc.pending_directives.append(Directive.SHOW_STATUS)
         deployment_desc.pending_directives.append(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
-        self.state.application.deployment_description = deployment_desc
+        self.state.application.update({"deployment_description": deployment_desc})
 
     def get_prometheus_labels(self) -> dict[str, str] | None:
         """Return the labels for the prometheus scrape."""
@@ -902,11 +906,11 @@ class ClusterManager(BaseManager):
 
         if first_data_node is None:
             # if first data node is None, delete the key from the relation data
-            del peer_cluster.first_data_node
+            peer_cluster.delete("first_data_node")
             return None
 
         # set the first data node in the relation data
-        peer_cluster.first_data_node = first_data_node
+        peer_cluster.update({"first_data_node": first_data_node})
 
     @override
     def get_statuses(

@@ -100,14 +100,19 @@ class InternalUsersManager(BaseManager):
         # so all units can fetch it for local users (internal_users.yml) updates.
 
         if user == ADMIN_USER:
-            self.state.application.admin_password = pwd
-            self.state.application.admin_hashed_password = hashed_pwd
-            self.state.application.admin_user_initialized = True
+            self.state.application.update(
+                {
+                    "admin_password": pwd,
+                    "admin_hashed_password": hashed_pwd,
+                    "admin_user_initialized": True,
+                }
+            )
         elif user == KIBANA_SERVER_USER:
-            self.state.application.kibana_server_password = pwd
-            self.state.application.kibana_server_hashed_password = hashed_pwd
+            self.state.application.update(
+                {"kibana_server_password": pwd, "kibana_server_hashed_password": hashed_pwd}
+            )
         elif user == COS_USER:
-            self.state.application.monitor_password = pwd
+            self.state.application.update({"monitor_password": pwd})
         return True
 
     def purge_initial_default_users(self) -> None:
@@ -198,6 +203,6 @@ class InternalUsersManager(BaseManager):
                     }
                 ],
             )
-            self.state.application.monitor_password = pwd
+            self.state.application.update({"monitor_password": pwd})
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)

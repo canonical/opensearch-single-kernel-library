@@ -163,7 +163,7 @@ class ExternalClientsManager(BaseManager):
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
         users[str(relation_id)] = user
-        self.state.application.client_relation_users = users
+        self.state.application.update({"client_relation_users": users})
 
     def get_connection_data(self, relation: Relation, nodes: list[Node]) -> dict | None:
         """Gather version, TLS CA and endpoint data for a client relation response.
@@ -272,7 +272,7 @@ class ExternalClientsManager(BaseManager):
 
                 if removed:
                     del relation_users[rel_id]
-        self.state.application.client_relation_users = relation_users
+        self.state.application.update({"client_relation_users": relation_users})
 
     def update_relations_roles_mapping(self) -> None:
         """Updates all the relations roles mapping due to config change.

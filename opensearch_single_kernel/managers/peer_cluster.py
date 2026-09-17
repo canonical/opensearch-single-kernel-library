@@ -78,11 +78,9 @@ class PeerClusterManager(BaseManager):
             is_provider=is_provider, relation_id=rel_id, remote=False
         )
         if local_peer_cluster:
-            with local_peer_cluster.update() as m:
-                m.app = current_app
-                fleet_apps = m.cluster_fleet_apps
-                fleet_apps[deployment_desc.app.id] = current_app
-                m.cluster_fleet_apps = fleet_apps
+            fleet_apps = local_peer_cluster.cluster_fleet_apps
+            fleet_apps[deployment_desc.app.id] = current_app
+            local_peer_cluster.update({"app": current_app, "cluster_fleet_apps": fleet_apps})
 
         # update content of fleet in the current app's peer databag
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
@@ -98,38 +96,39 @@ class PeerClusterManager(BaseManager):
         # Update the application peer databag
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.update(related_cluster_fleet_apps)
-        self.state.application.cluster_fleet_apps = cluster_fleet_apps
+        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
 
     def update_local_app_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
         """Unmarshal: update the local app peer model using peer cluster relation data."""
-        with self.state.application.update() as m:
-            m.first_data_node = peer_data.first_data_node
-            m.nodes_config = peer_data.nodes_config
+        items: dict = {
+            "first_data_node": peer_data.first_data_node,
+            "nodes_config": peer_data.nodes_config,
+            "admin_password": stripped_or_none(peer_data.admin_password),
+            "admin_hashed_password": peer_data.admin_hashed_password,
+            "kibana_server_password": peer_data.kibana_server_password,
+            "kibana_server_hashed_password": peer_data.kibana_server_hashed_password,
+            "monitor_password": peer_data.monitor_password,
+            "monitor_hashed_password": peer_data.monitor_hashed_password,
+            "admin_truststore_password": stripped_or_none(peer_data.admin_truststore_password),
+            "admin_keystore_password": stripped_or_none(peer_data.admin_keystore_password),
+            "admin_subject": stripped_or_none(peer_data.admin_subject),
+            "admin_key": stripped_or_none(peer_data.admin_key),
+            "admin_key_password": stripped_or_none(peer_data.admin_key_password),
+            "admin_csr": stripped_or_none(peer_data.admin_csr),
+            "admin_chain": stripped_or_none(peer_data.admin_chain),
+            "admin_cert": stripped_or_none(peer_data.admin_cert),
+            "admin_ca_cert": stripped_or_none(peer_data.admin_ca_cert),
+        }
 
-            m.admin_password = stripped_or_none(peer_data.admin_password)
-            m.admin_hashed_password = peer_data.admin_hashed_password
-            m.kibana_server_password = peer_data.kibana_server_password
-            m.kibana_server_hashed_password = peer_data.kibana_server_hashed_password
-            m.monitor_password = peer_data.monitor_password
-            m.monitor_hashed_password = peer_data.monitor_hashed_password
+        if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
+            items["admin_user_initialized"] = True
 
-            m.admin_truststore_password = stripped_or_none(peer_data.admin_truststore_password)
-            m.admin_keystore_password = stripped_or_none(peer_data.admin_keystore_password)
-            m.admin_subject = stripped_or_none(peer_data.admin_subject)
-            m.admin_key = stripped_or_none(peer_data.admin_key)
-            m.admin_key_password = stripped_or_none(peer_data.admin_key_password)
-            m.admin_csr = stripped_or_none(peer_data.admin_csr)
-            m.admin_chain = stripped_or_none(peer_data.admin_chain)
-            m.admin_cert = stripped_or_none(peer_data.admin_cert)
-            m.admin_ca_cert = stripped_or_none(peer_data.admin_ca_cert)
+        if peer_data.plugin_config_info:
+            items["plugin_config_info"] = peer_data.plugin_config_info
+        if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
+            items["plugin_secrets"] = peer_data.plugin_secrets
 
-            if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
-                m.admin_user_initialized = True
-
-            if peer_data.plugin_config_info:
-                m.plugin_config_info = peer_data.plugin_config_info
-            if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
-                m.plugin_secrets = peer_data.plugin_secrets
+        self.state.application.update(items)
 
     def update_main_orchestrator_registered(self, rel_id: int, value: bool) -> None:
         """Update whether the main orchestrator is registered in the relation data."""
@@ -140,7 +139,7 @@ class PeerClusterManager(BaseManager):
         )
 
         if local_peer_cluster_data:
-            local_peer_cluster_data.main_orchestrator_registered = value
+            local_peer_cluster_data.update({"main_orchestrator_registered": value})
         else:
             logger.debug(
                 "No local peer cluster data found for relation id %s to update main_orchestrator_registered",
@@ -152,7 +151,7 @@ class PeerClusterManager(BaseManager):
         if local_peer_cluster_data := self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=rel_id, remote=False
         ):
-            del local_peer_cluster_data.main_orchestrator_registered
+            local_peer_cluster_data.delete("main_orchestrator_registered")
 
     def reconcile_orchestrators_from_provider_data(
         self,
@@ -214,8 +213,8 @@ class PeerClusterManager(BaseManager):
                     f"{trigger}_app": trigger_app,
                 }
             )
-            self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
-                local_orchestrators
+            self.state.application.update(
+                {"orchestrators": PeerClusterOrchestrators.from_dict(local_orchestrators)}
             )
 
         return PeerClusterOrchestrators.from_dict(local_orchestrators)
@@ -372,7 +371,7 @@ class PeerClusterManager(BaseManager):
         if not local_peer_cluster:
             return None
 
-        local_peer_cluster.security_index_initialised = True
+        local_peer_cluster.update({"security_index_initialised": True})
 
     def cm_nodes(self, orchestrators: PeerClusterOrchestrators) -> list[Node]:
         """Fetch the cm nodes passed from the peer cluster relation not api call."""
@@ -437,9 +436,9 @@ class PeerClusterManager(BaseManager):
         if not local_peer_cluster:
             return
         if deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR:
-            local_peer_cluster.is_candidate_failover_orchestrator = True
+            local_peer_cluster.update({"is_candidate_failover_orchestrator": True})
         else:
-            del local_peer_cluster.is_candidate_failover_orchestrator
+            local_peer_cluster.delete("is_candidate_failover_orchestrator")
 
     def delete_departed_orchestrator(self, event_src_cluster_type: str) -> None:
         """Delete the orchestrator that left the relation from the state and cluster fleet."""
@@ -454,10 +453,10 @@ class PeerClusterManager(BaseManager):
 
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.pop(orchestrator_app_id, None)
-        self.state.application.cluster_fleet_apps = cluster_fleet_apps
+        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
 
         orchestrators.delete(event_src_cluster_type)
-        self.state.application.orchestrators = orchestrators
+        self.state.application.update({"orchestrators": orchestrators})
 
     def refresh_requirer_relation_data(self) -> None:
         """Refresh the peer cluster rel data (planned units).

@@ -69,7 +69,7 @@ class PebbleObserver(Object):
             env=new_env,
         )
 
-        self._charm.state.server.pebble_observer_pid = process.pid
+        self._charm.state.server.update({"pebble_observer_pid": process.pid})
         logger.info("Started pebble observer with PID %d", process.pid)
 
     def stop(self) -> None:
@@ -83,4 +83,4 @@ class PebbleObserver(Object):
         except OSError:
             pass
 
-        del self._charm.state.server.pebble_observer_pid
+        self._charm.state.server.delete("pebble_observer_pid")

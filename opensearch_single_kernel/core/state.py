@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import socket
+from functools import cached_property
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -60,23 +61,28 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchInvalidStorageTypeError,
 )
 from opensearch_single_kernel.core.base_models import Node, PeerClusterApp
-from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
-from opensearch_single_kernel.core.lock import (
+from opensearch_single_kernel.core.relation_models import (
+    JWTAuthConfiguration,
     LockAppStateModel,
     LockServerStateModel,
-)
-from opensearch_single_kernel.core.peer_app import OpenSearchAppPeerModel
-from opensearch_single_kernel.core.peer_cluster import (
+    OpenSearchAppPeerModel,
+    OpenSearchServerPeerModel,
     PeerClusterAppModel,
     PeerClusterServerModel,
-)
-from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.relation_base import (
-    build_and_bound_model,
-)
-from opensearch_single_kernel.core.upgrades import (
     UpgradeAppModel,
     UpgradeServerModel,
+)
+from opensearch_single_kernel.core.relations import (
+    LockApplication,
+    LockServer,
+    OpenSearchApplication,
+    OpenSearchServer,
+    UpgradeApplication,
+    UpgradeServer,
+)
+from opensearch_single_kernel.core.relations_cluster import (
+    PeerClusterApplication,
+    PeerClusterServer,
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
@@ -112,6 +118,7 @@ class ClusterState(Object):
         self.substrate = substrate
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
 
+        # only used for large deployments
         self.repositories: dict[
             tuple[Any, int, Any | None], RepositoryInterface[OpsRepository, BaseModel]
         ] = {}
@@ -228,16 +235,8 @@ class ClusterState(Object):
         """Relation name for the given side: provider = orchestrator, requirer = consumer."""
         return PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
 
-    # --- Repositories ---
-    def _live_relation(self, relation_name: str, relation_id: int) -> Relation | None:
-        """Return the relation for the given id only if it is live for this unit.
-
-        ops' `get_relation` never returns None for an unknown/`-1`/departing id — it
-        returns a placeholder `Relation(active=False)`. Building a model from such a
-        relation reads `remote_model`, which raises `RelationNotFoundError`. Callers
-        handed an arbitrary/merged rel id must go through here so the not-live case is a
-        clean None instead of a crash.
-        """
+    def get_relation_from_name(self, relation_name: str, relation_id: int) -> Relation | None:
+        """Return the relation for the given name and id."""
         relation = self.model.get_relation(relation_name, relation_id)
         if not relation or not relation.active:
             return None
@@ -255,36 +254,23 @@ class ClusterState(Object):
         return repository
 
     @property
-    def server_upgrade(self) -> UpgradeServerModel:
+    def server_upgrade(self) -> UpgradeServer:
         """Get state of upgrade relation for current unit."""
-        repository = self.get_repository_from_interface(
-            self.upgrade_unit_interface, self.upgrade_relation, self.model.unit
-        )
-        if repository is None:
-            return UpgradeServerModel()
-        return build_and_bound_model(repository, UpgradeServerModel)
+        return UpgradeServer(self.upgrade_relation, self.upgrade_unit_interface, self.model.unit)
 
     @property
-    def application_upgrade(self) -> UpgradeAppModel:
+    def application_upgrade(self) -> UpgradeApplication:
         """Get application state of upgrade relation."""
-        repository = self.get_repository_from_interface(
-            self.upgrade_app_interface, self.upgrade_relation, self.model.app
+        return UpgradeApplication(
+            self.upgrade_relation, self.upgrade_app_interface, self.model.app
         )
-        if repository is None:
-            return UpgradeAppModel()
-        return build_and_bound_model(repository, UpgradeAppModel)
 
     @property
-    def sorted_upgrades_units(self) -> list[UpgradeServerModel]:
+    def sorted_upgrades_units(self) -> list[UpgradeServer]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
             [
-                build_and_bound_model(
-                    self.get_repository_from_interface(
-                        self.upgrade_unit_interface, self.upgrade_relation, unit
-                    ),
-                    UpgradeServerModel,
-                )
+                UpgradeServer(self.upgrade_relation, self.upgrade_unit_interface, unit)
                 for unit in sorted(
                     (self.model.unit, *self.upgrade_relation.units),
                     key=lambda unit: int(unit.name.split("/")[1]),
@@ -297,8 +283,8 @@ class ClusterState(Object):
 
     def get_peer_cluster_app_model(
         self, relation: Relation, is_provider: bool, remote: bool
-    ) -> PeerClusterAppModel | None:
-        """Bind a PeerClusterAppModel to one peer-cluster relation app databag."""
+    ) -> PeerClusterApplication | None:
+        """Wrap one peer-cluster relation app databag with a PeerClusterApplication."""
         interface = (
             self.peer_cluster_orchestrator_repository
             if is_provider
@@ -307,11 +293,9 @@ class ClusterState(Object):
         component = relation.app if remote else self.model.app
 
         try:
-            return build_and_bound_model(
+            return PeerClusterApplication(
                 self.get_repository_from_interface(interface, relation, component),
-                PeerClusterAppModel,
                 skip_secrets=not is_provider,
-                read_only=remote,
             )
         except SecretNotFoundError:
             logger.warning(
@@ -328,7 +312,7 @@ class ClusterState(Object):
 
     def peer_cluster_by_relation_id(
         self, relation_id: int, is_provider: bool, remote: bool = False
-    ) -> PeerClusterAppModel | None:
+    ) -> PeerClusterApplication | None:
         """Return the current related peer cluster if any.
 
         Args:
@@ -338,13 +322,13 @@ class ClusterState(Object):
               or the local one (current cluster as part of the relation).
         """
         relation_name = self.peer_cluster_relation_name(is_provider)
-        if not (relation := self._live_relation(relation_name, relation_id)):
+        if not (relation := self.get_relation_from_name(relation_name, relation_id)):
             return None
         return self.get_peer_cluster_app_model(relation, is_provider, remote)
 
     def peer_clusters(
         self, is_provider: bool, must_have_units: bool = True, remote: bool = False
-    ) -> list[PeerClusterAppModel]:
+    ) -> list[PeerClusterApplication]:
         """Return the list of peer clusters for each relations."""
         clusters = []
         for rel in self.model.relations[self.peer_cluster_relation_name(is_provider)]:
@@ -356,7 +340,7 @@ class ClusterState(Object):
 
     def _peer_clusters_servers(
         self, is_provider: bool, remote: bool = False
-    ) -> list[PeerClusterServerModel]:
+    ) -> list[PeerClusterServer]:
         """Return the list of peer cluster servers for each relations.
 
         Args:
@@ -366,7 +350,7 @@ class ClusterState(Object):
         """
         relation_name = self.peer_cluster_relation_name(is_provider)
         return [
-            build_and_bound_model(
+            PeerClusterServer(
                 self.get_repository_from_interface(
                     RepositoryInterface(
                         self.model,
@@ -378,8 +362,6 @@ class ClusterState(Object):
                     rel,
                     unit,
                 ),
-                PeerClusterServerModel,
-                read_only=remote,
             )
             for rel in self.model.relations[relation_name]
             for unit in (rel.units if remote else [self.model.unit])
@@ -389,12 +371,12 @@ class ClusterState(Object):
         self,
         is_provider: bool,
         relation_id: int,
-    ) -> PeerClusterServerModel | None:
-        """Return this unit's peer cluster server model for the given relation id."""
+    ) -> PeerClusterServer | None:
+        """Return this unit's peer cluster server wrapper for the given relation id."""
         relation_name = self.peer_cluster_relation_name(is_provider)
-        if relation := self._live_relation(relation_name, relation_id):
+        if relation := self.get_relation_from_name(relation_name, relation_id):
             unit = self.model.unit
-            return build_and_bound_model(
+            return PeerClusterServer(
                 self.get_repository_from_interface(
                     RepositoryInterface(
                         self.model,
@@ -406,11 +388,10 @@ class ClusterState(Object):
                     relation,
                     unit,
                 ),
-                PeerClusterServerModel,
             )
         return None
 
-    def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServerModel]:
+    def all_peer_clusters_servers(self, remote: bool = False) -> list[PeerClusterServer]:
         """Return the list of all peer cluster servers for each relations."""
         return self._peer_clusters_servers(
             is_provider=False, remote=remote
@@ -428,26 +409,16 @@ class ClusterState(Object):
 
     # -- Core Components
 
-    @property
-    def server(self) -> OpenSearchServerPeerModel:
+    @cached_property
+    def server(self) -> OpenSearchServer:
         """Get the opensearch unit state."""
-        repository = self.get_repository_from_interface(
-            self.peer_unit_interface, self.peer_relation, self.model.unit
-        )
-        if repository is None:
-            return OpenSearchServerPeerModel()
-        return build_and_bound_model(repository, OpenSearchServerPeerModel)
+        return OpenSearchServer(self.peer_relation, self.peer_unit_interface, self.model.unit)
 
     @property
-    def application_servers(self) -> list[OpenSearchServerPeerModel]:
+    def application_servers(self) -> list[OpenSearchServer]:
         """Return all opensearch servers using peer relation."""
         return [
-            build_and_bound_model(
-                self.get_repository_from_interface(
-                    self.peer_unit_interface, self.peer_relation, unit
-                ),
-                OpenSearchServerPeerModel,
-            )
+            OpenSearchServer(self.peer_relation, self.peer_unit_interface, unit)
             for unit in self.all_units
         ]
 
@@ -456,15 +427,10 @@ class ClusterState(Object):
         """Whether this unit is the leader of the application."""
         return self.model.unit.is_leader()
 
-    @property
-    def application(self) -> OpenSearchAppPeerModel:
+    @cached_property
+    def application(self) -> OpenSearchApplication:
         """Get the opensearch application state."""
-        repository = self.get_repository_from_interface(
-            self.peer_app_interface, self.peer_relation, self.model.app
-        )
-        if repository is None:
-            return OpenSearchAppPeerModel()
-        return build_and_bound_model(repository, OpenSearchAppPeerModel)
+        return OpenSearchApplication(self.peer_relation, self.peer_app_interface, self.model.app)
 
     def get_dashboards_relations(self) -> list[Relation]:
         """Return relations that have requested the kibana server role."""
@@ -537,41 +503,26 @@ class ClusterState(Object):
             return False
 
     @property
-    def server_lock(self) -> LockServerStateModel:
+    def server_lock(self) -> LockServer:
         """Get state of lock relation for current unit."""
-        repository = self.get_repository_from_interface(
-            self.lock_unit_interface, self.lock_relation, self.model.unit
-        )
-        if repository is None:
-            return LockServerStateModel()
-        return build_and_bound_model(repository, LockServerStateModel)
+        return LockServer(self.lock_relation, self.lock_unit_interface, self.model.unit)
 
     @property
-    def lock_granted_server(self) -> LockServerStateModel | None:
+    def lock_granted_server(self) -> LockServer | None:
         """Get state of lock relation for unit granted with lock."""
         granted_unit_name = self.application_lock.unit_with_lock
         if not granted_unit_name:
             return None
 
         granted_unit = self.model.get_unit(lock_unit_name(granted_unit_name))
-        return build_and_bound_model(
-            self.get_repository_from_interface(
-                self.lock_unit_interface, self.lock_relation, granted_unit
-            ),
-            LockServerStateModel,
-        )
+        return LockServer(self.lock_relation, self.lock_unit_interface, granted_unit)
 
     @property
-    def server_locks(self) -> list[LockServerStateModel]:
+    def server_locks(self) -> list[LockServer]:
         """Get state of lock relation for all units in it."""
         return (
             [
-                build_and_bound_model(
-                    self.get_repository_from_interface(
-                        self.lock_unit_interface, self.lock_relation, unit
-                    ),
-                    LockServerStateModel,
-                )
+                LockServer(self.lock_relation, self.lock_unit_interface, unit)
                 for unit in [self.model.unit, *self.lock_relation.units]
             ]
             if self.lock_relation
@@ -579,14 +530,9 @@ class ClusterState(Object):
         )
 
     @property
-    def application_lock(self) -> LockAppStateModel:
+    def application_lock(self) -> LockApplication:
         """Get application state of lock relation."""
-        repository = self.get_repository_from_interface(
-            self.lock_app_interface, self.lock_relation, self.model.app
-        )
-        if repository is None:
-            return LockAppStateModel()
-        return build_and_bound_model(repository, LockAppStateModel)
+        return LockApplication(self.lock_relation, self.lock_app_interface, self.model.app)
 
     # -- Cluster State Properties
 
@@ -747,17 +693,15 @@ class ClusterState(Object):
         # if this flag is set, the CA rotation routine is complete for this unit
         if self.server.tls_ca_renewed and self.ca_and_certs_rotation_complete_in_cluster:
             # both CA rotation and certs rotation completed in the cluster
-            del self.server.tls_ca_renewing
-            del self.server.tls_ca_renewed
+            self.server.delete("tls_ca_renewing", "tls_ca_renewed")
             for peer_cluster_server in peer_cluster_servers:
-                del peer_cluster_server.tls_ca_renewing
-                del peer_cluster_server.tls_ca_renewed
+                peer_cluster_server.delete("tls_ca_renewing", "tls_ca_renewed")
             return
 
         # this means only the CA rotation completed, still need to create certificates
-        self.server.tls_ca_renewed = True
+        self.server.update({"tls_ca_renewed": True})
         for peer_cluster_server in peer_cluster_servers:
-            peer_cluster_server.tls_ca_renewed = True
+            peer_cluster_server.update({"tls_ca_renewed": True})
 
     @property
     def peer_unit_hosts(self) -> set[str]:
@@ -854,7 +798,7 @@ class ClusterState(Object):
             and self.is_failover_and_sole_data_app
             and not self.application.security_index_initialised
         ):
-            self.server.cluster_manager_removed = True
+            self.server.update({"cluster_manager_removed": True})
             if "cluster_manager" in computed_roles:
                 computed_roles.remove("cluster_manager")
 
@@ -1080,9 +1024,14 @@ class ClusterState(Object):
         else:
             return of_main or of_failover
 
-    @property
-    def main_orchestrator_app(self) -> PeerClusterAppModel | None:
-        """Return the main orchestrator's remote app model, or None if not related to one."""
+    @cached_property
+    def main_orchestrator_app(self) -> PeerClusterApplication | None:
+        """Return the main orchestrator's remote app model, or None if not related to one.
+
+        Cached for the state's (per-event) lifetime: this is a read-only remote
+        databag, so there is no in-hook write that could make the snapshot stale,
+        and caching avoids rebuilding the model on every access.
+        """
         if (
             not (orchestrators := self.application.orchestrators)
             or orchestrators.main_rel_id == -1

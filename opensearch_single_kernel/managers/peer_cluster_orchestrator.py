@@ -33,6 +33,7 @@ from opensearch_single_kernel.core.base_models import (
 from opensearch_single_kernel.core.peer_cluster import (
     PeerClusterAppModel,
 )
+from opensearch_single_kernel.core.relations_cluster import PeerClusterApplication
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.core.storage import (
     AzureRelData,
@@ -102,81 +103,91 @@ class PeerClusterOrchestratorManager(BaseManager):
                 relation_id=event_rel_id, is_provider=True, remote=False
             )
             if local_peer_cluster:
-                local_peer_cluster.trigger = cluster_type
+                local_peer_cluster.update({"trigger": cluster_type})
 
         # update reported orchestrators on local orchestrator
         if cluster_type == "main":
             orchestrators.main_app = deployment_description.app
         else:
             orchestrators.failover_app = deployment_description.app
-        self.state.application.orchestrators = orchestrators
+        self.state.application.update({"orchestrators": orchestrators})
 
         should_wait = rel_err_data and rel_err_data.should_wait
 
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            with local_peer_cluster.update():
-                local_peer_cluster.initialize_empty_secrets()
-                orchestrators = local_peer_cluster.orchestrators or PeerClusterOrchestrators()
-                logger.debug(
-                    "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
-                    local_peer_cluster.relation.app.name,
-                    orchestrators,
-                    cluster_type,
-                    deployment_description.app.to_dict(),
+            # Accumulate every field change for this relation and persist once (a single
+            # databag write per requirer, instead of one write per field/helper).
+            changes: dict = local_peer_cluster.empty_secret_placeholders()
+            orchestrators = local_peer_cluster.orchestrators or PeerClusterOrchestrators()
+            logger.debug(
+                "Provider Updating orchestrators for requirer %s previous orchestrators %s. Updating with cluster type %s with %s",
+                local_peer_cluster.relation.app.name,
+                orchestrators,
+                cluster_type,
+                deployment_description.app.to_dict(),
+            )
+
+            if cluster_type == "main":
+                orchestrators.main_app = deployment_description.app if has_units else None
+                orchestrators.main_rel_id = local_peer_cluster.relation.id if has_units else -1
+            else:
+                orchestrators.failover_app = deployment_description.app if has_units else None
+                orchestrators.failover_rel_id = local_peer_cluster.relation.id if has_units else -1
+
+            # in case of demotion update the trigger
+            changes["trigger"] = cluster_type
+            changes["orchestrators"] = orchestrators
+            if remote_peer_cluster:
+                changes.update(self._rel_data_changes(remote_peer_cluster))
+            logger.debug(
+                f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
+            )
+
+            # share object-storage backup credentials with the requirer sub-cluster
+            changes.update(self._backup_secret_changes())
+
+            if remote_peer_cluster:
+                changes["rel_data_hash"] = self._rel_data_hash(
+                    local_peer_cluster, remote_peer_cluster, changes
                 )
 
-                if cluster_type == "main":
-                    orchestrators.main_app = deployment_description.app if has_units else None
-                    orchestrators.main_rel_id = local_peer_cluster.relation.id if has_units else -1
-                else:
-                    orchestrators.failover_app = deployment_description.app if has_units else None
-                    orchestrators.failover_rel_id = (
-                        local_peer_cluster.relation.id if has_units else -1
-                    )
-
-                # in case of demotion update the trigger
-                local_peer_cluster.trigger = cluster_type
-                local_peer_cluster.orchestrators = orchestrators
-                if remote_peer_cluster:
-                    self.apply_rel_data(local_peer_cluster, remote_peer_cluster)
+            # there is no error to broadcast - we clear any previously broadcasted error.
+            # None resets the field, so write_model drops it from the databag.
+            if not rel_err_data:
                 logger.debug(
-                    f"Current rel error data for {local_peer_cluster.relation.app.name} is {local_peer_cluster.error_data}"
+                    f"No rel error data to set for {local_peer_cluster.relation.app.name}. Deleting any existing error data."
                 )
+                changes["error_data"] = None
+            else:
+                logger.debug(
+                    f"Setting rel error data for {local_peer_cluster.relation.app.name} with blocked message: {rel_err_data.blocked_message}"
+                )
+                changes["error_data"] = rel_err_data
 
-                # share object-storage backup credentials with the requirer sub-cluster
-                self.broadcast_backup_secrets(local_peer_cluster)
+            # if no planned units, delete relation data as it won't get updated
+            if not has_units:
+                changes["error_data"] = None
 
-                if remote_peer_cluster:
-                    self.refresh_hash(local_peer_cluster, remote_peer_cluster)
-
-                # there is no error to broadcast - we clear any previously broadcasted error
-                if not rel_err_data:
-                    logger.debug(
-                        f"No rel error data to set for {local_peer_cluster.relation.app.name}. Deleting any existing error data."
-                    )
-                    del local_peer_cluster.error_data
-                else:
-                    logger.debug(
-                        f"Setting rel error data for {local_peer_cluster.relation.app.name} with blocked message: {rel_err_data.blocked_message}"
-                    )
-                    local_peer_cluster.error_data = rel_err_data
-
-                # if no planned units, delete relation data as it won't get updated
-                if not has_units:
-                    del local_peer_cluster.error_data
+            local_peer_cluster.update(changes)
         return not should_wait
 
-    def broadcast_backup_secrets(self, local_peer_cluster: PeerClusterAppModel) -> None:
-        """Share this orchestrator's object-storage credentials with a requirer sub-cluster."""
+    def _backup_secret_changes(self) -> dict:
+        """Return backup-secret field changes for the current storage relations (no write).
+
+        A cloud with no relation has its fields cleared (set to None); a cloud whose
+        credentials are not published/complete yet is omitted so its previous value is left
+        untouched until a later refresh.
+        """
+        changes: dict = {}
         for cloud, storage_type in (
             ("s3", ObjectStorageType.S3),
             ("azure", ObjectStorageType.AZURE),
             ("gcs", ObjectStorageType.GCS),
         ):
             if not getattr(self.state, f"{cloud}_relation"):
-                self.set_backup_secrets(local_peer_cluster, cloud, None)
+                changes.update(self._backup_secret_fields(cloud, None))
                 continue
             try:
                 connection_info = self.state.get_storage_connection_info_from_relation(
@@ -187,113 +198,117 @@ class PeerClusterOrchestratorManager(BaseManager):
                 OpenSearchInvalidStorageTypeError,
                 OpenSearchObjectStorageConfigValidationError,
             ) as e:
-                # credentials not yet published/complete; leave any previous value untouched
-                # and let a later refresh broadcast them.
                 logger.warning("Backup credentials for %s not ready to broadcast: %s", cloud, e)
                 continue
             reldata = getattr(config, cloud, None) if config else None
             if reldata is not None:
-                self.set_backup_secrets(local_peer_cluster, cloud, reldata)
+                changes.update(self._backup_secret_fields(cloud, reldata))
+        return changes
 
-    def set_backup_secrets(
-        self,
-        local_peer_cluster: PeerClusterAppModel,
-        cloud: str,
-        reldata: S3RelData | AzureRelData | GcsRelData | None,
-    ) -> None:
-        """Store a cloud's secret credentials in the top-level backup-secret fields.
-
-        Passing ``reldata=None`` clears the fields (e.g. the backup relation went away).
-        Call inside an ``update()`` on ``local_peer_cluster``.
-        """
+    @staticmethod
+    def _backup_secret_fields(
+        cloud: str, reldata: S3RelData | AzureRelData | GcsRelData | None
+    ) -> dict:
+        """Return the top-level backup-secret fields for one cloud (``None`` clears them)."""
         if cloud == "s3":
-            local_peer_cluster.s3_access_key = getattr(reldata, "access_key", None)
-            local_peer_cluster.s3_secret_key = getattr(reldata, "secret_key", None)
-            local_peer_cluster.s3_tls_ca_chain = getattr(reldata, "tls_ca_chain", None)
-        elif cloud == "azure":
-            local_peer_cluster.azure_storage_account = getattr(reldata, "storage_account", None)
-            local_peer_cluster.azure_secret_key = getattr(reldata, "secret_key", None)
-        elif cloud == "gcs":
-            local_peer_cluster.gcs_secret_key = getattr(reldata, "secret_key", None)
+            return {
+                "s3_access_key": getattr(reldata, "access_key", None),
+                "s3_secret_key": getattr(reldata, "secret_key", None),
+                "s3_tls_ca_chain": getattr(reldata, "tls_ca_chain", None),
+            }
+        if cloud == "azure":
+            return {
+                "azure_storage_account": getattr(reldata, "storage_account", None),
+                "azure_secret_key": getattr(reldata, "secret_key", None),
+            }
+        return {"gcs_secret_key": getattr(reldata, "secret_key", None)}
 
-    def apply_rel_data(
-        self, local_peer_cluster: PeerClusterAppModel, source: PeerClusterAppModel
-    ) -> None:
-        """Copy orchestrator-broadcast fields from ``source`` into the relation databag."""
-        with local_peer_cluster.update() as m:
-            m.deployment_description = source.deployment_description
-            m.security_index_initialised = source.security_index_initialised
-            m.first_data_node = source.first_data_node or ""
-            m.nodes_config = source.nodes_config
-            m.plugin_config_info = source.plugin_config_info
+    def _rel_data_changes(self, source: PeerClusterAppModel) -> dict:
+        """Return the orchestrator-broadcast field changes copied from ``source`` (no write)."""
+        return {
+            "deployment_description": source.deployment_description,
+            "security_index_initialised": source.security_index_initialised,
+            "first_data_node": source.first_data_node or "",
+            "nodes_config": source.nodes_config,
+            "plugin_config_info": source.plugin_config_info,
             # Passwords
-            m.admin_password = source.admin_password
-            m.admin_hashed_password = source.admin_hashed_password
-            m.kibana_server_password = source.kibana_server_password
-            m.kibana_server_hashed_password = source.kibana_server_hashed_password
-            m.monitor_password = source.monitor_password
-            m.monitor_hashed_password = source.monitor_hashed_password
+            "admin_password": source.admin_password,
+            "admin_hashed_password": source.admin_hashed_password,
+            "kibana_server_password": source.kibana_server_password,
+            "kibana_server_hashed_password": source.kibana_server_hashed_password,
+            "monitor_password": source.monitor_password,
+            "monitor_hashed_password": source.monitor_hashed_password,
             # Plugin secrets
-            m.plugin_secrets = source.plugin_secrets
+            "plugin_secrets": source.plugin_secrets,
             # Admin TLS secrets
-            m.admin_truststore_password = stripped_or_none(source.admin_truststore_password)
-            m.admin_keystore_password = stripped_or_none(source.admin_keystore_password)
-            m.admin_subject = stripped_or_none(source.admin_subject)
-            m.admin_key = stripped_or_none(source.admin_key)
-            m.admin_key_password = stripped_or_none(source.admin_key_password)
-            m.admin_csr = stripped_or_none(source.admin_csr)
-            m.admin_chain = stripped_or_none(source.admin_chain)
-            m.admin_cert = stripped_or_none(source.admin_cert)
-            m.admin_ca_cert = stripped_or_none(source.admin_ca_cert)
+            "admin_truststore_password": stripped_or_none(source.admin_truststore_password),
+            "admin_keystore_password": stripped_or_none(source.admin_keystore_password),
+            "admin_subject": stripped_or_none(source.admin_subject),
+            "admin_key": stripped_or_none(source.admin_key),
+            "admin_key_password": stripped_or_none(source.admin_key_password),
+            "admin_csr": stripped_or_none(source.admin_csr),
+            "admin_chain": stripped_or_none(source.admin_chain),
+            "admin_cert": stripped_or_none(source.admin_cert),
+            "admin_ca_cert": stripped_or_none(source.admin_ca_cert),
+        }
 
-    def refresh_hash(
-        self, local_peer_cluster: PeerClusterAppModel, source: PeerClusterAppModel
-    ) -> None:
-        """Recompute ``rel_data_hash`` over the full payload, secrets included."""
+    def _rel_data_hash(
+        self,
+        local_peer_cluster: PeerClusterApplication,
+        source: PeerClusterAppModel,
+        changes: dict,
+    ) -> str:
+        """Recompute ``rel_data_hash`` over the full payload (secrets included), post-merge.
+
+        The secret values are read from the accumulated ``changes`` (the values about to be
+        written) falling back to the current model, so the hash reflects the same state a
+        single ``update(changes)`` is about to persist.
+        """
         non_secret = source.model_dump(mode="json", context={"skip_secrets": True})
         secret_values = {
-            name: getattr(local_peer_cluster, name)
-            for name, field in type(local_peer_cluster).model_fields.items()
+            name: changes[name] if name in changes else getattr(local_peer_cluster, name)
+            for name, field in type(local_peer_cluster.model).model_fields.items()
             if field.exclude
         }
-        local_peer_cluster.rel_data_hash = sha1(
-            json.dumps([non_secret, secret_values], sort_keys=True).encode()
-        ).hexdigest()
+        return sha1(json.dumps([non_secret, secret_values], sort_keys=True).encode()).hexdigest()
 
-    def clear_rel_data(self, local_peer_cluster: PeerClusterAppModel) -> None:
-        """Reset all orchestrator-broadcast fields to their defaults."""
-        with local_peer_cluster.update() as m:
-            m.deployment_description = None
-            m.security_index_initialised = False
-            m.first_data_node = ""
-            m.nodes_config = {}
-            m.plugin_config_info = {}
-            m.admin_password = None
-            m.admin_hashed_password = None
-            m.kibana_server_password = None
-            m.kibana_server_hashed_password = None
-            m.monitor_password = None
-            m.monitor_hashed_password = None
-            m.plugin_secrets = None
-            m.admin_truststore_password = None
-            m.admin_keystore_password = None
-            m.admin_subject = None
-            m.admin_key = None
-            m.admin_key_password = None
-            m.admin_csr = None
-            m.admin_chain = None
-            m.admin_cert = None
-            m.admin_ca_cert = None
-            # Backup storage secrets
-            m.s3_access_key = None
-            m.s3_secret_key = None
-            m.s3_tls_ca_chain = None
-            m.azure_storage_account = None
-            m.azure_secret_key = None
-            m.gcs_secret_key = None
-            # emptying the secret fields above deletes the backing group secrets, so
-            # drop the marker to let initialize_empty_secrets() re-create them later
-            m.pc_secrets_initialized = False
+    def clear_rel_data(self, local_peer_cluster: PeerClusterApplication) -> None:
+        """Reset all orchestrator-broadcast fields to their defaults in a single write."""
+        local_peer_cluster.update(
+            {
+                "deployment_description": None,
+                "security_index_initialised": False,
+                "first_data_node": "",
+                "nodes_config": {},
+                "plugin_config_info": {},
+                "admin_password": None,
+                "admin_hashed_password": None,
+                "kibana_server_password": None,
+                "kibana_server_hashed_password": None,
+                "monitor_password": None,
+                "monitor_hashed_password": None,
+                "plugin_secrets": None,
+                "admin_truststore_password": None,
+                "admin_keystore_password": None,
+                "admin_subject": None,
+                "admin_key": None,
+                "admin_key_password": None,
+                "admin_csr": None,
+                "admin_chain": None,
+                "admin_cert": None,
+                "admin_ca_cert": None,
+                # Backup storage secrets
+                "s3_access_key": None,
+                "s3_secret_key": None,
+                "s3_tls_ca_chain": None,
+                "azure_storage_account": None,
+                "azure_secret_key": None,
+                "gcs_secret_key": None,
+                # emptying the secret fields above deletes the backing group secrets, so
+                # drop the marker to let initialize_empty_secrets() re-create them later
+                "pc_secrets_initialized": False,
+            }
+        )
 
     def to_peer_cluster_rel_data(
         self,
@@ -541,7 +556,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             return False
 
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            local_peer_cluster.error_data = rel_err_data
+            local_peer_cluster.update({"error_data": rel_err_data})
 
         # delete trigger
         if local_peer_cluster := self.state.peer_cluster_by_relation_id(
@@ -552,7 +567,7 @@ class PeerClusterOrchestratorManager(BaseManager):
                 local_peer_cluster.relation.app.name,
                 rel_err_data.blocked_message,
             )
-            del local_peer_cluster.trigger
+            local_peer_cluster.delete("trigger")
         return True
 
     def save_cluster_fleet_apps(
@@ -579,15 +594,15 @@ class PeerClusterOrchestratorManager(BaseManager):
         if p_cluster_app:
             update_cluster_fleet(cluster_fleet_apps, p_cluster_app)
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            local_peer_cluster.cluster_fleet_apps = cluster_fleet_apps
+            local_peer_cluster.update({"cluster_fleet_apps": cluster_fleet_apps})
 
-        self.state.application.cluster_fleet_apps = cluster_fleet_apps
+        self.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
 
         # store the trigger app (not current) with relation id, useful for departed rel event
         if trigger_rel_id and p_cluster_app:
             cluster_fleet_apps_rels = self.state.application.cluster_fleet_apps_rels
             update_cluster_fleet(cluster_fleet_apps_rels, p_cluster_app, key=trigger_rel_id)
-            self.state.application.cluster_fleet_apps_rels = cluster_fleet_apps_rels
+            self.state.application.update({"cluster_fleet_apps_rels": cluster_fleet_apps_rels})
 
     def promote_failover(self) -> None:
         """Handle failover promotion to main orchestrator."""
@@ -595,16 +610,16 @@ class PeerClusterOrchestratorManager(BaseManager):
         # remove old main and promote new failover
         orchestrators = self.state.application.orchestrators
         orchestrators.promote_failover()
-        self.state.application.orchestrators = orchestrators
+        self.state.application.update({"orchestrators": orchestrators})
         for p_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            p_cluster.trigger = "main"
+            p_cluster.update({"trigger": "main"})
 
     def reconcile_security_index_initialised(self) -> None:
         """Check if security index is initialised in any cluster and update state."""
         if self.state.security_index_initialised_in_all_clusters:
-            self.state.application.security_index_initialised = True
+            self.state.application.update({"security_index_initialised": True})
             # clean up the first data node attribute when security index is initialised
-            del self.state.application.first_data_node
+            self.state.application.delete("first_data_node")
 
     def broadcast_new_failover_app(self, peer_cluster_app: PeerClusterApp) -> None:
         """Broadcasts the new failover in all the cluster fleet"""
@@ -618,7 +633,7 @@ class PeerClusterOrchestratorManager(BaseManager):
             # Update the orchestrators
             orchestrators = local_p_cluster.orchestrators or PeerClusterOrchestrators()
             orchestrators.failover_app = candidate_failover_app
-            local_p_cluster.orchestrators = orchestrators
+            local_p_cluster.update({"orchestrators": orchestrators})
 
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""
@@ -632,10 +647,14 @@ class PeerClusterOrchestratorManager(BaseManager):
         )
         if local_peer_cluster:
             self.clear_rel_data(local_peer_cluster)
-            del local_peer_cluster.rel_data_hash
-            del local_peer_cluster.error_data
-            del local_peer_cluster.cluster_fleet_apps
-            del local_peer_cluster.orchestrators
-            del local_peer_cluster.trigger
-            for cloud in ("gcs", "azure", "s3"):
-                delattr(local_peer_cluster, cloud)
+            local_peer_cluster.delete(
+                "rel_data_hash",
+                "error_data",
+                "cluster_fleet_apps",
+                "orchestrators",
+                "trigger",
+                # legacy top-level keys kept for backward-compatible cleanup
+                "gcs",
+                "azure",
+                "s3",
+            )

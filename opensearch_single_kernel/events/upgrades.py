@@ -28,7 +28,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.upgrades import (
+from opensearch_single_kernel.core.base_models import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
 )
@@ -83,9 +83,9 @@ class UpgradesEventsHandler(Object):
     def _on_upgrade_peer_relation_created(self, _) -> None:
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
-            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-        self.charm.state.server_upgrade.workload_version = (
-            self.charm.upgrades_manager.current_versions.workload
+            self.charm.state.server_upgrade.update({"snap_revision": OPENSEARCH_SNAP_REVISION})
+        self.charm.state.server_upgrade.update(
+            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
         )
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
@@ -124,8 +124,8 @@ class UpgradesEventsHandler(Object):
                 "Setting %r in upgrade peer relation app databag",
                 self.charm.upgrades_manager.current_versions,
             )
-            self.charm.state.application_upgrade.versions = (
-                self.charm.upgrades_manager.current_versions
+            self.charm.state.application_upgrade.update(
+                {"versions": self.charm.upgrades_manager.current_versions}
             )
             logger.debug(
                 "Set %r in upgrade peer relation app databag",
@@ -184,7 +184,7 @@ class UpgradesEventsHandler(Object):
                     )
                 except OpenSearchHttpError:
                     logger.exception("Failed to re-enable allocation after upgrade")
-                self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+                self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.HEALTHY)
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
 
@@ -357,7 +357,7 @@ class UpgradesEventsHandler(Object):
                 logger.error("Failed to override OpenSearch version: %s", str(e))
         else:
             logger.debug("Upgrading unit")
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
+            self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.UPGRADING)
             try:
                 self.charm.workload.install()
             except OpenSearchInstallError as e:
@@ -384,9 +384,9 @@ class UpgradesEventsHandler(Object):
                     )
                     self.charm.lock_manager.release()
                     return
-        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-        self.charm.state.server_upgrade.workload_version = (
-            self.charm.upgrades_manager.current_versions.workload
+        self.charm.state.server_upgrade.update({"snap_revision": OPENSEARCH_SNAP_REVISION})
+        self.charm.state.server_upgrade.update(
+            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
         )
         self.charm.state.remove_status_if_present(
             UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
@@ -550,8 +550,8 @@ class UpgradesEventsHandler(Object):
             return
 
         # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
-        self.charm.state.server_upgrade.workload_version = (
-            self.charm.upgrades_manager.current_versions.workload
+        self.charm.state.server_upgrade.update(
+            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
         )
         logger.debug(
             f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"

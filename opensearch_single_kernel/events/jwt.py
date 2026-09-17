@@ -23,7 +23,7 @@ from opensearch_single_kernel.common.constants import (
     JWT_CONFIG_RELATION,
     DeploymentType,
 )
-from opensearch_single_kernel.core.jwt import JWTAuthConfiguration
+from opensearch_single_kernel.core.relations import JWTAuthConfiguration
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm

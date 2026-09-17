@@ -156,7 +156,7 @@ class PeerClusterEventsHandler(Object):
             first_data_node
             := self.charm.peer_cluster_orchestrator_manager.first_data_node_in_all_clusters
         ):
-            self.charm.state.application.first_data_node = first_data_node
+            self.charm.state.application.update({"first_data_node": first_data_node})
 
         # fetch emitting app planned units and broadcast
         remote_peer_cluster = self.charm.state.peer_cluster_by_relation_id(
@@ -205,7 +205,7 @@ class PeerClusterEventsHandler(Object):
         logger.debug(f"Electing {candidate_failover_app.name} as new failover orchestrator")
         orchestrators.failover_app = candidate_failover_app
         orchestrators.failover_rel_id = event.relation.id
-        self.charm.state.application.orchestrators = orchestrators
+        self.charm.state.application.update({"orchestrators": orchestrators})
 
         self.charm.peer_cluster_orchestrator_manager.broadcast_new_failover_app(
             related_peer_cluster_app
@@ -246,13 +246,13 @@ class PeerClusterEventsHandler(Object):
         # Remove the cluster_fleet_app
         cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
         cluster_fleet_apps.pop(trigger_app.app.id, None)
-        self.charm.state.application.cluster_fleet_apps = cluster_fleet_apps
+        self.charm.state.application.update({"cluster_fleet_apps": cluster_fleet_apps})
 
         # Update the orchestrators
         orchestrators = self.charm.state.application.orchestrators
         if orchestrators.failover_rel_id == event.relation.id:
             orchestrators.delete("failover")
-            self.charm.state.application.orchestrators = orchestrators
+            self.charm.state.application.update({"orchestrators": orchestrators})
 
     # ---- PEER CLUSTER RELATION EVENTS ----
     def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):  # noqa: C901
@@ -403,13 +403,13 @@ class PeerClusterEventsHandler(Object):
 
         # register main and failover cm app names if any
         logger.debug("Requirer updating orchestrators %s", orchestrators)
-        self.charm.state.application.orchestrators = orchestrators
+        self.charm.state.application.update({"orchestrators": orchestrators})
 
         if remote_peer_cluster.security_index_initialised:
-            self.charm.state.application.security_index_initialised = True
+            self.charm.state.application.update({"security_index_initialised": True})
 
         # let the charm know this is an already bootstrapped cluster
-        self.charm.state.application.bootstrapped = True
+        self.charm.state.application.update({"bootstrapped": True})
         # store the security related settings in secrets, peer_data, disk
         if remote_peer_cluster.admin_hashed_password:
             logger.debug("Admin TLS credentials received from peer cluster relation data.")
@@ -423,8 +423,11 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        # aggregate all CMs (main + failover if any)
-        remote_peer_cluster.nodes_config = {
+        # aggregate all CMs (main + failover if any). remote_peer_cluster wraps a remote
+        # (read-only) databag; this is an in-memory-only enrichment consumed just below by
+        # _reconcile_deployment_desc_from_peer_cluster_data, never persisted, so we mutate
+        # the underlying model directly rather than going through update().
+        remote_peer_cluster.model.nodes_config = {
             node.name: node for node in self.charm.peer_cluster_manager.cm_nodes(orchestrators)
         }
 
@@ -478,7 +481,9 @@ class PeerClusterEventsHandler(Object):
         for local_peer_cluster in self.charm.state.peer_clusters(
             is_provider=True, must_have_units=False, remote=False
         ):
-            local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
+            local_peer_cluster.update(
+                {"cluster_fleet_apps": self.charm.state.application.cluster_fleet_apps}
+            )
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins without a relation."""
@@ -486,10 +491,10 @@ class PeerClusterEventsHandler(Object):
             return
 
         if self.charm.plugin_manager.missing_plugins_relations():
-            self.charm.state.application.missing_relations = True
+            self.charm.state.application.update({"missing_relations": True})
             return
 
-        del self.charm.state.application.missing_relations
+        self.charm.state.application.delete("missing_relations")
 
     def handle_joining_data_node(self) -> None:
         """Start Opensearch on a cluster-manager node when a data-node is joining"""
@@ -508,7 +513,7 @@ class PeerClusterEventsHandler(Object):
             config_profile.get_jvm_heap_size(self.charm.workload.memtotal())
         )
         # store profile in unit state
-        self.charm.state.server.opensearch_profile = config_profile
+        self.charm.state.server.update({"profile": config_profile.type})
         self.charm.start_opensearch_event.emit(ignore_lock=True)
 
     def reconcile_peer_cluster_errors(
@@ -517,14 +522,12 @@ class PeerClusterEventsHandler(Object):
         """Store peer-cluster error labels for relation synchronization."""
         if error:
             # keep track of set messages so managers can recompute statuses
-            with self.charm.state.application.update() as m:
-                m.model_extra[label] = error.blocked_message
+            self.charm.state.application.update({label: error.blocked_message})
         else:
             # if there is no error, clear the stored message for this label
             app_m = self.charm.state.application
-            if app_m and label in app_m.model_extra:
-                with app_m.update():
-                    app_m.model_extra[label] = None
+            if label in app_m.model_extra:
+                app_m.delete(label)
 
     def _set_security_conf(self, data: PeerClusterAppModel) -> None:
         """Store security related config."""

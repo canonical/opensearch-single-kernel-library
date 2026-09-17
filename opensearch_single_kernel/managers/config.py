@@ -13,8 +13,7 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
-from opensearch_single_kernel.core.base_models import Node
-from opensearch_single_kernel.core.profiles import OpenSearchProfile
+from opensearch_single_kernel.core.base_models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -86,7 +85,7 @@ class ConfigManager(BaseManager):
         else:
             self.update_seeds_config()
 
-        self.state.server.last_host_ip = self.state.host_ip
+        self.state.server.update({"last_host_ip": self.state.host_ip})
         # rewrite() returns whether the on-disk YAML text changed after the update.
         return self.yaml_setter.rewrite(self.CONFIG_YML, config)
 
@@ -520,7 +519,7 @@ class ConfigManager(BaseManager):
                 "Updating JVM heap size to %s KB based on profile requirements", heap_size
             )
             self._update_jvm_heap_size(heap_size)
-            self.state.server.opensearch_profile = profile
+            self.state.server.update({"profile": profile.type})
             return True
         return False
 

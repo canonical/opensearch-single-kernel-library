@@ -10,11 +10,14 @@ Includes:
 """
 
 import re
-from abc import ABC
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
+from enum import IntEnum
 from hashlib import md5
 from typing import Any, Literal
 
+import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from pydantic import (
     BaseModel,
@@ -26,12 +29,17 @@ from pydantic import (
 from typing_extensions import Self
 
 from opensearch_single_kernel.common.constants import (
+    _1GB_IN_KB,
+    MAX_HEAP_SIZE_IN_KB,
     DeploymentType,
     Directive,
+    PerformanceType,
+    SmtpTransportSecurity,
     StartMode,
     State,
 )
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
+from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
 def _sort_nested_dicts(obj: Any) -> Any:
@@ -311,3 +319,161 @@ class PeerClusterApp(PlainModel):
     def sort_list(cls, v):
         """Returns deduplicated sorted list."""
         return sorted(set(v))
+
+
+class UpgradeVersions(PlainModel):
+    """Model class for the charm and workload versions used for upgrades."""
+
+    charm: str
+    workload: str
+
+    @property
+    def charm_parsed(self) -> poetry_version.Version:
+        """Parsed charm version with build version omitted."""
+        return poetry_version.Version.parse(self.charm.split("+")[0])
+
+    @property
+    def workload_parsed(self) -> poetry_version.Version:
+        """Parsed workload version."""
+        return poetry_version.Version.parse(self.workload)
+
+
+class UnitUpgradesState(BaseStrEnum):
+    """Unit state of upgrade."""
+
+    HEALTHY = "healthy"
+    RESTARTING = "restarting"  # Kubernetes only
+    UPGRADING = "upgrading"  # Machines only
+    OUTDATED = "outdated"  # Machines only
+
+
+class LifecycleUnitTearingDownAndAppActive(IntEnum):
+    """Unit is tearing down and 1+ other units are NOT tearing down"""
+
+    FALSE = 0
+    TRUE = 1
+    UNKNOWN = 2
+
+    def __bool__(self) -> bool:
+        """Return bool evaluation."""
+        return self is self.TRUE
+
+
+class ProfileMemoryRequirements(PlainModel):
+    """Memory requirements for a profile"""
+
+    memory_size: int | None = None
+    jvm_heap_percentage: float | None = None
+
+
+class ClusterTopologyRequirements(PlainModel):
+    """Cluster Topology requirements for a profile"""
+
+    cluster_managers: int = 1
+    data: int = 1
+
+
+class OpenSearchProfile(ABC):
+    """Abstract class for an OpenSearch profile"""
+
+    type: PerformanceType
+
+    @property
+    @abstractmethod
+    def memory_requirements(self) -> ProfileMemoryRequirements:
+        """Get the memory requirements for this profile"""
+        pass
+
+    @property
+    @abstractmethod
+    def cluster_topology_requirements(self) -> ClusterTopologyRequirements:
+        """Get the cluster topology requirements for this profile."""
+        pass
+
+    def get_jvm_heap_size(self, mem_size: float) -> int:
+        """Get the JVM heap size in KB based on the memory requirements."""
+        if self.memory_requirements.jvm_heap_percentage:
+            return min(
+                int(self.memory_requirements.jvm_heap_percentage * mem_size),
+                MAX_HEAP_SIZE_IN_KB,
+            )
+        return _1GB_IN_KB
+
+    def __hash__(self):
+        """Get the hash of the profile."""
+        return hash(self.type)
+
+    def __eq__(self, value: object) -> bool:
+        """Check equality with another OpenSearchProfile."""
+        return self.type == value.type if isinstance(value, OpenSearchProfile) else False
+
+
+class ProductionProfile(OpenSearchProfile):
+    """Production profile for opensearch.
+
+    Ensures cluster meets production minimal requirements
+    """
+
+    type = PerformanceType.PRODUCTION
+
+    @property
+    def memory_requirements(self) -> ProfileMemoryRequirements:
+        """Get the memory requirements for this profile."""
+        return ProfileMemoryRequirements(
+            memory_size=8 * _1GB_IN_KB,
+            jvm_heap_percentage=0.5,
+        )
+
+    @property
+    def cluster_topology_requirements(self) -> ClusterTopologyRequirements:
+        """Get the cluster topology requirements for this profile."""
+        return ClusterTopologyRequirements(
+            cluster_managers=3,
+            data=3,
+        )
+
+
+class TestingProfile(OpenSearchProfile):
+    """Testing profile for opensearch.
+
+    Ensures basic system requirements and 1 CM+ 1 Data roles.
+    """
+
+    type = PerformanceType.TESTING
+
+    @property
+    def memory_requirements(self) -> ProfileMemoryRequirements:
+        """Get the memory requirements for this profile."""
+        return ProfileMemoryRequirements(
+            memory_size=None,
+            jvm_heap_percentage=None,
+        )
+
+    @property
+    def cluster_topology_requirements(self) -> ClusterTopologyRequirements:
+        """Get the cluster topology requirements for this profile."""
+        return ClusterTopologyRequirements(
+            cluster_managers=1,
+            data=1,
+        )
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """SMTP-related config derived from relation data.
+
+    Attributes:
+        sender_email: From-address for the SMTP sender (relation smtp_sender).
+        smtp_account_id: OpenSearch config id for the SMTP account (e.g. smtp-88_smtp-account).
+        label: Plugin/config label for this relation (e.g. plugin-notifications-88).
+        group_id: OpenSearch config id for the recipient group (e.g. smtp-88_recipients).
+        channel_id: OpenSearch config id for the email channel (e.g. smtp-88_email-channel).
+        transport_security: SMTP transport security (none, start_tls, tls).
+    """
+
+    sender_email: str
+    smtp_account_id: str
+    label: str
+    group_id: str
+    channel_id: str
+    transport_security: SmtpTransportSecurity

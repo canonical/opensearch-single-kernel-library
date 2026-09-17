@@ -27,7 +27,7 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     NotificationsStatuses,
 )
-from opensearch_single_kernel.core.smtp import SmtpConfig
+from opensearch_single_kernel.core.base_models import SmtpConfig
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import (
     SecretError,

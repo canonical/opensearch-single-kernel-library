@@ -10,6 +10,7 @@ from datetime import datetime
 from time import time_ns
 from typing import TYPE_CHECKING
 
+from dpcharmlibs.interfaces import build_model
 from ops import (
     ConfigChangedEvent,
     InstallEvent,
@@ -68,10 +69,8 @@ from opensearch_single_kernel.common.statuses import (
     InternalUsersStatuses,
     LockStatuses,
 )
-from opensearch_single_kernel.core.base_models import DeploymentDescription
-from opensearch_single_kernel.core.peer_unit import OpenSearchServerPeerModel
-from opensearch_single_kernel.core.relation_base import build_and_bound_model
-from opensearch_single_kernel.core.upgrades import UnitUpgradesState
+from opensearch_single_kernel.core.base_models import DeploymentDescription, UnitUpgradesState
+from opensearch_single_kernel.core.relations import OpenSearchServerPeerModel
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
     RestartOpenSearch,
@@ -224,7 +223,7 @@ class OpenSearchEventsHandler(Object):
         if not event.relation.data.get(event.unit):
             return
 
-        event_server = build_and_bound_model(
+        event_server = build_model(
             self.charm.state.get_repository_from_interface(
                 self.charm.state.peer_unit_interface, event.relation, event.unit
             ),
@@ -233,7 +232,9 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.unit.is_leader() and event_server.bootstrap_contributor:
             contributor_count = self.charm.state.application.bootstrap_contributors_count
-            self.charm.state.application.bootstrap_contributors_count = contributor_count + 1
+            self.charm.state.application.update(
+                {"bootstrap_contributors_count": contributor_count + 1}
+            )
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
@@ -321,7 +322,7 @@ class OpenSearchEventsHandler(Object):
                     )
                     logger.debug("demoting main orchestrator")
                     self.charm.cluster_manager.demote_deployment_type()
-                    del self.charm.state.application.orchestrators
+                    self.charm.state.application.delete("orchestrators")
                     self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
                 elif self.charm.state.is_peer_cluster_consumer():
                     self.charm.peer_cluster_manager.refresh_requirer_relation_data()
@@ -432,8 +433,8 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
-        self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
-            CERTS_EXPIRATION_DATE_FORMAT
+        self.charm.state.server.update(
+            {"certs_exp_checked_at": datetime.now().strftime(CERTS_EXPIRATION_DATE_FORMAT)}
         )
 
     def _on_install(self, event: InstallEvent) -> None:
@@ -834,7 +835,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.state.server.started:
-            del self.charm.state.server.started
+            self.charm.state.server.delete("started")
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -891,7 +892,7 @@ class OpenSearchEventsHandler(Object):
                 and self.charm.state.is_failover_and_sole_data_app
                 and not self.charm.state.application.security_index_initialised
             ):
-                self.charm.state.server.cluster_manager_removed = True
+                self.charm.state.server.update({"cluster_manager_removed": True})
                 if "cluster-manager" in computed_roles:
                     computed_roles.remove("cluster-manager")
             cm_names = self.charm.cluster_manager.get_cluster_managers_names(nodes)
@@ -1036,7 +1037,7 @@ class OpenSearchEventsHandler(Object):
                 return
 
         # Add a timestamp to always trigger relation changed
-        self.charm.state.server.started = str(time.time())
+        self.charm.state.server.update({"started": str(time.time())})
         self.charm.state.remove_status_if_present(
             GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
         )
@@ -1103,7 +1104,7 @@ class OpenSearchEventsHandler(Object):
                     "other than primary shards on upgraded unit & not enough upgraded units available "
                     "for replica shards"
                 )
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+            self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.HEALTHY)
             logger.debug("Set upgrade unit state to healthy")
             self.charm.upgrade_events._reconcile_upgrade()
 
@@ -1334,9 +1335,9 @@ class OpenSearchEventsHandler(Object):
 
         if on_other_units or not on_current_unit:
             if only_by_leader:
-                self.charm.state.application.update_ts = str(time_ns())
+                self.charm.state.application.update({"update_ts": str(time_ns())})
             else:
-                self.charm.state.server.update_ts = str(time_ns())
+                self.charm.state.server.update({"update_ts": str(time_ns())})
 
         if on_current_unit:
             self.charm.on[PEER_RELATION].relation_changed.emit(self.charm.state.peer_relation)
@@ -1367,18 +1368,18 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.server.cluster_manager_removed:
             # restore cluster_manager role and restart the service
             logger.debug("Restoring cluster_manager role and restarting the service")
-            del self.charm.state.server.cluster_manager_removed
+            self.charm.state.server.delete("cluster_manager_removed")
             self.charm.restart_opensearch_event.emit()
 
     def request_new_unit_certificates(
         self, cert_types: tuple[CertType, ...] = (CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT)
     ) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
-        del self.charm.state.server.tls_configured
+        self.charm.state.server.delete("tls_configured")
         peer_cluster_servers = self.charm.state.all_peer_clusters_servers(remote=False)
 
         for peer_cluster_server in peer_cluster_servers:
-            del peer_cluster_server.tls_configured
+            peer_cluster_server.delete("tls_configured")
 
         csr_state_field = {
             CertType.UNIT_HTTP: "http_csr",

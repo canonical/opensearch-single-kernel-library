@@ -20,11 +20,13 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.state import ClusterState
-from opensearch_single_kernel.core.upgrades import (
+from opensearch_single_kernel.core.base_models import (
     UnitUpgradesState,
+)
+from opensearch_single_kernel.core.relations import (
     UpgradeServerModel,
 )
+from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
@@ -76,7 +78,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             "Setting %r in upgrade peer relation app databag",
             self.current_versions,
         )
-        self.state.application_upgrade.versions = self.current_versions
+        self.state.application_upgrade.update({"versions": self.current_versions})
         logger.debug(
             "Set %r in upgrade peer relation app databag",
             self.current_versions,
@@ -224,7 +226,7 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             logger.debug("Failed to flush before upgrade", exc_info=e)
 
         # We update the state to set up the unit as restarting
-        self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
+        self.state.server_upgrade.set_unit_state(UnitUpgradesState.RESTARTING)
 
     def _determine_partition(
         self, units: list[UpgradeServerModel], action_event: ops.ActionEvent | None, force: bool

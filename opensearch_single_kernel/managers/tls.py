@@ -296,25 +296,34 @@ class TlsManager(BaseManager):
 
         match cert_type:
             case CertType.APP_ADMIN:
-                with self.state.application.update() as m:
-                    m.admin_key = key.decode("utf-8")
-                    m.admin_key_password = password
-                    m.admin_csr = csr.decode("utf-8")
-                    m.admin_subject = f"O={organization},CN={subject}"
+                self.state.application.update(
+                    {
+                        "admin_key": key.decode("utf-8"),
+                        "admin_key_password": password,
+                        "admin_csr": csr.decode("utf-8"),
+                        "admin_subject": f"O={organization},CN={subject}",
+                    }
+                )
 
             case CertType.UNIT_TRANSPORT:
-                with self.state.server.update() as m:
-                    m.transport_key = key.decode("utf-8")
-                    m.transport_key_password = password
-                    m.transport_csr = csr.decode("utf-8")
-                    m.transport_subject = f"O={organization},CN={subject}"
+                self.state.server.update(
+                    {
+                        "transport_key": key.decode("utf-8"),
+                        "transport_key_password": password,
+                        "transport_csr": csr.decode("utf-8"),
+                        "transport_subject": f"O={organization},CN={subject}",
+                    }
+                )
 
             case CertType.UNIT_HTTP:
-                with self.state.server.update() as m:
-                    m.http_key = key.decode("utf-8")
-                    m.http_key_password = password
-                    m.http_csr = csr.decode("utf-8")
-                    m.http_subject = f"O={organization},CN={subject}"
+                self.state.server.update(
+                    {
+                        "http_key": key.decode("utf-8"),
+                        "http_key_password": password,
+                        "http_csr": csr.decode("utf-8"),
+                        "http_subject": f"O={organization},CN={subject}",
+                    }
+                )
         return csr
 
     def update_certificate_secret_if_needed(
@@ -336,20 +345,21 @@ class TlsManager(BaseManager):
             # for the same content
             match cert_type:
                 case CertType.APP_ADMIN:
-                    with self.state.application.update() as m:
-                        m.admin_chain = ca_chain
-                        m.admin_cert = certificate
-                        m.admin_ca_cert = ca
+                    self.state.application.update(
+                        {"admin_chain": ca_chain, "admin_cert": certificate, "admin_ca_cert": ca}
+                    )
                 case CertType.UNIT_HTTP:
-                    with self.state.server.update() as m:
-                        m.http_chain = ca_chain
-                        m.http_cert = certificate
-                        m.http_ca_cert = ca
+                    self.state.server.update(
+                        {"http_chain": ca_chain, "http_cert": certificate, "http_ca_cert": ca}
+                    )
                 case CertType.UNIT_TRANSPORT:
-                    with self.state.server.update() as m:
-                        m.transport_chain = ca_chain
-                        m.transport_cert = certificate
-                        m.transport_ca_cert = ca
+                    self.state.server.update(
+                        {
+                            "transport_chain": ca_chain,
+                            "transport_cert": certificate,
+                            "transport_ca_cert": ca,
+                        }
+                    )
 
     def find_event_secret_type(
         self, event_data: str, secret: str
@@ -508,10 +518,10 @@ class TlsManager(BaseManager):
 
         # Mark this unit as tls configured
         if self.is_fully_configured():
-            self.state.server.tls_configured = True
+            self.state.server.update({"tls_configured": True})
             peer_cluster_servers = self.state.all_peer_clusters_servers(remote=False)
             for peer_cluster_server in peer_cluster_servers:
-                peer_cluster_server.tls_configured = True
+                peer_cluster_server.update({"tls_configured": True})
         return True
 
     def reconcile_k8s_runtime_resources(self) -> None:
@@ -839,13 +849,13 @@ class TlsManager(BaseManager):
         secret_name = secret_name.replace("-", "_")
 
         if cert == CertType.APP_ADMIN:
-            setattr(self.state.application, f"admin_{secret_name}", value)
+            self.state.application.update({f"admin_{secret_name}": value})
 
         elif cert == CertType.UNIT_TRANSPORT:
-            setattr(self.state.server, f"transport_{secret_name}", value)
+            self.state.server.update({f"transport_{secret_name}": value})
 
         else:
-            setattr(self.state.server, f"http_{secret_name}", value)
+            self.state.server.update({f"http_{secret_name}": value})
 
     @override
     def get_statuses(  # noqa: C901
