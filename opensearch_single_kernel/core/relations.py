@@ -1,289 +1,360 @@
 #!/usr/bin/env python3
-
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Base classes for charm relations."""
+"""Relations wrappers used by state to access models"""
 
-import enum
-import json
 import logging
-from abc import ABC, abstractmethod
-from ast import literal_eval
-from typing import Any
+import os
+import time
+from typing import Any, Optional
 
-from ops.model import Application, Relation, Unit
-from overrides import override
+import ops
+from dpcharmlibs.interfaces import OpsRepository, build_model, write_model
+from ops.model import SecretNotFoundError
+from pydantic import BaseModel
+from pydantic_core import PydanticSerializationError
 
-from opensearch_single_kernel.common.constants import Scope
-from opensearch_single_kernel.core.models import Model
-from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
-    Data,
-    ProviderData,
-    RequirerData,
+from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.core.base_models import (
+    OpenSearchProfile,
+    ProductionProfile,
+    TestingProfile,
+    UnitUpgradesState,
+)
+from opensearch_single_kernel.core.relation_models import (
+    LockAppStateModel,
+    LockServerStateModel,
+    OpenSearchAppPeerModel,
+    OpenSearchServerPeerModel,
+    PeerClusterAppModel,
+    PeerClusterServerModel,
+    UpgradeAppModel,
+    UpgradeServerModel,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class DataStore(ABC):
-    """Class representing a data store used in the OPs code of the charm."""
-
-    def __init__(self, charm):
-        self._charm = charm
-
-    @abstractmethod
-    def put(self, scope: Scope, key: str, value: Any | None) -> None:
-        """Put string into the data store."""
-        pass
-
-    @abstractmethod
-    def put_object(
-        self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
-    ) -> None:
-        """Put object into the data store."""
-        pass
-
-    @abstractmethod
-    def has(self, scope: Scope, key: str) -> bool:
-        """Check if the said key is contained in the store."""
-        pass
-
-    @abstractmethod
-    def get(
-        self, scope: Scope, key: str, default: float | str | bool | None = None
-    ) -> int | float | str | bool | None:
-        """Get string from the data store."""
-        pass
-
-    @abstractmethod
-    def get_object(self, scope: Scope, key: str) -> dict[str, Any] | None:
-        """Get dict / json object from the data store."""
-        pass
-
-    @abstractmethod
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the data store."""
-        pass
-
-    @staticmethod
-    def cast(str_val: str) -> bool | int | float | str:
-        """Cast a string to the corresponding primitive type."""
-        try:
-            typed_val = literal_eval(str_val.capitalize())
-            if type(typed_val) not in {bool, int, float, str}:
-                return str_val
-
-            return typed_val
-        except (ValueError, SyntaxError):
-            return str_val
-
-    @staticmethod
-    def put_or_delete(data: dict[str, str], key: str, value: str | None):
-        """Put data into the key/val data store or delete if value is None."""
-        if value is None:
-            data.pop(key, None)
-            return
-
-        data.update({key: str(value)})
-
-
-class RelationDataStore(DataStore):
-    """Class representing a relation data store for a charm."""
-
-    def __init__(self, charm, relation_name: str):
-        super().__init__(charm)
-        self.relation_name = relation_name
-
-    @override
-    def put(self, scope: Scope, key: str, value: Any | None) -> None:
-        """Put string into the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-        self.put_or_delete(data, key, value)
-
-    @override
-    def put_object(
-        self, scope: Scope, key: str, value: dict[str, Any], merge: bool = False
-    ) -> None:
-        """Put dict / json object into relation data store."""
-        if merge:
-            stored = self.get_object(scope, key)
-
-            if stored is not None:
-                stored.update(value)
-                value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
-            )
-
-        self.put(scope, key, payload_str)
-
-    @override
-    def has(self, scope: Scope, key: str) -> bool:
-        """Check if the said key is contained in the relation data."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        return key in (self._get_relation_data(scope) or {})
-
-    @override
-    def get(
-        self,
-        scope: Scope,
-        key: str,
-        default: float | str | bool | None = None,
-        auto_casting: bool = True,
-    ) -> int | float | str | bool | None:
-        """Get string from the relation data store."""
-        if scope is None:
-            raise ValueError("Scope undefined.")
-
-        data = self._get_relation_data(scope)
-
-        value = data.get(key)
-        if value is None:
-            return default
-
-        if not auto_casting:
-            return value
-
-        return self.cast(value)
-
-    @override
-    def get_object(self, scope: Scope, key: str) -> dict[str, Any] | None:
-        """Get dict / json object from the relation data store."""
-        data = self.get(scope, key)
-        if data is None:
-            return None
-
-        return json.loads(data)
-
-    @override
-    def delete(self, scope: Scope, key: str):
-        """Delete object from the relation data store."""
-        self.put(scope, key, None)
-
-    def _get_relation_data(self, scope: Scope) -> dict[str, str]:
-        """Relation data object."""
-        relation = self._charm.model.get_relation(self.relation_name)
-        if relation is None:
-            return {}
-
-        relation_scope = self._charm.app if scope == Scope.APP else self._charm.unit
-
-        return relation.data.get(relation_scope)
-
-    @staticmethod
-    def _default_encoder(o: Any) -> Any:
-        """Default encoder for json dumps."""
-        if isinstance(o, enum.Enum):
-            return o.value
-
-        if hasattr(o, "__dict__"):
-            return vars(o)
-
-        raise TypeError(f"Unserializable {o.__class__.__name__}")
-
-
 class RelationState:
-    """Relation state object."""
+    """Base wrapper for models"""
+
+    # Wrapper-internal attributes that must never be routed to the databag. Used to avoid setattr on this fields
+    RESERVED_ATTRS = {"repository", "component", "relation", "skip_secrets", "model", "unit"}
 
     def __init__(
         self,
-        relation: Relation | None,
-        data_interface: Data,
-        component: Unit | Application | None,
-    ):
-        self.relation = relation
-        self.data_interface = data_interface
-        self.unit = component
-        self.relation_data = self.data_interface.as_dict(self.relation.id) if self.relation else {}
+        model_cls: type[BaseModel],
+        repository: OpsRepository | None,
+        component: ops.model.Unit | ops.model.Application | None = None,
+        skip_secrets: bool = False,
+    ) -> None:
+        self.repository = repository
+        self.component = (
+            component if component is not None else getattr(repository, "component", None)
+        )
+        self.relation = self.repository.relation if self.repository is not None else None
+        self.skip_secrets = skip_secrets
+        self.model = build_model(repository, model_cls) if repository else model_cls()
 
-    def __bool__(self) -> bool:
-        """Boolean evaluation based on the existence of self.relation."""
-        try:
-            return bool(self.relation)
-        except AttributeError:
-            return False
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown reads to the underlying model."""
+        model = self.__dict__.get("model")
+        if model is None:
+            raise AttributeError(name)
+        return getattr(model, name)
 
-    def update(self, items: dict[str, str]) -> None:
-        """Write to relation data."""
-        if not self.relation:
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Update model-field writes to the databag."""
+        model = self.__dict__.get("model")
+        if (
+            name not in self.RESERVED_ATTRS
+            and model is not None
+            and name in type(model).__pydantic_fields__
+        ):
+            self.update({name: value})
+        else:
+            object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        """Reset a single model field to its default and write."""
+        self.reset(name)
+
+    def reset(self, *names: str) -> None:
+        """Reset the given model field(s) to their default(s) in a single write."""
+        if not self.repository or self.model is None:
             logger.warning(
-                f"Fields {list(items.keys())} were attempted to be written on the relation before it exists."
+                "Fields %s were attempted to be deleted on the relation before it exists.",
+                list(names),
             )
             return
 
-        delete_fields = [key for key in items if not items[key]]
-        update_content = {k: items[k] for k in items if k not in delete_fields}
+        for field in names:
+            field_info = type(self.model).__pydantic_fields__.get(field)
+            default = field_info.get_default(call_default_factory=True) if field_info else None
+            setattr(self.model, field, default)
 
-        self.relation_data.update(update_content)
+        self.write()
 
-        for field in delete_fields:
-            if field not in self.relation_data:
-                logger.debug(
-                    f"Field '{field}' not found in relation data for deletion. Skipping deletion for this field."
-                )
-            else:
-                # use del instead of pop here because of error with dataplatform-libs
-                try:
-                    del self.relation_data[field]
-                except KeyError:
-                    pass
-
-    def get_object(self, key: str) -> dict[str, Any] | None:
-        """Get dict / json object from the relation data store."""
-        return json.loads(data) if (data := self.relation_data.get(key)) is not None else None
-
-    def put_object(self, key: str, value: dict[str, Any], merge: bool = False) -> None:
-        """Put dict / json object into relation data store."""
-        if merge and (stored := self.get_object(key)) is not None:
-            stored.update(value)
-            value = stored
-
-        sorted_value = Model.sort_payload(value)
-
-        payload_str = None
-        if value is not None:
-            payload_str = json.dumps(
-                sorted_value, default=RelationDataStore._default_encoder, sort_keys=True
+    def update(self, items: dict[str, Any]) -> None:
+        """Apply the given field changes and update the whole model in a single write."""
+        if not self.repository or self.model is None:
+            logger.warning(
+                "Fields %s were attempted to be written on the relation before it exists.",
+                list(items.keys()),
             )
+            return
 
-        self.update({key: payload_str})
+        for field, value in items.items():
+            setattr(self.model, field.replace("-", "_"), value)
+
+        self.write()
+
+    def write(self) -> None:
+        """Write the whole model, falling back to non-secret fields if secrets are missing."""
+        try:
+            write_model(
+                self.repository,
+                self.model,
+                context={"skip_secrets": "true"} if self.skip_secrets else None,
+            )
+        except (SecretNotFoundError, PydanticSerializationError) as e:
+            logger.warning(
+                "Secret unavailable while updating %s, writing non-secret fields only: %s",
+                type(self.model).__name__,
+                e,
+            )
+            try:
+                write_model(self.repository, self.model, context={"skip_secrets": "true"})
+            except (SecretNotFoundError, PydanticSerializationError) as e2:
+                logger.warning(
+                    "Skipping write for %s, fallback write failed: %s",
+                    type(self.model).__name__,
+                    e2,
+                )
 
 
-class PeerClusterOrchestratorData(ProviderData, RequirerData):
-    """Orchestrator provider data model."""
+class LockApplication(RelationState):
+    """State wrapper for the Lock application databag."""
 
-    # This is to bypass the PrematureDataAccessError, which is irrelevant in this case.
-    def _update_relation_data(self, relation: Relation, data: dict[str, str]) -> None:
-        """Set values for fields not caring whether it's a secret or not."""
-        super(ProviderData, self)._update_relation_data(relation, data)
+    model: LockAppStateModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Application,
+    ):
+        super().__init__(LockAppStateModel, repository, component)
+        self.unit = component
+
+    def grant_lock(self, unit_name: str, own_unit_name: str) -> None:
+        """Grant the peer lock to `unit_name`.
+
+        If the lock is granted to the local (leader) unit, also record the Juju event
+        during which it happened: see
+        LockAppStateModel.leader_acquired_lock_after_juju_event_id for why. Prevent leader
+        unit from using lock in the same Juju event that it was granted. If the charm code
+        raises an uncaught exception later in the Juju event, `unit-with-lock` will be
+        reverted to its previous value which could allow another unit to get the lock.
+        Therefore, we cannot use the lock in this Juju event. We must wait until the next
+        Juju event, when `unit-with-lock` has been committed (i.e. won't be reverted), to
+        use the lock.
+        """
+        assert self.model.unit_with_lock != unit_name
+        items: dict = {"unit_with_lock": unit_name}
+        if unit_name == own_unit_name:
+            items["leader_acquired_lock_after_juju_event_id"] = os.environ.get(
+                "JUJU_CONTEXT_ID", None
+            )
+        self.update(items)
+
+    def release_lock(self) -> None:
+        """Release the lock and clear `leader_acquired_lock_after_juju_event_id`."""
+        if not self.model.unit_with_lock:
+            return
+        self.reset("unit_with_lock", "leader_acquired_lock_after_juju_event_id")
 
 
-class PeerClusterData(ProviderData, RequirerData):
-    """Orchestrator requirer data model."""
+class LockServer(RelationState):
+    """State wrapper for the Lock unit databag."""
 
-    # This is to bypass the PrematureDataAccessError, which is irrelevant in this case.
-    def _update_relation_data(self, relation: Relation, data: dict[str, str]) -> None:
-        """Set values for fields not caring whether it's a secret or not."""
-        super(ProviderData, self)._update_relation_data(relation, data)
+    model: LockServerStateModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Unit,
+    ):
+        super().__init__(LockServerStateModel, repository, component)
+        self.unit = component
+
+    def trigger_relation_changed(self) -> None:
+        """Trigger relation changed event on other units by writing to a dummy field."""
+        self.trigger = os.environ.get("JUJU_CONTEXT_ID", "")
 
 
-class JwtData(RequirerData):
-    """Data Interface to JWT relation on requirer side."""
+class OpenSearchApplication(RelationState):
+    """State wrapper for the OpenSearch application databag."""
 
-    def __init__(self, model, relation_name: str):
-        super().__init__(
-            model,
-            relation_name,
-            additional_secret_fields=["signing-key"],
+    model: OpenSearchAppPeerModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Application,
+    ):
+        super().__init__(OpenSearchAppPeerModel, repository, component)
+        self.unit = component
+
+    @property
+    def name(self) -> str:
+        """Return the name of the Application this wrapper is bound to."""
+        return self.unit.name
+
+    def initialize_empty_secrets(self) -> None:
+        """Initialize empty app-level secrets to prevent log spam.
+
+        The v1 lib only creates a Juju secret when the written value is truthy.
+        We write a single-space placeholder to force creation and leave it in place
+        callers strip the value before use so the placeholder is never
+        mistaken for real data.
+        """
+        items: dict = {}
+        if not self.model.plugin_secrets:
+            items["plugin_secrets"] = "{}"
+        if not self.model.admin_password:
+            items["admin_password"] = " "
+        if not self.model.admin_key_password:
+            items["admin_key_password"] = " "
+        if items:
+            self.update(items)
+
+
+class OpenSearchServer(RelationState):
+    """State wrapper for the OpenSearch unit databag."""
+
+    model: OpenSearchServerPeerModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Unit,
+    ):
+        super().__init__(OpenSearchServerPeerModel, repository, component)
+        self.unit = component
+
+    @property
+    def unit_id(self) -> int:
+        """The id of the unit this wrapper is bound to, from its unit name."""
+        return int(self.component.name.split("/")[1])
+
+    @property
+    def opensearch_profile(self) -> Optional[OpenSearchProfile]:
+        """Current profile of the unit, as an OpenSearchProfile instance."""
+        if not self.model.profile:
+            return None
+        return (
+            ProductionProfile()
+            if self.model.profile == PerformanceType.PRODUCTION
+            else TestingProfile()
         )
+
+    def initialize_empty_secrets(self) -> None:
+        """Initialize empty unit-level secrets to prevent log spam."""
+        items: dict = {}
+        if not self.model.transport_key_password:
+            items["transport_key_password"] = " "
+        if not self.model.http_key_password:
+            items["http_key_password"] = " "
+        if items:
+            self.update(items)
+
+
+class UpgradeApplication(RelationState):
+    """State wrapper for the Upgrades application databag."""
+
+    model: UpgradeAppModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Application,
+    ):
+        super().__init__(UpgradeAppModel, repository, component)
+        self.unit = component
+
+    def set_upgrade_resumed(self, value: bool) -> None:
+        """Set whether user has resumed upgrade with Juju action."""
+        self.update({"upgrade_resume_last_updated": str(time.time()), "upgrade_resumed": value})
+
+
+class UpgradeServer(RelationState):
+    """State wrapper for the Upgrades unit databag."""
+
+    model: UpgradeServerModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Unit,
+    ):
+        super().__init__(UpgradeServerModel, repository, component)
+
+    @property
+    def unit_number(self) -> int:
+        """Get the unit number this wrapper is bound to."""
+        return int(self.component.name.split("/")[-1])
+
+    def set_unit_state(self, value: "UnitUpgradesState") -> None:
+        """Set the unit upgrade state."""
+        self.state = value.value
+
+
+class PeerClusterApplication(RelationState):
+    """State wrapper for the peer cluster application databag."""
+
+    model: PeerClusterAppModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Application | None = None,
+        skip_secrets: bool = False,
+    ) -> None:
+        super().__init__(PeerClusterAppModel, repository, component, skip_secrets)
+
+    def empty_secret_placeholders(self) -> dict[str, Any]:
+        """Return the placeholder field changes that pre-create the secret groups."""
+        if self.model.pc_secrets_initialized:
+            return {}
+        return {
+            "admin_password": self.model.admin_password or " ",
+            "admin_cert": self.model.admin_cert or " ",
+            "plugin_secrets": self.model.plugin_secrets or " ",
+            "pc_secrets_initialized": True,
+        }
+
+    def initialize_empty_secrets(self) -> None:
+        """Pre-create the peer-cluster secret groups if they are not populated yet."""
+        if changes := self.empty_secret_placeholders():
+            self.update(changes)
+
+
+class PeerClusterServer(RelationState):
+    """State wrapper for the peer cluster unit databag."""
+
+    model: PeerClusterServerModel
+
+    def __init__(
+        self,
+        repository: OpsRepository | None,
+        component: ops.model.Unit | None = None,
+        skip_secrets: bool = False,
+    ) -> None:
+        super().__init__(PeerClusterServerModel, repository, component, skip_secrets)
+        self.component = component
+
+    @property
+    def unit(self) -> ops.model.Unit:
+        """The ops.Unit this wrapper's data is bound to."""
+        return self.component

@@ -215,13 +215,17 @@ async def test_rollout_new_ca(ops_test: OpsTest, deploy_type, substrate) -> None
         # using the SSL API requires authentication with app-admin cert and key
         leader_unit_ip = await get_leader_unit_ip(ops_test, app)
         url = f"https://{leader_unit_ip}:9200/_plugins/_security/api/ssl/certs"
-        admin_secret = await get_secret_by_label(ops_test, f"{app}:app:app-admin")
+
+        secret_app_name = APP_NAME if deploy_type == SMALL_DEPLOYMENT else MAIN_APP
+        admin_secret = await get_secret_by_label(
+            ops_test, f"opensearch-peers.{secret_app_name}.app.app-admin"
+        )
 
         with open("admin.cert", "w") as cert:
-            cert.write(admin_secret["cert"])
+            cert.write(admin_secret["admin-cert"])
 
         with open("admin.key", "w") as key:
-            key.write(admin_secret["key"])
+            key.write(admin_secret["admin-key"])
 
         response = requests.get(url, cert=("admin.cert", "admin.key"), verify=False)
         data = response.json()

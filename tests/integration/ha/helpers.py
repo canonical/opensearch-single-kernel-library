@@ -14,11 +14,15 @@ from tenacity import (
     Retrying,
     retry,
     stop_after_attempt,
+    stop_after_delay,
     wait_fixed,
     wait_random,
 )
 
-from opensearch_single_kernel.core.models import App, Node
+from opensearch_single_kernel.core.base_models import (
+    App,
+    Node,
+)
 from tests.helpers import Substrate
 from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count
@@ -38,7 +42,7 @@ from .continuous_writes import ContinuousWrites
 logger = logging.getLogger(__name__)
 
 
-OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch.daemon.service"
+OPENSEARCH_SERVICE_PATH = "/etc/systemd/system/snap.opensearch-charmed.daemon.service"
 
 
 def nodes_count_by_role(nodes: list[Node]) -> dict[str, int]:
@@ -216,9 +220,13 @@ async def assert_continuous_writes_increasing(
 ) -> None:
     """Asserts that the continuous writes are increasing."""
     writes_count = await c_writes.count()
-    await asyncio.sleep(20)
-    more_writes = await c_writes.count()
-    assert more_writes > writes_count, "Writes not continuing to DB"
+    for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(5)):
+        with attempt:
+            # Refresh the writer's endpoints in case IPs changed (e.g. post-upgrade on k8s).
+            await c_writes.update()
+            await asyncio.sleep(5)
+            more_writes = await c_writes.count()
+            assert more_writes > writes_count, "Writes not continuing to DB"
 
 
 async def assert_continuous_writes_consistency(

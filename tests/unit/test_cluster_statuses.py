@@ -16,7 +16,7 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import DeploymentState, PeerClusterConfig
+from opensearch_single_kernel.core.base_models import DeploymentState, PeerClusterConfig
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.utils.status import format_status
 
@@ -34,7 +34,7 @@ def _manager(
         "init_hold": False,
         "roles": roles_config,
     }
-    state.application.deployment_desc = deployment_desc
+    state.application.deployment_description = deployment_desc
     state.is_peer_cluster_consumer.return_value = is_peer_consumer
     state.oauth_relation = None
     state.jwt_relation = None
@@ -119,7 +119,7 @@ def test_valid_roles_idle():
         ),
     )
     # security index path may add no-data-node if not data+... mark security inited
-    mgr.state.application.is_security_index_initialised = True
+    mgr.state.application.security_index_initialised = True
 
     statuses = mgr.get_statuses("app")
 

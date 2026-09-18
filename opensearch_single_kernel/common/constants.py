@@ -152,7 +152,10 @@ class ExtraUserRolePermissions(Enum):
     # Default user has CRUD in a specific index. Update index_patterns to include the index to
     # which these permissions are applied.
     DEFAULT = {
-        "cluster_permissions": ["cluster_monitor"],
+        "cluster_permissions": [
+            "cluster_monitor",
+            "cluster_composite_ops",
+        ],
         "index_permissions": [
             {
                 "index_patterns": [],
@@ -162,6 +165,7 @@ class ExtraUserRolePermissions(Enum):
                 "allowed_actions": [
                     "indices_monitor",
                     "data_access",
+                    "indices_all",
                 ],
             }
         ],
@@ -196,7 +200,10 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = "193"  # Keep in sync with `workload_version` file
+# Revision 3.7.0
+# OPENSEARCH_SNAP_REVISION = "65"  # Keep in sync with `workload_version` file
+# Revision 3.8.0
+OPENSEARCH_SNAP_REVISION = "79"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -272,14 +279,13 @@ UPGRADE_RELATION = "upgrade-version-a"
 PROMETHEUS_K8S_RELATION = "metrics-endpoint"
 LOKI_K8S_RELATION = "logging"
 GRAFANA_K8S_RELATION = "grafana-dashboard"
-COS_RELATION = "cos-agent"
 
 
 # Paths
-BASE_SNAP_DIR = "/var/snap/opensearch"
+BASE_SNAP_DIR = "/var/snap/opensearch-charmed"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
-SNAP = "/snap/opensearch/current"
+SNAP = "/snap/opensearch-charmed/current"
 
 
 # Secrets
@@ -287,7 +293,16 @@ PW_POSTFIX = "password"
 HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
-SECRETS_LABEL_SEPARATOR = ":"
+SECRETS_LABEL_SEPARATOR = "."
+
+ADMIN_HASHED_PASSWORD_KEY = "admin-hashed-password"
+KIBANA_SERVER_HASHED_PASSWORD_KEY = "kibana-server-hashed-password"
+
+SECRET_APP_ADMIN = "app-admin"
+SECRET_UNIT_TRANSPORT = "unit-transport"
+SECRET_UNIT_HTTP = "unit-http"
+SECRET_PLUGIN = "plugins"
+SECRET_BACKUPS = "backups"
 
 # Backup
 S3_CREDENTIALS = "s3-creds"

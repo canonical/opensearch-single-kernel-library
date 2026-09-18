@@ -12,7 +12,7 @@ from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
 from opensearch_single_kernel.common.statuses import PeerClusterStatuses
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     PeerClusterOrchestrators,
 )
