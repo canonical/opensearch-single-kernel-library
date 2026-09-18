@@ -127,6 +127,7 @@ def test_on_index_requested(harness, mocker):
     event.defer.assert_called()
 
     is_node_up.return_value = True
+    harness.charm.state.application.is_security_index_initialised = True
     event.extra_user_roles = "admin"
     event.index = "test_index"
     harness.charm.unit.status = ActiveStatus()
@@ -230,6 +231,7 @@ def test_on_index_requested_kibanaserver(harness, mocker):
     event.defer.assert_called()
 
     is_node_up.return_value = True
+    harness.charm.state.application.is_security_index_initialised = True
     event.extra_user_roles = "kibana_server"
     event.index = ".opensearch-dashboards"
     harness.charm.unit.status = ActiveStatus()
