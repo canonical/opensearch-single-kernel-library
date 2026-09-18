@@ -169,11 +169,7 @@ class ExternalClientsEventsHandler(Object):
         return index_name
 
     def update_users_on_secret_change(self, event: SecretChangedEvent) -> bool:
-        """React to a system-user password-hash secret change.
-
-        The leader propagates the new password to the dashboards relation; non-leaders
-        refresh their local internal_users.yml. Returns False if the event was deferred.
-        """
+        """React to a system-user password-hash secret change."""
         if self.charm.unit.is_leader():
             self.charm.external_clients_manager.update_dashboards_password()
             return True

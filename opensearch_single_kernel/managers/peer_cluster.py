@@ -213,8 +213,8 @@ class PeerClusterManager(BaseManager):
                     f"{trigger}_app": trigger_app,
                 }
             )
-            self.state.application.update(
-                {"orchestrators": PeerClusterOrchestrators.from_dict(local_orchestrators)}
+            self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
+                local_orchestrators
             )
 
         return PeerClusterOrchestrators.from_dict(local_orchestrators)

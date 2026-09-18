@@ -485,8 +485,6 @@ class SnapshotsEventsHandler(Object):
             self.charm.snapshots_manager.set_credentials_saved(info_to_save)
             return
 
-        # No backup credentials broadcast by the orchestrator. If we never stored any,
-        # there is nothing to clean up.
         if not self.charm.snapshots_manager.has_saved_backup_credentials():
             return
 

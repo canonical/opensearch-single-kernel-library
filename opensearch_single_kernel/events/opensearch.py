@@ -10,7 +10,6 @@ from datetime import datetime
 from time import time_ns
 from typing import TYPE_CHECKING
 
-from dpcharmlibs.interfaces import build_model
 from ops import (
     ConfigChangedEvent,
     InstallEvent,
@@ -70,7 +69,6 @@ from opensearch_single_kernel.common.statuses import (
     LockStatuses,
 )
 from opensearch_single_kernel.core.base_models import DeploymentDescription, UnitUpgradesState
-from opensearch_single_kernel.core.relations import OpenSearchServerPeerModel
 from opensearch_single_kernel.events.custom_events import (
     PebbleCanConnectEvent,
     RestartOpenSearch,
@@ -223,18 +221,11 @@ class OpenSearchEventsHandler(Object):
         if not event.relation.data.get(event.unit):
             return
 
-        event_server = build_model(
-            self.charm.state.get_repository_from_interface(
-                self.charm.state.peer_unit_interface, event.relation, event.unit
-            ),
-            OpenSearchServerPeerModel,
-        )
+        event_server = self.charm.state.server_by_unit(event.unit)
 
         if self.charm.unit.is_leader() and event_server.bootstrap_contributor:
             contributor_count = self.charm.state.application.bootstrap_contributors_count
-            self.charm.state.application.update(
-                {"bootstrap_contributors_count": contributor_count + 1}
-            )
+            self.charm.state.application.bootstrap_contributors_count = contributor_count + 1
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
@@ -433,8 +424,8 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
-        self.charm.state.server.update(
-            {"certs_exp_checked_at": datetime.now().strftime(CERTS_EXPIRATION_DATE_FORMAT)}
+        self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
+            CERTS_EXPIRATION_DATE_FORMAT
         )
 
     def _on_install(self, event: InstallEvent) -> None:
@@ -1267,7 +1258,6 @@ class OpenSearchEventsHandler(Object):
         try:
             label_parts = breakdown_label(event.secret.label)
         except ValueError:
-            # Not one of our internal secrets, leave it to other observers.
             return
 
         if (

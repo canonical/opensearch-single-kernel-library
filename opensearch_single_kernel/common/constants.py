@@ -200,9 +200,6 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-# OPENSEARCH_SNAP_REVISION = "98"  # Keep in sync with `workload_version` file
-# Revision 2.19.5
-# OPENSEARCH_SNAP_REVISION = "108"  # Keep in sync with `workload_version` file
 # Revision 3.7.0
 # OPENSEARCH_SNAP_REVISION = "65"  # Keep in sync with `workload_version` file
 # Revision 3.8.0

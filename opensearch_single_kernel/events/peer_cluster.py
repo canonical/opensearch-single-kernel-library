@@ -417,16 +417,15 @@ class PeerClusterEventsHandler(Object):
 
         # check if there are any security misconfigurations / violations
         tls_errors = self.charm.tls_manager.peer_cluster_error_from_tls(remote_peer_cluster)
-        self.reconcile_peer_cluster_errors(label="error_from_tls", error=tls_errors)
+        self.reconcile_peer_cluster_errors(
+            label=f"error_from_tls_{event.relation.id}", error=tls_errors
+        )
         if tls_errors:
             logger.debug("TLS/Security misconfigurations detected. Deferring event.")
             event.defer()
             return
 
-        # aggregate all CMs (main + failover if any). remote_peer_cluster wraps a remote
-        # (read-only) databag; this is an in-memory-only enrichment consumed just below by
-        # _reconcile_deployment_desc_from_peer_cluster_data, never persisted, so we mutate
-        # the underlying model directly rather than going through update().
+        # aggregate all CMs (main + failover if any)
         remote_peer_cluster.model.nodes_config = {
             node.name: node for node in self.charm.peer_cluster_manager.cm_nodes(orchestrators)
         }
@@ -481,9 +480,7 @@ class PeerClusterEventsHandler(Object):
         for local_peer_cluster in self.charm.state.peer_clusters(
             is_provider=True, must_have_units=False, remote=False
         ):
-            local_peer_cluster.update(
-                {"cluster_fleet_apps": self.charm.state.application.cluster_fleet_apps}
-            )
+            local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins without a relation."""
@@ -521,13 +518,10 @@ class PeerClusterEventsHandler(Object):
     ) -> None:
         """Store peer-cluster error labels for relation synchronization."""
         if error:
-            # keep track of set messages so managers can recompute statuses
             self.charm.state.application.update({label: error.blocked_message})
         else:
-            # if there is no error, clear the stored message for this label
-            app_m = self.charm.state.application
-            if label in app_m.model_extra:
-                delattr(app_m, label)
+            if label in (self.charm.state.application.model_extra or {}):
+                delattr(self.charm.state.application, label)
 
     def _set_security_conf(self, data: PeerClusterAppModel) -> None:
         """Store security related config."""

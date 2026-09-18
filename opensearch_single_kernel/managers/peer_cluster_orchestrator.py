@@ -117,8 +117,6 @@ class PeerClusterOrchestratorManager(BaseManager):
         # save the orchestrators of this fleet
         has_units = self.state.planned_units > 0
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            # Accumulate every field change for this relation and persist once (a single
-            # databag write per requirer, instead of one write per field/helper).
             changes: dict = local_peer_cluster.empty_secret_placeholders()
             orchestrators = local_peer_cluster.orchestrators or PeerClusterOrchestrators()
             logger.debug(
@@ -154,7 +152,6 @@ class PeerClusterOrchestratorManager(BaseManager):
                 )
 
             # there is no error to broadcast - we clear any previously broadcasted error.
-            # None resets the field, so write_model drops it from the databag.
             if not rel_err_data:
                 logger.debug(
                     f"No rel error data to set for {local_peer_cluster.relation.app.name}. Deleting any existing error data."
@@ -174,12 +171,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         return not should_wait
 
     def _backup_secret_changes(self) -> dict:
-        """Return backup-secret field changes for the current storage relations (no write).
-
-        A cloud with no relation has its fields cleared (set to None); a cloud whose
-        credentials are not published/complete yet is omitted so its previous value is left
-        untouched until a later refresh.
-        """
+        """Return backup-secret field changes for the current storage relations (no write)."""
         changes: dict = {}
         for cloud, storage_type in (
             ("s3", ObjectStorageType.S3),
@@ -258,12 +250,7 @@ class PeerClusterOrchestratorManager(BaseManager):
         source: PeerClusterAppModel,
         changes: dict,
     ) -> str:
-        """Recompute ``rel_data_hash`` over the full payload (secrets included), post-merge.
-
-        The secret values are read from the accumulated ``changes`` (the values about to be
-        written) falling back to the current model, so the hash reflects the same state a
-        single ``update(changes)`` is about to persist.
-        """
+        """Recompute ``rel_data_hash`` over the full payload (secrets included)."""
         non_secret = source.model_dump(mode="json", context={"skip_secrets": True})
         secret_values = {
             name: changes[name] if name in changes else getattr(local_peer_cluster, name)
@@ -653,8 +640,4 @@ class PeerClusterOrchestratorManager(BaseManager):
                 "cluster_fleet_apps",
                 "orchestrators",
                 "trigger",
-                # legacy top-level keys kept for backward-compatible cleanup
-                "gcs",
-                "azure",
-                "s3",
             )

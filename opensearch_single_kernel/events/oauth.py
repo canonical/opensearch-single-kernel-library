@@ -94,13 +94,8 @@ class OAuthEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.state.server.update(
-            {
-                "oauth_openid_connect_url": (
-                    f"{relation.data[relation.app].get('issuer_url')}"
-                    "/.well-known/openid-configuration"
-                )
-            }
+        self.charm.state.server.oauth_openid_connect_url = (
+            f"{relation.data[relation.app].get('issuer_url')}/.well-known/openid-configuration"
         )
         self.charm.config_manager.update_security_config()
 

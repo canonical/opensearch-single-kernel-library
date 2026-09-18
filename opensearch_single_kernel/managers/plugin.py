@@ -148,14 +148,10 @@ class PluginManager(BaseManager):
             label: label of the secret to store
             relation_name: name of the relation from which the secret content came
         """
-        # One write for both the config and the secret id: write_model re-serialises the
-        # whole app model (every secret group) on each `.update()`, so splitting this into
-        # put_plugin_config + add_plugin_secret paid that cost twice.
         app = self.state.application
         plugins = self._with_plugin_config(
             app.plugin_config_info, label, relation_name=relation_name
         )
-        # `_with_plugin_config` sets secret_name to `label`.
         secrets = json.loads(app.plugin_secrets) if app.plugin_secrets else {}
         secrets[label] = json.dumps(content)
         app.update({"plugin_config_info": plugins, "plugin_secrets": json.dumps(secrets)})
@@ -166,8 +162,6 @@ class PluginManager(BaseManager):
         Args:
             label: label of the secret to remove
         """
-        # Single write for both fields (see store_plugin_secret). Read the secret_name
-        # before dropping the config, since the name is looked up from the config.
         app = self.state.application
         secret_name = self._plugin_secret_name(label)
         secrets = json.loads(app.plugin_secrets) if app.plugin_secrets else {}

@@ -616,9 +616,7 @@ class ClusterManager(BaseManager):
                     contribute_to_bootstrap = True
 
                     if self.state.is_app_leader:
-                        self.state.application.update(
-                            {"bootstrap_contributors_count": cms_in_bootstrap + 1}
-                        )
+                        self.state.application.bootstrap_contributors_count = cms_in_bootstrap + 1
 
                     # indicates that this unit is part of the "initial cm nodes"
                     self.state.server.bootstrap_contributor = True
@@ -855,9 +853,7 @@ class ClusterManager(BaseManager):
         if orchestrators.main_app is None:
             return None
 
-        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
-            is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
-        )
+        remote_peer_cluster = self.state.main_orchestrator_app
         logger.debug(f"get_cluster_first_data_node : data read: {remote_peer_cluster}")
         if not remote_peer_cluster or not remote_peer_cluster.deployment_description:
             return None
@@ -956,7 +952,7 @@ class ClusterManager(BaseManager):
                 status_list.append(OAuthStatuses.OAUTH_RELATION_INVALID.value)
             if self.state.jwt_relation:
                 status_list.append(JwtStatuses.JWT_RELATION_INVALID.value)
-        elif self.state.jwt_relation and not self.state.jwt_config_is_valid:
+        elif self.state.jwt_relation and not self.state.jwt:
             status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
         # Validate current juju `roles` config (DPE #75).

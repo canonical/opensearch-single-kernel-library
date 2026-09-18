@@ -272,11 +272,7 @@ def test_unit_peers_data(harness):
 
 def test_app_peers_data_secret(harness):
     """Test getting data from the app relation data bag."""
-    # Need to set leader to update the application state
     harness.set_leader(True)
-    # The app admin secret group already exists (initialize_empty_secrets writes an
-    # admin_key_password placeholder), so the lib's extract_secrets surfaces an unset
-    # key in that group as None rather than the field's "" default.
     assert harness.charm.state.application.admin_keystore_password is None
     harness.charm.state.application.admin_keystore_password = "yeses"
     assert harness.charm.state.application.admin_keystore_password == "yeses"

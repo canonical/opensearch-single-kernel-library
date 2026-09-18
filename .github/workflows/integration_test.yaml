@@ -214,12 +214,10 @@ jobs:
             dest="$HOME/logs/opensearch/${unit//\//_}"
             mkdir -p "$dest"
             if [[ "$SPREAD_JOB" == *"/k8s/"* ]]; then
-              # K8s: logs live in the `opensearch` workload container.
               sudo juju ssh --container opensearch "$unit" \
                 'tar -C /var/log/opensearch -cf - .' 2>/dev/null \
                 | tar -C "$dest" -xf - || true
             else
-              # VM: logs are root-owned under the snap common directory.
               sudo juju ssh "$unit" \
                 'sudo tar -C /var/snap/opensearch-charmed/common/var/log/opensearch -cf - .' 2>/dev/null \
                 | tar -C "$dest" -xf - || true

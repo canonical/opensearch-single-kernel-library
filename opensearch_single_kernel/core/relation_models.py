@@ -61,7 +61,7 @@ class JWTAuthConfiguration(ResourceProviderModel):
 
 
 class LockAppStateModel(PeerModel):
-    """Inert data model for the Lock application state."""
+    """Data model for the Lock application state."""
 
     # Juju event id during which the leader granted the lock to itself; the leader may
     # only use the lock in a next event (see LockApplication.grant_lock).
@@ -71,10 +71,7 @@ class LockAppStateModel(PeerModel):
 
 
 class LockServerStateModel(PeerModel):
-    """Inert data model for the Lock unit state.
-
-    Reads/writes to the databag go through the `LockServer` wrapper.
-    """
+    """Data model for the Lock unit state."""
 
     # Whether this unit is asking the leader for the peer lock.
     lock_requested: bool = Field(default=False)
@@ -83,9 +80,8 @@ class LockServerStateModel(PeerModel):
 
 
 class OpenSearchAppPeerModel(PeerModel):
-    """Peer model mapping to the OpenSearch application state."""
+    """Data model for the OpenSearch application state."""
 
-    # --- Secret-group fields (internal-user credentials) ---
     admin_password: UserSecretStr = Field(default="")
     admin_hashed_password: UserSecretStr = Field(default="")
     kibana_server_password: UserSecretStr = Field(default="")
@@ -93,7 +89,6 @@ class OpenSearchAppPeerModel(PeerModel):
     monitor_password: UserSecretStr = Field(default="")
     monitor_hashed_password: UserSecretStr = Field(default="")
 
-    # --- Secret-group fields (admin-TLS material) ---
     admin_truststore_password: AdminSecretStr = Field(default="")
     admin_subject: AdminSecretStr = Field(default="")
     admin_keystore_password: AdminSecretStr = Field(default="")
@@ -104,7 +99,6 @@ class OpenSearchAppPeerModel(PeerModel):
     admin_cert: AdminSecretStr = Field(default="")
     admin_ca_cert: AdminSecretStr = Field(default="")
 
-    # --- Secret-group fields (plugin secrets) ---
     plugin_secrets: PluginsSecretStr = Field(default="")
 
     # Whether the admin user has been created in the security index.
@@ -181,9 +175,8 @@ class OpenSearchAppPeerModel(PeerModel):
 
 
 class OpenSearchServerPeerModel(PeerModel):
-    """Peer model to the OpenSearch unit state."""
+    """Data model for the OpenSearch unit state."""
 
-    # --- Secret-group fields (transport-layer TLS) ---
     transport_key: TransportSecretStr = Field(default="")
     transport_key_password: TransportSecretStr = Field(default="")
     transport_csr: TransportSecretStr = Field(default="")
@@ -194,7 +187,6 @@ class OpenSearchServerPeerModel(PeerModel):
     transport_subject: TransportSecretStr = Field(default="")
     transport_keystore_password: TransportSecretStr = Field(default="")
 
-    # --- Secret-group fields (HTTP-layer TLS) ---
     http_keystore_password: HttpSecretStr = Field(default="")
     http_key: HttpSecretStr = Field(default="")
     http_key_password: HttpSecretStr = Field(default="")
@@ -258,13 +250,13 @@ class OpenSearchServerPeerModel(PeerModel):
 
     @field_serializer("allocation_exclusions_to_delete", "delete_voting_exclusions")
     def serialize_comma_separated_strings(self, v: set[str]) -> str:
-        """Serialize the set to a sorted, comma-separated string for stable databag output."""
+        """Serialize the set to a sorted, comma-separated string"""
         return ",".join(sorted(v))
 
     @field_validator("started", mode="before")
     @classmethod
     def coerce_to_str(cls, v):
-        """Ensure non-None values are always strings, even if the databag returns a float/int."""
+        """Ensure non-None values are always strings"""
         if v is None:
             return None
         return str(v)
@@ -272,17 +264,14 @@ class OpenSearchServerPeerModel(PeerModel):
     @field_validator("update_ts", mode="before")
     @classmethod
     def coerce_update_ts_to_str(cls, v):
-        """Ensure update_ts is always a string, even if the databag returns a float/int."""
+        """Ensure update_ts is always a string"""
         if v is None:
             return ""
         return str(v)
 
 
 class UpgradeAppModel(PeerModel):
-    """Inert data model for the upgrade application-level databag.
-
-    Reads/writes to the databag go through the `UpgradeApplication` wrapper.
-    """
+    """Data model for the Upgrades application state."""
 
     # Charm/workload versions the app is upgrading to.
     versions: Optional[UpgradeVersions] = Field(default=None)
@@ -304,10 +293,7 @@ class UpgradeAppModel(PeerModel):
 
 
 class UpgradeServerModel(PeerModel):
-    """Inert data model for the upgrade unit-level databag.
-
-    Reads/writes to the databag go through the `UpgradeServer` wrapper.
-    """
+    """Data model for the Upgrades unit state."""
 
     state: Optional[str] = Field(default=None)
     snap_revision: Optional[str] = Field(default=None)
@@ -335,17 +321,17 @@ class UpgradeServerModel(PeerModel):
 
 
 class PeerClusterServerModel(PeerModel):
-    """Data model for the peer cluster unit-level databag."""
+    """Data model for the peer cluster unit state."""
 
     tls_ca_renewing: bool = Field(default=False)
     tls_ca_renewed: bool = Field(default=False)
     tls_configured: bool = Field(default=False)
-    # Hash of the last snapshots (backup) credentials this unit persisted to its keystore.
+    # Hash of the last snapshots credentials this unit pushed to its keystore.
     snapshots_credentials_saved: Optional[str] = Field(default=None)
 
 
 class PeerClusterAppModel(BaseCommonModel):
-    """Data model for the peer cluster application-level databag."""
+    """Data model for the peer cluster application state."""
 
     # Whether the requirer app offers itself as a failover-orchestrator candidate.
     is_candidate_failover_orchestrator: bool = Field(default=False)
@@ -367,13 +353,8 @@ class PeerClusterAppModel(BaseCommonModel):
     first_data_node: Optional[str] = Field(default=None)
     nodes_config: dict[str, Node] = Field(default_factory=dict)
     deployment_description: Optional[DeploymentDescription] = Field(default=None)
-    # Optional (not default {}) so the requirer can distinguish "no plugin data broadcast"
-    # (None -> leave the subcluster's plugins untouched) from "plugins explicitly removed"
-    # ({} -> remove them in the subcluster). Only the main orchestrator broadcasts a dict;
-    # non-main orchestrators broadcast None. See events/peer_cluster.py guard.
     plugin_config_info: Optional[dict[str, PluginConfigInfo]] = Field(default=None)
-    # Marker that the peer-cluster relation secret groups have been pre-created; see
-    # initialize_empty_secrets().
+    # Marker that the peer-cluster relation secret groups have been pre-created
     pc_secrets_initialized: bool = Field(default=False)
 
     # User secrets
@@ -398,9 +379,7 @@ class PeerClusterAppModel(BaseCommonModel):
     admin_cert: AdminSecretStr = Field(default="")
     admin_ca_cert: AdminSecretStr = Field(default="")
 
-    # Backup storage secrets. These must be top-level fields, the databag serializer only
-    # promotes top-level secret-group fields into Juju secrets, not credential fields nested
-    # inside an S3RelData/AzureRelData/GcsRelData sub-model.
+    # Backup storage secrets
     s3_access_key: BackupSecretStr = Field(default="")
     s3_secret_key: BackupSecretStr = Field(default="")
     s3_tls_ca_chain: BackupSecretStr = Field(default="")

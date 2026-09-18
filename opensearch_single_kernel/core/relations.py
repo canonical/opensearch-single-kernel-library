@@ -40,9 +40,7 @@ class RelationState:
     """Base wrapper for models"""
 
     # Wrapper-internal attributes that must never be routed to the databag. Used to avoid setattr on this fields
-    _RESERVED_ATTRS = frozenset(
-        {"repository", "component", "relation", "skip_secrets", "model", "unit"}
-    )
+    RESERVED_ATTRS = {"repository", "component", "relation", "skip_secrets", "model", "unit"}
 
     def __init__(
         self,
@@ -60,7 +58,7 @@ class RelationState:
         self.model = build_model(repository, model_cls) if repository else model_cls()
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate unknown (non-private) reads to the underlying model."""
+        """Delegate unknown reads to the underlying model."""
         model = self.__dict__.get("model")
         if model is None:
             raise AttributeError(name)
@@ -70,7 +68,7 @@ class RelationState:
         """Update model-field writes to the databag."""
         model = self.__dict__.get("model")
         if (
-            name not in self._RESERVED_ATTRS
+            name not in self.RESERVED_ATTRS
             and model is not None
             and name in type(model).__pydantic_fields__
         ):
@@ -137,7 +135,7 @@ class RelationState:
 
 
 class LockApplication(RelationState):
-    """State/relation-data wrapper for the Lock application databag."""
+    """State wrapper for the Lock application databag."""
 
     model: LockAppStateModel
 
@@ -178,7 +176,7 @@ class LockApplication(RelationState):
 
 
 class LockServer(RelationState):
-    """State/relation-data wrapper for the Lock unit databag."""
+    """State wrapper for the Lock unit databag."""
 
     model: LockServerStateModel
 
@@ -196,7 +194,7 @@ class LockServer(RelationState):
 
 
 class OpenSearchApplication(RelationState):
-    """State/relation-data wrapper for the OpenSearch application peer databag."""
+    """State wrapper for the OpenSearch application databag."""
 
     model: OpenSearchAppPeerModel
 
@@ -233,7 +231,7 @@ class OpenSearchApplication(RelationState):
 
 
 class OpenSearchServer(RelationState):
-    """State/relation-data wrapper for a single OpenSearch unit's peer databag."""
+    """State wrapper for the OpenSearch unit databag."""
 
     model: OpenSearchServerPeerModel
 
@@ -263,7 +261,6 @@ class OpenSearchServer(RelationState):
 
     def initialize_empty_secrets(self) -> None:
         """Initialize empty unit-level secrets to prevent log spam."""
-        # Use truthy placeholders only for fields whose secrets don't exist yet
         items: dict = {}
         if not self.model.transport_key_password:
             items["transport_key_password"] = " "
@@ -274,7 +271,7 @@ class OpenSearchServer(RelationState):
 
 
 class UpgradeApplication(RelationState):
-    """State/relation-data wrapper for the upgrade application databag."""
+    """State wrapper for the Upgrades application databag."""
 
     model: UpgradeAppModel
 
@@ -292,7 +289,7 @@ class UpgradeApplication(RelationState):
 
 
 class UpgradeServer(RelationState):
-    """State/relation-data wrapper for the upgrade unit databag."""
+    """State wrapper for the Upgrades unit databag."""
 
     model: UpgradeServerModel
 
@@ -314,7 +311,7 @@ class UpgradeServer(RelationState):
 
 
 class PeerClusterApplication(RelationState):
-    """State/relation-data wrapper for a peer-cluster application databag."""
+    """State wrapper for the peer cluster application databag."""
 
     model: PeerClusterAppModel
 
@@ -344,7 +341,7 @@ class PeerClusterApplication(RelationState):
 
 
 class PeerClusterServer(RelationState):
-    """State/relation-data wrapper for a single unit's peer-cluster databag."""
+    """State wrapper for the peer cluster unit databag."""
 
     model: PeerClusterServerModel
 
@@ -355,6 +352,7 @@ class PeerClusterServer(RelationState):
         skip_secrets: bool = False,
     ) -> None:
         super().__init__(PeerClusterServerModel, repository, component, skip_secrets)
+        self.component = component
 
     @property
     def unit(self) -> ops.model.Unit:

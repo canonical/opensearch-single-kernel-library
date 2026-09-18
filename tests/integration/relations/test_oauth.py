@@ -287,8 +287,6 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
         verify=False,
     )
     assert result.status_code == 200, "request for authinfo should success"
-    # https://github.com/opensearch-project/security/pull/6147
-    # 3.8.0 removed own_index default roles mapping
     assert result.json().get("roles") == [second_data_integrator_user], (
         "second data integrator role should be enabled"
     )
@@ -306,8 +304,6 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
         verify=False,
     )
     assert result.status_code == 200, "request for authinfo should success"
-    # https://github.com/opensearch-project/security/pull/6147
-    # 3.8.0 removed own_index default roles mapping
     assert result.json().get("roles") == [], "all the mapped roles should be removed"
 
 

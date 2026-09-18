@@ -918,7 +918,7 @@ class TlsManager(BaseManager):
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
             for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-                error_key = f"error_from_tls-{peer_cluster.relation.id}"
+                error_key = f"error_from_tls_{peer_cluster.relation.id}"
                 model = self.state.application
                 error_value = (
                     model.model_extra.get(error_key) if model and model.model_extra else None

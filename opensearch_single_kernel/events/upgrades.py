@@ -84,8 +84,8 @@ class UpgradesEventsHandler(Object):
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
             self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-        self.charm.state.server_upgrade.update(
-            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
         )
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
@@ -124,8 +124,8 @@ class UpgradesEventsHandler(Object):
                 "Setting %r in upgrade peer relation app databag",
                 self.charm.upgrades_manager.current_versions,
             )
-            self.charm.state.application_upgrade.update(
-                {"versions": self.charm.upgrades_manager.current_versions}
+            self.charm.state.application_upgrade.versions = (
+                self.charm.upgrades_manager.current_versions
             )
             logger.debug(
                 "Set %r in upgrade peer relation app databag",
@@ -385,8 +385,8 @@ class UpgradesEventsHandler(Object):
                     self.charm.lock_manager.release()
                     return
         self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
-        self.charm.state.server_upgrade.update(
-            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
         )
         self.charm.state.remove_status_if_present(
             UpgradesStatuses.UPGRADES_PRE_UPGRADE_CHECK_FAILED.value,
@@ -550,8 +550,8 @@ class UpgradesEventsHandler(Object):
             return
 
         # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
-        self.charm.state.server_upgrade.update(
-            {"workload_version": self.charm.upgrades_manager.current_versions.workload}
+        self.charm.state.server_upgrade.workload_version = (
+            self.charm.upgrades_manager.current_versions.workload
         )
         logger.debug(
             f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"

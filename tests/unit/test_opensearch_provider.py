@@ -238,7 +238,6 @@ def test_create_opensearch_users(
         return_value={},
     )
 
-    # username for this relation would be f"{relation.name}_{relation.id}"
     expected_username = f"{relation.name}_{relation.id}"
     expected_patches = [
         {"op": "replace", "path": "/opendistro_security_roles", "value": [expected_username]},

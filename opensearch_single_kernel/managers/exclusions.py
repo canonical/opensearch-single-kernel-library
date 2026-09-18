@@ -171,20 +171,12 @@ class NodesExclusionsManager(BaseManager):
                 alt_hosts=self.alt_hosts,
             )
             if scope == Scope.APP:
-                self.state.application.update(
-                    {
-                        "delete_voting_exclusions": to_add.union(
-                            self.state.application.delete_voting_exclusions
-                        )
-                    }
+                self.state.application.delete_voting_exclusions = to_add.union(
+                    self.state.application.delete_voting_exclusions
                 )
             else:
-                self.state.server.update(
-                    {
-                        "delete_voting_exclusions": to_add.union(
-                            self.state.server.delete_voting_exclusions
-                        )
-                    }
+                self.state.server.delete_voting_exclusions = to_add.union(
+                    self.state.server.delete_voting_exclusions
                 )
 
             # The voting excl. API returns a status only
@@ -246,18 +238,12 @@ class NodesExclusionsManager(BaseManager):
 
             # Finally, we clean up the VOTING_TO_DELETE
             if scope == Scope.APP:
-                self.state.application.update(
-                    {
-                        "delete_voting_exclusions": self.state.application.delete_voting_exclusions
-                        - exclusions
-                    }
+                self.state.application.delete_voting_exclusions = (
+                    self.state.application.delete_voting_exclusions - exclusions
                 )
             else:
-                self.state.server.update(
-                    {
-                        "delete_voting_exclusions": self.state.server.delete_voting_exclusions
-                        - exclusions
-                    }
+                self.state.server.delete_voting_exclusions = (
+                    self.state.server.delete_voting_exclusions - exclusions
                 )
 
             return True

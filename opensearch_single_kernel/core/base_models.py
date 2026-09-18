@@ -43,7 +43,7 @@ from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 
 def _sort_nested_dicts(obj: Any) -> Any:
-    """Recursively sort dict keys so serialized output is deterministic."""
+    """Recursively sort dict keys."""
     if isinstance(obj, dict):
         return {k: _sort_nested_dicts(v) for k, v in sorted(obj.items())}
     if isinstance(obj, list):
