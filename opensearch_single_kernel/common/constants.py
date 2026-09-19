@@ -141,7 +141,6 @@ class OpenSearchPaths(BaseStrEnum):
     CONF = "etc/opensearch"
     DATA = "var/lib/opensearch"
     LOGS = "var/log/opensearch"
-    JDK = "usr/lib/jvm/java-21-openjdk-amd64"
     TMP = "usr/share/tmp"
     BIN = "usr/share/opensearch/bin"
 
@@ -196,7 +195,10 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = "193"  # Keep in sync with `workload_version` file
+OPENSEARCH_SNAP_REVISIONS = {
+    "x86_64": "193",
+    "aarch64": "192",
+}
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
