@@ -253,6 +253,13 @@ class ExternalClientsStatuses(Enum):
         check="Entity validation for entity-type=GROUP client relations.",
         action="Change entity-type or provide valid entity through client relation.",
     )
+    USER_ENTITY_GROUP_CONFLICT = StatusObject(
+        status="blocked",
+        message="Conflicting group entity on client relation {id}",
+        short_message="Conflicting client group entity",
+        check="Repetition of OpenSearch username across client relations.",
+        action="Change group entity username and retry the client relation.",
+    )
 
 
 class PeerClusterStatuses(Enum):

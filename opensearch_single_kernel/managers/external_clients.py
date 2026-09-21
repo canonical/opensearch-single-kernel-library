@@ -324,17 +324,27 @@ class ExternalClientsManager(BaseManager):
                 )
                 return
 
-            if (
-                external_client.entity_type == ENTITY_GROUP
-                and not external_client.get_requested_entity()
-            ):
-                status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
-                        {"id": relation.id},
+            if external_client.entity_type == ENTITY_GROUP:
+                if not (entity := external_client.get_requested_entity()):
+                    status_list.append(
+                        format_status(
+                            ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
+                            {"id": relation.id},
+                        )
                     )
-                )
-                return
+                    return
+                elif entity.username in [
+                    name
+                    for relation_id, name in self.state.application.client_users_dict.items()
+                    if relation_id != str(relation.id)
+                ]:
+                    status_list.append(
+                        format_status(
+                            ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
+                            {"id": relation.id},
+                        )
+                    )
+                    return
 
             if str(relation.id) not in self.state.application.client_users_dict and (
                 external_client.entity_type == ENTITY_GROUP

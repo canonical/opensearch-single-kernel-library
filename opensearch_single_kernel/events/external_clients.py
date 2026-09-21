@@ -191,6 +191,14 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
+        if entity.username in [
+            name
+            for relation_id, name in self.charm.state.application.client_users_dict.items()
+            if relation_id != str(event.relation.id)
+        ]:
+            event.defer()
+            return False
+
         try:
             self.charm.external_clients_manager.put_client_user(
                 event.relation.id,
