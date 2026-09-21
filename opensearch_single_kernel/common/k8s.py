@@ -21,8 +21,8 @@ from opensearch_single_kernel.common.exceptions import (
 # default logging from lightkube httpx requests is very noisy
 logging.getLogger("lightkube").setLevel(logging.WARNING)
 logging.getLogger("lightkube.core.client").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx2").setLevel(logging.WARNING)
+logging.getLogger("httpcore2").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
