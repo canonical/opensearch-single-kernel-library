@@ -145,6 +145,10 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
+        if not self.charm.state.application.is_security_index_initialised:
+            event.defer()
+            return False
+
         if not event.index:
             return False
 

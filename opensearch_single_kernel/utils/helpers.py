@@ -94,8 +94,13 @@ def deployment_type(
     )
 
 
-def get_k8s_fqdn(name: str) -> str:
-    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+def resolve_k8s_canonical_name(name: str) -> str | None:
+    """Resolve the canonical DNS name for a K8s service or pod name, or None if unresolvable.
+
+    On a freshly (re)created pod, the per-unit DNS record may not be published
+    yet — callers can use None to postpone work that must not run with an
+    unresolved name (e.g. computing certificate SANs).
+    """
     try:
         info = socket.getaddrinfo(
             name,
@@ -105,20 +110,23 @@ def get_k8s_fqdn(name: str) -> str:
             type=socket.SOCK_STREAM,
         )
     except socket.gaierror as e:
-        logger.warning(
-            "Failed to resolve canonical name for %s: %s. \nFalling back on default fqdn.",
-            name,
-            e,
-        )
-        return socket.getfqdn(name)
+        logger.warning("Failed to resolve canonical name for %s: %s.", name, e)
+        return None
 
     for entry in info:
         if canonname := entry[3]:
             return canonname
 
-    logger.warning(
-        "Failed to resolve canonical name for %s. \nFalling back on default fqdn.", name
-    )
+    logger.warning("Failed to resolve canonical name for %s.", name)
+    return None
+
+
+def get_k8s_fqdn(name: str) -> str:
+    """Resolve the canonical FQDN for a Kubernetes service or pod name."""
+    if canonname := resolve_k8s_canonical_name(name):
+        return canonname
+
+    logger.warning("Falling back on default fqdn for %s.", name)
     return socket.getfqdn(name)
 
 
@@ -413,7 +421,7 @@ def _cleanup_exec_process(process: Any) -> None:
 
 def wait_for_process_output(
     process: Any, masked_command: str, original_command: str
-) -> tuple[str, str]:
+) -> tuple[str | bytes, str | bytes | None]:
     """Wait for process to complete and return output.
 
     Args:
@@ -422,7 +430,8 @@ def wait_for_process_output(
         original_command: Original command string for error messages.
 
     Returns:
-        tuple[str, str]: (stdout, stderr). stderr is typically empty when
+        tuple: (stdout, stderr), as str unless exec() was called with
+        ``encoding=None``, in which case both are bytes. stderr is None when
         combine_stderr=True was used for exec().
 
     Raises:
