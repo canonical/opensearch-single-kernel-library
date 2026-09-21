@@ -150,7 +150,10 @@ class ExternalClientsEventsHandler(Object):
 
     def _validate_request(self, event: ResourceRequestedEvent) -> str | None:
         """Validates the event and returns the index name if valid, otherwise None."""
-        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+        if (
+            not self.charm.cluster_manager.opensearch_client.is_node_up()
+            or not self.charm.state.application.security_index_initialised
+        ):
             event.defer()
             return None
 

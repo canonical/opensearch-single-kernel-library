@@ -86,6 +86,7 @@ from opensearch_single_kernel.utils.helpers import (
     get_k8s_fqdn,
     k8s_fqdn,
     lock_unit_name,
+    resolve_k8s_canonical_name,
 )
 from opensearch_single_kernel.utils.status import format_status
 
@@ -619,6 +620,21 @@ class ClusterState(Object):
             service_name = f"{unit_prefix}.{self.application.name}-endpoints"
             return get_k8s_fqdn(service_name)
         return socket.getfqdn()
+
+    @property
+    def fqdn_resolvable(self) -> bool:
+        """Whether the unit's canonical FQDN is already published in DNS.
+
+        On K8s, the FQDN used in certificate SANs can be temporarily
+        unavailable (e.g. after pod recreation), resulting in bad certificates
+        loaded and unavailability of OpenSearch connection. This check was
+        added to handle this case.
+        """
+        if self.substrate != Substrates.K8S:
+            return True
+        unit_prefix = self.unit_name.split(".")[0]
+        service_name = f"{unit_prefix}.{self.application.name}-endpoints"
+        return resolve_k8s_canonical_name(service_name) is not None
 
     @property
     def network_hosts(self) -> list[str]:

@@ -151,7 +151,9 @@ def get_version_on_unit(unit: str, model: str, substrate):
     # Retry to absorb transient `juju ssh`/`juju exec` connection flakiness.
     for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(wait=30)):
         with attempt:
-            output = subprocess.check_output(cmd, shell=shell, text=True).strip()
+            output = subprocess.check_output(
+                cmd, shell=shell, text=True, stdin=subprocess.DEVNULL
+            ).strip()
     match = re.search(r"Version:\s*([0-9]+\.[0-9]+\.[0-9]+)", output)
     return match.group(1) if match else None
 

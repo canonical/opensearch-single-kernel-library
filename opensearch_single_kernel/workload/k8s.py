@@ -533,6 +533,9 @@ class K8sWorkload(BaseWorkload):
 
             cmd_list = build_command_list(command_with_args)
 
+            # OpenSSL's "pkcs12 -in" output may contain non-UTF-8 bytes in Bag Attributes
+            # (e.g., friendlyName: debian:netlock_arany_=class_gold=_fQtanúsítvány.pem). When Python
+            # decodes stdout/stderr as UTF-8, this can raise UnicodeDecodeError.
             if use_errors_replace:
                 process = self.container.exec(
                     cmd_list,
@@ -552,6 +555,14 @@ class K8sWorkload(BaseWorkload):
                     stdout = stdout.decode("utf-8", "replace")
                 if isinstance(stderr, bytes):
                     stderr = stderr.decode("utf-8", "replace")
+            # Logs should be truncated to avoid exceeding text limit OSError:
+            # [Errno 7] Argument list too long: 'juju-log').
+            logger.debug(
+                "%s:\nstdout: %.2000s\nstderr: %.2000s\nreturncode: 0",
+                masked_command,
+                stdout,
+                stderr,
+            )
             # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 

@@ -739,18 +739,24 @@ async def test_relation_broken(ops_test: OpsTest):
     # Break both relations simultaneously.
     await asyncio.gather(
         ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
-            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}"
+            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+            f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
+            block_until_done=True,
         ),
         ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
-            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}", f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}"
+            f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
+            f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
+            block_until_done=True,
         ),
         ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
             f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
             f"{V1_CLIENT_APP_NAME}:{V1_FIRST_RELATION_NAME}",
+            block_until_done=True,
         ),
         ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
             f"{OPENSEARCH_APP_NAME}:{CLIENT_RELATION}",
             f"{V1_CLIENT_APP_NAME}:{V1_ADMIN_RELATION_NAME}",
+            block_until_done=True,
         ),
     )
 

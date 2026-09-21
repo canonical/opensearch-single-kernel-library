@@ -134,6 +134,13 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.state.fqdn_resolvable:
+            logger.warning(
+                "Unit canonical FQDN not yet resolvable in DNS, deferring CSR generation."
+            )
+            event.defer()
+            return
+
         if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
             # create passwords for both ca trust_store/admin key_store
             self.charm.tls_manager.create_store_pwd_if_not_exists(
@@ -344,6 +351,14 @@ class TLSEventsHandler(Object):
 
         logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         old_csr = self.charm.tls_manager.get_secret_by_cert(cert_type, "csr").encode("utf-8")
+
+        if cert_type != CertType.APP_ADMIN and not self.charm.state.fqdn_resolvable:
+            logger.warning(
+                "Unit canonical FQDN not yet resolvable in DNS, deferring certificate renewal."
+            )
+            event.defer()
+            return
+
         new_csr = self.charm.tls_manager.create_certificate_signing_request(
             cert_type=cert_type, tls_file=False, renew=True
         )
@@ -444,22 +459,16 @@ class TLSEventsHandler(Object):
 
         password = event.params.get("password") or generate_password()
         try:
-            self.charm.internal_users_manager.put_or_update_internal_user_leader(
+            if not self.charm.internal_users_manager.put_or_update_internal_user_leader(
                 user_name, password
-            )
+            ):
+                event.fail("Failed to update user")
+                return
             event.set_results({user_name: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
         except OpenSearchError as e:
             event.fail(f"Failed changing the password: {e}")
-        except RuntimeError as e:
-            # From:
-            # https://github.com/canonical/operator/blob/ \
-            #     eb52cef1fba4df2f999f88902fb39555fb6de52f/ops/charm.py
-            # if str(e) == "cannot defer action events":
-            #    event.fail("Cluster is not ready to update this password. Try again later.")
-            # else:
-            event.fail(f"Failed with unknown error: {e}")
 
     def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""

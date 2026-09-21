@@ -113,6 +113,7 @@ def test_on_index_requested(harness, mocker):
     event.defer.assert_called()
 
     is_node_up.return_value = True
+    harness.charm.state.application.security_index_initialised = True
     harness.charm.unit.status = ActiveStatus()
     harness.charm.external_clients_events._on_resource_requested(event)
     create_users.assert_called_with(
@@ -194,6 +195,7 @@ def test_on_index_requested_kibanaserver(harness, mocker):
     event.defer.assert_called()
 
     is_node_up.return_value = True
+    harness.charm.state.application.security_index_initialised = True
     harness.charm.unit.status = ActiveStatus()
     harness.charm.external_clients_events._on_resource_requested(event)
     create_users.assert_called()
