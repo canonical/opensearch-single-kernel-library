@@ -147,7 +147,7 @@ class ManualTLSAgent:
         action = await self.tls_unit.run_action(
             "provide-certificate",
             **{
-                "relation-id": str(csr.relation_id),
+                "relation-id": int(csr.relation_id),
                 "certificate": base64.b64encode(certificate).decode(),
                 "ca-certificate": base64.b64encode(self.ca).decode(),
                 "certificate-signing-request": base64.b64encode(
