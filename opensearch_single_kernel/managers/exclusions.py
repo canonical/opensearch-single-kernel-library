@@ -92,6 +92,7 @@ class NodesExclusionsManager(BaseManager):
         state = self.state.application if scope == Scope.APP else self.state.server
         units_to_cleanup = self._units_to_cleanup(list(state.delete_voting_exclusions))
         self._delete_voting(units_to_cleanup, scope)
+        state = self.state.application if scope == Scope.APP else self.state.server
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(
             self.api_or_state_node, allocations_to_cleanup

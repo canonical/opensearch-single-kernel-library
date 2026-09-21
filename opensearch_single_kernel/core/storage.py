@@ -15,11 +15,11 @@ from dpcharmlibs.interfaces import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
-from opensearch_single_kernel.common.constants import SECRET_BACKUPS
+from opensearch_single_kernel.common.constants import SECRET_LABEL_BACKUPS
 from opensearch_single_kernel.core.base_models import PlainModel
 
 BackupSecretKeyStr = Annotated[
-    OptionalSecretStr, Field(exclude=True, default=None), SECRET_BACKUPS
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_BACKUPS
 ]
 
 

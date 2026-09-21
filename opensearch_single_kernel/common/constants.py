@@ -151,6 +151,8 @@ class ExtraUserRolePermissions(Enum):
 
     # Default user has CRUD in a specific index. Update index_patterns to include the index to
     # which these permissions are applied.
+    # cluster_composite_ops and indices_all restoring `own_index` role mappings
+    # rights after it's deletion in 3.8.0
     DEFAULT = {
         "cluster_permissions": [
             "cluster_monitor",
@@ -298,11 +300,11 @@ SECRETS_LABEL_SEPARATOR = "."
 ADMIN_HASHED_PASSWORD_KEY = "admin-hashed-password"
 KIBANA_SERVER_HASHED_PASSWORD_KEY = "kibana-server-hashed-password"
 
-SECRET_APP_ADMIN = "app-admin"
-SECRET_UNIT_TRANSPORT = "unit-transport"
-SECRET_UNIT_HTTP = "unit-http"
-SECRET_PLUGIN = "plugins"
-SECRET_BACKUPS = "backups"
+SECRET_LABEL_APP_ADMIN = "app-admin"
+SECRET_LABEL_UNIT_TRANSPORT = "unit-transport"
+SECRET_LABEL_UNIT_HTTP = "unit-http"
+SECRET_LABEL_PLUGIN = "plugins"
+SECRET_LABEL_BACKUPS = "backups"
 
 # Backup
 S3_CREDENTIALS = "s3-creds"

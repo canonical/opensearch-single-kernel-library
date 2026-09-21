@@ -18,11 +18,11 @@ from dpcharmlibs.interfaces import (
 from pydantic import Field, field_serializer, field_validator, model_serializer
 
 from opensearch_single_kernel.common.constants import (
-    SECRET_APP_ADMIN,
-    SECRET_BACKUPS,
-    SECRET_PLUGIN,
-    SECRET_UNIT_HTTP,
-    SECRET_UNIT_TRANSPORT,
+    SECRET_LABEL_APP_ADMIN,
+    SECRET_LABEL_BACKUPS,
+    SECRET_LABEL_PLUGIN,
+    SECRET_LABEL_UNIT_HTTP,
+    SECRET_LABEL_UNIT_TRANSPORT,
     PerformanceType,
 )
 from opensearch_single_kernel.core.base_models import (
@@ -39,12 +39,20 @@ from opensearch_single_kernel.core.base_models import (
 from opensearch_single_kernel.core.storage import AzureRelData, GcsRelData, S3RelData
 
 TransportSecretStr = Annotated[
-    OptionalSecretStr, Field(exclude=True, default=None), SECRET_UNIT_TRANSPORT
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_UNIT_TRANSPORT
 ]
-HttpSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_UNIT_HTTP]
-AdminSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_APP_ADMIN]
-PluginsSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_PLUGIN]
-BackupSecretStr = Annotated[OptionalSecretStr, Field(exclude=True, default=None), SECRET_BACKUPS]
+HttpSecretStr = Annotated[
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_UNIT_HTTP
+]
+AdminSecretStr = Annotated[
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_APP_ADMIN
+]
+PluginsSecretStr = Annotated[
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_PLUGIN
+]
+BackupSecretStr = Annotated[
+    OptionalSecretStr, Field(exclude=True, default=None), SECRET_LABEL_BACKUPS
+]
 
 
 class JWTAuthConfiguration(ResourceProviderModel):

@@ -4,6 +4,7 @@
 
 """Relations wrappers used by state to access models"""
 
+import json
 import logging
 import os
 import time
@@ -11,9 +12,7 @@ from typing import Any, Optional
 
 import ops
 from dpcharmlibs.interfaces import OpsRepository, build_model, write_model
-from ops.model import SecretNotFoundError
 from pydantic import BaseModel
-from pydantic_core import PydanticSerializationError
 
 from opensearch_single_kernel.common.constants import PerformanceType
 from opensearch_single_kernel.core.base_models import (
@@ -70,7 +69,7 @@ class RelationState:
         if (
             name not in self.RESERVED_ATTRS
             and model is not None
-            and name in type(model).__pydantic_fields__
+            and name in type(model).model_fields
         ):
             self.update({name: value})
         else:
@@ -90,7 +89,7 @@ class RelationState:
             return
 
         for field in names:
-            field_info = type(self.model).__pydantic_fields__.get(field)
+            field_info = type(self.model).model_fields.get(field)
             default = field_info.get_default(call_default_factory=True) if field_info else None
             setattr(self.model, field, default)
 
@@ -111,27 +110,21 @@ class RelationState:
         self.write()
 
     def write(self) -> None:
-        """Write the whole model, falling back to non-secret fields if secrets are missing."""
-        try:
-            write_model(
-                self.repository,
-                self.model,
-                context={"skip_secrets": "true"} if self.skip_secrets else None,
-            )
-        except (SecretNotFoundError, PydanticSerializationError) as e:
-            logger.warning(
-                "Secret unavailable while updating %s, writing non-secret fields only: %s",
-                type(self.model).__name__,
-                e,
-            )
-            try:
-                write_model(self.repository, self.model, context={"skip_secrets": "true"})
-            except (SecretNotFoundError, PydanticSerializationError) as e2:
-                logger.warning(
-                    "Skipping write for %s, fallback write failed: %s",
-                    type(self.model).__name__,
-                    e2,
-                )
+        """Write the whole model."""
+        write_model(
+            self.repository,
+            self.model,
+            context={"skip_secrets": "true"} if self.skip_secrets else None,
+        )
+
+        # TODO: remove then https://github.com/canonical/data-platform-libs/issues/272 is fixed
+        dumped = self.model.model_dump(
+            mode="json", context={"skip_secrets": "true"}, exclude_none=True
+        )
+        for field, value in dumped.items():
+            serialized = value if isinstance(value, str) else json.dumps(value)
+            if not serialized:
+                self.repository.delete_field(field)
 
 
 class LockApplication(RelationState):
@@ -352,7 +345,6 @@ class PeerClusterServer(RelationState):
         skip_secrets: bool = False,
     ) -> None:
         super().__init__(PeerClusterServerModel, repository, component, skip_secrets)
-        self.component = component
 
     @property
     def unit(self) -> ops.model.Unit:

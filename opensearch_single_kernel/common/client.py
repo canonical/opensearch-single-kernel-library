@@ -575,13 +575,7 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request(
-                "DELETE",
-                f"{USER_ROLE_ENDPOINT}/{role_name}",
-                retries=3,
-                wait_strategy=wait_fixed(3),
-                ignore_retry_on=[404],
-            )
+            resp = self.request("DELETE", f"{USER_ROLE_ENDPOINT}/{role_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -663,13 +657,7 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request(
-                "DELETE",
-                f"{USER_ENDPOINT}/{user_name}",
-                retries=3,
-                wait_strategy=wait_fixed(3),
-                ignore_retry_on=[404],
-            )
+            resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {

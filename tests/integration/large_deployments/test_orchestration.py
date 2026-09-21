@@ -9,7 +9,7 @@ import pytest
 from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
-from opensearch_single_kernel.common.constants import PEER_RELATION, DeploymentType
+from opensearch_single_kernel.common.constants import PEER_RELATION
 from opensearch_single_kernel.common.statuses import (
     PeerClusterErrorDataStatuses,
     PeerClusterStatuses,
@@ -39,12 +39,6 @@ NO_DATA_NODE_STATUS = StatusObject(
 NO_CM_STATUS = StatusObject(
     status="blocked",
     message="Missing requirements: At least 1 cluster manager nodes are required.",
-)
-FAILOVER_NOT_READY_STATUS = StatusObject(
-    status="waiting",
-    message=PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value.message.format(
-        message_suffix=f"in related '{DeploymentType.FAILOVER_ORCHESTRATOR}'"
-    ),
 )
 
 
@@ -281,11 +275,9 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
             FAILOVER_APP: [PeerClusterStatuses.PEER_CLUSTER_NO_RELATION.value],
             DATA_APP: [
                 PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value,
-                FAILOVER_NOT_READY_STATUS,
             ],
             DATA_APP_TWO: [
                 PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value,
-                FAILOVER_NOT_READY_STATUS,
             ],
         },
     )
