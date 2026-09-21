@@ -311,6 +311,39 @@ class ExternalClientsManager(BaseManager):
             )
             return
 
+        if external_client.entity_type == ENTITY_GROUP:
+            if not (entity := external_client.get_requested_entity()):
+                status_list.append(
+                    format_status(
+                        ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
+                        {"id": relation.id},
+                    )
+                )
+                return
+            elif entity.username in [
+                name
+                for relation_id, name in self.state.application.client_users_dict.items()
+                if relation_id != str(relation.id)
+            ]:
+                status_list.append(
+                    format_status(
+                        ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
+                        {"id": relation.id},
+                    )
+                )
+                return
+
+        if str(relation.id) not in self.state.application.client_users_dict and (
+            external_client.entity_type == ENTITY_GROUP
+            or external_client.extra_user_roles.lower() != KIBANA_SERVER_ROLE
+        ):
+            status_list.append(
+                format_status(
+                    ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
+                )
+            )
+            return
+
         try:
             if not self.opensearch_client.is_node_up():
                 return
@@ -320,39 +353,6 @@ class ExternalClientsManager(BaseManager):
                     format_status(
                         ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
                         {"id": relation.id, "index": index},
-                    )
-                )
-                return
-
-            if external_client.entity_type == ENTITY_GROUP:
-                if not (entity := external_client.get_requested_entity()):
-                    status_list.append(
-                        format_status(
-                            ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
-                            {"id": relation.id},
-                        )
-                    )
-                    return
-                elif entity.username in [
-                    name
-                    for relation_id, name in self.state.application.client_users_dict.items()
-                    if relation_id != str(relation.id)
-                ]:
-                    status_list.append(
-                        format_status(
-                            ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
-                            {"id": relation.id},
-                        )
-                    )
-                    return
-
-            if str(relation.id) not in self.state.application.client_users_dict and (
-                external_client.entity_type == ENTITY_GROUP
-                or external_client.extra_user_roles.lower() != KIBANA_SERVER_ROLE
-            ):
-                status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
                     )
                 )
                 return

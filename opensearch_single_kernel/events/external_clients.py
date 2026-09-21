@@ -83,6 +83,13 @@ class ExternalClientsEventsHandler(Object):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
+        if not (
+            self._create_client_group(event, external_client)
+            if external_client.entity_type == ENTITY_GROUP
+            else self._create_client_user(event, external_client)
+        ):
+            return
+
         self.charm.status_handler.set_running_status(
             format_status(
                 ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
@@ -96,13 +103,6 @@ class ExternalClientsEventsHandler(Object):
         )
 
         if not self._create_client_index(event, external_client):
-            return
-
-        if not (
-            self._create_client_group(event, external_client)
-            if external_client.entity_type == ENTITY_GROUP
-            else self._create_client_user(event, external_client)
-        ):
             return
 
         try:
