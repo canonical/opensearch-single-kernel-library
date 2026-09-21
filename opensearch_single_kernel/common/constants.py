@@ -152,7 +152,7 @@ class ExtraUserRolePermissions(Enum):
     # Default user has CRUD in a specific index. Update index_patterns to include the index to
     # which these permissions are applied.
     # cluster_composite_ops and indices_all restoring `own_index` role mappings
-    # rights after it's deletion in 3.8.0
+    # after it's deletion in 3.8.0
     DEFAULT = {
         "cluster_permissions": [
             "cluster_monitor",

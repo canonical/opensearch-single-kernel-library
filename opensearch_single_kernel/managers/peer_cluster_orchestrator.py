@@ -259,44 +259,6 @@ class PeerClusterOrchestratorManager(BaseManager):
         }
         return sha1(json.dumps([non_secret, secret_values], sort_keys=True).encode()).hexdigest()
 
-    def clear_rel_data(self, local_peer_cluster: PeerClusterApplication) -> None:
-        """Reset all orchestrator-broadcast fields to their defaults in a single write."""
-        local_peer_cluster.update(
-            {
-                "deployment_description": None,
-                "security_index_initialised": False,
-                "first_data_node": "",
-                "nodes_config": {},
-                "plugin_config_info": {},
-                "admin_password": None,
-                "admin_hashed_password": None,
-                "kibana_server_password": None,
-                "kibana_server_hashed_password": None,
-                "monitor_password": None,
-                "monitor_hashed_password": None,
-                "plugin_secrets": None,
-                "admin_truststore_password": None,
-                "admin_keystore_password": None,
-                "admin_subject": None,
-                "admin_key": None,
-                "admin_key_password": None,
-                "admin_csr": None,
-                "admin_chain": None,
-                "admin_cert": None,
-                "admin_ca_cert": None,
-                # Backup storage secrets
-                "s3_access_key": None,
-                "s3_secret_key": None,
-                "s3_tls_ca_chain": None,
-                "azure_storage_account": None,
-                "azure_secret_key": None,
-                "gcs_secret_key": None,
-                # emptying the secret fields above deletes the backing group secrets, so
-                # drop the marker to let initialize_empty_secrets() re-create them later
-                "pc_secrets_initialized": False,
-            }
-        )
-
     def to_peer_cluster_rel_data(
         self,
         security_index_initialised: bool | None,
@@ -625,19 +587,42 @@ class PeerClusterOrchestratorManager(BaseManager):
     def clean_all_provider_relation_data(self):
         """Clean all relation data on provider."""
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
-            self._delete_rel_data(local_peer_cluster.relation.id)
-
-    def _delete_rel_data(self, rel_id: int) -> None:
-        """Deletes relation data"""
-        local_peer_cluster = self.state.peer_cluster_by_relation_id(
-            is_provider=True, relation_id=rel_id, remote=False
-        )
-        if local_peer_cluster:
-            self.clear_rel_data(local_peer_cluster)
-            local_peer_cluster.reset(
-                "rel_data_hash",
-                "error_data",
-                "cluster_fleet_apps",
-                "orchestrators",
-                "trigger",
+            local_peer_cluster.update(
+                {
+                    "deployment_description": None,
+                    "security_index_initialised": False,
+                    "first_data_node": "",
+                    "nodes_config": {},
+                    "plugin_config_info": {},
+                    # "" rather than None is used because next time we try to write something
+                    # in this model before hook ends will result in SecretNotFoundError
+                    "admin_password": "",
+                    "admin_hashed_password": "",
+                    "kibana_server_password": "",
+                    "kibana_server_hashed_password": "",
+                    "monitor_password": "",
+                    "monitor_hashed_password": "",
+                    "plugin_secrets": "",
+                    "admin_truststore_password": "",
+                    "admin_keystore_password": "",
+                    "admin_subject": "",
+                    "admin_key": "",
+                    "admin_key_password": "",
+                    "admin_csr": "",
+                    "admin_chain": "",
+                    "admin_cert": "",
+                    "admin_ca_cert": "",
+                    # Backup storage secrets
+                    "s3_access_key": "",
+                    "s3_secret_key": "",
+                    "s3_tls_ca_chain": "",
+                    "azure_storage_account": "",
+                    "azure_secret_key": "",
+                    "gcs_secret_key": "",
+                    "rel_data_hash": None,
+                    "error_data": None,
+                    "cluster_fleet_apps": {},
+                    "orchestrators": None,
+                    "trigger": None,
+                }
             )

@@ -733,13 +733,7 @@ class OpenSearchClient:
             OpenSearchHttpError: If the request fails, or if role is empty
         """
         try:
-            resp = self.request(
-                "DELETE",
-                f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
-                retries=3,
-                wait_strategy=wait_fixed(3),
-                ignore_retry_on=[404],
-            )
+            resp = self.request("DELETE", f"{USER_ROLESMAPPING_ENDPOINT}/{role}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 resp = {
