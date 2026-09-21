@@ -841,6 +841,9 @@ class ClusterState(Object):
             logger.error("Bad roles_mapping config value")
             return res
         for user, role in roles_mapping.items():
+            if not isinstance(role, str):
+                logger.error("Bad roles_mapping config value for user %s", user)
+                continue
             res.setdefault(role, []).append(user)
         return res
 
@@ -1386,4 +1389,4 @@ class ClusterState(Object):
         """Get whether the current application is not a sub-cluster."""
         return (
             deployment_desc := self.application.deployment_desc
-        ) is None or deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+        ) is not None and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

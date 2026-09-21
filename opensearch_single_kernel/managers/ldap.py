@@ -22,7 +22,7 @@ class LdapManager(BaseManager):
     """
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
-        super().__init__(state, workload, "config_manager")
+        super().__init__(state, workload, "ldap_manager")
 
     @override()
     def get_statuses(
@@ -31,7 +31,11 @@ class LdapManager(BaseManager):
         """Compute statuses from roles and deployment state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        if scope != "app" or not self.state.ldap_relation:
+        if (
+            scope != "app"
+            or not self.state.application.deployment_desc
+            or not self.state.ldap_relation
+        ):
             return [GeneralStatuses.ACTIVE_IDLE.value]
 
         if not self.state.is_main_orchestrator:

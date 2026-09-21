@@ -162,7 +162,7 @@ class ExternalOpenSearchClient(RelationState):
                 self.relation.id,
             )
             return None
-        requested_entity = requested_entity.split(":")
+        requested_entity = requested_entity.split(":", maxsplit=1)
         if len(requested_entity) != 2:
             logger.error(
                 "Invalid requested entities secret content for GROUP requirer relation %d",

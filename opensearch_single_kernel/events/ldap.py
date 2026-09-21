@@ -152,6 +152,11 @@ class LdapEventsHandler(Object):
             logger.debug("Not the leader unit. Early exiting event.")
             return
 
+        if not self.charm.state.application.deployment_desc:
+            logger.debug("Deployment description absent. Deferring event.")
+            event.defer()
+            return
+
         if not (admin_secrets := self.charm.state.application.admin_secrets):
             logger.debug("Admin secrets absent. Deferring event.")
             event.defer()
