@@ -426,11 +426,10 @@ class TlsManager(BaseManager):
         """Add key and cert to keystore.
 
         Returns:
-            True once the resources are stored. False if the caller should defer and
-            retry.
+            True on success, False if a filesystem or command error occurred.
         """
         if not self.state.ca_rotation_complete_in_cluster:
-            return False
+            return True
 
         # if the TLS certificate is available before the keystore-password, create it anyway
         self.create_store_pwd_if_not_exists(cert_type, StoreType.KEYSTORE)
