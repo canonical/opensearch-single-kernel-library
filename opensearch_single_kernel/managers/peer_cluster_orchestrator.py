@@ -376,7 +376,6 @@ class PeerClusterOrchestratorManager(BaseManager):
                     message_suffix=message_suffix
                 )
             )
-            should_retry = False
         elif (
             "data" in deployment_desc.config.roles
             or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
