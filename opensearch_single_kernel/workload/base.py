@@ -94,7 +94,7 @@ class Paths:
     @property
     def opensearch_keystore_binary(self) -> str:
         """Name of the opensearch-keystore binary."""
-        return "opensearch-charmed.keystore"
+        return "opensearch.keystore"
 
     @property
     def data(self) -> PathProtocol:
