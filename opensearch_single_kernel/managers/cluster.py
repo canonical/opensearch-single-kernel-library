@@ -854,10 +854,10 @@ class ClusterManager(BaseManager):
         )
         peer_cluster_data = remote_peer_cluster.data()
 
-        logger.debug(f"get_cluster_first_data_node : data read: {peer_cluster_data}")
-
         if not peer_cluster_data:
             return None
+
+        logger.debug("First data node: %s", peer_cluster_data.first_data_node)
         return peer_cluster_data.first_data_node
 
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
