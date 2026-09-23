@@ -183,6 +183,41 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         if on_current_unit:
             self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)
 
+    def is_unit_going_away(self, event: ops.EventBase | None = None) -> bool:
+        """Whether this unit, or the whole application, is being removed.
+
+        Args:
+            event: the event being handled.
+
+        Returns:
+            True if this unit is dying or if no unit of the application will remain.
+        """
+        departing_unit = getattr(event, "departing_unit", None)
+        if departing_unit is not None and departing_unit == self.unit:
+            return True
+
+        try:
+            goal_state = ops.hookcmds.goal_state()
+        except (ops.hookcmds.Error, FileNotFoundError) as e:
+            logger.warning(
+                "Failed to fetch the goal-state (%s), assuming unit %s is going away.",
+                e,
+                self.unit.name,
+            )
+            return True
+
+        unit_goal = goal_state.units.get(self.unit.name)
+        if unit_goal is not None and unit_goal.status == "dying":
+            return True
+
+        alive_units = [
+            unit_name for unit_name, goal in goal_state.units.items() if goal.status != "dying"
+        ]
+        if not alive_units:
+            return True
+
+        return False
+
     def stop_opensearch(self, *, restart: bool = False) -> None:
         """Stop OpenSearch service."""
         self.status_handler.set_running_status(

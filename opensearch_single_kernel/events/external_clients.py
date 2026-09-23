@@ -160,7 +160,7 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
-        """Check if this relation is being removed, and update the peer databag accordingly."""
+        """Remove the departing OpenSearch unit from the endpoints exposed to the client."""
         if not self.charm.unit.is_leader():
             return
         external_client = self.charm.state.external_client_by_relation(event.relation)
@@ -168,34 +168,30 @@ class ExternalClientsEventsHandler(Object):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
         # remove departing unit from endpoints available to requirer charm.
-        if event.departing_unit.app == self.charm.app:
-            self.charm.state.server.set_relation_departing(event.relation)
+        if event.departing_unit and event.departing_unit.app == self.charm.app:
             departing_unit_ip = self.charm.state.unit_ip(event.departing_unit)
             self.update_external_client_endpoints(
                 external_client, omit_endpoints={departing_unit_ip}
             )
-        self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
-            external_client
-        )
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle client relation-broken event."""
+        if self.charm.is_unit_going_away(event):
+            logger.info(
+                "Unit is going away, keeping the user of client relation %d.", event.relation.id
+            )
+            return
         if not self.charm.unit.is_leader():
-            return
-        if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
-            logger.warning("No external client found for relation id %d", event.relation.id)
-            return
-        if self.charm.state.server.get_relation_departing(event.relation):
-            self.charm.state.server.remove_relation_departing(event.relation)
             return
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
                 "Modifying relations during an upgrade is not supported."
                 "The charm may be in a broken, unrecoverable state"
             )
-        self.charm.external_clients_manager.remove_lingering_relation_users_and_roles(
-            external_client
-        )
+        if not self.charm.cluster_manager.opensearch_client.is_node_up():
+            event.defer()
+            return
+        self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
     def update_external_client_endpoints(
         self, external_client: ExternalOpenSearchClient, omit_endpoints: set | None = None

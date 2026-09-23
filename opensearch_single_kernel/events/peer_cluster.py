@@ -436,6 +436,10 @@ class PeerClusterEventsHandler(Object):
         if not self.charm.unit.is_leader():
             return
 
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, keeping the registered orchestrators.")
+            return
+
         # handle scale-down at the charm level storage detaching
         if len(event.relation.units) > 0:
             return

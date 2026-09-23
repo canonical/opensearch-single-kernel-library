@@ -194,6 +194,13 @@ class NotificationsEvents(Object):
         Args:
             event: RelationBrokenEvent
         """
+        if self.charm.is_unit_going_away(event):
+            logger.info(
+                "Unit is going away, keeping the SMTP configuration of relation %d.",
+                event.relation.id,
+            )
+            return
+
         label = self.charm.notifications_manager.label(event.relation.id)
         plugin_config = self.charm.state.server.plugin_config_info.get(label)
         if not plugin_config:
