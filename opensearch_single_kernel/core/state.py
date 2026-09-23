@@ -31,6 +31,7 @@ from opensearch_single_kernel.common.constants import (
     KIBANA_SERVER_ROLE,
     LDAP_RELATION,
     LOKI_K8S_RELATION,
+    MANAGED_ROLES,
     NODE_LOCK_RELATION,
     OAUTH_RELATION,
     OPENSEARCH_HTTP_PORT,
@@ -828,7 +829,7 @@ class ClusterState(Object):
 
         Format: role -> mapped users.
         """
-        res = {"own_index": ["*"]}
+        res = {}
         config_roles_mapping = self.config.get("roles_mapping")
         if not config_roles_mapping or not isinstance(config_roles_mapping, str):
             return res
@@ -879,14 +880,7 @@ class ClusterState(Object):
 
         External client roles also included in the results.
         """
-        return [
-            "manage_snapshots",
-            "logstash",
-            "own_index",
-            "kibana_user",
-            "all_access",
-            "readall",
-        ] + list(self.application.client_users_dict.values())
+        return MANAGED_ROLES + list(self.application.client_users_dict.values())
 
     def computed_roles(self) -> list[str]:
         """Return computed_roles"""

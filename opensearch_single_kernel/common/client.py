@@ -701,6 +701,8 @@ class OpenSearchClient:
         Raises:
             OpenSearchHttpError: If the request fails.
         """
+        if not users and not backend_roles:
+            return self.remove_role_mapping(role)
         try:
             resp = self.request(
                 "PUT",
@@ -716,7 +718,7 @@ class OpenSearchClient:
         ):
             raise OpenSearchHttpError(f"creating role mapping {role} failed")
 
-    def remove_user_role_mapping(self, role: str) -> None:
+    def remove_role_mapping(self, role: str) -> None:
         """Remove the given role mapping if it exists.
 
         Args:

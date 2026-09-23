@@ -247,7 +247,7 @@ class ExternalClientsManager(BaseManager):
                     logger.error("failed to remove role %s", username)
 
                 try:
-                    self.opensearch_client.remove_user_role_mapping(username)
+                    self.opensearch_client.remove_role_mapping(username)
                 except OpenSearchHttpError:
                     logger.error("failed to remove role mapping for %s", username)
 

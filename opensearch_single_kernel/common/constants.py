@@ -209,6 +209,57 @@ OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
 GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
 
+# Built-in roles whose mappings are managed by charm.
+MANAGED_ROLES = [
+    "alerting_ack_alerts",
+    "alerting_full_access",
+    "alerting_read_access",
+    "all_access",
+    "anomaly_full_access",
+    "anomaly_read_access",
+    "asynchronous_search_full_access",
+    "asynchronous_search_read_access",
+    "cross_cluster_replication_follower_full_access",
+    "cross_cluster_replication_leader_full_access",
+    "cross_cluster_search_remote_full_access",
+    "flow_framework_full_access",
+    "flow_framework_read_access",
+    "index_management_full_access",
+    "ip2geo_datasource_full_access",
+    "ip2geo_datasource_read_access",
+    "kibana_read_only",
+    "kibana_user",
+    "knn_full_access",
+    "knn_read_access",
+    "logstash",
+    "ltr_full_access",
+    "ltr_read_access",
+    "manage_snapshots",
+    "ml_full_access",
+    "ml_read_access",
+    "notebooks_full_access",
+    "notebooks_read_access",
+    "notifications_full_access",
+    "notifications_read_access",
+    "observability_full_access",
+    "observability_read_access",
+    "point_in_time_full_access",
+    "ppl_full_access",
+    "query_assistant_access",
+    "query_insights_full_access",
+    "readall",
+    "readall_and_monitor",
+    "reports_full_access",
+    "reports_instances_read_access",
+    "reports_read_access",
+    "security_analytics_ack_alerts",
+    "security_analytics_full_access",
+    "security_analytics_read_access",
+    "security_rest_api_access",
+    "snapshot_management_full_access",
+    "snapshot_management_read_access",
+]
+
 # OpenSearch indices
 OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
 SYSTEM_INDICES = {
