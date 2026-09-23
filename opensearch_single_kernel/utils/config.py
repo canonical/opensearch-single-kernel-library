@@ -284,7 +284,6 @@ class YamlConfigSetter(ConfigSetter):
                 lineterm="",
             )
         )
-        logger.debug("Rewrote config file %s. Diff:\n%s", config_file, diff)
         return old_content != new_content
 
     @override
