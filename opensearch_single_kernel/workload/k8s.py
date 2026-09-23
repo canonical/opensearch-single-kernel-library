@@ -513,7 +513,9 @@ class K8sWorkload(BaseWorkload):
             command: command to run, can contain arguments
             args: additional command line arguments
             stdin: string input to be passed on the standard input
-            use_errors_replace: decode the command output with errors="replace"
+            use_errors_replace: if True, tolerate non-UTF-8 bytes in stdout/stderr
+             by decoding with errors="replace" instead of strict
+                UTF-8.
 
         Returns:
             SimpleNamespace with cmd, out, err, return code attributes
@@ -548,10 +550,11 @@ class K8sWorkload(BaseWorkload):
                 )
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode("utf-8", "replace")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode("utf-8", "replace")
+            if use_errors_replace:
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode("utf-8", "replace")
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode("utf-8", "replace")
             # Logs should be truncated to avoid exceeding text limit OSError:
             # [Errno 7] Argument list too long: 'juju-log').
             logger.debug(

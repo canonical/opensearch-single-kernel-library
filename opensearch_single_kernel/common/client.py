@@ -34,7 +34,11 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
-from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
+from opensearch_single_kernel.core.base_models import (
+    App,
+    Node,
+)
+from opensearch_single_kernel.core.storage import ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     repository_type,
@@ -85,19 +89,27 @@ class OpenSearchClient:
         if object_storage_type == ObjectStorageType.S3:
             settings = {
                 "bucket": object_storage_config.s3.bucket,
-                "base_path": object_storage_config.s3.base_path,
+                "base_path": object_storage_config.s3.path,
                 "region": object_storage_config.s3.region,
                 "endpoint": object_storage_config.s3.endpoint,
+                # restore pre https://github.com/opensearch-project/OpenSearch/pull/22144
+                # settings, not sure what to do about it
+                # but for now it works same as pre 3.8.0
+                "server_side_encryption_type": "bucket_default",
+                # restore pre https://github.com/opensearch-project/OpenSearch/pull/18800
+                # settings, not sure what to do about it
+                # but for now it works same as pre 3.x
+                "s3_async_client_type": "netty",
             }
         elif object_storage_type == ObjectStorageType.AZURE:
             settings = {
                 "container": object_storage_config.azure.container,
-                "base_path": object_storage_config.azure.base_path,
+                "base_path": object_storage_config.azure.path,
             }
         elif object_storage_type == ObjectStorageType.GCS:
             settings = {
                 "bucket": object_storage_config.gcs.bucket,
-                "base_path": object_storage_config.gcs.base_path,
+                "base_path": object_storage_config.gcs.path,
             }
 
         repo_type = repository_type(object_storage_type)
