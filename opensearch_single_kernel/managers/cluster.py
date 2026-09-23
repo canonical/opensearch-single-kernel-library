@@ -854,9 +854,10 @@ class ClusterManager(BaseManager):
             return None
 
         remote_peer_cluster = self.state.main_orchestrator_app
-        logger.debug(f"get_cluster_first_data_node : data read: {remote_peer_cluster}")
         if not remote_peer_cluster or not remote_peer_cluster.deployment_description:
             return None
+
+        logger.debug("First data node: %s", remote_peer_cluster.first_data_node)
         return remote_peer_cluster.first_data_node
 
     def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
