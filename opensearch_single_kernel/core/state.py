@@ -22,8 +22,6 @@ from dpcharmlibs.interfaces import (
     OpsRelationRepositoryInterface,
     OpsRepository,
     RepositoryInterface,
-    RequirerCommonModel,
-    RequirerDataContractV1,
     ResourceProviderEventHandler,
     build_model,
 )
@@ -471,16 +469,17 @@ class ClusterState(Object):
             if not relation.app:
                 continue
 
-            repository = OpsRelationRepository(self.model, relation, component=relation.app)
-
             try:
-                contract = build_model(repository, RequirerDataContractV1[RequirerCommonModel])
-                for req in contract.requests:
-                    if req.extra_user_roles and KIBANA_SERVER_ROLE in req.extra_user_roles:
-                        result.append(relation)
-                        break
+                requests = self.opensearch_provides.requests(relation)
             except ValidationError as e:
                 logger.error(f"Failed to validate client relation {relation.id}: {e}")
+                continue
+
+            if any(
+                req.extra_user_roles and KIBANA_SERVER_ROLE in req.extra_user_roles
+                for req in requests
+            ):
+                result.append(relation)
 
         return result
 
