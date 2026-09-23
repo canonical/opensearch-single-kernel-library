@@ -327,11 +327,6 @@ class PeerClusterApplication(RelationState):
             "pc_secrets_initialized": True,
         }
 
-    def initialize_empty_secrets(self) -> None:
-        """Pre-create the peer-cluster secret groups if they are not populated yet."""
-        if changes := self.empty_secret_placeholders():
-            self.update(changes)
-
 
 class PeerClusterServer(RelationState):
     """State wrapper for the peer cluster unit databag."""

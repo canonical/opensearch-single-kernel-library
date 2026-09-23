@@ -326,8 +326,8 @@ class PeerClusterEventsHandler(Object):
 
         logger.debug(f"Orchestrators: {orchestrators}")
         if is_failover_promoted(orchestrators):
-            self.charm.peer_cluster_manager.remove_main_orchestrator_registered(
-                orchestrators.failover_rel_id
+            self.charm.peer_cluster_manager.update_main_orchestrator_registered(
+                orchestrators.failover_rel_id, value=None
             )
             orchestrators.delete("failover")
 
@@ -348,10 +348,10 @@ class PeerClusterEventsHandler(Object):
         reconcile_deployment_desc = False
         try:
             # check if any errors sent by providers
-            errors_data, rel_error_id = self.charm.peer_cluster_manager.error_set_from_providers(
+            errors_data = self.charm.peer_cluster_manager.error_set_from_providers(
                 orchestrators, event_rel_id=event.relation.id
             )
-            logger.debug(f"Errors from providers: {errors_data}, rel_error_id: {rel_error_id}")
+            logger.debug(f"Errors from providers: {errors_data}")
             if errors_data:
                 reconcile_deployment_desc = True
         except OpenSearchPeerClusterRelationDataIncompleteError as e:
@@ -373,7 +373,6 @@ class PeerClusterEventsHandler(Object):
                 self._reconcile_deployment_desc_from_peer_cluster_data(remote_peer_cluster)
             return
 
-        logger.debug(f"Checking Requirer errors: {remote_peer_cluster.error_data}")
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
             orchestrators, deployment_desc, remote_peer_cluster, event.relation.id
         )

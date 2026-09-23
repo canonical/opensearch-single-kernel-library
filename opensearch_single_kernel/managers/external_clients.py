@@ -311,6 +311,23 @@ class ExternalClientsManager(BaseManager):
             if updated:
                 self.state.opensearch_provides.set_responses(relation.id, responses)
 
+    def update_relations_tls_ca(self) -> None:
+        """Broadcast the current admin CA chain to all external client relations."""
+        tls_ca = self.state.application.admin_chain
+        for relation in self.state.external_client_relations:
+            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            if not responses:
+                continue
+
+            updated = False
+            for response in responses:
+                if response.tls_ca != tls_ca:
+                    response.tls_ca = tls_ca
+                    updated = True
+
+            if updated:
+                self.state.opensearch_provides.set_responses(relation.id, responses)
+
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

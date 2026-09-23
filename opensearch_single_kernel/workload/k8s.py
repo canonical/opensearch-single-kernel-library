@@ -563,6 +563,7 @@ class K8sWorkload(BaseWorkload):
                 stdout,
                 stderr,
             )
+
             # err is typically empty because combine_stderr=True merges stderr into stdout
             return SimpleNamespace(cmd=command, out=stdout, err=stderr, returncode=0)
 

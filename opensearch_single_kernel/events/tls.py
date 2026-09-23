@@ -7,9 +7,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-from dpcharmlibs.interfaces import (
-    ResourceProviderModel,
-)
 from ops import (
     ActionEvent,
     Object,
@@ -283,34 +280,7 @@ class TLSEventsHandler(Object):
                 return
 
         if self.charm.unit.is_leader():
-            for external_client in self.charm.state.external_client_relations:
-                responses = self.charm.state.opensearch_provides.responses(
-                    external_client, ResourceProviderModel
-                )
-                if not responses:
-                    continue
-
-                updated = False
-                for response in responses:
-                    if response.tls_ca != self.charm.state.application.admin_chain:
-                        response.tls_ca = self.charm.state.application.admin_chain
-                        updated = True
-
-                if updated:
-                    version = (
-                        external_client.data[external_client.app].get("version", "v0")
-                        if external_client.app
-                        else "v0"
-                    )
-
-                    if version == "v0":
-                        external_client.data[self.charm.app].update(
-                            {"tls-ca": self.charm.state.application.admin_chain}
-                        )
-                    else:
-                        self.charm.state.opensearch_provides.set_responses(
-                            external_client.id, responses
-                        )
+            self.charm.external_clients_manager.update_relations_tls_ca()
 
         # broadcast secret updates for certs and CA to related sub-clusters
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):

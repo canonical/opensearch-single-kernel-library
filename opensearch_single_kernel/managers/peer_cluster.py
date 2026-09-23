@@ -12,10 +12,8 @@ from overrides import override
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
-    GENERATED_ROLES,
     DeploymentType,
     Directive,
-    StartMode,
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -29,19 +27,15 @@ from opensearch_single_kernel.common.statuses import (
 from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     Node,
-    PeerClusterApp,
     PeerClusterOrchestrators,
     PeerClusterRelErrorData,
-    stripped_or_none,
 )
 from opensearch_single_kernel.core.relation_models import (
     PeerClusterAppModel,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
-from opensearch_single_kernel.utils.helpers import (
-    format_unit_name,
-)
+from opensearch_single_kernel.utils.peer_cluster import peer_cluster_credentials
 from opensearch_single_kernel.utils.status import running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -62,25 +56,11 @@ class PeerClusterManager(BaseManager):
         self, rel_id: int, deployment_desc: DeploymentDescription, is_provider: bool
     ) -> None:
         """Report the current app on the peer cluster rel data to be broadcast to all apps."""
-        current_app = PeerClusterApp(
-            app=deployment_desc.app,
-            planned_units=self.state.planned_units,
-            units=[
-                format_unit_name(unit, app=deployment_desc.app) for unit in self.state.all_units
-            ],
-            roles=(
-                deployment_desc.config.roles
-                if deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
-                else GENERATED_ROLES
-            ),
-        )
-        local_peer_cluster = self.state.peer_cluster_by_relation_id(
+        current_app = self.state.current_peer_cluster_app
+        if local_peer_cluster := self.state.peer_cluster_by_relation_id(
             is_provider=is_provider, relation_id=rel_id, remote=False
-        )
-        if local_peer_cluster:
-            fleet_apps = local_peer_cluster.cluster_fleet_apps
-            fleet_apps[deployment_desc.app.id] = current_app
-            local_peer_cluster.update({"app": current_app, "cluster_fleet_apps": fleet_apps})
+        ):
+            local_peer_cluster.app = current_app
 
         # update content of fleet in the current app's peer databag
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
@@ -103,24 +83,10 @@ class PeerClusterManager(BaseManager):
         items: dict = {
             "first_data_node": peer_data.first_data_node,
             "nodes_config": peer_data.nodes_config,
-            "admin_password": stripped_or_none(peer_data.admin_password),
-            "admin_hashed_password": peer_data.admin_hashed_password,
-            "kibana_server_password": peer_data.kibana_server_password,
-            "kibana_server_hashed_password": peer_data.kibana_server_hashed_password,
-            "monitor_password": peer_data.monitor_password,
-            "monitor_hashed_password": peer_data.monitor_hashed_password,
-            "admin_truststore_password": stripped_or_none(peer_data.admin_truststore_password),
-            "admin_keystore_password": stripped_or_none(peer_data.admin_keystore_password),
-            "admin_subject": stripped_or_none(peer_data.admin_subject),
-            "admin_key": stripped_or_none(peer_data.admin_key),
-            "admin_key_password": stripped_or_none(peer_data.admin_key_password),
-            "admin_csr": stripped_or_none(peer_data.admin_csr),
-            "admin_chain": stripped_or_none(peer_data.admin_chain),
-            "admin_cert": stripped_or_none(peer_data.admin_cert),
-            "admin_ca_cert": stripped_or_none(peer_data.admin_ca_cert),
+            **peer_cluster_credentials(peer_data),
         }
 
-        if stripped_or_none(peer_data.admin_password) or peer_data.admin_hashed_password:
+        if items["admin_password"] or peer_data.admin_hashed_password:
             items["admin_user_initialized"] = True
 
         if peer_data.plugin_config_info:
@@ -130,8 +96,11 @@ class PeerClusterManager(BaseManager):
 
         self.state.application.update(items)
 
-    def update_main_orchestrator_registered(self, rel_id: int, value: bool) -> None:
-        """Update whether the main orchestrator is registered in the relation data."""
+    def update_main_orchestrator_registered(self, rel_id: int, value: bool | None) -> None:
+        """Update whether the main orchestrator is registered in the relation data.
+
+        A ``None`` value removes the key from the relation data.
+        """
         if rel_id == -1:
             return
         local_peer_cluster_data = self.state.peer_cluster_by_relation_id(
@@ -146,94 +115,59 @@ class PeerClusterManager(BaseManager):
                 rel_id,
             )
 
-    def remove_main_orchestrator_registered(self, rel_id: int) -> None:
-        """Remove the main_orchestrator_registered key from relation data."""
-        if local_peer_cluster_data := self.state.peer_cluster_by_relation_id(
-            is_provider=False, relation_id=rel_id, remote=False
-        ):
-            del local_peer_cluster_data.main_orchestrator_registered
-
     def reconcile_orchestrators_from_provider_data(
         self,
         remote_peer_cluster: PeerClusterAppModel,
         trigger: str | None,
-        relation_id: str,
+        relation_id: int,
         relation_app_name: str,
         relation_units: int,
     ) -> PeerClusterOrchestrators:
-        """Fetch related orchestrator IDs and App names."""
-        remote_orchestrators = (
-            remote_peer_cluster.orchestrators.to_dict()
-            if remote_peer_cluster.orchestrators
-            else {}
-        )
+        """Register the orchestrator announced by the provider of ``relation_id``."""
+        orchestrators = self.state.application.orchestrators.model_copy()
+        if trigger not in {"main", "failover"} or relation_units == 0:
+            return orchestrators
+
         logger.debug(
-            "Fetched orchestrators from provider %s with relation id %s are %s",
+            "Updating local orchestrator from provider %s with relation id %s. trigger %s. "
+            "The provider orchestrators are %s",
             relation_app_name,
             relation_id,
-            remote_orchestrators,
+            trigger,
+            remote_peer_cluster.orchestrators,
         )
-
-        # Capture the trigger app from the event relation before the loop can overwrite it.
-        # The loop merges orchestrators from all peer cluster relations, which may incorrectly
-        # replace the event relation's {trigger}_app with a stale value from another relation.
-        trigger_app = remote_orchestrators.get(f"{trigger}_app") if trigger else None
-
-        for loop_cluster in self.state.peer_clusters(is_provider=False, remote=True):
-            if not loop_cluster.orchestrators:
-                continue
-            remote_orchestrators.update(
-                {
-                    k: v
-                    for k, v in loop_cluster.orchestrators.to_dict().items()
-                    if v is not None and v != -1
-                }
-            )
-
-        local_orchestrators = self.state.application.orchestrators.to_dict()
-
-        if (trigger in {"main", "failover"}) and (relation_units > 0):
-            logger.debug(
-                "Updating local orchestrator from provider %s. trigger %s The orchestrators are %s",
-                relation_app_name,
-                trigger,
-                remote_orchestrators,
-            )
-            # If this relation previously held the opposite role, clear that stale entry.
-            # Without this, a relation switching from trigger=main to trigger=failover
-            # (or vice versa) leaves both main_* and failover_* pointing to the same app,
-            # causing is_failover_promoted() to fire a false positive and wipe failover state.
-            opposite = "failover" if trigger == "main" else "main"
-            if local_orchestrators.get(f"{opposite}_rel_id") == relation_id:
-                local_orchestrators[f"{opposite}_rel_id"] = -1
-                local_orchestrators[f"{opposite}_app"] = None
-            local_orchestrators.update(
-                {
-                    f"{trigger}_rel_id": relation_id,
-                    f"{trigger}_app": trigger_app,
-                }
-            )
-            self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
-                local_orchestrators
-            )
-
-        return PeerClusterOrchestrators.from_dict(local_orchestrators)
+        # If this relation previously held the opposite role, clear that stale entry.
+        # Without this, a relation switching from trigger=main to trigger=failover
+        # (or vice versa) leaves both main_* and failover_* pointing to the same app,
+        # causing is_failover_promoted() to fire a false positive and wipe failover state.
+        # The app is only taken from the event relation: other peer cluster relations
+        # may carry a stale value for it.
+        remote_orchestrators = remote_peer_cluster.orchestrators
+        if trigger == "main":
+            if orchestrators.failover_rel_id == relation_id:
+                orchestrators.delete("failover")
+            orchestrators.main_rel_id = relation_id
+            orchestrators.main_app = remote_orchestrators.main_app
+        else:
+            if orchestrators.main_rel_id == relation_id:
+                orchestrators.delete("main")
+            orchestrators.failover_rel_id = relation_id
+            orchestrators.failover_app = remote_orchestrators.failover_app
+        self.state.application.orchestrators = orchestrators.model_copy()
+        return orchestrators
 
     def error_set_from_providers(
         self,
         orchestrators: PeerClusterOrchestrators,
         event_rel_id: int,
-    ) -> tuple[PeerClusterRelErrorData | None, int]:
-        """Check if the providers are ready and set error if not."""
+    ) -> PeerClusterRelErrorData | None:
+        """Check if the providers are ready and return their error if not."""
         orchestrator_rel_ids = [
             rel_id
             for rel_id in [orchestrators.main_rel_id, orchestrators.failover_rel_id]
             if rel_id != -1
         ]
 
-        error = None
-        # We need to know from where the error comes from to set the correct relation data key
-        rel_error_id = -1
         for rel_id in orchestrator_rel_ids:
             remote_peer_cluster = self.state.peer_cluster_by_relation_id(
                 relation_id=rel_id,
@@ -249,47 +183,34 @@ class PeerClusterManager(BaseManager):
                     f"Peer cluster relation data is incomplete for relation id {rel_id}"
                 )
 
-            if error_data:
-                parsed_error = (
-                    error_data
-                    if isinstance(error_data, PeerClusterRelErrorData)
-                    else PeerClusterRelErrorData.from_dict(error_data)
-                )
-                # A failover orchestrator that is not-ready-yet must not block a requirer from
-                # bootstrapping off an already-ready main orchestrator. Otherwise, the whole fleet
-                # blocks waiting for failover. Only the main
-                # orchestrator's errors, or a failover error that requires
-                # severing the relation, should block here.
-                if (
-                    rel_id == orchestrators.failover_rel_id
-                    and orchestrators.main_rel_id != -1
-                    and not parsed_error.should_sever_relation
-                ):
-                    continue
+            if not error_data:
+                continue
 
-                error = error_data
-                rel_error_id = rel_id
-                break
+            # A failover orchestrator that is not-ready-yet must not block a requirer from
+            # bootstrapping off an already-ready main orchestrator. Otherwise, the whole fleet
+            # blocks waiting for failover. Only the main
+            # orchestrator's errors, or a failover error that requires
+            # severing the relation, should block here.
+            if (
+                rel_id == orchestrators.failover_rel_id
+                and orchestrators.main_rel_id != -1
+                and not error_data.should_sever_relation
+            ):
+                continue
+
+            return error_data
 
         # handle the case where the error came from the provider of a wrong relation
-        if not error and event_rel_id not in orchestrator_rel_ids:
-            wrong_rel_peer_cluster = self.state.peer_cluster_by_relation_id(
+        if event_rel_id not in orchestrator_rel_ids and (
+            wrong_rel_peer_cluster := self.state.peer_cluster_by_relation_id(
                 relation_id=event_rel_id,
                 is_provider=False,
                 remote=True,
             )
-            if wrong_rel_peer_cluster and wrong_rel_peer_cluster.error_data:
-                error = wrong_rel_peer_cluster.error_data
-                rel_error_id = event_rel_id
+        ):
+            return wrong_rel_peer_cluster.error_data
 
-        if rel_error_id == -1:
-            rel_error_id = event_rel_id
-
-        if not error:
-            return (None, rel_error_id)
-        if isinstance(error, PeerClusterRelErrorData):
-            return (error, rel_error_id)
-        return (PeerClusterRelErrorData.from_dict(error), rel_error_id)
+        return None
 
     def requirer_errors(  # noqa: C901
         self,
@@ -503,6 +424,7 @@ class PeerClusterManager(BaseManager):
             return status_list
 
         if scope == "app":
+            requirer_peer_clusters = self.state.peer_clusters(is_provider=False, remote=True)
             orchestrators = self.state.application.orchestrators
             has_no_orchestrators = (
                 orchestrators and not orchestrators.main_app and not orchestrators.failover_app
@@ -524,18 +446,15 @@ class PeerClusterManager(BaseManager):
                         PeerClusterStatuses.PEER_CLUSTER_MAIN_ORCHESTRATOR_REMOVED_WITHOUT_MAJORITY.value
                     )
             elif has_no_orchestrators and (
-                (
-                    self.state.is_peer_cluster_consumer()
-                    and self.state.peer_clusters(is_provider=False, remote=True)
-                )
+                (self.state.is_peer_cluster_consumer() and requirer_peer_clusters)
                 or (
                     self.state.application.deployment_description.typ == DeploymentType.OTHER
                     and self.state.application.deployment_description.state.value == State.ACTIVE
-                    and not self.state.peer_clusters(is_provider=False, remote=True)
+                    and not requirer_peer_clusters
                 )
             ):
                 status_list.append(PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value)
-            for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
+            for peer_cluster in requirer_peer_clusters:
                 # check if there is an error reported directly by the provider
                 if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
                     status_list.append(status)

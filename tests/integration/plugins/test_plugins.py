@@ -701,16 +701,16 @@ async def test_knn_search_with_hnsw_faiss(ops_test: OpsTest, deploy_type: str) -
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_knn_search_with_hnsw_lucene(ops_test: OpsTest, deploy_type: str) -> None:
-    """Uploads data and runs a query search against the Lucene KNNEngine."""
+async def test_knn_search_with_hnsw_nmslib(ops_test: OpsTest, deploy_type: str) -> None:
+    """Uploads data and runs a query search against the NMSLIB KNNEngine."""
     app = (await app_name(ops_test)) or APP_NAME
 
     units = await get_application_unit_ids_ips(ops_test, app=app)
     leader_unit_ip = await get_leader_unit_ip(ops_test, app=app)
 
     # create index with r_shards = nodes - 1
-    index_name = "test_search_with_hnsw_lucene"
-    vector_name = "test_search_with_hnsw_lucene_vector"
+    index_name = "test_search_with_hnsw_nmslib"
+    vector_name = "test_search_with_hnsw_nmslib_vector"
     await create_index(
         ops_test,
         app,
@@ -726,7 +726,7 @@ async def test_knn_search_with_hnsw_lucene(ops_test: OpsTest, deploy_type: str) 
                     "method": {
                         "name": "hnsw",
                         "space_type": "l2",
-                        "engine": "lucene",
+                        "engine": "nmslib",
                         "parameters": {"ef_construction": 256, "m": 48},
                     },
                 }
@@ -756,7 +756,8 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     1) Enters data and trains a model in "test_end_to_end_with_ivf_faiss_training"
     2) Trains model: "test_end_to_end_with_ivf_faiss_model"
     3) Once training is complete, creates a target index and connects with the model
-    4) Runs a KNN search against the target index and expects two vectors back.
+    4) Disables KNN plugin: the search must fail
+    5) Re-enables the plugin: search must succeed and return two vectors.
     """
     app = (await app_name(ops_test)) or APP_NAME
 
@@ -840,7 +841,6 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
     )
 
 
-@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate) -> None:
@@ -1800,11 +1800,11 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_plugins/_ml/agents"
 
-    # register flow agent to run ListIndexTool
+    # register flow agent to run CatIndexTool
     payload = {
         "name": "skills_test",
         "type": "flow",
-        "tools": [{"type": "ListIndexTool", "name": "list"}],
+        "tools": [{"type": "CatIndexTool", "name": "list"}],
     }
     response = await http_request(ops_test, "POST", f"{endpoint}/_register", payload)
     agent_id = response.get("agent_id")

@@ -287,9 +287,12 @@ async def test_oauth_access_second_client(ops_test: OpsTest, k8s_model: Model):
         verify=False,
     )
     assert result.status_code == 200, "request for authinfo should success"
-    assert result.json().get("roles") == [second_data_integrator_user], (
-        "second data integrator role should be enabled"
-    )
+    assert sorted(result.json().get("roles")) == sorted(
+        [
+            "own_index",
+            second_data_integrator_user,
+        ]
+    ), "second data integrator role should be enabled"
 
 
 @pytest.mark.abort_on_fail
@@ -304,7 +307,7 @@ async def test_oauth_access_cleanup(ops_test: OpsTest, k8s_model: Model):
         verify=False,
     )
     assert result.status_code == 200, "request for authinfo should success"
-    assert result.json().get("roles") == [], "all the mapped roles should be removed"
+    assert result.json().get("roles") == ["own_index"], "all the mapped roles should be removed"
 
 
 @pytest.mark.abort_on_fail

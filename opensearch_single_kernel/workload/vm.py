@@ -412,9 +412,7 @@ class VMWorkload(BaseWorkload):
     @override
     def get_workload_version(self) -> str:
         """Return the workload version."""
-        return self.run_cmd(
-            "opensearch.opensearch-bin", args="--version 2>/dev/null"
-        ).out.strip()
+        return self.run_cmd("opensearch.opensearch-bin", args="--version 2>/dev/null").out.strip()
 
     @override
     def memtotal(self) -> float:

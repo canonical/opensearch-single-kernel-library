@@ -907,8 +907,8 @@ async def debug_failed_unit(
         conf = "/etc/opensearch"
         sudo = ""
     else:
-        logs = "/var/snap/opensearch-charmed/common/var/log/opensearch"
-        conf = "/var/snap/opensearch-charmed/current/etc/opensearch"
+        logs = "/var/snap/opensearch/common/var/log/opensearch"
+        conf = "/var/snap/opensearch/current/etc/opensearch"
         sudo = "sudo "
 
     # The server log is named after the cluster, not after the application, so it is globbed.

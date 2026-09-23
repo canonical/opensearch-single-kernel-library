@@ -69,6 +69,14 @@ class JWTEventsHandler(Object):
             # Only the main orchestrator applies JWT config.
             logger.warning("JWT relation created on non-main orchestrator.")
 
+    def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
+        """Handle changed relation data."""
+        if not self.charm.state.jwt:
+            logger.error(f"Cannot access relation data for {JWT_CONFIG_RELATION}")
+            return
+
+        self._validate_and_apply_jwt_auth_config(event)
+
     def _on_jwt_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle the removal of the relation."""
         if (
@@ -80,24 +88,12 @@ class JWTEventsHandler(Object):
 
         self.apply_security_config_if_needed(event)
 
-    def _on_jwt_relation_changed(self, event: RelationChangedEvent) -> None:
-        """Handle relation changes directly."""
-        if not event.app:
-            return
-
-        parsed_config = self.charm.state.jwt
-
-        if not parsed_config:
-            logger.debug("No valid JWT configuration found in the databag yet.")
-            return
-
-        self._validate_and_apply_jwt_auth_config(event)
-
     def _on_jwt_authentication_updated(self, event: AuthenticationUpdatedEvent) -> None:
         """Handle a rotated JWT secret delivered via the secret-changed."""
-        parsed_config = self.charm.state.jwt
+        if not self.charm.state.jwt.relation:
+            return
 
-        if not parsed_config:
+        if not self.charm.state.jwt:
             logger.debug("No valid JWT configuration found in the databag yet, deferring.")
             event.defer()
             return

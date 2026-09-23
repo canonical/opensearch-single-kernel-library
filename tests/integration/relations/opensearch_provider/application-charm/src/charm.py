@@ -140,6 +140,7 @@ class ApplicationCharm(CharmBase):
             event.fail("Secrets not accessible yet.")
             return
 
+        host = None
         if not hosts:
             return
 

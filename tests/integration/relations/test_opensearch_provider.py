@@ -286,7 +286,6 @@ async def test_version(ops_test: OpsTest, app_name: str):
 
 
 # TODO add for k8s once k8s dashboards is available
-@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation(ops_test: OpsTest):
@@ -321,7 +320,6 @@ async def test_dashboard_relation(ops_test: OpsTest):
 
 
 # TODO add for k8s once k8s dashboards is available
-@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation_password_change(ops_test: OpsTest):
