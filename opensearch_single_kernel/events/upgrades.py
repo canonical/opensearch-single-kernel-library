@@ -26,7 +26,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.base_models import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
 )
@@ -173,7 +173,7 @@ class UpgradesEventsHandler(Object):
 
         if self.charm.state.substrate == Substrates.K8S:
             if (
-                self.charm.state.application.deployment_desc
+                self.charm.state.application.deployment_description
                 and self.charm.upgrades_manager.opensearch_client.is_node_up()
             ):
                 try:
@@ -182,7 +182,7 @@ class UpgradesEventsHandler(Object):
                     )
                 except OpenSearchHttpError:
                     logger.exception("Failed to re-enable allocation after upgrade")
-                self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+                self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.HEALTHY)
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
 
@@ -205,6 +205,11 @@ class UpgradesEventsHandler(Object):
             get_charm_revision(self.charm.model.unit)
         )
         # TODO check backwards compatibility for profiles
+        self.charm.state.server.initialize_empty_secrets()
+
+        if self.authorized_leader:
+            self.charm.state.application.initialize_empty_secrets()
+
         if self.charm.substrate == Substrates.VM:
             self.machine_upgrade()
         else:
@@ -350,7 +355,7 @@ class UpgradesEventsHandler(Object):
                 logger.error("Failed to override OpenSearch version: %s", str(e))
         else:
             logger.debug("Upgrading unit")
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
+            self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.UPGRADING)
             self.charm.workload.install()
 
             # We check if it is a rollback here only if the unit is highest order
@@ -497,7 +502,7 @@ class UpgradesEventsHandler(Object):
         if not self.charm.upgrades_manager.in_progress:
             logger.info("Charm upgraded. OpenSearch version unchanged")
 
-        self.charm.state.application_upgrade.upgrade_resumed = False
+        self.charm.state.application_upgrade.set_upgrade_resumed(False)
         # Only call `_reconcile_upgrade` on leader unit to avoid race conditions with
         # `upgrade_resumed`
         self._reconcile_upgrade()

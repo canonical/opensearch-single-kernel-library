@@ -272,7 +272,6 @@ UPGRADE_RELATION = "upgrade-version-a"
 PROMETHEUS_K8S_RELATION = "metrics-endpoint"
 LOKI_K8S_RELATION = "logging"
 GRAFANA_K8S_RELATION = "grafana-dashboard"
-COS_RELATION = "cos-agent"
 
 
 # Paths
@@ -287,7 +286,16 @@ PW_POSTFIX = "password"
 HASH_POSTFIX = f"{PW_POSTFIX}-hash"
 ADMIN_PW = f"admin-{PW_POSTFIX}"
 ADMIN_PW_HASH = f"{ADMIN_PW}-hash"
-SECRETS_LABEL_SEPARATOR = ":"
+SECRETS_LABEL_SEPARATOR = "."
+
+ADMIN_HASHED_PASSWORD_KEY = "admin-hashed-password"
+KIBANA_SERVER_HASHED_PASSWORD_KEY = "kibana-server-hashed-password"
+
+SECRET_LABEL_APP_ADMIN = "app-admin"
+SECRET_LABEL_UNIT_TRANSPORT = "unit-transport"
+SECRET_LABEL_UNIT_HTTP = "unit-http"
+SECRET_LABEL_PLUGIN = "plugins"
+SECRET_LABEL_BACKUPS = "backups"
 
 # Backup
 S3_CREDENTIALS = "s3-creds"

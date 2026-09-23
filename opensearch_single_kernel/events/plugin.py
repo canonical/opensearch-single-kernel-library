@@ -4,6 +4,7 @@
 
 """Handler for plugins events."""
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,6 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.utils.helpers import (
-    decode_plugin_secret_content,
     diff,
 )
 
@@ -47,17 +47,14 @@ class PluginEventsHandler(Object):
         added, removed = diff(app_plugins.keys(), unit_plugins.keys())
         for label in added:
             plugin = app_plugins[label]
-            if not plugin.secret_id:
+            if not plugin.secret_name:
                 continue
 
             # start locally tracking secret and write transferred keys to keystore
-            content = self.charm.state.secrets.get_tracked_secret(
-                plugin.secret_id, Scope.APP, label
-            ).get_content()
-            if not (plugin_config := decode_plugin_secret_content(content, label)):
+            content = self.charm.plugin_manager.get_plugin_secret(label)
+            if not content:
                 continue
-
-            keys_to_add = plugin_config.get("keys")
+            keys_to_add = json.loads(content).get("keys")
 
             self.charm.keystore_manager.put_entries(keys_to_add)
             cleanup = {"keys": list(keys_to_add.keys())}

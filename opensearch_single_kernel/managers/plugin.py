@@ -15,7 +15,6 @@ import logging
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ModelError, SecretNotFoundError
 from overrides import override
 
 from opensearch_single_kernel.common.constants import Scope
@@ -23,7 +22,8 @@ from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     PeerClusterStatuses,
 )
-from opensearch_single_kernel.core.models import PluginConfigInfo, SmtpConfig
+from opensearch_single_kernel.core.base_models import PluginConfigInfo, SmtpConfig
+from opensearch_single_kernel.core.relations import OpenSearchAppPeerModel
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.helpers import diff
@@ -40,7 +40,7 @@ class PluginManager(BaseManager):
         """Creates the plugin manager class."""
         super().__init__(state, workload, "plugin_manager")
 
-    def update_plugin_configs(self, configs_from_relation) -> None:
+    def update_plugin_configs(self, configs_from_relation: dict[str, PluginConfigInfo]) -> None:
         """Add or Remove plugin config information transferred from main orchestrator"""
         current_app_plugin_info = self.state.application.plugin_config_info
         add, remove = diff(configs_from_relation.keys(), current_app_plugin_info.keys())
@@ -50,12 +50,10 @@ class PluginManager(BaseManager):
 
         for label in add:
             plugin = configs_from_relation[label]
-            if plugin.secret_id:
-                self.state.secrets.get_tracked_secret(plugin.secret_id, Scope.APP, label)
+            if plugin.secret_name:
                 self.put_plugin_config(
                     scope=Scope.APP,
                     label=label,
-                    secret_id=plugin.secret_id,
                     relation_name=plugin.relation_name,
                 )
 
@@ -66,27 +64,35 @@ class PluginManager(BaseManager):
             self.put_plugin_config(
                 scope=Scope.APP,
                 label=label,
-                secret_id=None,
                 relation_name=plugin.relation_name,
             )
+
+    def _with_plugin_config(
+        self,
+        plugins: dict[str, PluginConfigInfo],
+        label: str,
+        relation_name: str | None = None,
+        cleanup: dict[str, list[str]] | None = None,
+    ) -> dict[str, PluginConfigInfo]:
+        """Return `plugins` updated in place with the given label's config (no write)."""
+        plugin_config = plugins.get(label) or PluginConfigInfo()
+        plugin_config.relation_name = relation_name
+        plugin_config.secret_name = label
+        if cleanup:
+            plugin_config.add_cleanup_items(cleanup)
+        plugins[label] = plugin_config
+        return plugins
 
     def put_plugin_config(
         self,
         scope: Scope,
         label: str,
-        secret_id: str | None = None,
         relation_name: str | None = None,
         cleanup: dict[str, list[str]] | None = None,
     ) -> None:
         """Adds plugin configuration information to peer relation data"""
         state = self.state.application if scope == Scope.APP else self.state.server
-        plugins = state.plugin_config_info
-        plugin_config = plugins.get(label) or PluginConfigInfo()
-        plugin_config.relation_name = relation_name
-        plugin_config.secret_id = secret_id
-        if cleanup:
-            plugin_config.add_cleanup_items(cleanup)
-        plugins[label] = plugin_config
+        plugins = self._with_plugin_config(state.plugin_config_info, label, relation_name, cleanup)
         state.plugin_config_info = plugins
 
     def put_notifications_plugin_smtp_config(
@@ -125,7 +131,7 @@ class PluginManager(BaseManager):
     def remove_plugin_secrets(self) -> None:
         """Removes all plugin secrets and their corresponding config info."""
         for label, plugin_config in self.state.application.plugin_config_info.items():
-            if plugin_config.secret_id:
+            if plugin_config.secret_name:
                 self.remove_plugin_secret(label)
 
     def store_plugin_secret(
@@ -142,13 +148,13 @@ class PluginManager(BaseManager):
             label: label of the secret to store
             relation_name: name of the relation from which the secret content came
         """
-        self.state.secrets.put(Scope.APP, label, json.dumps(content))
-        secret_id = self.state.secrets.get_secret_id(Scope.APP, label)
-        if not secret_id:
-            logger.error("Could not create secret with label: %s", label)
-        self.put_plugin_config(
-            Scope.APP, label=label, secret_id=secret_id, relation_name=relation_name
+        app = self.state.application
+        plugins = self._with_plugin_config(
+            app.plugin_config_info, label, relation_name=relation_name
         )
+        secrets = json.loads(app.plugin_secrets) if app.plugin_secrets else {}
+        secrets[label] = json.dumps(content)
+        app.update({"plugin_config_info": plugins, "plugin_secrets": json.dumps(secrets)})
 
     def remove_plugin_secret(self, label: str) -> None:
         """Delete app-scoped plugin secret and remove id from peers data.
@@ -156,13 +162,36 @@ class PluginManager(BaseManager):
         Args:
             label: label of the secret to remove
         """
-        try:
-            self.state.secrets.delete(Scope.APP, label)
-        except SecretNotFoundError:
-            logger.error("Can't find secret '%s'", label)
-        except ModelError as e:
-            logger.error("Cannot delete secret %s: %s", label, e)
-        self.remove_plugin_config(Scope.APP, label)
+        app = self.state.application
+        secret_name = self._plugin_secret_name(label)
+        secrets = json.loads(app.plugin_secrets) if app.plugin_secrets else {}
+        if secret_name is None:
+            logger.warning(f"Cannot delete secret: no secret_name defined for plugin {label}")
+        elif secrets.pop(secret_name, None) is None:
+            logger.debug(f"Secret for plugin {label} was not found, nothing to delete.")
+        plugins = app.plugin_config_info
+        if label in plugins:
+            del plugins[label]
+        app.update({"plugin_config_info": plugins, "plugin_secrets": json.dumps(secrets)})
+
+    def _load_plugin_secrets(
+        self,
+    ) -> tuple[OpenSearchAppPeerModel, dict]:
+        """Return the application model and its decoded plugin-secrets contents."""
+        app = self.state.application
+        return app, (json.loads(app.plugin_secrets) if app.plugin_secrets else {})
+
+    def _plugin_secret_name(self, plugin_name: str) -> str | None:
+        """Return the configured secret_name for a plugin, or None if it has none."""
+        config = self.state.application.plugin_config_info.get(plugin_name)
+        return config.secret_name if config and config.secret_name else None
+
+    def get_plugin_secret(self, plugin_name: str) -> str | None:
+        """Return the stored secret content for a plugin, or None if not set."""
+        if not (secret_name := self._plugin_secret_name(plugin_name)):
+            return None
+        _, secrets = self._load_plugin_secrets()
+        return secrets.get(secret_name)
 
     def missing_plugins_relations(self) -> list[str]:
         """Get the cureent missing plugins relations."""

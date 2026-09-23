@@ -13,21 +13,17 @@ from opensearch_single_kernel.common.constants import (
     KIBANA_SERVER_USER,
     OPENSEARCH_SYSTEM_USERS,
     OPENSEARCH_USERS,
-    Scope,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
+from opensearch_single_kernel.core.base_models import stripped_or_none
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.helpers import generate_hashed_password
-from opensearch_single_kernel.utils.secrets import (
-    hash_key,
-    password_key,
-)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -61,7 +57,16 @@ class InternalUsersManager(BaseManager):
             True if the user was created or updated, False if an error occurred.
         """
         # Leader is to set new password and hash, others populate existing hash locally
-        password_secret = self.state.application.get_user_password(user)
+        if user == ADMIN_USER:
+            # admin_password may hold a single-space placeholder to force secret
+            # creation (see initialize_empty_secrets)
+            password_secret = stripped_or_none(self.state.application.admin_password)
+        elif user == KIBANA_SERVER_USER:
+            password_secret = self.state.application.kibana_server_password
+        elif user == COS_USER:
+            password_secret = self.state.application.monitor_password
+        else:
+            raise ValueError(f"User {user} is not an internal user.")
         if password_secret and not update:
             try:
                 self.save_user_locally(user)
@@ -93,13 +98,21 @@ class InternalUsersManager(BaseManager):
         # Secrets need to be maintained
         # For System Users we also save the hash key
         # so all units can fetch it for local users (internal_users.yml) updates.
-        self.state.secrets.put(Scope.APP, password_key(user), pwd)
-
-        if user in OPENSEARCH_SYSTEM_USERS:
-            self.state.secrets.put(Scope.APP, hash_key(user), hashed_pwd)
 
         if user == ADMIN_USER:
-            self.state.application.is_admin_user_initialized = True
+            self.state.application.update(
+                {
+                    "admin_password": pwd,
+                    "admin_hashed_password": hashed_pwd,
+                    "admin_user_initialized": True,
+                }
+            )
+        elif user == KIBANA_SERVER_USER:
+            self.state.application.update(
+                {"kibana_server_password": pwd, "kibana_server_hashed_password": hashed_pwd}
+            )
+        elif user == COS_USER:
+            self.state.application.monitor_password = pwd
         return True
 
     def purge_initial_default_users(self) -> None:
@@ -120,7 +133,15 @@ class InternalUsersManager(BaseManager):
     def save_user_locally(self, user: str) -> None:
         """Save the user in internal_users.yaml"""
         # System users have to be saved locally in internal_users.yml
-        self.put_internal_user(user, self.state.application.get_user_hashed_password(user))
+        if user == ADMIN_USER:
+            hashed_pwd = self.state.application.admin_hashed_password
+        elif user == KIBANA_SERVER_USER:
+            hashed_pwd = self.state.application.kibana_server_hashed_password
+        elif user == COS_USER:
+            hashed_pwd = self.state.application.monitor_hashed_password
+        else:
+            raise ValueError(f"User {user} is not an internal user.")
+        self.put_internal_user(user, hashed_pwd)
 
     def put_internal_user(self, user: str, hashed_pwd: str) -> None:
         """User creation for specific system users.
@@ -182,6 +203,6 @@ class InternalUsersManager(BaseManager):
                     }
                 ],
             )
-            self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
+            self.state.application.monitor_password = pwd
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)

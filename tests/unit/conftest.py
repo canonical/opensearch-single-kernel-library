@@ -148,7 +148,6 @@ def use_s3(mocker, *, ca: str | None = None, info: dict[str, str] | None = None)
         "object_storage.S3Requirer.get_storage_connection_info",
         return_value=DEFAULT_S3_INFO,
     )
-
     info = info or DEFAULT_S3_INFO
     if ca is not None:
         info["tls_ca_chain"] = ca

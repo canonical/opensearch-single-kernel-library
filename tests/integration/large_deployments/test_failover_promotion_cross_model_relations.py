@@ -16,7 +16,7 @@ from opensearch_single_kernel.common.constants import (
     TLS_RELATION,
     DeploymentType,
 )
-from opensearch_single_kernel.core.models import (
+from opensearch_single_kernel.core.base_models import (
     DeploymentDescription,
     PeerClusterOrchestrators,
 )

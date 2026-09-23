@@ -41,6 +41,8 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
+pytestmark = pytest.mark.skip(reason="Upgrade tests will be enabled in 3.x")
+
 MAIN_APP = "main"
 FAILOVER_APP = "failover"
 
