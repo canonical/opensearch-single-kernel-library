@@ -150,7 +150,8 @@ class ExternalClientsManager(BaseManager):
         try:
             self.opensearch_client.create_user_role(role_name=user, permissions=role_permissions)
 
-            self.opensearch_client.create_user(user, [user], hash_string(password))
+            if password != "None":
+                self.opensearch_client.create_user(user, [user], hash_string(password))
 
             self.opensearch_client.put_role_mapping(
                 user,
