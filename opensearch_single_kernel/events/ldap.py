@@ -67,7 +67,7 @@ class LdapEventsHandler(Object):
             logger.debug("LDAPS urls absent. Early exiting event.")
             return
 
-        if not self.charm.workload.exists(self.charm.workload.paths.ldap_chain):
+        if not self.charm.state.ldap_certificates:
             logger.debug("LDAP certificates absent. Early exiting event.")
             return
 
@@ -93,9 +93,7 @@ class LdapEventsHandler(Object):
             event.defer()
             return
 
-        if not (
-            ca_certs := self.charm.state.ldap_certificate_transfer_requires.get_all_certificates()
-        ):
+        if not (ca_certs := self.charm.state.ldap_certificates):
             logger.debug("Ldap certificates not published by provider. Early exiting event.")
             return
 

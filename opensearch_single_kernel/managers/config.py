@@ -443,7 +443,7 @@ class ConfigManager(BaseManager):
             }
             if (ldap_data := self.state.ldap_data)
             and ldap_data.ldaps_urls
-            and self.workload.exists(self.workload.paths.ldap_chain)
+            and self.state.ldap_certificates
             else {
                 "ldap": {
                     "description": "Authenticate via LDAP or Active Directory",
@@ -549,7 +549,7 @@ class ConfigManager(BaseManager):
             }
             if (ldap_data := self.state.ldap_data)
             and ldap_data.ldaps_urls
-            and self.workload.exists(self.workload.paths.ldap_chain)
+            and self.state.ldap_certificates
             else {}
         )
 

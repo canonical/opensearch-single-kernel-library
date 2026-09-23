@@ -1379,6 +1379,11 @@ class ClusterState(Object):
         )
 
     @property
+    def ldap_certificates(self) -> set[str]:
+        """Get the LDAP CA certificates published over the certificate transfer relation."""
+        return self.ldap_certificate_transfer_requires.get_all_certificates()
+
+    @property
     def is_main_orchestrator(self) -> bool:
         """Get whether the current application is not a sub-cluster."""
         return (

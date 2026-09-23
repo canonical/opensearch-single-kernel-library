@@ -4,20 +4,26 @@
 import asyncio
 import logging
 from asyncio import gather
+from datetime import datetime, timezone
 
 import pytest
 import requests
 from juju.model import Model
+from kubernetes import client
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from opensearch_single_kernel.common.statuses import LdapStatuses
 from tests.helpers import Substrate
 from tests.integration.conftest import CONFIG_OPTS
+from tests.integration.ha.k8s_helpers.helpers import delete_pod
 from tests.integration.helpers import (
+    NO_TTY_STDIN,
     EmptyActiveStatus,
     EmptyBlockedStatus,
+    get_application_unit_ids_ips,
     get_application_unit_ips,
+    get_leader_unit_id,
     get_leader_unit_ip,
     run_action,
     wait_until,
@@ -401,6 +407,57 @@ async def test_ldap_access(ops_test: OpsTest) -> None:
             json={"field": "test_value"},
         )
         assert result.status_code == 403
+
+
+@pytest.mark.abort_on_fail
+@pytest.mark.skip_if_substrate("vm")
+async def test_ldap_certificates_restored_after_pod_deletion(ops_test: OpsTest) -> None:
+    """The LDAP CA file lives on the ephemeral pod filesystem and must be restored on start.
+
+    The leader is recreated as it is the unit applying the security config cluster-wide.
+    """
+    assert (model := ops_test.model)
+
+    leader_id = await get_leader_unit_id(ops_test, app=MAIN_APP)
+    unit_name = f"{MAIN_APP}/{leader_id}"
+    pod_name = f"{MAIN_APP}-{leader_id}"
+
+    deleted_at = datetime.now(timezone.utc)
+    delete_pod(pod_name, namespace=model.name)
+
+    # Wait for the replacement pod, otherwise Juju may still report the stale active status
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+        with attempt:
+            pod = client.CoreV1Api().read_namespaced_pod(pod_name, model.name)
+            assert pod.metadata.creation_timestamp > deleted_at
+            assert pod.status.phase == "Running"
+
+    await wait_until(ops_test, apps=[MAIN_APP, DATA_APP])
+
+    _, ldap_chain, _ = await ops_test.juju(
+        "ssh",
+        "--container",
+        "opensearch",
+        unit_name,
+        "cat",
+        "/etc/opensearch/certificates/ldap.pem",
+        stdin=NO_TTY_STDIN,
+    )
+    assert "BEGIN CERTIFICATE" in ldap_chain
+
+    # The security plugin authenticates on the node receiving the request, so query the
+    # recreated unit directly. Its IP changes on recreation.
+    ip = (await get_application_unit_ids_ips(ops_test, MAIN_APP))[leader_id]
+    for authorization, backend_role in LDAP_BACKEND_ROLES.items():
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+            with attempt:
+                result = requests.get(
+                    f"https://{ip}:9200/_plugins/_security/authinfo",
+                    headers={"Authorization": authorization},
+                    verify=False,
+                )
+                assert result.status_code == 200
+                assert backend_role in result.json()["backend_roles"], result.json()
 
 
 @pytest.mark.abort_on_fail
