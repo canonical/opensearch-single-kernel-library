@@ -393,9 +393,10 @@ class PeerClusterManager(BaseManager):
         else:
             del local_peer_cluster.is_candidate_failover_orchestrator
 
-    def delete_departed_orchestrator(self, event_src_cluster_type: str) -> None:
+    def delete_departed_orchestrator(
+        self, event_src_cluster_type: str, orchestrators: PeerClusterOrchestrators
+    ) -> None:
         """Delete the orchestrator that left the relation from the state and cluster fleet."""
-        orchestrators = self.state.application.orchestrators
         # delete the orchestrator that triggered this event
         if event_src_cluster_type == "main" and orchestrators.main_app:
             orchestrator_app_id = orchestrators.main_app.id

@@ -63,7 +63,7 @@ class OpenSearchClient:
         self.workload = workload
         self.admin_secret = admin_secret
 
-    def create_repository(
+    def create_snapshots_repository(
         self,
         object_storage_type: ObjectStorageType,
         object_storage_config: ObjectStorageConfig,
@@ -115,16 +115,16 @@ class OpenSearchClient:
         assert response.get("acknowledged") is True
         return repo_name
 
-    def verify_repository(
+    def verify_snapshots_repository(
         self, object_storage_type: ObjectStorageType, alt_hosts: list[str] | None = None
     ) -> bool:
-        """Verify repository by listing snapshots.
+        """Verify repository.
 
         Args:
             object_storage_type (ObjectStorageType): Object storage type
 
         Returns:
-            True if the repository can be listed successfully.
+            True if the repository is healthy.
 
         Raises:
             OpenSearchHttpError if there are any backend issues such as auth/perm errors.
@@ -132,8 +132,8 @@ class OpenSearchClient:
         repository = repository_name(object_storage_type)
         # If creds/endpoint/perm are wrong, this call raises OpenSearchHttpError with a 500.
         self.request(
-            "GET",
-            f"_snapshot/{repository}/_all",
+            "POST",
+            f"_snapshot/{repository}/_verify",
             alt_hosts=alt_hosts,
             timeout=30,
             retries=3,
@@ -200,7 +200,7 @@ class OpenSearchClient:
         }
         return dict(sorted(snapshots.items(), reverse=True))
 
-    def is_repository_created(
+    def is_snapshots_repository_created(
         self,
         object_storage_type: ObjectStorageType,
         repository: str = None,
@@ -259,7 +259,7 @@ class OpenSearchClient:
                 return True
         return False
 
-    def remove_repository(
+    def remove_snapshots_repository(
         self,
         object_storage_type: ObjectStorageType,
         name: str | None = None,
@@ -1231,14 +1231,21 @@ class OpenSearchClient:
                 return
             raise
 
-    def reload_secure_settings(self) -> bool:
+    def reload_secure_settings(self, alt_hosts: list[str] | None = None) -> bool:
         """Reload secure settings. Doesn't throw an exception.
 
         Returns:
             bool: whether operation was successful.
         """
         try:
-            response = self.request("POST", "_nodes/reload_secure_settings")
+            response = self.request(
+                "POST",
+                "_nodes/reload_secure_settings",
+                alt_hosts=alt_hosts,
+                retries=3,
+                wait_strategy=wait_exponential(min=2),
+                timeout=30,
+            )
         except OpenSearchHttpError as e:
             logger.error("Could not reload secure settings: %s", e)
             return False

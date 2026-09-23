@@ -47,6 +47,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# It's better to block stdin so terminal don't break after the test (e.g. Ctrl+C and lines alignment)
+NO_TTY_STDIN = b""
+
+# How much of a unit's OpenSearch log to print when a unit is being debugged in-test.
+DEBUG_LOG_LINES = 500
+
 # Keep the existing connect/read timeout used by http_request.
 _HTTP_REQUEST_TIMEOUT = (17, 17)
 EmptyBlockedStatus = StatusObject(
@@ -168,7 +174,7 @@ def _progress_line(units: List[Unit]) -> str:
 
 async def get_unit_hostname(ops_test: OpsTest, unit_id: int, app: str) -> str:
     """Get the hostname of a specific unit."""
-    _, hostname, _ = await ops_test.juju("ssh", f"{app}/{unit_id}", "hostname")
+    _, hostname, _ = await ops_test.juju("ssh", f"{app}/{unit_id}", "hostname", stdin=NO_TTY_STDIN)
     return hostname.strip()
 
 
@@ -379,7 +385,7 @@ async def _is_every_condition_met(
             logger.info(_progress_line(units))
             return False
 
-        if expected_units > -1 and not _is_every_condition_on_units_met(
+        if not _is_every_condition_on_units_met(
             model=ops_test.model.info.name,
             units=units,
             unit_statuses=units_statuses.get(app) if units_statuses else None,
@@ -428,6 +434,7 @@ async def wait_until(  # noqa: C901
     elif not wait_for_exact_units:
         wait_for_exact_units = {app: -1 for app in apps}
     else:
+        wait_for_exact_units = wait_for_exact_units.copy()
         for app in apps:
             if app not in wait_for_exact_units:
                 wait_for_exact_units[app] = 1
@@ -581,7 +588,7 @@ def get_file_contents(
     else:
         command.extend([unit, "sudo", "cat", filename])
 
-    return subprocess.check_output(command)
+    return subprocess.check_output(command, stdin=subprocess.DEVNULL)
 
 
 def get_conf_as_dict(
@@ -697,7 +704,13 @@ async def run_action(
             # try to juju exec
             if ops_test.request.config.option.substrate == "k8s":
                 return_code, output, _ = await ops_test.juju(
-                    "exec", "--wait", "5s", "--unit", f"{app}/{unit.id}", "echo hello"
+                    "exec",
+                    "--wait",
+                    "5s",
+                    "--unit",
+                    f"{app}/{unit.id}",
+                    "echo hello",
+                    stdin=NO_TTY_STDIN,
                 )
                 if return_code == 0 and output.strip() == "hello":
                     online_units.append(unit)
@@ -880,24 +893,47 @@ async def http_request(  # noqa: C901
 async def debug_failed_unit(
     ops_test: OpsTest, app: str, endpoint: str, level: int = logging.DEBUG
 ) -> None:
-    """Print the logs of a unit failing with a certain set of statuses."""
+    """Print the workload logs and config of a unit failing with a certain set of statuses."""
     unit_ip = endpoint[8:].split(":")[0]
 
     ids_ips = await get_application_unit_ids_ips(ops_test, app=app)
     unit_id = [u_id for u_id, u_ip in ids_ips.items() if u_ip == unit_ip][0]
+    unit = f"{app}/{unit_id}"
 
-    root = "/var/snap/opensearch"
-    files_to_debug = [
-        f"{root}/common/logs/{app}-{ops_test.model_name}.log",
-        f"{root}/current/config/opensearch.yml",
-        f"{root}/current/config/unicast_hosts.txt",
-    ]
-    bin_cmd = "exec" if juju_version_major() > 2 else "run"
-    for f in files_to_debug:
-        logger.log(level, f"{f}:\n")
+    substrate = ops_test.request.config.option.substrate
+    if substrate == "k8s":
+        # The workload container runs as root and the rock has no sudo.
+        logs = "/var/log/opensearch"
+        conf = "/etc/opensearch"
+        sudo = ""
+    else:
+        logs = "/var/snap/opensearch/common/var/log/opensearch"
+        conf = "/var/snap/opensearch/current/etc/opensearch"
+        sudo = "sudo "
 
-        get_logs_cmd = f"{bin_cmd} --unit {app}/{unit_id} -- sudo cat {f}"
-        _, out, err = await ops_test.juju(*get_logs_cmd.split())
+    # The server log is named after the cluster, not after the application, so it is globbed.
+    # gc.log is excluded, being megabytes of JVM noise, and the tail is bounded: the complete logs
+    # of every unit are collected as a CI artifact by scripts/collect_opensearch_logs.sh.
+    commands = {
+        f"{logs} (last {DEBUG_LOG_LINES} lines per file)": (
+            f"{sudo}find {logs} -name '*.log' ! -name 'gc.log*' -size +0 "
+            f"-exec tail -n {DEBUG_LOG_LINES} {{}} +"
+        ),
+        f"{conf}/opensearch.yml": f"{sudo}cat {conf}/opensearch.yml",
+        f"{conf}/unicast_hosts.txt": f"{sudo}cat {conf}/unicast_hosts.txt",
+    }
+
+    for description, command in commands.items():
+        logger.log(level, f"{unit} {description}:\n")
+
+        # The command has to be a single argument: `juju ssh` joins its arguments and lets the
+        # remote shell split them again, so quoting is lost on anything passed separately.
+        argv = ["ssh", "-m", ops_test.model.info.name]
+        if substrate == "k8s":
+            argv += ["--container", "opensearch"]
+        argv += [unit, command]
+
+        _, out, err = await ops_test.juju(*argv, stdin=NO_TTY_STDIN)
         logger.log(level, f"out:\n{out}\n---\nerr:\n{err}")
 
         logger.log(level, "\n\n------------------\n\n")
@@ -1158,7 +1194,7 @@ async def execute_update_status_manually(ops_test: OpsTest, app: str):
         # The "normal" subprocess.run with "export ...; ..." cmd was failing
         # Noticed that, for this case, canonical/jhack uses shlex instead to split.
         # Adding it fixed the issue.
-        subprocess.run(shlex.split(exec_cmd))
+        subprocess.run(shlex.split(exec_cmd), stdin=subprocess.DEVNULL)
     except Exception as e:
         logger.error(
             f"Failed to apply state: process exited with {e.returncode}; "
