@@ -73,28 +73,10 @@ class PeerClusterManager(BaseManager):
         )
         related_cluster_fleet_apps[deployment_desc.app.id] = current_app
 
-        # Update the application peer databag
+        # Update peer application databag
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         cluster_fleet_apps.update(related_cluster_fleet_apps)
         self.state.application.cluster_fleet_apps = cluster_fleet_apps
-
-    def update_local_app_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
-        """Unmarshal: update the local app peer model using peer cluster relation data."""
-        items: dict = {
-            "first_data_node": peer_data.first_data_node,
-            "nodes_config": peer_data.nodes_config,
-            **peer_cluster_credentials(peer_data),
-        }
-
-        if items["admin_password"] or peer_data.admin_hashed_password:
-            items["admin_user_initialized"] = True
-
-        if peer_data.plugin_config_info:
-            items["plugin_config_info"] = peer_data.plugin_config_info
-        if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
-            items["plugin_secrets"] = peer_data.plugin_secrets
-
-        self.state.application.update(items)
 
     def update_main_orchestrator_registered(self, rel_id: int, value: bool | None) -> None:
         """Update whether the main orchestrator is registered in the relation data.
@@ -293,6 +275,24 @@ class PeerClusterManager(BaseManager):
             return None
 
         local_peer_cluster.security_index_initialised = True
+
+    def update_local_app_from_peer_cluster_rel_data(self, peer_data: PeerClusterAppModel) -> None:
+        """Unmarshal: update the local app peer model using peer cluster relation data."""
+        items: dict = {
+            "first_data_node": peer_data.first_data_node,
+            "nodes_config": peer_data.nodes_config,
+            **peer_cluster_credentials(peer_data),
+        }
+
+        if items["admin_password"] or peer_data.admin_hashed_password:
+            items["admin_user_initialized"] = True
+
+        if peer_data.plugin_config_info:
+            items["plugin_config_info"] = peer_data.plugin_config_info
+        if peer_data.plugin_secrets and peer_data.plugin_secrets.strip():
+            items["plugin_secrets"] = peer_data.plugin_secrets
+
+        self.state.application.update(items)
 
     def cm_nodes(self, orchestrators: PeerClusterOrchestrators) -> list[Node]:
         """Fetch the cm nodes passed from the peer cluster relation not api call."""

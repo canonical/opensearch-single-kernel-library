@@ -15,6 +15,7 @@ from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
 from tests.integration.conftest import (
     CONFIG_OPTS,
     MODEL_CONFIG,
+    SERIES,
 )
 from tests.integration.helpers import (
     EmptyBlockedStatus,
@@ -51,7 +52,7 @@ ALL_APPS = [
     TLS_CERTIFICATES_APP_NAME,
     V1_CLIENT_APP_NAME,
     CLIENT_APP_NAME,
-    # DASHBOARDS_APP_NAME,
+    DASHBOARDS_APP_NAME,
 ]
 
 NUM_UNITS = 3
@@ -112,13 +113,13 @@ async def test_create_relation(
             trust=substrate == "k8s",
         ),
     )
-    # if substrate == "vm":
-    #     await ops_test.model.deploy(
-    #         DASHBOARDS_APP_NAME,
-    #         application_name=DASHBOARDS_APP_NAME,
-    #         channel="2/edge",
-    #         series=SERIES,
-    #     )
+    if substrate == "vm":
+        await ops_test.model.deploy(
+            DASHBOARDS_APP_NAME,
+            application_name=DASHBOARDS_APP_NAME,
+            channel="2/edge",
+            series=SERIES,
+        )
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
@@ -143,17 +144,17 @@ async def test_create_relation(
         timeout=1600,
         status="active",
     )
-    # if substrate == "vm":
-    #     await ops_test.model.wait_for_idle(
-    #         apps=[DASHBOARDS_APP_NAME],
-    #         timeout=1600,
-    #     )
+    if substrate == "vm":
+        await ops_test.model.wait_for_idle(
+            apps=[DASHBOARDS_APP_NAME],
+            timeout=1600,
+        )
 
 
 def _all_apps(substrate: str) -> list:
     """Return ALL_APPS, dropping dashboards on k8s where it's never deployed."""
-    # if substrate == "k8s":
-    #     return [app for app in ALL_APPS if app != DASHBOARDS_APP_NAME]
+    if substrate == "k8s":
+        return [app for app in ALL_APPS if app != DASHBOARDS_APP_NAME]
     return ALL_APPS
 
 
@@ -422,8 +423,7 @@ async def test_multiple_relations(
             f"{OPENSEARCH_APP_NAME}/{max(opensearch_unit_ids)}"
         )
 
-    # Wait for the scale-down to actually complete before moving on: a fixed sleep here is
-    # racy since k8s pod removal (and any shard relocation) isn't guaranteed to finish within it.
+    # Wait for the scale-down to actually complete before moving on
     await wait_until(
         ops_test,
         apps=[OPENSEARCH_APP_NAME],
@@ -797,10 +797,6 @@ async def test_relation_broken(ops_test: OpsTest):
             logger.info(f"Checking removal of users {users_to_check}; still present: {lingering}")
             assert not lingering, f"Users {lingering!r} were not removed after relation break"
 
-    # The relation-broken hooks run serially on the leader and can still be in flight here,
-    # leaving the relations in Juju's "dying" state. A subsequent test that re-integrates the
-    # same endpoints would otherwise fail with "is dying, but not yet removed", so wait until
-    # each broken relation is fully gone from the model before returning.
     for requirer in (
         f"{CLIENT_APP_NAME}:{FIRST_RELATION_NAME}",
         f"{CLIENT_APP_NAME}:{ADMIN_RELATION_NAME}",
@@ -844,8 +840,8 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str
         SECONDARY_CLIENT_APP_NAME,
         V1_SECONDARY_CLIENT_APP_NAME,
     ]
-    # if substrate == "vm":
-    #     apps_to_wait.append(DASHBOARDS_APP_NAME)
+    if substrate == "vm":
+        apps_to_wait.append(DASHBOARDS_APP_NAME)
 
     await wait_until(
         ops_test,

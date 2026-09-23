@@ -50,6 +50,16 @@ class ExternalClientsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "external_clients_manager")
 
+    def sent_responses(self, relation: Relation) -> list[ResourceProviderModel]:
+        """Return the responses already sent on the relation."""
+        return [
+            response
+            for response in self.state.opensearch_provides.responses(
+                relation, ResourceProviderModel
+            )
+            if response.resource
+        ]
+
     def create_opensearch_users(
         self,
         index: str,
@@ -205,7 +215,7 @@ class ExternalClientsManager(BaseManager):
         if not nodes:
             # `get_nodes()` returns [] when the cluster is unreachable: keep current endpoints.
             logger.debug("No nodes provided, keeping the currently advertised endpoints.")
-            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            responses = self.sent_responses(relation)
             for response in responses or []:
                 if response.endpoints:
                     return response.endpoints
@@ -298,7 +308,7 @@ class ExternalClientsManager(BaseManager):
         """Update each Opensearch Dashboards relation with new password."""
         pwd = self.state.application.kibana_server_password
         for relation in self.state.get_dashboards_relations():
-            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            responses = self.sent_responses(relation)
             if not responses:
                 continue
 
@@ -315,7 +325,7 @@ class ExternalClientsManager(BaseManager):
         """Broadcast the current admin CA chain to all external client relations."""
         tls_ca = self.state.application.admin_chain
         for relation in self.state.external_client_relations:
-            responses = self.state.opensearch_provides.responses(relation, ResourceProviderModel)
+            responses = self.sent_responses(relation)
             if not responses:
                 continue
 

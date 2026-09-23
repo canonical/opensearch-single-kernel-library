@@ -303,7 +303,7 @@ class ExternalClientsEventsHandler(Object):
             logger.error("unable to get nodes %s", str(e))
             return
 
-        responses = self.charm.state.opensearch_provides.responses(relation, ResourceProviderModel)
+        responses = self.charm.external_clients_manager.sent_responses(relation)
         if not responses:
             return
 
