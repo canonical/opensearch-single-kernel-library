@@ -231,9 +231,9 @@ def mock_response_mynode(
                         ],
                     },
                     "path": {
-                        "data": ["/var/snap/opensearch/common/var/lib/opensearch"],
-                        "logs": "/var/snap/opensearch/common/var/log/opensearch",
-                        "home": "/var/snap/opensearch/current/usr/share/opensearch",
+                        "data": ["/var/snap/opensearch-charmed/common/var/lib/opensearch"],
+                        "logs": "/var/snap/opensearch-charmed/common/var/log/opensearch",
+                        "home": "/var/snap/opensearch-charmed/current/usr/share/opensearch",
                     },
                     "discovery": {"seed_providers": "file"},
                     "client": {"type": "node"},

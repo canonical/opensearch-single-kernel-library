@@ -20,7 +20,9 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
+    OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchInstallError,
     OpenSearchReconcilePartitionError,
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
@@ -340,7 +342,7 @@ class UpgradesEventsHandler(Object):
         logger.debug("Stopping OpenSearch before upgrade")
         try:
             self.charm.stop_opensearch(restart=True)
-        except OpenSearchStopError as e:
+        except (OpenSearchStopError, OpenSearchHAError) as e:
             logger.exception(e)
             self.charm.lock_manager.release()
             event.defer()
@@ -356,7 +358,13 @@ class UpgradesEventsHandler(Object):
         else:
             logger.debug("Upgrading unit")
             self.charm.state.server_upgrade.set_unit_state(UnitUpgradesState.UPGRADING)
-            self.charm.workload.install()
+            try:
+                self.charm.workload.install()
+            except OpenSearchInstallError as e:
+                logger.exception(e)
+                self.charm.lock_manager.release()
+                event.defer()
+                return
 
             # We check if it is a rollback here only if the unit is highest order
             # If we reach this point we are sure its compatible and upgrade is in progress
