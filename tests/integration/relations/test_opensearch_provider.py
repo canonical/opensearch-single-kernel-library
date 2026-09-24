@@ -11,6 +11,7 @@ import pytest
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
+from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
 from tests.integration.conftest import (
     CONFIG_OPTS,
@@ -18,6 +19,7 @@ from tests.integration.conftest import (
     SERIES,
 )
 from tests.integration.helpers import (
+    EmptyActiveStatus,
     EmptyBlockedStatus,
     get_application_unit_ids,
     get_leader_unit_id,
@@ -48,6 +50,19 @@ ALL_APPS = [
 ]
 
 NUM_UNITS = 3
+
+DATA_INTEGRATOR_CHARM = "data-integrator"
+GROUP_ENTITY_NAME = "test-group"
+
+GROUP_CLIENT_APP_NAME = "group-client"
+GROUP_CLIENT_CONFIG = {"index-name": "group-index", "entity-type": "GROUP"}
+GROUP_ENTITY_SECRET_NAME = "group-entity"
+GROUP_ENTITY_PASSWORD = "group-password"
+
+CONFLICTING_CLIENT_APP_NAME = "conflicting-client"
+CONFLICTING_CLIENT_CONFIG = {"index-name": "conflicting-index", "entity-type": "GROUP"}
+CONFLICTING_ENTITY_SECRET_NAME = "conflicting-group-entity"
+CONFLICTING_ENTITY_PASSWORD = "conflicting-password"
 
 FIRST_RELATION_NAME = "first-index"
 SECOND_RELATION_NAME = "second-index"
@@ -102,7 +117,9 @@ async def test_create_relation(
             channel="2/edge",
             series=SERIES,
         )
-    await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(
+        f"{OPENSEARCH_APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
+    )
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
         status="active",
@@ -754,3 +771,135 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
         hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
+
+
+async def _entity_auth_status(ops_test: OpsTest, password: str) -> int:
+    """Get the response status of an authentication attempt as the group entity."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    return await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/authinfo",
+        user=GROUP_ENTITY_NAME,
+        user_password=password,
+        resp_status_code=True,
+        verify=False,
+    )
+
+
+async def _wait_for_group_entity_conflict(ops_test: OpsTest) -> None:
+    """Wait for the charm to report the group entity requested by two relations."""
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME],
+        units_statuses={
+            OPENSEARCH_APP_NAME: [
+                EmptyActiveStatus,
+                ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
+            ]
+        },  # client relation statuses are only computed by the leader
+        idle_period=70,
+    )
+
+
+@pytest.mark.abort_on_fail
+async def test_group_entity_relation(ops_test: OpsTest):
+    """Test that a relation requesting a group entity is provided with it."""
+    await asyncio.gather(
+        ops_test.model.deploy(
+            DATA_INTEGRATOR_CHARM,
+            revision=500,
+            channel="latest/edge",
+            application_name=GROUP_CLIENT_APP_NAME,
+        ),
+        ops_test.model.deploy(
+            DATA_INTEGRATOR_CHARM,
+            revision=500,
+            channel="latest/edge",
+            application_name=CONFLICTING_CLIENT_APP_NAME,
+        ),
+    )
+    await ops_test.model.wait_for_idle(
+        apps=[GROUP_CLIENT_APP_NAME, CONFLICTING_CLIENT_APP_NAME], timeout=1800
+    )
+
+    # Both clients request the same group entity, each one with its own password.
+    group_secret = await ops_test.model.add_secret(
+        GROUP_ENTITY_SECRET_NAME, [f"{GROUP_ENTITY_NAME}={GROUP_ENTITY_PASSWORD}"]
+    )
+    conflicting_secret = await ops_test.model.add_secret(
+        CONFLICTING_ENTITY_SECRET_NAME, [f"{GROUP_ENTITY_NAME}={CONFLICTING_ENTITY_PASSWORD}"]
+    )
+    await asyncio.gather(
+        ops_test.model.grant_secret(GROUP_ENTITY_SECRET_NAME, GROUP_CLIENT_APP_NAME),
+        ops_test.model.grant_secret(CONFLICTING_ENTITY_SECRET_NAME, CONFLICTING_CLIENT_APP_NAME),
+    )
+    await asyncio.gather(
+        ops_test.model.applications[GROUP_CLIENT_APP_NAME].set_config(
+            GROUP_CLIENT_CONFIG | {"requested-entities-secret": group_secret}
+        ),
+        ops_test.model.applications[CONFLICTING_CLIENT_APP_NAME].set_config(
+            CONFLICTING_CLIENT_CONFIG | {"requested-entities-secret": conflicting_secret}
+        ),
+    )
+
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME)
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
+
+
+@pytest.mark.abort_on_fail
+async def test_conflicting_group_entity_relation(ops_test: OpsTest):
+    """Test that a relation cannot take over the group entity owned by another relation."""
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME)
+    await _wait_for_group_entity_conflict(ops_test)
+
+    # The entity keeps the password of the relation owning it...
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
+    # ...and never the one of the relation requesting it afterwards.
+    assert await _entity_auth_status(ops_test, CONFLICTING_ENTITY_PASSWORD) == 401
+
+
+@pytest.mark.abort_on_fail
+async def test_conflicting_group_entity_relation_broken(ops_test: OpsTest):
+    """Test that removing the conflicting relation keeps the entity of the owning one."""
+    await ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
+        CLIENT_RELATION, CONFLICTING_CLIENT_APP_NAME, True
+    )
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
+
+
+@pytest.mark.abort_on_fail
+async def test_group_entity_provided_on_owning_relation_broken(ops_test: OpsTest):
+    """Test that the entity is provided to the conflicting relation once it is released."""
+    await wait_for_relation_removed_between(
+        ops_test, OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME
+    )
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test, OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME
+    )
+    await _wait_for_group_entity_conflict(ops_test)
+
+    await ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
+        CLIENT_RELATION, GROUP_CLIENT_APP_NAME, True
+    )
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    assert await _entity_auth_status(ops_test, CONFLICTING_ENTITY_PASSWORD) == 200
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 401

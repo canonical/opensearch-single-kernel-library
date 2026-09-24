@@ -166,6 +166,11 @@ class Paths:
         """Get path to grafana dashboard file."""
         return self.charm_root / "src/grafana_dashboards/opensearch.json"
 
+    @property
+    def ldap_chain(self) -> PathProtocol:
+        """Get path to ldap ca certificates file."""
+        return self.certs / "ldap.pem"
+
 
 # --- Base Workload
 class BaseWorkload(ABC):
