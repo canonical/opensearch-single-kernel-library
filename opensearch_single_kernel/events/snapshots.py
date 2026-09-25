@@ -211,6 +211,13 @@ class SnapshotsEventsHandler(Object):
         self, event: StorageConnectionInfoGoneEvent
     ) -> None:
         """Handler for backup credentials gone event."""
+        if self.charm.is_unit_going_away(event):
+            logger.info(
+                "Unit is going away, keeping the snapshot configuration of relation %d.",
+                event.relation.id,
+            )
+            return
+
         if event.relation.name == S3_RELATION:
             object_storage_type = ObjectStorageType.S3
         elif event.relation.name == GCS_RELATION:
@@ -501,20 +508,32 @@ class SnapshotsEventsHandler(Object):
         self.charm.snapshots_manager.set_credentials_saved(None)
 
     def _on_peer_clusters_relation_departed_for_snapshots(self, event) -> None:  # noqa C901
-        """Cleanup snapshot config if the orchestrator we depended on is gone."""
+        """Cleanup snapshot config if the main orchestrator we got it from is gone."""
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, skipping the snapshot configuration cleanup.")
+            return
+
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return
 
-        if (
-            self.charm.state.application.orchestrators
-            and self.charm.state.application.orchestrators.main_app
-            and self.charm.state.application.orchestrators.main_app.name == event.relation.app.name
-            and len(event.relation.units) > 0
-        ):
+        if len(event.relation.units) > 0:
             logger.debug(
-                "Main orchestrator still accessible; do not cleanup as it can be scale down"
+                "Orchestrator %s still has units on the relation"
+                "skipping snapshot configuration cleanup.",
+                event.relation.app.name,
+            )
+            return
+
+        orchestrators = self.charm.state.application.orchestrators
+        main_app = orchestrators.main_app if orchestrators else None
+        if main_app and main_app.name != event.relation.app.name:
+            logger.debug(
+                "Departed orchestrator %s is not the main orchestrator %s , "
+                "skipping snapshots configuration cleanup",
+                event.relation.app.name,
+                main_app.name,
             )
             return
 
