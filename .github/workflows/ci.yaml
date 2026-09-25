@@ -136,13 +136,18 @@ jobs:
       contents: read
 
   integration-test:
-    name: Integration test charm
+    strategy:
+      fail-fast: false
+      matrix:
+        # One call per base keeps each matrix under GitHub's 256 jobs limit
+        base: ${{ github.event_name == 'schedule' && fromJSON('["ubuntu22", "ubuntu24"]') || fromJSON('["ubuntu24"]') }}
+    name: Integration test charm | ${{ matrix.base }}
     uses: $/.github/workflows/integration_test.yaml
     needs:
       - build
     with:
       artifact-prefix: ${{ needs.build.outputs.artifact-prefix }}
-      run-on-all-bases: ${{ github.event_name == 'schedule' }}
+      base: ${{ matrix.base }}
     secrets:
       AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
       AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}

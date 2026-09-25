@@ -8,12 +8,14 @@ on:
           Use canonical/data-platform-workflows build_charm.yaml to build the charm(s)
         required: true
         type: string
-      run-on-all-bases:
+      base:
         description: |
-          Run the integration tests on all spread systems. If false, run only on ubuntu 24.
+          Spread variant (Ubuntu base) to run the integration tests on, e.g. ubuntu24.
+
+          Call this workflow once per base to keep each matrix under GitHub's 256 jobs limit.
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: ubuntu24
     secrets:
       AWS_ACCESS_KEY:
         required: true
@@ -51,7 +53,7 @@ jobs:
         id: collect-jobs
         shell: python
         env:
-          RUN_ON_ALL_BASES: ${{ inputs.run-on-all-bases }}
+          BASE: ${{ inputs.base }}
         run: |
           import json
           import pathlib
@@ -68,11 +70,11 @@ jobs:
               .split("\n")
           )
           jobs = []
-          run_on_all_bases = os.environ.get("RUN_ON_ALL_BASES", "false").lower() == "true"
+          base = os.environ["BASE"]
           for job in spread_jobs:
               # Example `job`: "github-ci:ubuntu-24.04:tests/spread/opensearch/k8s/test_charm.py:ubuntu22"
               _, runner, task, variant = job.split(":")
-              if not run_on_all_bases and variant != "ubuntu24":
+              if variant != base:
                   continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
@@ -103,7 +105,7 @@ jobs:
         if: ${{ github.event_name == 'schedule' && github.run_attempt == '1' }}
         uses: actions/upload-artifact@v4
         with:
-          name: allure-default-results-integration-test
+          name: allure-default-results-integration-test-${{ inputs.base }}
           path: allure-default-results/
           if-no-files-found: error
     outputs:

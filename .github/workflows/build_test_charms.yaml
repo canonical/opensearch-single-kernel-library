@@ -101,7 +101,7 @@ jobs:
       - name: Upload charm
         uses: actions/upload-artifact@v7
         with:
-          name: packed-charm-${{ steps.path-in-artifact.outputs.path }}--platform-${{ matrix.platform.name_in_artifact }}
+          name: ${{ inputs.artifact-prefix }}-${{ steps.path-in-artifact.outputs.path }}--platform-${{ matrix.platform.name_in_artifact }}
           path: |
             ${{ inputs.path-to-charm-directory }}/*.charm
             .empty
