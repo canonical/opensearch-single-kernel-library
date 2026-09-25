@@ -114,9 +114,25 @@ class TLSEventsHandler(Object):
 
             if not old_csr:
                 self.certs.request_certificate_creation(certificate_signing_request=csr)
-            # In case user provide a key and password already in current CSR
             elif old_csr.rstrip() == csr.decode().rstrip():
-                self.request_certificate_reissue(cert_type)
+                # In case CSR is the same, make sure reissue is pending
+                if cert_type.val in self.charm.state.server.certs_reissue_pending:
+                    event.set_results({"message": "A certificate reissue is already in progress."})
+                    return
+
+                # Make sure the TLS provider is aware of the CSR
+                requested_csrs = {
+                    req.csr.strip() for req in self.certs.get_certificate_signing_requests()
+                }
+                if csr.decode().strip() not in requested_csrs:
+                    logger.info(
+                        "CSR of %s not found in the relation, requesting it.", cert_type.val
+                    )
+                    self.certs.request_certificate_creation(certificate_signing_request=csr)
+                    return
+                event.set_results(
+                    {"message": "The provided key is already in use; no renewal requested."}
+                )
             else:
                 self.certs.request_certificate_renewal(
                     old_certificate_signing_request=old_csr.encode("utf-8"),
