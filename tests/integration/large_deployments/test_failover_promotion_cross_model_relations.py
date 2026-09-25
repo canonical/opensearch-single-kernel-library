@@ -168,6 +168,7 @@ async def test_failover_orchestrator_promotion(
     await failover_model.applications[FAILOVER_APP].remove_relation(
         f"{FAILOVER_APP}:{PEER_CLUSTER_RELATION}",
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
+        block_until_done=True,
     )
     await failover_model.wait_for_idle(
         apps=[FAILOVER_APP],
@@ -193,6 +194,7 @@ async def test_failover_orchestrator_promotion(
     await data_model.applications[DATA_APP].remove_relation(
         f"{DATA_APP}:{PEER_CLUSTER_RELATION}",
         f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
+        block_until_done=True,
     )
     await data_model.wait_for_idle(
         apps=[DATA_APP],

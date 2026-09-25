@@ -77,7 +77,8 @@ async def test_check_opensearch_transport(ops_test: OpsTest) -> None:
     for id in ids:
         ids_to_addr[id] = yaml.safe_load(
             subprocess.check_output(
-                f"juju exec --unit opensearch/{id} -- network-get opensearch-peers".split()
+                f"juju exec --unit opensearch/{id} -- network-get opensearch-peers".split(),
+                stdin=subprocess.DEVNULL,
             ).decode()
         )["bind-addresses"][0]["addresses"][0]["address"]
 
@@ -87,7 +88,8 @@ async def test_check_opensearch_transport(ops_test: OpsTest) -> None:
     for id in ids_to_addr.keys():
         hosts = (
             subprocess.check_output(
-                f"juju ssh opensearch/{id} -- sudo cat /var/snap/opensearch/current/etc/opensearch/unicast_hosts.txt".split()
+                f"juju ssh opensearch/{id} -- sudo cat /var/snap/opensearch/current/etc/opensearch/unicast_hosts.txt".split(),
+                stdin=subprocess.DEVNULL,
             )
             .decode()
             .rsplit()

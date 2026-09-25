@@ -531,6 +531,57 @@ def test_on_set_tls_private_key(harness, mocker, substrate):
     request_certificate_creation.assert_called()
 
 
+TLS_REQUIRES = (
+    "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates"
+    ".TLSCertificatesRequiresV3"
+)
+
+
+@pytest.mark.parametrize(
+    "reissue_pending,requested,expect_creation",
+    [(True, False, False), (False, False, True), (False, True, False)],
+    ids=["reissue-pending", "not-requested", "already-requested"],
+)
+def test_on_set_tls_private_key_same_csr(
+    harness, mocker, reissue_pending, requested, expect_creation
+):
+    """Test _on_set_tls_private_key only re-requests a same CSR unknown to the provider."""
+    csr = "csr_12345"
+    cert_type = CertType.UNIT_TRANSPORT
+    event_mock = MagicMock(params={"category": cert_type.val, "key": "key_12345"})
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    request_certificate_renewal = mocker.patch(f"{TLS_REQUIRES}.request_certificate_renewal")
+    mocker.patch(
+        f"{TLS_REQUIRES}.get_certificate_signing_requests",
+        return_value=[MagicMock(csr=csr)] if requested else [],
+    )
+    deployment_desc = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    deployment_desc.return_value = deployment_descriptions["ok"]
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request",
+        return_value=f"{csr}\n".encode("utf-8"),
+    )
+    harness.charm.state.secrets.put_object(Scope.UNIT, cert_type.val, {"csr": csr})
+    if reissue_pending:
+        harness.charm.state.server.certs_reissue_pending = {cert_type.val}
+
+    harness.charm.tls_events._on_set_private_key(event_mock)
+
+    request_certificate_renewal.assert_not_called()
+    event_mock.fail.assert_not_called()
+    if expect_creation:
+        request_certificate_creation.assert_called_once_with(
+            certificate_signing_request=f"{csr}\n".encode("utf-8")
+        )
+        event_mock.set_results.assert_not_called()
+    else:
+        request_certificate_creation.assert_not_called()
+        event_mock.set_results.assert_called_once()
+
+
 def test_on_certificate_available(harness, mocker):
     """Test _on_certificate_available event."""
     deployment_desc = mocker.patch(

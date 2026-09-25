@@ -1448,6 +1448,15 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     base_url = f"https://{leader_unit_ip}:9200"
 
+    # Enabling model can cause memory spike resulting in transient HTTP 429
+    # "Memory Circuit Breaker is open" responses, so we temporarily disable this check.
+    await http_request(
+        ops_test,
+        "PUT",
+        f"{base_url}/_cluster/settings",
+        {"persistent": {"plugins.ml_commons.jvm_heap_memory_threshold": 100}},
+    )
+
     # get model id used for ingesting documents to this index
     # ingest pipeline with id {INGEST_PIPELINE_ID} was created during flow framework test
     response = await http_request(
@@ -1478,12 +1487,13 @@ async def test_neural_search_plugin(ops_test: OpsTest, deploy_type: str) -> None
     await bulk_insert(ops_test, APP_NAME, leader_unit_ip, bulk_encode(TEST_DOCS, TEST_INDEX))
     await http_request(ops_test, "POST", f"{base_url}/{TEST_INDEX}/_refresh")
 
-    # run neural search
     payload = {
         "query": {"neural": {"passage_embedding": {"query_text": "hello", "model_id": model_id}}}
     }
     response = await http_request(ops_test, "GET", f"{base_url}/{TEST_INDEX}/_search", payload)
-    assert len(response.get("hits", {}).get("hits", [])) > 0, "Neural search did not yield results"
+    assert len(response.get("hits", {}).get("hits", [])) > 0, (
+        f"Neural search did not yield results: {response}"
+    )
 
     # clean up resources
     response = await http_request(ops_test, "GET", f"{base_url}/_plugins/_ml/models/{model_id}")
@@ -1504,6 +1514,16 @@ async def test_ltr_plugin(ops_test: OpsTest, deploy_type: str) -> None:
     leader_unit_ip = await get_leader_unit_ip(ops_test)
     base_url = f"https://{leader_unit_ip}:9200"
     endpoint = f"{base_url}/_ltr/_featureset"
+
+    # LTR plugin can also cause memory spike resulting in transient HTTP 429
+    # "Memory Circuit Breaker is open" responses, so we temporarily disable this check.
+    # Unlike neural search plugin, this plugin's breaker is controlled by different option.
+    await http_request(
+        ops_test,
+        "PUT",
+        f"{base_url}/_cluster/settings",
+        {"persistent": {"ltr.breaker.enabled": False}},
+    )
 
     # initialize default feature store
     response = await http_request(ops_test, "PUT", f"{base_url}/_ltr")
@@ -1691,6 +1711,8 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     codec = response[zstd]["settings"]["index.codec"]
     assert codec == "zstd", f"Expected codec 'zstd' but found {codec}"
 
+    await http_request(ops_test, "POST", f"{base_url}/{zstd},{default}/_refresh")
+
     # compare size of indices, zstd should be smaller or equal
     # This test was flaky due to two reasons:
     # 1. Compression happens during segment merges, not immediately after indexing.
@@ -1700,13 +1722,16 @@ async def test_custom_codecs_plugin(ops_test: OpsTest, deploy_type: str) -> None
     # 2. For very small datasets, fixed overhead (metadata, segment headers, minimum segment sizes)
     #    may dominate, making compressed and uncompressed sizes equal (e.g., 416 == 416).
     #    Fixed by using <= instead of < to allow equality for edge cases.
-    stats = await http_request(ops_test, "GET", f"{base_url}/{zstd},{default}/_stats/store")
-    zstd_size = stats["indices"][zstd]["total"]["store"]["size_in_bytes"]
-    default_size = stats["indices"][default]["total"]["store"]["size_in_bytes"]
+    segments = await http_request(
+        ops_test, "GET", f"{base_url}/_cat/segments/{zstd},{default}?format=json&bytes=b"
+    )
+    zstd_size = sum(int(segment["size"]) for segment in segments if segment["index"] == zstd)
+    default_size = sum(int(segment["size"]) for segment in segments if segment["index"] == default)
 
-    logger.info(f"Index sizes - zstd: {zstd_size} default: {default_size}")
+    # exactly one segment per shard copy (primary + replica) proves the force merge applied
+    assert len(segments) == 4, f"Expected 1 segment per shard copy, got: {segments}"
     assert zstd_size > 0 and default_size > 0, (
-        "Index store sizes should be positive after bulk indexing"
+        "Index segment sizes should be positive after bulk indexing"
     )
     assert zstd_size <= default_size, (
         f"zstd codec should not increase size: zstd={zstd_size} default={default_size}"
@@ -1852,11 +1877,10 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     assert _cfg_name(group_cfg) == email_group_cfg_name
 
     # remove relation
-    main_app = ops_test.model.applications[APP_NAME]
-
-    await main_app.remove_relation(
+    await ops_test.model.applications[APP_NAME].remove_relation(
         f"{APP_NAME}:smtp",
         f"{SMTP_INTEGRATOR_APP_NAME}:smtp",
+        block_until_done=True,
     )
     await _wait_for_units(ops_test, deploy_type)
 
