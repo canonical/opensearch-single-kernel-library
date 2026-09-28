@@ -3,36 +3,21 @@
 
 from unittest.mock import MagicMock, PropertyMock
 
+import pytest
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
     CLIENT_RELATION,
     NODE_LOCK_RELATION,
-    DeploymentType,
-    StartMode,
-    State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
-from opensearch_single_kernel.core.models import (
-    App,
-    DeploymentDescription,
-    DeploymentState,
-    PeerClusterConfig,
-)
 
 DASHBOARDS_CHARM = "opensearch-dashboards"
 
-mock_deployment_desc = DeploymentDescription(
-    config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
-    start=StartMode.WITH_GENERATED_ROLES,
-    pending_directives=[],
-    typ=DeploymentType.MAIN_ORCHESTRATOR,
-    app=App(model_uuid="model-uuid", name="opensearch"),
-    state=DeploymentState(value=State.ACTIVE),
-)
+pytestmark = pytest.mark.usefixtures("patch_deployment_desc")
 
 
 def relation_username(relation) -> str:

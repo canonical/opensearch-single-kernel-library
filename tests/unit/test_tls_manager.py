@@ -307,7 +307,6 @@ def test_get_sans(harness, mocker, substrate):
                 [
                     harness.charm.state.unit_name,
                     "nebula",
-                    "localhost",
                     "opensearch-0.opensearch-endpoints.namespace.svc.cluster.local",
                 ]
             ),
@@ -336,7 +335,7 @@ def test_get_certificate_subject_uses_short_unit_identity_on_k8s(harness, mocker
     )
 
     assert harness.charm.tls_manager._get_certificate_subject(CertType.UNIT_TRANSPORT) == (
-        "opensearch-k8s-0"
+        "opensearch-k8s-0.a03"
     )
     assert len(harness.charm.tls_manager._get_certificate_subject(CertType.UNIT_HTTP)) <= 64
 
