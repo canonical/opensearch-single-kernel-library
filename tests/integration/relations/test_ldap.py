@@ -461,6 +461,172 @@ async def test_ldap_certificates_restored_after_pod_deletion(ops_test: OpsTest) 
 
 
 @pytest.mark.abort_on_fail
+async def test_remove_ldap_relation(ops_test: OpsTest, substrate: Substrate) -> None:
+    """Removing the LDAP relation on its own switches LDAP authentication off."""
+    assert (model := ops_test.model)
+
+    await model.applications[MAIN_APP].remove_relation(
+        "ldap", LDAP_OFFER if substrate == "vm" else LDAP_APP_NAME, True
+    )
+
+    # No LDAP relation is left to complain about, so the apps go back to active/idle.
+    await wait_until(ops_test, apps=[MAIN_APP, DATA_APP])
+
+    main_app_ips = await get_application_unit_ips(ops_test, MAIN_APP)
+    data_app_ips = await get_application_unit_ips(ops_test, DATA_APP)
+    for ip in [*main_app_ips, *data_app_ips]:
+        for authorization in (SEARCH_ADMIN_LDAP_AUTHORIZATION, SEARCH_READONLY_LDAP_AUTHORIZATION):
+            # Wait for LDAP propagation over the cluster
+            for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+                with attempt:
+                    result = requests.get(
+                        f"https://{ip}:9200/_plugins/_security/authinfo",
+                        headers={"Authorization": authorization},
+                        verify=False,
+                    )
+                    assert result.status_code == 401
+
+
+@pytest.mark.abort_on_fail
+async def test_readd_ldap_relation(ops_test: OpsTest, substrate: Substrate) -> None:
+    """Reconnecting the LDAP relation restores authentication and index access."""
+    assert (model := ops_test.model)
+
+    await model.integrate(
+        f"{MAIN_APP}:ldap", LDAP_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:ldap"
+    )
+
+    await wait_until(ops_test, apps=[MAIN_APP, DATA_APP])
+
+    main_app_ips = await get_application_unit_ips(ops_test, MAIN_APP)
+    data_app_ips = await get_application_unit_ips(ops_test, DATA_APP)
+    for ip in [*main_app_ips, *data_app_ips]:
+        for authorization, backend_role in LDAP_BACKEND_ROLES.items():
+            # Wait for LDAP propagation over the cluster
+            for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+                with attempt:
+                    result = requests.get(
+                        f"https://{ip}:9200/_plugins/_security/authinfo",
+                        headers={"Authorization": authorization},
+                        verify=False,
+                    )
+                    assert result.status_code == 200
+                    authinfo = result.json()
+                    assert backend_role in authinfo["backend_roles"], authinfo
+
+            result = requests.get(
+                f"https://{ip}:9200/search-index/_search",
+                headers={"Authorization": authorization},
+                verify=False,
+            )
+            assert result.status_code == 200
+
+        result = requests.post(
+            f"https://{ip}:9200/search-index/_doc",
+            headers={"Authorization": SEARCH_ADMIN_LDAP_AUTHORIZATION},
+            verify=False,
+            json={"field": "test_value"},
+        )
+        assert result.status_code == 201
+
+        result = requests.post(
+            f"https://{ip}:9200/search-index/_doc",
+            headers={"Authorization": SEARCH_READONLY_LDAP_AUTHORIZATION},
+            verify=False,
+            json={"field": "test_value"},
+        )
+        assert result.status_code == 403
+
+
+@pytest.mark.abort_on_fail
+async def test_remove_ldap_cert_relation(ops_test: OpsTest, substrate: Substrate) -> None:
+    """Removing the certificate transfer relation on its own blocks and disables LDAP."""
+    assert (model := ops_test.model)
+
+    await model.applications[MAIN_APP].remove_relation(
+        "ldap-certificate-transfer",
+        LDAP_CERT_OFFER if substrate == "vm" else TLS_CERTIFICATES_APP_NAME,
+        True,
+    )
+
+    # Without the CA the charm cannot verify the LDAPS endpoint.
+    await wait_until(
+        ops_test,
+        apps=[MAIN_APP, DATA_APP],
+        apps_statuses={MAIN_APP: [LdapStatuses.CERT_NOT_CONNECTED.value]},
+    )
+
+    main_app_ips = await get_application_unit_ips(ops_test, MAIN_APP)
+    data_app_ips = await get_application_unit_ips(ops_test, DATA_APP)
+    for ip in [*main_app_ips, *data_app_ips]:
+        for authorization in (SEARCH_ADMIN_LDAP_AUTHORIZATION, SEARCH_READONLY_LDAP_AUTHORIZATION):
+            # Wait for LDAP propagation over the cluster
+            for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+                with attempt:
+                    result = requests.get(
+                        f"https://{ip}:9200/_plugins/_security/authinfo",
+                        headers={"Authorization": authorization},
+                        verify=False,
+                    )
+                    assert result.status_code == 401
+
+
+@pytest.mark.abort_on_fail
+async def test_readd_ldap_cert_relation(ops_test: OpsTest, substrate: Substrate) -> None:
+    """Reconnecting the certificate transfer relation restores auth and index access."""
+    assert (model := ops_test.model)
+
+    # GLAuth only speaks certificate-transfer v0; take the CA from the provider that issued
+    # GLAuth's own certificate instead
+    await model.integrate(
+        f"{MAIN_APP}:ldap-certificate-transfer",
+        # LDAP_CERT_OFFER if substrate == "vm" else f"{LDAP_APP_NAME}:send-ca-cert",
+        LDAP_CERT_OFFER if substrate == "vm" else f"{TLS_CERTIFICATES_APP_NAME}:send-ca-cert",
+    )
+
+    await wait_until(ops_test, apps=[MAIN_APP, DATA_APP])
+
+    main_app_ips = await get_application_unit_ips(ops_test, MAIN_APP)
+    data_app_ips = await get_application_unit_ips(ops_test, DATA_APP)
+    for ip in [*main_app_ips, *data_app_ips]:
+        for authorization, backend_role in LDAP_BACKEND_ROLES.items():
+            # Wait for LDAP propagation over the cluster
+            for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10)):
+                with attempt:
+                    result = requests.get(
+                        f"https://{ip}:9200/_plugins/_security/authinfo",
+                        headers={"Authorization": authorization},
+                        verify=False,
+                    )
+                    assert result.status_code == 200
+                    authinfo = result.json()
+                    assert backend_role in authinfo["backend_roles"], authinfo
+
+            result = requests.get(
+                f"https://{ip}:9200/search-index/_search",
+                headers={"Authorization": authorization},
+                verify=False,
+            )
+            assert result.status_code == 200
+
+        result = requests.post(
+            f"https://{ip}:9200/search-index/_doc",
+            headers={"Authorization": SEARCH_ADMIN_LDAP_AUTHORIZATION},
+            verify=False,
+            json={"field": "test_value"},
+        )
+        assert result.status_code == 201
+
+        result = requests.post(
+            f"https://{ip}:9200/search-index/_doc",
+            headers={"Authorization": SEARCH_READONLY_LDAP_AUTHORIZATION},
+            verify=False,
+            json={"field": "test_value"},
+        )
+        assert result.status_code == 403
+
+
+@pytest.mark.abort_on_fail
 async def test_kibana(ops_test: OpsTest) -> None:
     assert (model := ops_test.model)
 

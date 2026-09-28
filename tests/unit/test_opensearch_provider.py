@@ -1,8 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock
 
+import pytest
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
@@ -13,6 +15,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
+from opensearch_single_kernel.common.statuses import ExternalClientsStatuses, GeneralStatuses
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
@@ -20,8 +23,15 @@ from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
     DeploymentState,
+    ExternalClientRequestedEntity,
     PeerClusterConfig,
 )
+from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    ENTITY_GROUP,
+    ENTITY_USER,
+)
+from opensearch_single_kernel.managers.external_clients import ExternalClientsManager
+from opensearch_single_kernel.utils.status import format_status
 
 DASHBOARDS_CHARM = "opensearch-dashboards"
 
@@ -330,3 +340,105 @@ def test_provide_client_user(
     put_role_mapping.assert_called_with(username, mapped_users[username], mapped_roles[username])
     patch_user.assert_called_with(username, patches)
     client_users_dict.assert_called()
+
+
+def make_client(relation_id: int, entity_type: str = ENTITY_USER, groups: list[str] | None = None):
+    return MagicMock(
+        relation=MagicMock(id=relation_id),
+        entity_type=entity_type,
+        extra_group_roles=groups or [""],
+    )
+
+
+def test_mapped_roles_map_ldap_groups_to_group_entity_clients(harness, mocker):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.external_clients",
+        new_callable=PropertyMock,
+        return_value=[
+            make_client(1, groups=["ignored"]),
+            make_client(2, ENTITY_GROUP, groups=["devs", "ops"]),
+            make_client(3, ENTITY_GROUP, groups=["devs"]),
+            make_client(4, ENTITY_GROUP, groups=["unprovisioned"]),
+        ],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.client_users_dict",
+        new_callable=PropertyMock,
+        return_value={"1": "app_user", "2": "devs_ops_group", "3": "devs_group"},
+    )
+
+    mapped_roles = harness.charm.state.mapped_roles
+
+    assert {
+        "app_user": ["app_user"],
+        "devs_ops_group": ["devs_ops_group"],
+        "devs_group": ["devs_group"],
+        "devs": ["devs_ops_group", "devs_group"],
+        "ops": ["devs_ops_group"],
+    }.items() <= mapped_roles.items()
+    assert "ignored" not in mapped_roles
+    assert "unprovisioned" not in mapped_roles
+
+
+@pytest.mark.parametrize(
+    "roles_mapping, expected",
+    [
+        (
+            '{"alice": "readall", "bob": "readall", "carol": "all_access"}',
+            {"readall": ["alice", "bob"], "all_access": ["carol"]},
+        ),
+        ('{"alice": ["readall"], "bob": "readall"}', {"readall": ["bob"]}),
+        ('["alice"]', {}),
+        ("not-a-json", {}),
+    ],
+    ids=["valid", "non-string-role-skipped", "not-a-dict", "invalid-json"],
+)
+def test_mapped_users_from_roles_mapping_config(harness, roles_mapping, expected):
+    with harness.hooks_disabled():
+        harness.update_config({"roles_mapping": roles_mapping})
+
+    assert harness.charm.state.mapped_users == expected
+
+
+@pytest.mark.parametrize(
+    "requested_entity, client_users, expected_statuses",
+    [
+        (
+            None,
+            {},
+            [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value, {"id": 1})],
+        ),
+        (
+            ExternalClientRequestedEntity("devs_group", "password"),
+            {"2": "devs_group"},
+            [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value, {"id": 1})],
+        ),
+        (
+            ExternalClientRequestedEntity("devs_group", "password"),
+            {"1": "devs_group"},
+            [GeneralStatuses.ACTIVE_IDLE.value],
+        ),
+    ],
+    ids=["missing-entity", "username-used-by-other-relation", "username-owned-by-relation"],
+)
+def test_group_entity_client_statuses(mocker, requested_entity, client_users, expected_statuses):
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}}
+    external_client = make_client(1, ENTITY_GROUP)
+    external_client.get_requested_entity.return_value = requested_entity
+
+    state = MagicMock()
+    state.statuses.get.return_value = SimpleNamespace(root=[])
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+    state.application.client_users_dict = client_users
+    mocker.patch.object(
+        ExternalClientsManager,
+        "opensearch_client",
+        new_callable=PropertyMock,
+        return_value=MagicMock(is_node_up=MagicMock(return_value=False)),
+    )
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == expected_statuses
