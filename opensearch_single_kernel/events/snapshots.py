@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     HealthColors,
     ObjectStorageType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
@@ -37,6 +38,7 @@ from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
     AzureRelDataCredentials,
     GcsRelDataCredentials,
+    ObjectStorageConfig,
     ObjectStorageCredentials,
     S3RelDataCredentials,
 )
@@ -157,15 +159,9 @@ class SnapshotsEventsHandler(Object):
         # Update backup credentials
         # Catch file operation exceptions
         try:
-            tls_ca_chain = None
-            match object_storage_type:
-                case ObjectStorageType.S3:
-                    object_storage_credentials = object_storage_config.s3.credentials
-                    tls_ca_chain = object_storage_config.s3.tls_ca_chain
-                case ObjectStorageType.AZURE:
-                    object_storage_credentials = object_storage_config.azure.credentials
-                case ObjectStorageType.GCS:
-                    object_storage_credentials = object_storage_config.gcs.credentials
+            object_storage_credentials, tls_ca_chain = self._credentials_from_config(
+                object_storage_type, object_storage_config
+            )
             self.update_stored_credentials(
                 object_storage_type, object_storage_credentials, tls_ca_chain
             )
@@ -452,20 +448,9 @@ class SnapshotsEventsHandler(Object):
                     return None
             self._set_credentials_cleanup_failed_status(False)
 
-            tls_ca_chain = None
-            if self.charm.snapshots_manager.s3_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.S3
-                s3_credentials = self.charm.snapshots_manager.s3_info_from_peer_cluster
-                object_storage_credentials = S3RelDataCredentials(**s3_credentials)
-                tls_ca_chain = s3_credentials.get("s3_tls_ca_chain")
-            elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.AZURE
-                azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
-                object_storage_credentials = AzureRelDataCredentials(**azure_credentials)
-            elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.GCS
-                gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
-                object_storage_credentials = GcsRelDataCredentials(**gcs_credentials)
+            object_storage_type, object_storage_credentials, tls_ca_chain = (
+                self._credentials_from_peer_cluster()
+            )
 
             try:
                 self.update_stored_credentials(
@@ -667,6 +652,62 @@ class SnapshotsEventsHandler(Object):
                 "app",
                 self.charm.snapshots_manager.name,
             )
+
+    @staticmethod
+    def _credentials_from_config(
+        object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
+    ) -> tuple[ObjectStorageCredentials, str | list[str] | None]:
+        match object_storage_type:
+            case ObjectStorageType.S3:
+                s3 = object_storage_config.s3
+                return s3.credentials, s3.tls_ca_chain
+            case ObjectStorageType.AZURE:
+                return object_storage_config.azure.credentials, None
+            case _:
+                return object_storage_config.gcs.credentials, None
+
+    def _credentials_from_peer_cluster(
+        self,
+    ) -> tuple[ObjectStorageType | None, ObjectStorageCredentials | None, str | None]:
+        if s3_credentials := self.charm.snapshots_manager.s3_info_from_peer_cluster:
+            return (
+                ObjectStorageType.S3,
+                S3RelDataCredentials(**s3_credentials),
+                s3_credentials.get("s3_tls_ca_chain"),
+            )
+        if azure_credentials := self.charm.snapshots_manager.azure_info_from_peer_cluster:
+            return ObjectStorageType.AZURE, AzureRelDataCredentials(**azure_credentials), None
+        if gcs_credentials := self.charm.snapshots_manager.gcs_info_from_peer_cluster:
+            return ObjectStorageType.GCS, GcsRelDataCredentials(**gcs_credentials), None
+        return None, None, None
+
+    def restore_stored_credentials(self) -> None:
+        """Restore the keystore credentials and S3 CA lost with the K8s container filesystem."""
+        if self.charm.substrate != Substrates.K8S:
+            return
+
+        object_storage_type = self.charm.state.storage_type
+        if object_storage_type in (
+            ObjectStorageType.S3,
+            ObjectStorageType.AZURE,
+            ObjectStorageType.GCS,
+        ):
+            connection_info = self.charm.state.get_storage_connection_info_from_relation(
+                object_storage_type
+            )
+            try:
+                config = storage_config_from_connection_info(object_storage_type, connection_info)
+            except OpenSearchObjectStorageConfigValidationError:
+                return
+            if not config:
+                return
+            credentials, tls_ca_chain = self._credentials_from_config(object_storage_type, config)
+        else:
+            object_storage_type, credentials, tls_ca_chain = self._credentials_from_peer_cluster()
+            if not object_storage_type:
+                return
+
+        self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
 
     def update_stored_credentials(
         self,
