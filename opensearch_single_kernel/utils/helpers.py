@@ -24,6 +24,7 @@ from cryptography import x509
 from ops import Unit, pebble
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_SNAP_REVISIONS,
     PROTECTED_INDEX_NAMES,
     DeploymentType,
     StartMode,
@@ -486,3 +487,10 @@ def hash_credentials(credentials: dict[str, str]) -> str:
         hash of the credentials
     """
     return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()
+
+
+def pinned_snap_revision() -> str:
+    """Get the snap revision pinned to this charm."""
+    from platform import machine
+
+    return OPENSEARCH_SNAP_REVISIONS[machine()]

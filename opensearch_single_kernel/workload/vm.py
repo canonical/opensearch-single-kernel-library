@@ -12,7 +12,6 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
-from platform import machine
 from types import SimpleNamespace
 
 from charmlibs import pathops
@@ -20,7 +19,6 @@ from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISIONS
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -36,7 +34,7 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap import SnapError
-from opensearch_single_kernel.utils.helpers import mask_sensitive_information
+from opensearch_single_kernel.utils.helpers import mask_sensitive_information, pinned_snap_revision
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
 logger = logging.getLogger(__name__)
@@ -111,8 +109,7 @@ class VMWorkload(BaseWorkload):
             cache = snap.SnapCache()
             opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
-            revision = OPENSEARCH_SNAP_REVISIONS[machine()]
-            opensearch_snap.ensure(snap.SnapState.Latest, revision=revision)
+            opensearch_snap.ensure(snap.SnapState.Latest, revision=pinned_snap_revision())
             opensearch_snap.connect("process-control")
             self.opensearch_snap = opensearch_snap
             if not opensearch_snap.held:

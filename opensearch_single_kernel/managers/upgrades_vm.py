@@ -8,19 +8,18 @@ Derived from specification: DA058 - In-Place Upgrades - Kubernetes v2
 """
 
 import logging
-from platform import machine
 from typing import Any
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusObject
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISIONS
 from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.core.models import UnitUpgradesState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
+from opensearch_single_kernel.utils.helpers import pinned_snap_revision
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         """Calculate the upgrade state of current unit."""
         if (
             snap_revision := self.state.server_upgrade.snap_revision
-        ) is not None and snap_revision != OPENSEARCH_SNAP_REVISIONS[machine()]:
+        ) is not None and snap_revision != pinned_snap_revision():
             logger.debug("Unit upgrade state: outdated")
             return UnitUpgradesState.OUTDATED
         return self.state.server_upgrade.unit_state
@@ -55,7 +54,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
             else:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
 
-        if self.state.server_upgrade.snap_revision == OPENSEARCH_SNAP_REVISIONS[machine()]:
+        if self.state.server_upgrade.snap_revision == pinned_snap_revision():
             return (
                 UpgradesStatuses.UPGRADES_ACTIVE.value,
                 {
@@ -81,7 +80,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
             return
 
         first_upgrade_unit = self.state.sorted_upgrades_units[0]
-        outdated = first_upgrade_unit.snap_revision != OPENSEARCH_SNAP_REVISIONS[machine()]
+        outdated = first_upgrade_unit.snap_revision != pinned_snap_revision()
         unhealthy = first_upgrade_unit.unit_state is not UnitUpgradesState.HEALTHY
         if outdated or unhealthy:
             if outdated:
@@ -106,7 +105,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
         Raises:
             PrecheckFailed: App is not ready to upgrade
         """
-        assert self.state.server_upgrade.snap_revision != OPENSEARCH_SNAP_REVISIONS[machine()]
+        assert self.state.server_upgrade.snap_revision != pinned_snap_revision()
         assert self.state.application_upgrade.versions
         for index, unit in enumerate(self.state.sorted_upgrades_units):
             if unit.unit == self.state.server.unit:
@@ -136,7 +135,7 @@ class UpgradesManagerVM(UpgradesManagerBase):
                     return self.state.application_upgrade.upgrade_resumed
                 return True
             if (
-                unit.snap_revision != OPENSEARCH_SNAP_REVISIONS[machine()]
+                unit.snap_revision != pinned_snap_revision()
                 or unit.unit_state is not UnitUpgradesState.HEALTHY
             ):
                 # Waiting for higher number units to upgrade
@@ -192,5 +191,5 @@ class UpgradesManagerVM(UpgradesManagerBase):
 
     @property
     def _app_workload_container_version(self) -> str:
-        """App's Kubernetes controller revision hash"""
-        return OPENSEARCH_SNAP_REVISIONS[machine()]
+        """App's snap revision."""
+        return pinned_snap_revision()
