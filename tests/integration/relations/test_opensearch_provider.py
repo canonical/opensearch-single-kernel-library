@@ -113,7 +113,7 @@ async def test_create_relation(
             trust=substrate == "k8s",
         ),
     )
-    if substrate == "vm":
+    if substrate == "vm" and DEPLOY_DASHBOARDS:
         await ops_test.model.deploy(
             DASHBOARDS_APP_NAME,
             application_name=DASHBOARDS_APP_NAME,
@@ -144,7 +144,7 @@ async def test_create_relation(
         timeout=1600,
         status="active",
     )
-    if substrate == "vm":
+    if substrate == "vm" and DEPLOY_DASHBOARDS:
         await ops_test.model.wait_for_idle(
             apps=[DASHBOARDS_APP_NAME],
             timeout=1600,
@@ -152,8 +152,8 @@ async def test_create_relation(
 
 
 def _all_apps(substrate: str) -> list:
-    """Return ALL_APPS, dropping dashboards on k8s where it's never deployed."""
-    if substrate == "k8s":
+    """Return ALL_APPS, dropping dashboards where it is not deployed (k8s, or disabled)."""
+    if substrate == "k8s" or not DEPLOY_DASHBOARDS:
         return [app for app in ALL_APPS if app != DASHBOARDS_APP_NAME]
     return ALL_APPS
 
@@ -287,6 +287,7 @@ async def test_version(ops_test: OpsTest, app_name: str):
 
 
 # TODO add for k8s once k8s dashboards is available
+@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation(ops_test: OpsTest):
@@ -321,6 +322,7 @@ async def test_dashboard_relation(ops_test: OpsTest):
 
 
 # TODO add for k8s once k8s dashboards is available
+@pytest.mark.skip(reason="opensearch-dashboards charm is incompatible with the 3.x")
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
 async def test_dashboard_relation_password_change(ops_test: OpsTest):
@@ -840,7 +842,7 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest, app_name: str
         SECONDARY_CLIENT_APP_NAME,
         V1_SECONDARY_CLIENT_APP_NAME,
     ]
-    if substrate == "vm":
+    if substrate == "vm" and DEPLOY_DASHBOARDS:
         apps_to_wait.append(DASHBOARDS_APP_NAME)
 
     await wait_until(

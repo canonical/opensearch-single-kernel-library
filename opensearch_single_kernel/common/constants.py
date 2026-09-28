@@ -151,8 +151,13 @@ class ExtraUserRolePermissions(Enum):
 
     # Default user has CRUD in a specific index. Update index_patterns to include the index to
     # which these permissions are applied.
+    # cluster_composite_ops and indices_all restoring `own_index` role mappings
+    # after it's deletion in 3.8.0
     DEFAULT = {
-        "cluster_permissions": ["cluster_monitor"],
+        "cluster_permissions": [
+            "cluster_monitor",
+            "cluster_composite_ops",
+        ],
         "index_permissions": [
             {
                 "index_patterns": [],
@@ -162,6 +167,7 @@ class ExtraUserRolePermissions(Enum):
                 "allowed_actions": [
                     "indices_monitor",
                     "data_access",
+                    "indices_all",
                 ],
             }
         ],
@@ -196,7 +202,10 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = "193"  # Keep in sync with `workload_version` file
+# Revision 3.7.0
+# OPENSEARCH_SNAP_REVISION = "65"  # Keep in sync with `workload_version` file
+# Revision 3.8.0
+OPENSEARCH_SNAP_REVISION = "79"  # Keep in sync with `workload_version` file
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -275,10 +284,10 @@ GRAFANA_K8S_RELATION = "grafana-dashboard"
 
 
 # Paths
-BASE_SNAP_DIR = "/var/snap/opensearch"
+BASE_SNAP_DIR = "/var/snap/opensearch-charmed"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
-SNAP = "/snap/opensearch/current"
+SNAP = "/snap/opensearch-charmed/current"
 
 
 # Secrets
