@@ -227,8 +227,11 @@ class RelationState:
 
         self.relation_data.update(update_content)
 
+        # DataDict.__contains__ checks values, not keys,
+        # so fields must be compared against keys().
+        existing_fields = set(self.relation_data.keys())
         for field in delete_fields:
-            if field not in self.relation_data:
+            if field not in existing_fields:
                 logger.debug(
                     f"Field '{field}' not found in relation data for deletion. Skipping deletion for this field."
                 )
