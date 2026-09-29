@@ -29,7 +29,7 @@ class LdapManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "ldap_manager")
 
-    def reconcile_k8s_runtime_resources(self) -> None:
+    def restore_ldap_ca(self) -> None:
         """Restore LDAP chain resources from relation.
 
         On K8s, LDAP certificates can be present in relations while the workload container
@@ -45,9 +45,14 @@ class LdapManager(BaseManager):
             )
             return
 
-        if not self.workload.exists(self.workload.paths.ldap_chain):
+        content = "\n".join(sorted(ca_certs))
+
+        if (
+            not self.workload.exists(self.workload.paths.ldap_chain)
+            or self.workload.read_text(self.workload.paths.ldap_chain) != content
+        ):
             logger.debug("Restoring ldap certificates files")
-            self.workload.write_text("\n".join(sorted(ca_certs)), self.workload.paths.ldap_chain)
+            self.workload.write_text(content, self.workload.paths.ldap_chain)
 
     @override()
     def get_statuses(

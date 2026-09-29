@@ -65,7 +65,7 @@ class ExternalClientsEventsHandler(Object):
         self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
     def _on_client_requested(self, event: IndexRequestedEvent | IndexEntityRequestedEvent) -> None:
-        """Handle client index-requested event.
+        """Handle client index-requested & index-entity-requested events.
 
         The read-only-endpoints field of DatabaseProvides is unused in this relation because this
         concept is irrelevant to OpenSearch. In this relation, the application charm should have
@@ -73,7 +73,6 @@ class ExternalClientsEventsHandler(Object):
         network endpoints is unnecessary.
 
         Raises:
-            OpenSearchIndexError if the index name is invalid
             OpenSearchHttpError if we can't create the required index
         """
         if not self._validate_client_request(event):
@@ -188,7 +187,10 @@ class ExternalClientsEventsHandler(Object):
     ) -> bool:
         """Provide the requested group entity for client relation."""
         if not (entity := external_client.get_requested_entity()):
-            event.defer()
+            logger.error(
+                "Cannot get requested entity on client relation %s",
+                event.relation.id,
+            )
             return False
 
         if entity.username in [

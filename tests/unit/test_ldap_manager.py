@@ -85,7 +85,7 @@ def test_ldap_relation_statuses(state, expected_statuses):
 def test_certificates_restored_on_k8s_when_chain_missing():
     workload = make_workload(chain_exists=False)
 
-    LdapManager(make_state(substrate=Substrates.K8S), workload).reconcile_k8s_runtime_resources()
+    LdapManager(make_state(substrate=Substrates.K8S), workload).restore_ldap_ca()
 
     workload.write_text.assert_called_once_with("cert-a\ncert-b", workload.paths.ldap_chain)
 
@@ -103,6 +103,6 @@ def test_certificates_restored_on_k8s_when_chain_missing():
     ids=["vm", "k8s-chain-present", "k8s-no-certificates"],
 )
 def test_certificates_not_restored(state, workload):
-    LdapManager(state, workload).reconcile_k8s_runtime_resources()
+    LdapManager(state, workload).restore_ldap_ca()
 
     workload.write_text.assert_not_called()

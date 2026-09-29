@@ -143,9 +143,6 @@ class LdapEventsHandler(Object):
 
     def _update_security_config(self, event: EventBase) -> None:
         """Update & apply the security config."""
-        logger.debug("Updating security config")
-        self.charm.config_manager.update_security_config()
-
         if not self.charm.unit.is_leader():
             logger.debug("Not the leader unit. Early exiting event.")
             return
@@ -176,6 +173,9 @@ class LdapEventsHandler(Object):
             logger.debug("OpenSearch not ready. Deferring event.")
             event.defer()
             return
+
+        logger.debug("Updating security config")
+        self.charm.config_manager.update_security_config()
 
         if not self.charm.cluster_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML

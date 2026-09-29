@@ -146,17 +146,12 @@ class ExternalOpenSearchClient(RelationState):
             )
             return None
 
-    @property
-    def requested_entity_secret(self) -> str | None:
-        """Get entity secret id for this relation."""
-        return self.relation_data.get("requested-entity-secret")
-
     def get_requested_entity(self) -> ExternalClientRequestedEntity | None:
         """Retrieve and validate entity from requested entity secret using model.
 
         If content is invalid or absent the None is returned and error is logged.
         """
-        if not (requested_entity := self.requested_entity_secret):
+        if not (requested_entity := self.relation_data.get("requested-entity-secret")):
             logger.info(
                 "No requested entities secret provided for GROUP requirer relation %d",
                 self.relation.id,

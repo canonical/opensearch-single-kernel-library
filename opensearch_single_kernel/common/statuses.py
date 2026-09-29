@@ -249,7 +249,7 @@ class ExternalClientsStatuses(Enum):
     USER_ENTITY_GROUP_INVALID = StatusObject(
         status="blocked",
         message="Missing or invalid group entity on client relation {id}",
-        short_message="Invalid client group entity",
+        short_message="Invalid group entity from client",
         check="Entity validation for entity-type=GROUP client relations.",
         action="Change entity-type or provide valid entity through client relation.",
     )
@@ -684,8 +684,8 @@ class LdapStatuses(Enum):
     )
     RELATION_INVALID = StatusObject(
         status="blocked",
-        message="LDAP relation must be created on main cluster orchestrator.",
+        message="LDAP relation must be created with Main-cluster-orchestrator.",
         short_message="LDAP only on main",
-        check="LDAP relation.",
-        action="Unrelate LDAP from this app; relate LDAP to main-orchestrator.",
+        check="LDAP related to main orchestrator.",
+        action="Relate LDAP only to the main-cluster-orchestrator.",
     )

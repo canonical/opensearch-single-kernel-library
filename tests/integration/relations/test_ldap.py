@@ -136,17 +136,15 @@ async def test_deploy_glauth(
         ),
         k8s_model.deploy(
             LDAP_APP_NAME,
-            channel="latest/edge",
-            revision=56,
+            channel="latest/stable",
             trust=True,
         ),
-        k8s_model.deploy(LDAP_UTILS_APP_NAME, channel="latest/edge", trust=True),
+        k8s_model.deploy(LDAP_UTILS_APP_NAME, channel="latest/stable", trust=True),
         k8s_model.deploy(
             TLS_CERTIFICATES_APP_NAME,
             channel=TLS_STABLE_CHANNEL,
-            trust=True,
         ),
-        k8s_model.deploy(TRAEFIK_CHARM, trust=True),
+        k8s_model.deploy(TRAEFIK_CHARM, channel="latest/stable", trust=True),
     )
 
     await k8s_model.wait_for_idle(

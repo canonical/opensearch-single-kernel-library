@@ -891,7 +891,7 @@ class ExternalClientRequestedEntity(NamedTuple):
 
     Attributes:
         username: username of the requested entity.
-        password: password of the requested entity.
+        password: password of the requested entity or `None` if only the role is requested.
     """
 
     username: str

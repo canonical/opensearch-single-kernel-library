@@ -705,7 +705,7 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.ldap_manager.reconcile_k8s_runtime_resources()
+        self.charm.ldap_manager.restore_ldap_ca()
 
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
