@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="module")
 async def failover_model(
     ops_test: OpsTest,
+    architecture: str,
 ) -> AsyncGenerator[Model, Any]:
     # deploy the failover model
     failover_model = await ops_test.track_model(
@@ -25,6 +26,7 @@ async def failover_model(
         model_name=f"failover-{ops_test.model_name}",
         keep=ops_test.ModelKeep.IF_EXISTS,
     )
+    await failover_model.set_constraints({"arch": architecture})
     await failover_model.set_config(MODEL_CONFIG)
     logger.info(f"Created model {failover_model.name}")
     yield failover_model
@@ -35,6 +37,7 @@ async def failover_model(
 @pytest.fixture(scope="module")
 async def data_model(
     ops_test: OpsTest,
+    architecture: str,
 ) -> AsyncGenerator[Model, Any]:
     # deploy the data model
     data_model = await ops_test.track_model(
@@ -42,6 +45,7 @@ async def data_model(
         model_name=f"data-{ops_test.model_name}",
         keep=ops_test.ModelKeep.IF_EXISTS,
     )
+    await data_model.set_constraints({"arch": architecture})
     await data_model.set_config(MODEL_CONFIG)
     logger.info(f"Created model {data_model.name}")
     yield data_model
