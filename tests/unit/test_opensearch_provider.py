@@ -474,19 +474,15 @@ def test_on_relation_broken_clears_failures(harness, mocker):
     event.relation.id = 1
 
     harness.charm.external_clients_events._on_relation_broken(event)
-    remove_status.assert_has_calls(
-        [
-            call(
-                status.value,
-                "unit",
-                "external_clients_manager",
-                interpolated=True,
-                search_parameters={"id": event.relation.id},
-            )
-            for status in (
-                ExternalClientsStatuses.INVALID_INDEX_NAME,
-                ExternalClientsStatuses.INDEX_CREATION_FAILED,
-                ExternalClientsStatuses.USER_CREATION_FAILED,
-            )
-        ]
-    )
+    expected = [
+        call(
+            status.value,
+            "unit",
+            "external_clients_manager",
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
+        )
+        for status in ExternalClientsStatuses
+        if status.value.running is None
+    ]
+    remove_status.assert_has_calls(expected, any_order=True)
