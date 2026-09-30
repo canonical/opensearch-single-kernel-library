@@ -30,7 +30,7 @@ from opensearch_single_kernel.common.statuses import (
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
-from opensearch_single_kernel.core.models import Node
+from opensearch_single_kernel.core.models import ExternalClientRequestedEntity, Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
@@ -53,53 +53,110 @@ class ExternalClientsManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "external_clients_manager")
 
-    def provide_client_user(
+    def provide_client_entity(
         self,
         external_client: ExternalOpenSearchClient,
-        index: str,
-        extra_user_roles: str | None = None,
-    ) -> tuple[str, str]:
-        """Generate and create opensearch users and permissions for this relation.
+        requested_entity: ExternalClientRequestedEntity | None,
+    ) -> None:
+        """Create the user and / or role for a client relation and push credentials to the client.
 
         Args:
-            external_client: the external opensearch client relation state.
-            index: the index this relation will be using.
-            extra_user_roles: the extra roles mapping for the user.
-
-        Returns:
-            username and password for the created entity.
+            external_client: the client relation to provide the entity for.
+            requested_entity: the entity name and password requested by the client. If absent,
+                a relation-specific username and a random password are generated. For "None"
+                password and group entity type only the role will be created.
 
         Raises:
-            OpenSearchUserMgmtError if user creation fails
+            OpenSearchUserMgmtError: if the kibana server password is not available yet or
+                the entity could not be created in OpenSearch.
         """
-        extra_user_roles = (
-            extra_user_roles.lower() if extra_user_roles else DEFAULT_EXTRA_USER_ROLE
-        )
-        if extra_user_roles == KIBANA_SERVER_ROLE:
-            return KIBANA_SERVER_USER, self.state.application.kibana_server_password
+        if external_client.entity_type != ENTITY_GROUP:
+            extra_user_roles = external_client.extra_user_roles
+            extra_user_roles = (
+                extra_user_roles.lower() if extra_user_roles else DEFAULT_EXTRA_USER_ROLE
+            )
+            if extra_user_roles == KIBANA_SERVER_ROLE:
+                if not (password := self.state.application.kibana_server_password):
+                    raise OpenSearchUserMgmtError("Cannot provide kibana user")
+                external_client.username = KIBANA_SERVER_USER
+                external_client.password = password
+                return
+            # Create a new role for this relation, encapsulating the permissions we care about. We
+            # can't create a "default" and an "admin" role once because the permissions need to be
+            # set to this relation's specific index.
+            role_permissions = self.get_extra_user_role_permissions(
+                extra_user_roles, external_client.index
+            )
+        else:
+            role_permissions = external_client.entity_permissions
 
-        username = external_client.relation_username
-        password = generate_password()
+        user = requested_entity.username if requested_entity else external_client.relation_username
+        password = requested_entity.password if requested_entity else generate_password()
 
-        # Create a new role for this relation, encapsulating the permissions we care about. We
-        # can't create a "default" and an "admin" role once because the permissions need to be
-        # set to this relation's specific index.
-        permissions = self.get_extra_user_role_permissions(extra_user_roles, index)
-        self.put_client_user(external_client.relation.id, username, password, permissions)
+        relation_id = str(external_client.relation.id)
+        client_users_dict = self.state.application.client_users_dict
+
+        if registered_user := client_users_dict.get(relation_id):
+            logger.warning(
+                "User %s is already registered in Peer Relation data for relation %d.",
+                registered_user,
+                relation_id,
+            )
+
         try:
+            self.opensearch_client.create_user_role(role_name=user, permissions=role_permissions)
+
+            if external_client.entity_type != ENTITY_GROUP or password != "None":
+                self.opensearch_client.create_user(user, [user], hash_string(password))
+
+            self.opensearch_client.put_role_mapping(
+                user,
+                self.state.mapped_users.get(user, []),
+                self.state.mapped_roles.get(user, []),
+            )
+
+            client_users_dict[relation_id] = user
+            self.state.application.client_users_dict = client_users_dict
+
+            external_client.username = user
+            external_client.password = password
+
             self.opensearch_client.patch_user(
-                username,
+                user,
                 [
                     {
                         "op": "replace",
                         "path": "/opendistro_security_roles",
-                        "value": [username],
+                        "value": [user],
                     }
                 ],
             )
+
+            if external_client.entity_type == ENTITY_GROUP:
+                self.reconcile_role_mappings()
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
-        return username, password
+
+    def provide_client_index(self, external_client: ExternalOpenSearchClient) -> None:
+        """Create the index requested by a client relation and push name back via it.
+
+        Args:
+            external_client: the client relation that requested the index.
+
+        Raises:
+            OpenSearchUserMgmtError: if the index could not be created.
+        """
+        index = external_client.index
+
+        try:
+            self.opensearch_client.create_index(index)
+        except OpenSearchHttpError as e:
+            logger.error(
+                f"Failed to create index {index} for client relation {external_client.relation.id}: {e}"
+            )
+            raise OpenSearchUserMgmtError(e)
+
+        external_client.index = index
 
     def get_extra_user_role_permissions(self, extra_user_roles: str, index: str) -> dict[str, Any]:
         """Get relation role permissions from the extra_user_roles field.
@@ -131,38 +188,6 @@ class ExternalClientsManager(BaseManager):
                 perm_set["index_patterns"] = [index]
 
         return permissions
-
-    def put_client_user(
-        self, relation_id: int, user: str, password: str, role_permissions: dict[str, Any] | None
-    ) -> None:
-        """Push client users & related roles to OpenSearch and register them in state.
-
-        Raises:
-            OpenSearchUserMgmtError if user creation fails.
-        """
-        if (users := self.state.application.client_users_dict).get(str(relation_id)):
-            logger.warning(
-                "User %s is already registered in Peer Relation data for relation %d.",
-                user,
-                relation_id,
-            )
-
-        try:
-            self.opensearch_client.create_user_role(role_name=user, permissions=role_permissions)
-
-            if password != "None":
-                self.opensearch_client.create_user(user, [user], hash_string(password))
-
-            self.opensearch_client.put_role_mapping(
-                user,
-                self.state.mapped_users.get(user, []),
-                self.state.mapped_roles.get(user, []),
-            )
-        except OpenSearchHttpError as e:
-            raise OpenSearchUserMgmtError(e)
-
-        users[str(relation_id)] = user
-        self.state.application.client_users_dict = users
 
     def update_all_external_clients_relation_endpoints(self, nodes: list[Node]) -> None:
         """Update the relation databags of all external clients with network endpoints."""
@@ -312,27 +337,29 @@ class ExternalClientsManager(BaseManager):
             )
             return
 
-        if external_client.entity_type == ENTITY_GROUP:
-            if not (entity := external_client.get_requested_entity()):
-                status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
-                        {"id": relation.id},
-                    )
+        requested_entity = external_client.get_requested_entity()
+
+        if not requested_entity and external_client.entity_type == ENTITY_GROUP:
+            status_list.append(
+                format_status(
+                    ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value,
+                    {"id": relation.id},
                 )
-                return
-            elif entity.username in [
-                name
-                for relation_id, name in self.state.application.client_users_dict.items()
-                if relation_id != str(relation.id)
-            ]:
-                status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
-                        {"id": relation.id},
-                    )
+            )
+            return
+
+        if requested_entity and requested_entity.username in [
+            name
+            for relation_id, name in self.state.application.client_users_dict.items()
+            if relation_id != str(relation.id)
+        ]:
+            status_list.append(
+                format_status(
+                    ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
+                    {"id": relation.id},
                 )
-                return
+            )
+            return
 
         if str(relation.id) not in self.state.application.client_users_dict and (
             external_client.entity_type == ENTITY_GROUP

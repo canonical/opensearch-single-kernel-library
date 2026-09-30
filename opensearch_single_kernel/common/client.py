@@ -521,7 +521,7 @@ class OpenSearchClient:
     def create_user_role(
         self,
         role_name: str,
-        permissions: dict[str, str] | None = None,
+        permissions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Creates a role with the given permissions.
 

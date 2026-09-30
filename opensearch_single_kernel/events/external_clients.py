@@ -12,7 +12,6 @@ from ops import (
     RelationBrokenEvent,
     RelationChangedEvent,
     RelationDepartedEvent,
-    RelationEvent,
 )
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
@@ -22,6 +21,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
+from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
 from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
@@ -75,44 +75,45 @@ class ExternalClientsEventsHandler(Object):
         Raises:
             OpenSearchHttpError if we can't create the required index
         """
-        if not self._validate_client_request(event):
-            return
-
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
-        if not (
-            self._create_client_group(event, external_client)
-            if external_client.entity_type == ENTITY_GROUP
-            else self._create_client_user(event, external_client)
-        ):
-            return
+        requested_entity = external_client.get_requested_entity()
 
-        self.charm.status_handler.set_running_status(
-            format_status(
-                ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
-                {
-                    "index": event.index,
-                    "id": event.relation.id,
-                },
-            ),
-            "unit",
-            component_name=self.charm.external_clients_manager.name,
-        )
-
-        if not self._create_client_index(event, external_client):
+        if not self._validate_client_request(event, external_client, requested_entity):
             return
 
         try:
+            self.charm.external_clients_manager.provide_client_entity(
+                external_client, requested_entity
+            )
+
+            self.charm.status_handler.set_running_status(
+                format_status(
+                    ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+                    {
+                        "index": event.index,
+                        "id": event.relation.id,
+                    },
+                ),
+                "unit",
+                component_name=self.charm.external_clients_manager.name,
+            )
+
+            self.charm.external_clients_manager.provide_client_index(external_client)
+
             external_client.version = self.charm.workload.version
+
+            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
+        except OpenSearchUserMgmtError as e:
+            logger.error("Failed to provide client or entity: %s", str(e))
+            event.defer()
+            return
         except OpenSearchCmdError as e:
             logger.error("Failed to update relation version info: %s", str(e))
             event.defer()
             return
-
-        try:
-            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
         except KeyError as e:
             logger.error("Failed to update relation TLS info: missing key %s", str(e))
             event.defer()
@@ -123,7 +124,10 @@ class ExternalClientsEventsHandler(Object):
         logger.info("new index %s available", event.index)
 
     def _validate_client_request(
-        self, event: IndexRequestedEvent | IndexEntityRequestedEvent
+        self,
+        event: IndexRequestedEvent | IndexEntityRequestedEvent,
+        external_client: ExternalOpenSearchClient,
+        requested_entity: ExternalClientRequestedEntity | None,
     ) -> bool:
         """Validate client request and return whether we should process it.
 
@@ -159,41 +163,14 @@ class ExternalClientsEventsHandler(Object):
             )
             return False
 
-        return True
-
-    def _create_client_index(
-        self,
-        event: IndexRequestedEvent | IndexEntityRequestedEvent,
-        external_client: ExternalOpenSearchClient,
-    ) -> bool:
-        """Create and provide the index for client relation."""
-        try:
-            self.charm.external_clients_manager.opensearch_client.create_index(
-                external_client.index
-            )
-        except OpenSearchHttpError as e:
-            logger.error(
-                f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
-            )
-            event.defer()
-            return False
-
-        external_client.index = external_client.index
-
-        return True
-
-    def _create_client_group(
-        self, event: RelationEvent, external_client: ExternalOpenSearchClient
-    ) -> bool:
-        """Provide the requested group entity for client relation."""
-        if not (entity := external_client.get_requested_entity()):
+        if external_client.entity_type == ENTITY_GROUP and not requested_entity:
             logger.error(
                 "Cannot get requested entity on client relation %s",
                 event.relation.id,
             )
             return False
 
-        if entity.username in [
+        if requested_entity and requested_entity.username in [
             name
             for relation_id, name in self.charm.state.application.client_users_dict.items()
             if relation_id != str(event.relation.id)
@@ -201,41 +178,6 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
-        try:
-            self.charm.external_clients_manager.put_client_user(
-                event.relation.id,
-                entity.username,
-                entity.password,
-                external_client.entity_permissions,
-            )
-            self.charm.external_clients_manager.reconcile_role_mappings()
-        except OpenSearchUserMgmtError as err:
-            logger.error(err)
-            event.defer()
-            return False
-
-        external_client.username, external_client.password = entity
-        return True
-
-    def _create_client_user(
-        self,
-        event: RelationEvent,
-        external_client: ExternalOpenSearchClient,
-    ) -> bool:
-        """Create and provide the user for ordinary client relation."""
-        try:
-            username, password = self.charm.external_clients_manager.provide_client_user(
-                external_client,
-                external_client.index,
-                extra_user_roles=external_client.extra_user_roles,
-            )
-        except OpenSearchUserMgmtError as err:
-            logger.error(err)
-            event.defer()
-            return False
-
-        external_client.username = username
-        external_client.password = password
         return True
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
