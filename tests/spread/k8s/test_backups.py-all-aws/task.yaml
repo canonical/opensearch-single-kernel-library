@@ -3,6 +3,7 @@ environment:
   TEST_MODULE: ha/test_backup.py
 systems:
   - self-hosted-linux-amd64-noble-large
+  - self-hosted-linux-arm64-noble-large
 execute: |
   tox run -e integration -- "tests/integration/$TEST_MODULE" --model testing --substrate k8s --alluredir="$SPREAD_TASK/allure-results" -m 'group(id="all-aws")'
 artifacts:

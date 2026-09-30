@@ -70,11 +70,15 @@ def series(ubuntu_base) -> str:
 
 
 @pytest.fixture
-def charm(substrate: Substrate, opensearch_base_path: Path, ubuntu_base: str) -> str:
+def charm(
+    substrate: Substrate, opensearch_base_path: Path, ubuntu_base: str, architecture: str
+) -> str:
     """The OpenSearch charm path, to deploy charms, according to the substrate."""
     if substrate == "k8s":
-        return str(opensearch_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-amd64.charm")
-    return str(opensearch_base_path / f"opensearch_ubuntu@{ubuntu_base}-amd64.charm")
+        return str(
+            opensearch_base_path / f"opensearch-k8s_ubuntu@{ubuntu_base}-{architecture}.charm"
+        )
+    return str(opensearch_base_path / f"opensearch_ubuntu@{ubuntu_base}-{architecture}.charm")
 
 
 @pytest.fixture
@@ -101,11 +105,13 @@ def charm_resources(substrate: Substrate) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-async def deploy_client_charm(ops_test: OpsTest, substrate: Substrate):
+async def deploy_client_charm(
+    ops_test: OpsTest, substrate: Substrate, architecture: str, ubuntu_base: str
+) -> None:
     """Deploy the client charm."""
     if substrate == "k8s" and CLIENT_CHARM not in ops_test.model.applications:
         await ops_test.model.deploy(
-            "./tests/charms/dummy-client-charm/dummy-client-charm_amd64.charm",
+            f"./tests/charms/dummy-client-charm/dummy-client-charm_ubuntu@24.04-{architecture}.charm",
             CLIENT_CHARM,
         )
         await ops_test.model.wait_for_idle(apps=[CLIENT_CHARM])
