@@ -483,6 +483,5 @@ def test_on_relation_broken_clears_failures(harness, mocker):
             search_parameters={"id": event.relation.id},
         )
         for status in ExternalClientsStatuses
-        if status.value.running is None
     ]
     remove_status.assert_has_calls(expected, any_order=True)

@@ -212,10 +212,7 @@ class ExternalClientsEventsHandler(Object):
             return
 
         for status in ExternalClientsStatuses:
-            if status.value.running is None:
-                self._clear_external_client_failure_status(
-                    status.value, relation_id=event.relation.id
-                )
+            self._clear_external_client_failure_status(status.value, relation_id=event.relation.id)
 
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.warning("No external client found for relation id %d", event.relation.id)
