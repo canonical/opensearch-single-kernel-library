@@ -416,7 +416,8 @@ class ConfigManager(BaseManager):
                 "ldap": {
                     "http_enabled": True,
                     "transport_enabled": False,
-                    "order": 1,
+                    # Authentik slowly responds causing is_node_up timeouts.
+                    "order": 6,
                     "http_authenticator": {
                         "type": "basic",
                         "challenge": False,
@@ -449,7 +450,8 @@ class ConfigManager(BaseManager):
                     "description": "Authenticate via LDAP or Active Directory",
                     "http_enabled": False,
                     "transport_enabled": False,
-                    "order": 1,
+                    # Authentik slowly responds causing is_node_up timeouts.
+                    "order": 6,
                     "http_authenticator": {
                         "type": "basic",
                         "challenge": False,
