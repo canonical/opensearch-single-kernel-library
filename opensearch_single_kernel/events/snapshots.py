@@ -302,7 +302,7 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return
         except OpenSearchPeerClusterDidntSaveCredentialsYetError as e:
-            logger.warning(
+            logger.debug(
                 "Not all peer clusters have saved the latest backup credentials yet: %s", e
             )
             event.defer()
