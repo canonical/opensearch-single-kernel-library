@@ -5,27 +5,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
-from opensearch_single_kernel.common.constants import (
-    CLIENT_RELATION,
-    NODE_LOCK_RELATION,
-    DeploymentType,
-    StartMode,
-    State,
-)
+from opensearch_single_kernel.common.constants import CLIENT_RELATION, KIBANA_SERVER_USER
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses, GeneralStatuses
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
-from opensearch_single_kernel.core.models import (
-    App,
-    DeploymentDescription,
-    DeploymentState,
-    ExternalClientRequestedEntity,
-    PeerClusterConfig,
-)
+from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
     ENTITY_USER,
@@ -33,321 +20,260 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 from opensearch_single_kernel.managers.external_clients import ExternalClientsManager
 from opensearch_single_kernel.utils.status import format_status
 
-DASHBOARDS_CHARM = "opensearch-dashboards"
-
-mock_deployment_desc = DeploymentDescription(
-    config=PeerClusterConfig(cluster_name="", init_hold=False, roles=[], profile="production"),
-    start=StartMode.WITH_GENERATED_ROLES,
-    pending_directives=[],
-    typ=DeploymentType.MAIN_ORCHESTRATOR,
-    app=App(model_uuid="model-uuid", name="opensearch"),
-    state=DeploymentState(value=State.ACTIVE),
-)
+GROUP_ENTITY = ExternalClientRequestedEntity("devs_group", "secret")
+GROUP_PERMISSIONS = {
+    "index_permissions": [{"index_patterns": ["logs"], "allowed_actions": ["read"]}]
+}
 
 
-def relation_username(relation) -> str:
-    """Get the relation username key for this relation."""
-    return f"{relation.name}_{relation.id}"
-
-
-def add_relations(harness):
-    """Add necessary relations for testing."""
-    # Add client relation
-    client_rel_id = harness.add_relation(CLIENT_RELATION, "application")
-    harness.add_relation_unit(client_rel_id, "application/0")
-
-    # Add node lock relation
-    harness.add_relation(NODE_LOCK_RELATION, harness.charm.app.name)
-
-
-def test_on_index_requested(harness, mocker):
-    """Test the on_index_requested event handler."""
-    add_relations(harness)
-
-    event = MagicMock()
-    event.relation.id = 1
-    event.relation.app = harness.charm.app
-    username = relation_username(event.relation)
-    _, password = ("hashed_pw", "password")
-
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.request",
-        return_value={"status": "OK"},
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.secrets.OpenSearchSecrets.get_object",
-        return_value={"chain": "tls_chain"},
-    )
-    mocker.patch(
-        "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces.OpenSearchProvides._update_relation_data"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.utils.helpers.generate_hashed_password",
-        return_value=("hashed_pw", "password"),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.workload.base.BaseWorkload.version",
-        new_callable=PropertyMock,
-        return_value="1",
-    )
-
-    is_node_up = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
-    )
-    create_users = mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.provide_client_user",
-        return_value=(username, password),
-    )
-    set_username = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.username",
-        new_callable=PropertyMock,
-    )
-    set_password = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.password",
-        new_callable=PropertyMock,
-    )
-    set_version = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.version",
-        new_callable=PropertyMock,
-    )
-
-    external_client = ExternalOpenSearchClient(
-        relation=event.relation,
-        data_interface=MagicMock(as_dict=MagicMock(return_value={})),
-        component=harness.charm.app,
-        relation_name=CLIENT_RELATION,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
-        return_value=external_client,
-    )
-    harness.set_leader(False)
-    harness.charm.external_clients_events._on_client_requested(event)
-    is_node_up.assert_not_called()
-
-    harness.set_leader(True)
-    is_node_up.return_value = False
-    harness.charm.external_clients_events._on_client_requested(event)
-    event.defer.assert_called()
-
-    is_node_up.return_value = True
-    harness.charm.state.application.is_security_index_initialised = True
-    event.extra_user_roles = "admin"
-    event.index = "test_index"
-    external_client.extra_user_roles = event.extra_user_roles
-    external_client.index = event.index
-    harness.charm.unit.status = ActiveStatus()
-    harness.charm.external_clients_events._on_client_requested(event)
-    create_users.assert_called_with(
-        external_client, event.index, extra_user_roles=event.extra_user_roles
-    )
-    set_username.assert_called_with(username)
-    set_password.assert_called_with(password)
-    set_version.assert_called_with("1")
-    assert not isinstance(harness.charm.unit.status, BlockedStatus)
-    set_username.reset_mock()
-    set_password.reset_mock()
-    set_version.reset_mock()
-
-    create_users.side_effect = OpenSearchUserMgmtError()
-    harness.charm.external_clients_events._on_client_requested(event)
-    assert isinstance(harness.charm.unit.status, MaintenanceStatus)
-    set_username.assert_not_called()
-    set_password.assert_not_called()
-    set_version.assert_not_called()
-
-
-def test_on_index_requested_kibanaserver(harness, mocker):
-    add_relations(harness)
-
-    event = MagicMock()
-    event.relation.id = 1
-    event.relation.app = harness.charm.app
-    username = "kibanaserver"
-    _, password = ("hashed_pw", "password")
-
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.request",
-        return_value={"status": "OK"},
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.secrets.OpenSearchSecrets.get_object",
-        return_value={"chain": "tls_chain"},
-    )
-    mocker.patch(
-        "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces.OpenSearchProvides._update_relation_data"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.utils.helpers.generate_hashed_password",
-        return_value=("hashed_pw", "password"),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.workload.base.BaseWorkload.version",
-        new_callable=PropertyMock,
-        return_value="1",
-    )
-
-    is_node_up = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
-    )
-    create_users = mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.provide_client_user",
-        return_value=(username, password),
-    )
-    patch_user = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.patch_user",
-    )
-    set_username = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.username",
-        new_callable=PropertyMock,
-    )
-    set_password = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.password",
-        new_callable=PropertyMock,
-    )
-    set_version = mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.version",
-        new_callable=PropertyMock,
-    )
-
-    external_client = ExternalOpenSearchClient(
-        relation=event.relation,
-        data_interface=MagicMock(as_dict=MagicMock(return_value={})),
-        component=harness.charm.app,
-        relation_name=CLIENT_RELATION,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
-        return_value=external_client,
-    )
-
-    harness.set_leader(False)
-    harness.charm.external_clients_events._on_client_requested(event)
-    is_node_up.assert_not_called()
-
-    harness.set_leader(True)
-    is_node_up.return_value = False
-    harness.charm.external_clients_events._on_client_requested(event)
-    event.defer.assert_called()
-
-    is_node_up.return_value = True
-    harness.charm.state.application.is_security_index_initialised = True
-    event.extra_user_roles = "kibana_server"
-    event.index = ".opensearch-dashboards"
-    external_client.extra_user_roles = event.extra_user_roles
-    external_client.index = event.index
-    harness.charm.unit.status = ActiveStatus()
-    harness.charm.external_clients_events._on_client_requested(event)
-    create_users.assert_called()
-    patch_user.assert_not_called()
-    set_username.assert_called_with(username)
-    set_password.assert_called_with(password)
-    set_version.assert_called_with("1")
-    harness.charm.unit.status = ActiveStatus()
-    set_username.reset_mock()
-    set_password.reset_mock()
-    set_version.reset_mock()
-
-
-def test_provide_client_user(
-    harness,
-    mocker,
-):
-    add_relations(harness)
-    username = "username"
-    password = "password"
-    hashed_pw = "my_cool_hash"
-    extra_user_roles = "admin"
-    index = "test_index"
-    roles = [username]
-    patches = [
-        {"op": "replace", "path": "/opendistro_security_roles", "value": roles},
-    ]
-
-    mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.generate_password",
-        return_value=password,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.hash_string",
-        return_value=hashed_pw,
-    )
-    external_client = ExternalOpenSearchClient(
-        relation=harness.charm.model.get_relation(CLIENT_RELATION),
-        data_interface=MagicMock(),
-        component=harness.charm.app,
-        relation_name=CLIENT_RELATION,
-    )
-    mapped_users = {username: ["test_oidc"]}
-    mapped_roles = {username: [username]}
-    mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.mapped_users",
-        new_callable=PropertyMock,
-        return_value=mapped_users,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.ClusterState.mapped_roles",
-        new_callable=PropertyMock,
-        return_value=mapped_roles,
-    )
-    create_user_role = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.create_user_role",
-    )
-    create_user = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.create_user",
-    )
-    put_role_mapping = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.put_role_mapping",
-    )
-    patch_user = mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.patch_user",
-    )
-    client_users_dict = mocker.patch(
-        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.client_users_dict",
-        new_callable=PropertyMock,
-    )
-
-    mocker.patch(
-        "opensearch_single_kernel.core.external_clients_relation.ExternalOpenSearchClient.relation_username",
-        new_callable=PropertyMock,
-        return_value=username,
-    )
-
-    harness.charm.external_clients_manager.provide_client_user(
-        external_client, index, extra_user_roles=extra_user_roles
-    )
-
-    # permissions and action groups are in extra_user_roles, so we create a new role.
-    create_user_role.assert_called_with(
-        role_name=username,
-        permissions=harness.charm.external_clients_manager.get_extra_user_role_permissions(
-            extra_user_roles, index
-        ),
-    )
-    create_user.assert_called_with(username, roles, hashed_pw)
-    put_role_mapping.assert_called_with(username, mapped_users[username], mapped_roles[username])
-    patch_user.assert_called_with(username, patches)
-    client_users_dict.assert_called()
-
-
-def make_client(relation_id: int, entity_type: str = ENTITY_USER, groups: list[str] | None = None):
+def make_client(
+    relation_id: int = 1,
+    entity_type: str = ENTITY_USER,
+    groups: list[str] | None = None,
+    **attributes,
+) -> MagicMock:
     return MagicMock(
         relation=MagicMock(id=relation_id),
         entity_type=entity_type,
         extra_group_roles=groups or [""],
+        index="logs",
+        relation_username=f"{CLIENT_RELATION}_{relation_id}",
+        **attributes,
     )
+
+
+def make_state(client_users: dict[str, str] | None = None) -> MagicMock:
+    state = MagicMock()
+    state.statuses.get.return_value = SimpleNamespace(root=[])
+    state.application.client_users_dict = client_users or {}
+    state.mapped_users = {}
+    state.mapped_roles = {}
+    return state
+
+
+@pytest.fixture
+def opensearch_client(mocker) -> MagicMock:
+    client = MagicMock()
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.opensearch_client",
+        new_callable=PropertyMock,
+        return_value=client,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.generate_password",
+        return_value="generated",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.hash_string",
+        side_effect=lambda password: f"hash-of-{password}",
+    )
+    return client
+
+
+@pytest.mark.parametrize(
+    "secret_content, expected",
+    [
+        ("alice:secret", ExternalClientRequestedEntity("alice", "secret")),
+        ("alice:pass:word", ExternalClientRequestedEntity("alice", "pass:word")),
+        ("alice", None),
+        (None, None),
+    ],
+    ids=["valid", "colon-in-password", "no-password", "absent"],
+)
+def test_requested_entity_read_from_relation(secret_content, expected):
+    relation_data = {"requested-entity-secret": secret_content} if secret_content else {}
+    external_client = ExternalOpenSearchClient(
+        relation=MagicMock(id=1),
+        data_interface=MagicMock(as_dict=MagicMock(return_value=relation_data)),
+        component=MagicMock(),
+        relation_name=CLIENT_RELATION,
+    )
+
+    assert external_client.get_requested_entity() == expected
+
+
+@pytest.mark.parametrize(
+    "requested_entity, expected_user, expected_password",
+    [
+        (None, f"{CLIENT_RELATION}_1", "generated"),
+        (ExternalClientRequestedEntity("alice", "secret"), "alice", "secret"),
+    ],
+    ids=["generated", "requested"],
+)
+def test_user_client_credentials(
+    opensearch_client, requested_entity, expected_user, expected_password
+):
+    state = make_state()
+    external_client = make_client(extra_user_roles="admin")
+
+    ExternalClientsManager(state, MagicMock()).provide_client_entity(
+        external_client, requested_entity
+    )
+
+    opensearch_client.create_user.assert_called_once_with(
+        expected_user, [expected_user], f"hash-of-{expected_password}"
+    )
+    assert external_client.username == expected_user
+    assert external_client.password == expected_password
+    assert state.application.client_users_dict == {"1": expected_user}
+
+
+@pytest.mark.parametrize(
+    "password, user_created", [("secret", True), ("None", False)], ids=["user", "role-only"]
+)
+def test_group_client_role_gets_requested_permissions(
+    opensearch_client, mocker, password, user_created
+):
+    reconcile_role_mappings = mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
+    )
+    state = make_state()
+    external_client = make_client(entity_type=ENTITY_GROUP, entity_permissions=GROUP_PERMISSIONS)
+
+    ExternalClientsManager(state, MagicMock()).provide_client_entity(
+        external_client, ExternalClientRequestedEntity("devs_group", password)
+    )
+
+    opensearch_client.create_user_role.assert_called_once_with(
+        role_name="devs_group", permissions=GROUP_PERMISSIONS
+    )
+    assert opensearch_client.create_user.called is user_created
+    assert state.application.client_users_dict == {"1": "devs_group"}
+    reconcile_role_mappings.assert_called_once()
+
+
+def test_dashboards_client_gets_kibanaserver_credentials(opensearch_client):
+    state = make_state()
+    state.application.kibana_server_password = "kibana-password"
+    external_client = make_client(extra_user_roles="kibana_server")
+
+    ExternalClientsManager(state, MagicMock()).provide_client_entity(external_client, None)
+
+    opensearch_client.create_user.assert_not_called()
+    assert external_client.username == KIBANA_SERVER_USER
+    assert external_client.password == "kibana-password"
+
+
+@pytest.fixture
+def client_request_ready(harness, mocker):
+    """Leader with a running node and initialised security index."""
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.admin_secrets",
+        new_callable=PropertyMock,
+        return_value={"chain": "admin-chain"},
+    )
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.BaseWorkload.version",
+        new_callable=PropertyMock,
+        return_value="2.19.0",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
+    )
+
+
+@pytest.fixture
+def group_client(mocker) -> MagicMock:
+    external_client = make_client(entity_type=ENTITY_GROUP)
+    external_client.get_requested_entity.return_value = GROUP_ENTITY
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
+        return_value=external_client,
+    )
+    return external_client
+
+
+@pytest.fixture
+def provide_client_entity(mocker) -> MagicMock:
+    return mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.provide_client_entity"
+    )
+
+
+@pytest.fixture
+def provide_client_index(mocker) -> MagicMock:
+    return mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.provide_client_index"
+    )
+
+
+def test_client_request_provides_requested_entity_and_index(
+    harness, client_request_ready, group_client, provide_client_entity, provide_client_index
+):
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_called_once_with(group_client, GROUP_ENTITY)
+    provide_client_index.assert_called_once_with(group_client)
+    assert group_client.tls_ca == "admin-chain"
+    event.defer.assert_not_called()
+
+
+def test_group_request_without_entity_rejected(
+    harness, client_request_ready, group_client, provide_client_entity
+):
+    group_client.get_requested_entity.return_value = None
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_not_called()
+    event.defer.assert_not_called()
+
+
+def test_request_for_username_of_another_relation_deferred(
+    harness, mocker, client_request_ready, group_client, provide_client_entity
+):
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.client_users_dict",
+        new_callable=PropertyMock,
+        return_value={"2": GROUP_ENTITY.username},
+    )
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_not_called()
+    event.defer.assert_called_once()
+
+
+def test_request_deferred_until_node_up(
+    harness, mocker, client_request_ready, group_client, provide_client_entity
+):
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        return_value=False,
+    )
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_not_called()
+    event.defer.assert_called_once()
+
+
+def test_failed_entity_provisioning_retried(
+    harness, client_request_ready, group_client, provide_client_entity, provide_client_index
+):
+    provide_client_entity.side_effect = OpenSearchUserMgmtError()
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_index.assert_not_called()
+    event.defer.assert_called_once()
 
 
 def test_mapped_roles_map_ldap_groups_to_group_entity_clients(harness, mocker):
@@ -355,7 +281,7 @@ def test_mapped_roles_map_ldap_groups_to_group_entity_clients(harness, mocker):
         "opensearch_single_kernel.core.state.ClusterState.external_clients",
         new_callable=PropertyMock,
         return_value=[
-            make_client(1, groups=["ignored"]),
+            make_client(groups=["ignored"]),
             make_client(2, ENTITY_GROUP, groups=["devs", "ops"]),
             make_client(3, ENTITY_GROUP, groups=["devs"]),
             make_client(4, ENTITY_GROUP, groups=["unprovisioned"]),
@@ -409,35 +335,30 @@ def test_mapped_users_from_roles_mapping_config(harness, roles_mapping, expected
             [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value, {"id": 1})],
         ),
         (
-            ExternalClientRequestedEntity("devs_group", "password"),
+            GROUP_ENTITY,
             {"2": "devs_group"},
             [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value, {"id": 1})],
         ),
         (
-            ExternalClientRequestedEntity("devs_group", "password"),
+            GROUP_ENTITY,
             {"1": "devs_group"},
             [GeneralStatuses.ACTIVE_IDLE.value],
         ),
     ],
     ids=["missing-entity", "username-used-by-other-relation", "username-owned-by-relation"],
 )
-def test_group_entity_client_statuses(mocker, requested_entity, client_users, expected_statuses):
+def test_group_entity_client_statuses(
+    opensearch_client, requested_entity, client_users, expected_statuses
+):
     relation = MagicMock(id=1)
     relation.data = {relation.app: {"index": "logs"}}
-    external_client = make_client(1, ENTITY_GROUP)
+    external_client = make_client(entity_type=ENTITY_GROUP)
     external_client.get_requested_entity.return_value = requested_entity
 
-    state = MagicMock()
-    state.statuses.get.return_value = SimpleNamespace(root=[])
+    state = make_state(client_users)
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
-    state.application.client_users_dict = client_users
-    mocker.patch.object(
-        ExternalClientsManager,
-        "opensearch_client",
-        new_callable=PropertyMock,
-        return_value=MagicMock(is_node_up=MagicMock(return_value=False)),
-    )
+    opensearch_client.is_node_up.return_value = False
 
     statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
 

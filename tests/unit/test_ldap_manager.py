@@ -33,9 +33,10 @@ def make_state(
     return state
 
 
-def make_workload(chain_exists: bool) -> MagicMock:
+def make_workload(chain_content: str | None) -> MagicMock:
     workload = MagicMock()
-    workload.exists.return_value = chain_exists
+    workload.exists.return_value = chain_content is not None
+    workload.read_text.return_value = chain_content
     return workload
 
 
@@ -82,8 +83,9 @@ def test_ldap_relation_statuses(state, expected_statuses):
     assert manager.get_statuses("app") == [status.value for status in expected_statuses]
 
 
-def test_certificates_restored_on_k8s_when_chain_missing():
-    workload = make_workload(chain_exists=False)
+@pytest.mark.parametrize("chain_content", [None, "cert-old"], ids=["missing", "outdated"])
+def test_certificates_restored_on_k8s(chain_content):
+    workload = make_workload(chain_content)
 
     LdapManager(make_state(substrate=Substrates.K8S), workload).restore_ldap_ca()
 
@@ -93,14 +95,14 @@ def test_certificates_restored_on_k8s_when_chain_missing():
 @pytest.mark.parametrize(
     "state, workload",
     [
-        (make_state(substrate=Substrates.VM), make_workload(chain_exists=False)),
-        (make_state(substrate=Substrates.K8S), make_workload(chain_exists=True)),
+        (make_state(substrate=Substrates.VM), make_workload(chain_content=None)),
+        (make_state(substrate=Substrates.K8S), make_workload(chain_content="cert-a\ncert-b")),
         (
             make_state(substrate=Substrates.K8S, ldap_certificates=set()),
-            make_workload(chain_exists=False),
+            make_workload(chain_content=None),
         ),
     ],
-    ids=["vm", "k8s-chain-present", "k8s-no-certificates"],
+    ids=["vm", "k8s-chain-up-to-date", "k8s-no-certificates"],
 )
 def test_certificates_not_restored(state, workload):
     LdapManager(state, workload).restore_ldap_ca()

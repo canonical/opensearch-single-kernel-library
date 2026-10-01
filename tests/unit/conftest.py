@@ -50,6 +50,8 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             "opensearch_single_kernel.workload.vm.VMWorkload.check_missing_system_requirements",
             return_value=[],
         )
+        # Pinned snap revisions are keyed by Linux arch names, unknown to e.g. macOS ("arm64").
+        mocker.patch("platform.machine", return_value="x86_64")
 
         # Mock compatibility matrix reading
         mocker.patch(
