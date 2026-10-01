@@ -535,9 +535,8 @@ class SnapshotsManager(BaseManager):
 
         credentials_hash = hash_credentials(credential_dict)
         logger.info(
-            "Verifying credentials for %s with hash %s",
+            "Verifying credentials for %s",
             object_storage_type,
-            credentials_hash,
         )
 
         # check all other clusters if they have saved the credentials
