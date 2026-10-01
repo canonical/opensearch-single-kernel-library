@@ -520,7 +520,7 @@ class SnapshotsEventsHandler(Object):
 
         if len(event.relation.units) > 0:
             logger.debug(
-                "Orchestrator %s still has units on the relation"
+                "Orchestrator %s still has units on the relation, "
                 "skipping snapshot configuration cleanup.",
                 event.relation.app.name,
             )
@@ -530,7 +530,7 @@ class SnapshotsEventsHandler(Object):
         main_app = orchestrators.main_app if orchestrators else None
         if main_app and main_app.name != event.relation.app.name:
             logger.debug(
-                "Departed orchestrator %s is not the main orchestrator %s , "
+                "Departed orchestrator %s is not the main orchestrator %s, "
                 "skipping snapshots configuration cleanup",
                 event.relation.app.name,
                 main_app.name,

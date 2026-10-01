@@ -188,9 +188,6 @@ class ExternalClientsEventsHandler(Object):
                 "Modifying relations during an upgrade is not supported."
                 "The charm may be in a broken, unrecoverable state"
             )
-        if not self.charm.cluster_manager.opensearch_client.is_node_up():
-            event.defer()
-            return
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
     def update_external_client_endpoints(
