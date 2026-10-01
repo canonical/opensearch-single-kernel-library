@@ -250,6 +250,49 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config.assert_called()
 
 
+def test_on_start_restores_ldap_ca(harness, mocker):
+    """LDAP CA must be back on disk before OpenSearch starts, e.g. after a K8s pod restart."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.no_blocking_directives",
+        return_value=True,
+    )
+    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.is_admin_user_initialized",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.save_user_locally"
+    )
+    start_opensearch = mocker.patch(
+        "opensearch_single_kernel.events.opensearch.OpenSearchEventsHandler._on_start_opensearch"
+    )
+    restore_ldap_ca = mocker.patch(
+        "opensearch_single_kernel.managers.ldap.LdapManager.restore_ldap_ca"
+    )
+
+    harness.charm.on.start.emit()
+
+    restore_ldap_ca.assert_called_once()
+    start_opensearch.assert_called_once()
+
+
 def test_app_peers_data(harness):
     """Test getting data from the app relation data bag."""
     # Need to set leader to update the application state

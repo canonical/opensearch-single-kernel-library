@@ -108,7 +108,7 @@ async def test_build_and_deploy(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
 
 
 @pytest.mark.abort_on_fail
@@ -159,7 +159,7 @@ async def test_insufficient_memory(
         config={"profile": "production"},
         resources=charm_resources,
     )
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     # we do not wait for idle in this wait because the 3 units will keep trying
     # to acquire the lock but it will always be given to leader who cannot start
     # because it is blocked and deferring
@@ -189,7 +189,7 @@ async def test_testing_profile(
         config={"profile": "testing"},
         resources=charm_resources,
     )
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -258,7 +258,7 @@ async def test_large_deployment_cluster(
 
     # integrate TLS to all applications
     for app in ["main", "data"]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # create the peer-cluster-relation
     await ops_test.model.integrate(
