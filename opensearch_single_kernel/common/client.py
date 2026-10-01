@@ -690,6 +690,17 @@ class OpenSearchClient:
 
         return resp
 
+    def get_role_mappings(self) -> dict[str, dict[str, Any]]:
+        """Get all of the existing role mappings.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+
+        Returns:
+            Mapping of role name to its role mapping definition.
+        """
+        return self.request("GET", USER_ROLESMAPPING_ENDPOINT)
+
     def put_role_mapping(self, role: str, users: list[str], backend_roles: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 

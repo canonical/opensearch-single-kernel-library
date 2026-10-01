@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
 
@@ -152,6 +152,26 @@ def test_dashboards_client_gets_kibanaserver_credentials(opensearch_client):
     opensearch_client.create_user.assert_not_called()
     assert external_client.username == KIBANA_SERVER_USER
     assert external_client.password == "kibana-password"
+
+
+def test_reconcile_role_mappings_touches_only_changed_mappings(opensearch_client):
+    state = make_state()
+    state.managed_mappings = ["unchanged", "changed", "new", "stale", "absent"]
+    state.mapped_users = {"unchanged": ["*"]}
+    state.mapped_roles = {"unchanged": ["b", "a"], "changed": ["a"], "new": ["a"]}
+    opensearch_client.get_role_mappings.return_value = {
+        "unchanged": {"users": ["*"], "backend_roles": ["a", "b"]},
+        "changed": {"users": [], "backend_roles": ["b"]},
+        "stale": {"users": [], "backend_roles": ["a"]},
+    }
+
+    ExternalClientsManager(state, MagicMock()).reconcile_role_mappings()
+
+    assert opensearch_client.put_role_mapping.call_args_list == [
+        call("changed", [], ["a"]),
+        call("new", [], ["a"]),
+        call("stale", [], []),
+    ]
 
 
 @pytest.fixture

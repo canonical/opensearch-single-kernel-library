@@ -291,12 +291,22 @@ class ExternalClientsManager(BaseManager):
             raise OpenSearchUserMgmtError(
                 "Cannot update relations roles mapping as node is not active."
             )
-        roles_mapped_users = self.state.mapped_users
-        roles_mapped_roles = self.state.mapped_roles
+        existing_mappings = self.opensearch_client.get_role_mappings()
+        mapped_users = self.state.mapped_users
+        mapped_roles = self.state.mapped_roles
         for role in self.state.managed_mappings:
-            self.opensearch_client.put_role_mapping(
-                role, roles_mapped_users.get(role, []), roles_mapped_roles.get(role, [])
-            )
+            users = mapped_users.get(role, [])
+            roles = mapped_roles.get(role, [])
+            if not users and not roles and role not in existing_mappings:
+                continue
+
+            existing_mapping = existing_mappings.get(role, {})
+            if sorted(existing_mapping.get("users", [])) == sorted(users) and sorted(
+                existing_mapping.get("backend_roles", [])
+            ) == sorted(roles):
+                continue
+
+            self.opensearch_client.put_role_mapping(role, users, roles)
 
     def update_dashboards_password(self):
         """Update each Opensearch Dashboards relation with the latest kibanaserver."""
