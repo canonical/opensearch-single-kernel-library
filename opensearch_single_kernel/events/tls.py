@@ -280,17 +280,20 @@ class TLSEventsHandler(Object):
                 event.defer()
                 return
 
-        for external_client in self.charm.state.external_clients:
-            try:
-                external_client.tls_ca = self.charm.state.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val
-                )["chain"]
-            except KeyError as e:
-                # As we are setting the ca_chain, it should not be likely to happen a KeyError at
-                # update_certs. This logic is left for a very corner case.
-                logger.error("Failed to update relation TLS info: missing key %s", str(e))
-                event.defer()
-                return
+        # while the old CA is still in the trust store the fleet has not reloaded the new
+        # one yet: external clients only get it in finalize_ca_certs_rotation()
+        if not old_ca_present:
+            for external_client in self.charm.state.external_clients:
+                try:
+                    external_client.tls_ca = self.charm.state.secrets.get_object(
+                        Scope.APP, CertType.APP_ADMIN.val
+                    )["chain"]
+                except KeyError as e:
+                    # As we are setting the ca_chain, it should not be likely to happen a KeyError
+                    # at update_certs. This logic is left for a very corner case.
+                    logger.error("Failed to update relation TLS info: missing key %s", str(e))
+                    event.defer()
+                    return
 
         # broadcast secret updates for certs and CA to related sub-clusters
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider(typ="main"):
