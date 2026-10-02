@@ -928,7 +928,9 @@ class ClusterState(Object):
             or present_status.message != format_status(status, dynamic_params).message
         ):
             # Updates dynamic params if status already present.
-            self.remove_status_if_present(status, scope, component, interpolated=True)
+            self.remove_status_if_present(
+                status, scope, component, interpolated=True, search_parameters=search_parameters
+            )
             self.statuses.add(format_status(status, dynamic_params), scope, component)
 
     def remove_status_if_present(

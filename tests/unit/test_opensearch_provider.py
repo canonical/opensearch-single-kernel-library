@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
@@ -10,7 +10,11 @@ from opensearch_single_kernel.common.constants import (
     CLIENT_RELATION,
     NODE_LOCK_RELATION,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchUserMgmtError,
+)
+from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
@@ -300,3 +304,169 @@ def test_create_opensearch_users(
     create_role_mapping.assert_called_with(username, mapped_users)
     patch_user.assert_called_with(username, patches)
     client_users_dict.assert_called()
+
+
+def _index_requested_event(index="test-index"):
+    event = MagicMock()
+    event.relation.id = 1
+    event.index = index
+    event.extra_user_roles = "admin"
+    return event
+
+
+def _add_remove_status_calls(harness, mocker):
+    add_relations(harness)
+    harness.set_leader(True)
+    harness.charm.state.application.is_security_index_initialised = True
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
+        return_value=MagicMock(),
+    )
+
+    add_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.add_status_if_not_present"
+    )
+
+    remove_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.remove_status_if_present"
+    )
+    return add_status, remove_status
+
+
+def test_on_index_requested_invalid_index_name(harness, mocker):
+    invalid_index = "INVALID"
+    add_status, _ = _add_remove_status_calls(harness, mocker)
+    create_index = mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.create_index"
+    )
+    event = _index_requested_event(index=invalid_index)
+    harness.charm.external_clients_events._on_index_requested(event)
+
+    add_status.assert_called_once_with(
+        ExternalClientsStatuses.INVALID_INDEX_NAME.value,
+        "unit",
+        "external_clients_manager",
+        dynamic_params={"index": invalid_index, "id": event.relation.id},
+        search_parameters={"id": event.relation.id},
+    )
+
+    create_index.assert_not_called()
+    event.defer.assert_not_called()
+
+
+def test_on_index_requested_create_index_failed(harness, mocker):
+    add_status, _ = _add_remove_status_calls(harness, mocker)
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.create_index",
+        side_effect=OpenSearchHttpError(response_text="server error", response_code=500),
+    )
+    create_users = mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.create_opensearch_users"
+    )
+    event = _index_requested_event()
+
+    harness.charm.external_clients_events._on_index_requested(event)
+
+    add_status.assert_called_once_with(
+        ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+        "unit",
+        "external_clients_manager",
+        dynamic_params={"index": event.index, "id": event.relation.id},
+        search_parameters={"id": event.relation.id},
+    )
+
+    event.defer.assert_called_once()
+    create_users.assert_not_called()
+
+
+def test_on_index_requested_user_creation_failed(harness, mocker):
+    add_status, _ = _add_remove_status_calls(harness, mocker)
+
+    mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.create_index")
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.create_opensearch_users",
+        side_effect=OpenSearchUserMgmtError(),
+    )
+
+    event = _index_requested_event()
+    harness.charm.external_clients_events._on_index_requested(event)
+
+    add_status.assert_called_once_with(
+        ExternalClientsStatuses.USER_CREATION_FAILED.value,
+        "unit",
+        "external_clients_manager",
+        dynamic_params={"id": event.relation.id},
+        search_parameters={"id": event.relation.id},
+    )
+    event.defer.assert_called_once()
+
+
+def test_on_index_requested_success_clears_failures(harness, mocker):
+    add_status, remove_status = _add_remove_status_calls(harness, mocker)
+    mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.create_index")
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.create_opensearch_users",
+        return_value=("username", "password"),
+    )
+
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.BaseWorkload.version",
+        new_callable=PropertyMock,
+        return_value="1",
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.secrets.OpenSearchSecrets.get_object",
+        return_value={"chain": "tls_chain"},
+    )
+    mocker.patch(
+        "opensearch_single_kernel.events.external_clients.ExternalClientsEventsHandler.update_external_client_endpoints"
+    )
+
+    event = _index_requested_event()
+    harness.charm.external_clients_events._on_index_requested(event)
+    remove_status.assert_has_calls(
+        [
+            call(
+                status.value,
+                "unit",
+                "external_clients_manager",
+                interpolated=True,
+                search_parameters={"id": event.relation.id},
+            )
+            for status in (
+                ExternalClientsStatuses.INVALID_INDEX_NAME,
+                ExternalClientsStatuses.INDEX_CREATION_FAILED,
+                ExternalClientsStatuses.USER_CREATION_FAILED,
+            )
+        ]
+    )
+    add_status.assert_not_called()
+    event.defer.assert_not_called()
+
+
+def test_on_relation_broken_clears_failures(harness, mocker):
+    add_relations(harness)
+    harness.set_leader(True)
+    remove_status = mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.remove_status_if_present"
+    )
+
+    event = MagicMock()
+    event.relation.id = 1
+
+    harness.charm.external_clients_events._on_relation_broken(event)
+    expected = [
+        call(
+            status.value,
+            "unit",
+            "external_clients_manager",
+            interpolated=True,
+            search_parameters={"id": event.relation.id},
+        )
+        for status in ExternalClientsStatuses
+    ]
+    remove_status.assert_has_calls(expected, any_order=True)

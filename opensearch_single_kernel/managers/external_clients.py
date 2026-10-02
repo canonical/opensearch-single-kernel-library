@@ -288,6 +288,11 @@ class ExternalClientsManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute external-client statuses from state."""
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit" and self.state.application.deployment_desc:
@@ -314,6 +319,10 @@ class ExternalClientsManager(BaseManager):
             )
             return
 
+        # only check for missing index if we have already provisioned it
+        if not relation.data[self.state.model.app].get("index"):
+            return
+
         try:
             if not self.opensearch_client.is_node_up():
                 return
@@ -321,7 +330,7 @@ class ExternalClientsManager(BaseManager):
             if index not in self.opensearch_client.indices():
                 status_list.append(
                     format_status(
-                        ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                        ExternalClientsStatuses.INDEX_MISSING.value,
                         {"id": relation.id, "index": index},
                     )
                 )
@@ -335,9 +344,7 @@ class ExternalClientsManager(BaseManager):
                 external_client.relation_username
             ):
                 status_list.append(
-                    format_status(
-                        ExternalClientsStatuses.USER_CREATION_FAILED.value, {"id": relation.id}
-                    )
+                    format_status(ExternalClientsStatuses.USER_MISSING.value, {"id": relation.id})
                 )
                 return
         except OpenSearchHttpError as e:

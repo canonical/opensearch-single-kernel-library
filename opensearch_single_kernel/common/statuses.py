@@ -246,6 +246,20 @@ class ExternalClientsStatuses(Enum):
         check="OpenSearch user for client relation.",
         action="Check unit logs and retry the client relation.",
     )
+    INDEX_MISSING = StatusObject(
+        status="blocked",
+        message="Index {index} for client relation {id} no longer exists",
+        short_message="Client index missing",
+        check="Existence of client relation index in OpenSearch.",
+        action="Recreate the index or remove and re-relate the client.",
+    )
+    USER_MISSING = StatusObject(
+        status="blocked",
+        message="User for client relation {id} missing",
+        short_message="Client user missing",
+        check="Existence of client relation user in OpenSearch.",
+        action="Remove and re-relate the client.",
+    )
 
 
 class PeerClusterStatuses(Enum):
