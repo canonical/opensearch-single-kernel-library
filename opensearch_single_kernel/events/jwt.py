@@ -71,6 +71,10 @@ class JWTEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, keeping the JWT authentication configuration.")
+            return
+
         del self.charm.state.server.jwt_auth_configuration
         self.charm.config_manager.update_security_config()
 

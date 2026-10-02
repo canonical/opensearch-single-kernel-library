@@ -11,7 +11,6 @@ from ops import (
     Object,
     RelationBrokenEvent,
     RelationCreatedEvent,
-    RelationDepartedEvent,
 )
 
 from opensearch_single_kernel.common.constants import (
@@ -55,10 +54,6 @@ class OAuthEventsHandler(Object):
         self.framework.observe(
             self.charm.on[OAUTH_RELATION].relation_changed,
             self._on_oauth_relation_changed,
-        )
-        self.framework.observe(
-            self.charm.on[OAUTH_RELATION].relation_departed,
-            self._on_oauth_relation_departed,
         )
         self.framework.observe(
             self.charm.on[OAUTH_RELATION].relation_broken,
@@ -112,11 +107,6 @@ class OAuthEventsHandler(Object):
             event.defer()
             return
 
-    def _on_oauth_relation_departed(self, event: RelationDepartedEvent) -> None:
-        """Handler for `relation_departed` event."""
-        if event.departing_unit == self.charm.unit and self.charm.state.peer_relation is not None:
-            self.charm.state.server.set_relation_departing(event.relation)
-
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
         if (
@@ -124,10 +114,11 @@ class OAuthEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
-        if (
-            self.charm.state.server.get_relation_departing(event.relation)
-            or not self.charm.state.application.is_security_index_initialised
-        ):
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, keeping the OAuth configuration.")
+            return
+
+        if not self.charm.state.application.is_security_index_initialised:
             return
 
         self.charm.state.server.oauth_openid_connect_url = None
