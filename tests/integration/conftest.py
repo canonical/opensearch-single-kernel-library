@@ -15,7 +15,12 @@ logger = getLogger(__name__)
 
 CONFIG = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/config.yaml").read_text())
 ACTIONS = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/actions.yaml").read_text())
-
+K8S_CONFIG = yaml.safe_load(
+    Path("./tests/charms/opensearch_k8s_test_charm/config.yaml").read_text()
+)
+K8S_ACTIONS = yaml.safe_load(
+    Path("./tests/charms/opensearch_k8s_test_charm/actions.yaml").read_text()
+)
 METADATA = yaml.safe_load(Path("./tests/charms/opensearch_test_charm/metadata.yaml").read_text())
 K8S_METADATA = yaml.safe_load(
     Path("./tests/charms/opensearch_k8s_test_charm/metadata.yaml").read_text()
