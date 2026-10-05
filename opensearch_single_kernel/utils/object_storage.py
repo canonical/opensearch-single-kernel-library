@@ -227,7 +227,7 @@ def verify_s3_credentials(storage_config: ObjectStorageConfig) -> bool:  # noqa:
         logger.info("S3 credential validation with boto3 succeeded.")
         return True
 
-    except (BotoCoreError, ClientError) as e:
+    except (BotoCoreError, ClientError, ValueError) as e:
         logger.error("S3 credential validation with boto3 failed: %s", e, exc_info=True)
         return False
 
@@ -347,7 +347,7 @@ def verify_azure_credentials(storage_config: ObjectStorageConfig) -> bool:
         logger.info("Azure Storage credential validation succeeded.")
         return True
 
-    except AzureError as e:
+    except (AzureError, ValueError) as e:
         logger.error("Azure Storage credential validation failed: %s", e, exc_info=True)
         return False
 

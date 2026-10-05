@@ -460,7 +460,7 @@ class S3RelData(Model):
     @staticmethod
     def get_endpoint_protocol(endpoint: str) -> str:
         """Returns the protocol based on the endpoint."""
-        if not endpoint:
+        if not isinstance(endpoint, str) or not endpoint:
             return "https"
 
         if endpoint.startswith("http://"):
