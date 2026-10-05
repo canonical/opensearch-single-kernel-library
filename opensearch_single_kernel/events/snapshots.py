@@ -686,27 +686,40 @@ class SnapshotsEventsHandler(Object):
         if self.charm.substrate != Substrates.K8S:
             return
 
-        object_storage_type = self.charm.state.storage_type
+        if not (object_storage_type := self.charm.state.storage_type):
+            return
+
+        # large deployments (non main orchestrator apps): credentials come from the peer cluster
         if object_storage_type in (
+            ObjectStorageType.S3_PCLUSTER,
+            ObjectStorageType.AZURE_PCLUSTER,
+            ObjectStorageType.GCS_PCLUSTER,
+        ):
+            # the keystore is keyed on the plain s3 / azure / gcs type, not the pcluster one
+            peer_storage_type, credentials, tls_ca_chain = self._credentials_from_peer_cluster()
+            if peer_storage_type:
+                self.update_stored_credentials(peer_storage_type, credentials, tls_ca_chain)
+            return
+
+        # simple deployments or main orchestrator: s3 / azure / gcs relation
+        if object_storage_type not in (
             ObjectStorageType.S3,
             ObjectStorageType.AZURE,
             ObjectStorageType.GCS,
         ):
-            connection_info = self.charm.state.get_storage_connection_info_from_relation(
-                object_storage_type
-            )
-            try:
-                config = storage_config_from_connection_info(object_storage_type, connection_info)
-            except OpenSearchObjectStorageConfigValidationError:
-                return
-            if not config:
-                return
-            credentials, tls_ca_chain = self._credentials_from_config(object_storage_type, config)
-        else:
-            object_storage_type, credentials, tls_ca_chain = self._credentials_from_peer_cluster()
-            if not object_storage_type:
-                return
+            return
 
+        connection_info = self.charm.state.get_storage_connection_info_from_relation(
+            object_storage_type
+        )
+        try:
+            config = storage_config_from_connection_info(object_storage_type, connection_info)
+        except OpenSearchObjectStorageConfigValidationError:
+            return
+        if not config:
+            return
+
+        credentials, tls_ca_chain = self._credentials_from_config(object_storage_type, config)
         self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
 
     def update_stored_credentials(
