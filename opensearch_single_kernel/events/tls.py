@@ -100,6 +100,13 @@ class TLSEventsHandler(Object):
             )
             return
 
+        if cert_type.val in self.charm.state.server.certs_reissue_pending:
+            event.fail(
+                f"A reissue of the {cert_type.val} certificate is already in progress. "
+                "Retry once it completes."
+            )
+            return
+
         try:
             old_csr = (self.charm.tls_manager.get_secrets_for_cert_type(cert_type) or {}).get(
                 "csr"
@@ -115,11 +122,6 @@ class TLSEventsHandler(Object):
             if not old_csr:
                 self.certs.request_certificate_creation(certificate_signing_request=csr)
             elif old_csr.rstrip() == csr.decode().rstrip():
-                # In case CSR is the same, make sure reissue is pending
-                if cert_type.val in self.charm.state.server.certs_reissue_pending:
-                    event.set_results({"message": "A certificate reissue is already in progress."})
-                    return
-
                 # Make sure the TLS provider is aware of the CSR
                 requested_csrs = {
                     req.csr.strip() for req in self.certs.get_certificate_signing_requests()

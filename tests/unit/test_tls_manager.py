@@ -538,13 +538,11 @@ TLS_REQUIRES = (
 
 
 @pytest.mark.parametrize(
-    "reissue_pending,requested,expect_creation",
-    [(True, False, False), (False, False, True), (False, True, False)],
-    ids=["reissue-pending", "not-requested", "already-requested"],
+    "requested,expect_creation",
+    [(False, True), (True, False)],
+    ids=["not-requested", "already-requested"],
 )
-def test_on_set_tls_private_key_same_csr(
-    harness, mocker, reissue_pending, requested, expect_creation
-):
+def test_on_set_tls_private_key_same_csr(harness, mocker, requested, expect_creation):
     """Test _on_set_tls_private_key only re-requests a same CSR unknown to the provider."""
     csr = "csr_12345"
     cert_type = CertType.UNIT_TRANSPORT
@@ -565,8 +563,6 @@ def test_on_set_tls_private_key_same_csr(
         return_value=f"{csr}\n".encode("utf-8"),
     )
     harness.charm.state.secrets.put_object(Scope.UNIT, cert_type.val, {"csr": csr})
-    if reissue_pending:
-        harness.charm.state.server.certs_reissue_pending = {cert_type.val}
 
     harness.charm.tls_events._on_set_private_key(event_mock)
 
@@ -580,6 +576,44 @@ def test_on_set_tls_private_key_same_csr(
     else:
         request_certificate_creation.assert_not_called()
         event_mock.set_results.assert_called_once()
+
+
+def test_on_set_tls_private_key_reissue_pending(harness, mocker):
+    """Test _on_set_tls_private_key is refused while a reissue of the same category is pending."""
+    csr = "csr_12345"
+    cert_type = CertType.UNIT_TRANSPORT
+    event_mock = MagicMock(params={"category": cert_type.val, "key": "new_key_12345"})
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    request_certificate_renewal = mocker.patch(f"{TLS_REQUIRES}.request_certificate_renewal")
+    deployment_desc = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    deployment_desc.return_value = deployment_descriptions["ok"]
+    create_csr = mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request",
+        return_value=b"new_csr_12345",
+    )
+    harness.charm.state.secrets.put_object(Scope.UNIT, cert_type.val, {"csr": csr})
+    harness.charm.state.server.certs_reissue_pending = {cert_type.val}
+
+    harness.charm.tls_events._on_set_private_key(event_mock)
+
+    event_mock.fail.assert_called_once()
+    create_csr.assert_not_called()
+    request_certificate_creation.assert_not_called()
+    request_certificate_renewal.assert_not_called()
+    assert harness.charm.tls_manager.get_secrets_for_cert_type(cert_type)["csr"] == csr
+    assert harness.charm.state.server.certs_reissue_pending == {cert_type.val}
+
+    # A pending reissue of another category does not block this one
+    harness.charm.state.server.certs_reissue_pending = {CertType.UNIT_HTTP.val}
+    event_mock.reset_mock()
+
+    harness.charm.tls_events._on_set_private_key(event_mock)
+
+    event_mock.fail.assert_not_called()
+    request_certificate_renewal.assert_called_once()
 
 
 def test_on_certificate_available(harness, mocker):
