@@ -525,7 +525,8 @@ class OpenSearchEventsHandler(Object):
             )
             return
 
-        if not self.charm.profiles_manager.check_profile_requirements():
+        # check the profile being applied, not the one already stored on the unit
+        if not self.charm.profiles_manager.check_profile_requirements(config_profile):
             event.defer()
             return
 

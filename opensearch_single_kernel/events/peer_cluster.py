@@ -507,7 +507,7 @@ class PeerClusterEventsHandler(Object):
         except ValueError:
             return
 
-        if not self.charm.profiles_manager.check_profile_requirements():
+        if not self.charm.profiles_manager.check_profile_requirements(config_profile):
             return
 
         self.charm.config_manager._update_jvm_heap_size(
