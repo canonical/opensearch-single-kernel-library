@@ -32,6 +32,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
@@ -438,9 +439,13 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
-        info_to_save, object_storage_type_to_cleanup = (
-            self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
-        )
+        try:
+            info_to_save, object_storage_type_to_cleanup = (
+                self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
+            )
+        except OpenSearchSnapshotsPeerClusterDataConflictError:
+            return None
+
         if info_to_save:
             for object_storage_type in object_storage_type_to_cleanup:
                 if not self.charm.keystore_manager.cleanup_storage_credentials(
