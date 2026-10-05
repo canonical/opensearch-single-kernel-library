@@ -729,7 +729,17 @@ class SnapshotsManager(BaseManager):
                     status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                     return status_list
 
-                self.validate_storage_config(object_storage_config, object_storage_type)
+                if not recompute:
+                    if invalid_credentials := cached_non_running_statuses(
+                        self.state.statuses,
+                        scope,
+                        self.name,
+                        matches=[SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value],
+                    ):
+                        status_list.extend(invalid_credentials)
+                        return status_list
+                else:
+                    self.validate_storage_config(object_storage_config, object_storage_type)
             except OpenSearchInvalidStorageTypeError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                 return status_list

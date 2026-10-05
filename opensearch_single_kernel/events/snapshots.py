@@ -152,8 +152,10 @@ class SnapshotsEventsHandler(Object):
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
+            self._set_credentials_incorrect_status(failed=True)
             return
 
+        self._set_credentials_incorrect_status(failed=False)
         # Update backup credentials
         # Catch file operation exceptions
         try:
@@ -223,6 +225,7 @@ class SnapshotsEventsHandler(Object):
 
         # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
+        self._set_credentials_incorrect_status(failed=False)
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
@@ -631,6 +634,20 @@ class SnapshotsEventsHandler(Object):
             return f"Action failed with: {str(e)}."
 
         return None
+
+    def _set_credentials_incorrect_status(self, failed: bool) -> None:
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
 
     def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
         """Cache blocked status for repository registration failure (apply path only)."""
