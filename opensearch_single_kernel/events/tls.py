@@ -351,11 +351,15 @@ class TLSEventsHandler(Object):
         for peer_cluster_server in peer_clusters_servers:
             del peer_cluster_server.tls_configured
         try:
-            scope, cert_type, _ = self.charm.tls_manager.find_secret(event.certificate, "cert")
+            scope, cert_type, secrets = self.charm.tls_manager.find_secret(
+                event.certificate, "cert"
+            )
             logger.debug("%s.%s TLS certificate expiring.", scope.val, cert_type.val)
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
+
+        old_csr = secrets["csr"]
 
         if cert_type != CertType.APP_ADMIN and not self.charm.state.fqdn_resolvable:
             logger.warning(
@@ -364,18 +368,17 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        self.request_certificate_reissue(cert_type)
+        self.request_certificate_reissue(cert_type, old_csr)
 
-    def request_certificate_reissue(self, cert_type: CertType) -> None:
+    def request_certificate_reissue(self, cert_type: CertType, old_csr: str | None) -> None:
         """Request certificate to be reissued
 
         This is done by revoking the current certificate and waiting for the provider to drop it
         before re-requesting it. This is necessary because the provider will ignore a request
         for a certificate that is already issued.
         """
-        secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
-        if not (csr := (secrets or {}).get("csr")):
-            logger.warning("No CSR stored for %s, nothing to reissue.", cert_type.val)
+        if not (csr := old_csr):
+            logger.warning("No CSR provided for %s, nothing to reissue.", cert_type.val)
             return
 
         logger.debug("Revoking the CSR of %s to request a new one.", cert_type.val)
@@ -416,7 +419,7 @@ class TLSEventsHandler(Object):
 
             secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
             # If we have already dropped the CSR from our secrets, we cannot re-request it anymore.
-            if not (csr := (secrets or {}).get("csr")):
+            if not (csr := secrets["csr"]):
                 logger.warning(
                     "No CSR stored for %s anymore, dropping its pending reissue.", cert_type_val
                 )
@@ -564,6 +567,6 @@ class TLSEventsHandler(Object):
             {
                 "username": user_name,
                 "password": password,
-                "ca-chain": self.charm.state.application.admin_secrets.get("chain", ""),
+                "ca-chain": self.charm.state.application.admin_secrets["chain"],
             }
         )
