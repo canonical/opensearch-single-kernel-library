@@ -129,6 +129,32 @@ def test_get_statuses_with_recompute_validates_credentials(mocker, backend, vali
     verify.assert_called_once()
 
 
+@pytest.mark.parametrize("backend", STORAGE)
+def test_get_statuses_before_integrator_fills_connection_info(mocker, backend):
+    verify = _verify(mocker, backend, valid=True)
+
+    statuses = _main_mgr(backend, connection_info={}).get_statuses("app")
+
+    assert statuses == [SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value]
+    verify.assert_not_called()
+
+
+@pytest.mark.parametrize("backend", STORAGE)
+@pytest.mark.parametrize(
+    "recompute, cached",
+    [(True, ()), (False, [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value])],
+    ids=["update-status", "cached"],
+)
+def test_get_statuses_when_connection_info_empty_on_recompute(mocker, backend, recompute, cached):
+    verify = _verify(mocker, backend, valid=True)
+    manager = _main_mgr(backend, cached=cached, connection_info={})
+
+    statuses = manager.get_statuses("app", recompute=recompute)
+
+    assert statuses == [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
+    verify.assert_not_called()
+
+
 def _relate_backups(harness, relation):
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)

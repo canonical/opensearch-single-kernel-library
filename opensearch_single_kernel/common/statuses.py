@@ -458,6 +458,13 @@ class SnapshotsStatuses(Enum):
         check="At most one object-storage relation.",
         action="Remove extra s3/azure/gcs relations; keep only one.",
     )
+    BACKUP_WAITING_FOR_CONNECTION_INFO = StatusObject(
+        status="waiting",
+        message="Waiting for settings from backup integrator",
+        short_message="Waiting for backup settings",
+        check="Object-storage relation data from the integrator.",
+        action="If this lasts, check that the integrator is configured.",
+    )
     BACKUP_RELATION_DATA_INCOMPLETE = StatusObject(
         status="blocked",
         message="Backup relation data missing or incomplete.",

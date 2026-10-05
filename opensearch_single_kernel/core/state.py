@@ -1155,7 +1155,11 @@ class ClusterState(Object):
         """Returns the storage connection info from the active relation.."""
         match object_storage_type:
             case ObjectStorageType.S3:
-                return self.s3_requirer.get_storage_connection_info(self.s3_relation) or {}
+                # s3-integrator legacy-lib adds copy of our request to a "data" field
+                # before filling connection info (its not part of the connection info)
+                info = self.s3_requirer.get_storage_connection_info(self.s3_relation) or {}
+                info.pop("data", None)
+                return info
             case ObjectStorageType.AZURE:
                 return self.azure_requires.get_storage_connection_info(self.azure_relation) or {}
             case ObjectStorageType.GCS:
