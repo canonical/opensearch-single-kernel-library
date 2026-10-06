@@ -95,12 +95,13 @@ def test_remove_ca_deletes_exact_alias(mocker):
     workload.exists.return_value = True
     store_path = MagicMock()
     store_path.__str__.return_value = "/certs/ca.p12"
-    workload.run_cmd.side_effect = [
-        mocker.Mock(out=""),
-        mocker.Mock(out=""),
-        mocker.Mock(out="Alias name: old-ca-0\n"),
-        mocker.Mock(out=""),
-    ]
+
+    def run_cmd(cmd, *args, **kwargs):
+        if "-v -list" in cmd:
+            return mocker.Mock(out="Alias name: old-ca-0\n")
+        return mocker.Mock(out="")
+
+    workload.run_cmd.side_effect = run_cmd
 
     remove_ca(
         workload=workload,

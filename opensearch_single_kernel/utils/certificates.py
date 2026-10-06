@@ -332,15 +332,17 @@ def remove_ca(
         if _is_keystore_missing_error(e, str(store_path)):
             logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
             return
-        if is_alias_missing_error(e, alias):
-            logger.debug(
-                "Alias %s not found in %s when listing before delete, ignoring.",
-                alias,
-                store_path,
-            )
-            return
-        # Anything else is a real error
-        raise
+        if not is_alias_missing_error(e, alias):
+            # alias not found is expected for chains
+            # Anything else is a real error
+            raise
+
+    aliases_to_remove = _collect_aliases_to_remove(
+        workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
+    )
+    if not aliases_to_remove:
+        logger.debug("No aliases matching %s found in %s, nothing to remove.", alias, store_path)
+        return
 
     sudo_prefix = "sudo " if use_sudo else ""
     try:
@@ -353,29 +355,28 @@ def remove_ca(
             e.err or "",
         )
     _remove_ca_aliases(
-        workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
+        workload=workload,
+        aliases_to_remove=aliases_to_remove,
+        store_pwd=store_pwd,
+        store_path=store_path,
     )
     logger.info("Removed %s from truststore %s.", alias, store_path)
 
 
 def _remove_ca_aliases(
-    workload: BaseWorkload, alias_base: str, store_pwd: str, store_path: PathProtocol
+    workload: BaseWorkload,
+    aliases_to_remove: list[str],
+    store_pwd: str,
+    store_path: PathProtocol,
 ) -> None:
-    """Core logic to delete aliases for a given base name.
+    """Core logic to delete given aliases from truststore.
 
     Args:
         workload: The workload instance to run commands.
-        alias_base: The base alias to match.
+        aliases_to_remove: The aliases to delete.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
     """
-    aliases_to_remove = _collect_aliases_to_remove(
-        workload=workload, alias_base=alias_base, store_pwd=store_pwd, store_path=store_path
-    )
-
-    if not aliases_to_remove:
-        logger.debug("No aliases matching %s/* found in %s.", alias_base, store_path)
-        return
     logger.info("Aliases: %s going to be removed", ", ".join(aliases_to_remove))
     for name in aliases_to_remove:
         del_cmd = (
