@@ -337,13 +337,6 @@ def remove_ca(
             # Anything else is a real error
             raise
 
-    aliases_to_remove = _collect_aliases_to_remove(
-        workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
-    )
-    if not aliases_to_remove:
-        logger.debug("No aliases matching %s found in %s, nothing to remove.", alias, store_path)
-        return
-
     sudo_prefix = "sudo " if use_sudo else ""
     try:
         workload.run_cmd(f"{sudo_prefix}chmod 0664 {store_path}")
@@ -355,28 +348,29 @@ def remove_ca(
             e.err or "",
         )
     _remove_ca_aliases(
-        workload=workload,
-        aliases_to_remove=aliases_to_remove,
-        store_pwd=store_pwd,
-        store_path=store_path,
+        workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
     )
     logger.info("Removed %s from truststore %s.", alias, store_path)
 
 
 def _remove_ca_aliases(
-    workload: BaseWorkload,
-    aliases_to_remove: list[str],
-    store_pwd: str,
-    store_path: PathProtocol,
+    workload: BaseWorkload, alias_base: str, store_pwd: str, store_path: PathProtocol
 ) -> None:
-    """Core logic to delete given aliases from truststore.
+    """Core logic to delete aliases for a given base name.
 
     Args:
         workload: The workload instance to run commands.
-        aliases_to_remove: The aliases to delete.
+        alias_base: The base alias to match.
         store_pwd: Password for the trust store.
         store_path: Path to the trust store.
     """
+    aliases_to_remove = _collect_aliases_to_remove(
+        workload=workload, alias_base=alias_base, store_pwd=store_pwd, store_path=store_path
+    )
+
+    if not aliases_to_remove:
+        logger.debug("No aliases matching %s/* found in %s.", alias_base, store_path)
+        return
     logger.info("Aliases: %s going to be removed", ", ".join(aliases_to_remove))
     for name in aliases_to_remove:
         del_cmd = (
