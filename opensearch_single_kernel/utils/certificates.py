@@ -350,7 +350,6 @@ def remove_ca(
     _remove_ca_aliases(
         workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
     )
-    logger.info("Removed %s from truststore %s.", alias, store_path)
 
 
 def _remove_ca_aliases(
