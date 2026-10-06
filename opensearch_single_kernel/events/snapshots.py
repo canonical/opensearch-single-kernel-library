@@ -620,7 +620,10 @@ class SnapshotsEventsHandler(Object):
                 return "Object storage credentials are invalid."
             except OpenSearchObjectStorageConfigValidationError as e:
                 if e.missing_fields:
-                    return "Object storage configuration missing fields."
+                    return (
+                        "Object storage configuration missing fields: "
+                        f"{', '.join(e.missing_fields)}."
+                    )
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
