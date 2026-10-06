@@ -155,6 +155,24 @@ def test_get_statuses_when_connection_info_empty_on_recompute(mocker, backend, r
     verify.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "info, expected",
+    [
+        ({"bucket": "relation-0"}, SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value),
+        (
+            {k: v for k, v in DEFAULT_S3_INFO.items() if k != "region"},
+            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
+        ),
+        (DEFAULT_S3_INFO | {"bucket": 2024}, SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value),
+    ],
+    ids=["no-keys", "no-region", "malformed"],
+)
+def test_get_statuses_invalid_connection_info(mocker, info, expected):
+    _verify(mocker, "s3", valid=True)
+
+    assert _main_mgr("s3", connection_info=info).get_statuses("app") == [expected]
+
+
 def _relate_backups(harness, relation):
     with harness.hooks_disabled():
         harness.set_leader(is_leader=True)

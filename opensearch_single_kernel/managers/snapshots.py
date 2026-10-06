@@ -759,8 +759,12 @@ class SnapshotsManager(BaseManager):
             except OpenSearchInvalidStorageTypeError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                 return status_list
-            except OpenSearchObjectStorageConfigValidationError:
-                status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
+            except OpenSearchObjectStorageConfigValidationError as e:
+                status_list.append(
+                    SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value
+                    if e.missing_fields
+                    else SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value
+                )
                 return status_list
             except OpenSearchBackupRelationDataIncompleteError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)

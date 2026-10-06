@@ -103,6 +103,7 @@ class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
     def __init__(self, error: ValidationError):
         super().__init__(str(error))
         self.error = error
+        self.missing_fields = all("Missing field" in err["msg"] for err in error.errors())
 
 
 class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):
