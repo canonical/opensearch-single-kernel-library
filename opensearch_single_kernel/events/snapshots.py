@@ -617,7 +617,9 @@ class SnapshotsEventsHandler(Object):
             except OpenSearchInvalidStorageTypeError as e:
                 logger.error(str(e))
                 return "Object storage credentials are invalid."
-            except OpenSearchObjectStorageConfigValidationError:
+            except OpenSearchObjectStorageConfigValidationError as e:
+                if e.missing_fields:
+                    return "Object storage configuration missing fields."
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
