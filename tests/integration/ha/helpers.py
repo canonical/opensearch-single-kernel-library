@@ -310,7 +310,7 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
     """Check if all processes are down."""
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
-        get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
+        get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200 -sTCP:LISTEN"
         try:
             for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
                 with attempt:
@@ -337,9 +337,9 @@ async def send_kill_signal_to_process(
 
     if opensearch_pid is None:
         if substrate == "vm":
-            get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
+            get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200 -sTCP:LISTEN"
         else:
-            get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200"
+            get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200 -sTCP:LISTEN"
         _, opensearch_pid, _ = await ops_test.juju(
             *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
         )

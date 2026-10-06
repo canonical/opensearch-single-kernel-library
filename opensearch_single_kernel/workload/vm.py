@@ -207,7 +207,7 @@ class VMWorkload(BaseWorkload):
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
         # First, we want to make sure the process is not stopped, dead or zombie.
         try:
-            pid = self.run_cmd("lsof", args="-ti:9200").out.rstrip()
+            pid = self.run_cmd("lsof", args="-ti:9200 -sTCP:LISTEN").out.rstrip()
             if not pid or not os.path.exists(f"/proc/{pid}/stat"):
                 return False
             with open(f"/proc/{pid}/stat") as f:
