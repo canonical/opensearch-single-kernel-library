@@ -227,6 +227,7 @@ class SnapshotsEventsHandler(Object):
         # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
         self._set_credentials_incorrect_status(failed=False)
+        self._clear_relation_data_incomplete_status()
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
@@ -673,6 +674,13 @@ class SnapshotsEventsHandler(Object):
             "app",
             self.charm.snapshots_manager.name,
             interpolated=True,
+        )
+
+    def _clear_relation_data_incomplete_status(self) -> None:
+        self.charm.state.remove_status_if_present(
+            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
+            "app",
+            self.charm.snapshots_manager.name,
         )
 
     def _set_credentials_cleanup_failed_status(self, failed: bool) -> None:

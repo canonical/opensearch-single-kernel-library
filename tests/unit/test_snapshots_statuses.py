@@ -218,7 +218,15 @@ def test_credentials_changed_sets_then_clears_credentials_incorrect(
     assert _get_statuses(harness) == [GeneralStatuses.ACTIVE_IDLE.value]
 
 
-def test_credentials_gone_clears_credentials_incorrect(mocker, harness, backend_setup):
+@pytest.mark.parametrize(
+    "cached_status",
+    [
+        SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+        SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
+    ],
+    ids=["credentials-incorrect", "relation-data-incomplete"],
+)
+def test_credentials_gone_clears_cached_status(mocker, harness, backend_setup, cached_status):
     _, (relation,) = backend_setup
     _mock_backup(mocker)
     mocker.patch(
@@ -239,11 +247,11 @@ def test_credentials_gone_clears_credentials_incorrect(mocker, harness, backend_
     )
     rel_id = _relate_backups(harness, relation)
     harness.charm.state.add_status_if_not_present(
-        SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+        cached_status,
         "app",
         harness.charm.snapshots_manager.name,
     )
-    assert _get_statuses(harness) == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+    assert _cached_statuses(harness).root == [cached_status]
 
     harness.remove_relation(rel_id)
 
