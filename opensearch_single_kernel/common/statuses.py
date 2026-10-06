@@ -460,8 +460,8 @@ class SnapshotsStatuses(Enum):
     )
     BACKUP_WAITING_FOR_CONNECTION_INFO = StatusObject(
         status="waiting",
-        message="Waiting for settings from backup integrator",
-        short_message="Waiting for backup settings",
+        message="Waiting for settings from object storage integrator",
+        short_message="Waiting for object storage settings",
         check="Object-storage relation data from the integrator.",
         action="If this lasts, check that the integrator is configured.",
     )

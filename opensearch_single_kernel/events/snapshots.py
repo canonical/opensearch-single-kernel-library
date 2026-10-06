@@ -445,6 +445,7 @@ class SnapshotsEventsHandler(Object):
                 self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
             )
         except OpenSearchSnapshotsPeerClusterDataConflictError:
+            logger.warning("Ignoring conflicting snapshots data received over peer-clusters.")
             return None
 
         if info_to_save:
@@ -644,6 +645,7 @@ class SnapshotsEventsHandler(Object):
         return None
 
     def _set_credentials_incorrect_status(self, failed: bool) -> None:
+        """Cache or clear incorrect credentials status."""
         if failed:
             self.charm.state.add_status_if_not_present(
                 SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
@@ -679,6 +681,7 @@ class SnapshotsEventsHandler(Object):
         )
 
     def _clear_relation_data_incomplete_status(self) -> None:
+        """Clear relation data incomplete status."""
         self.charm.state.remove_status_if_present(
             SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
             "app",
