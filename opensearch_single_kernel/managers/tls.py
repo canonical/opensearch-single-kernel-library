@@ -679,13 +679,18 @@ class TlsManager(BaseManager):
         logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
         try:
             self.remove_old_ca()
-            # the whole fleet reloaded the new CA and dropped the old one, it is now safe
-            # to expose the new CA to the external clients
-            if self.state.server.is_app_leader and (
-                ca_chain := self.state.application.admin_secrets.get("chain")
-            ):
-                for external_client in self.state.external_clients:
-                    external_client.tls_ca = ca_chain
+        except OpenSearchFileOperationError as e:
+            logger.error("Error removing old CA during rotation finalization: %s", e)
+            return False
+
+        # the whole fleet reloaded the new CA and dropped the old one, it is now safe
+        # to expose the new CA to the external clients
+        if self.state.server.is_app_leader and (
+            ca_chain := self.state.application.admin_secrets.get("chain")
+        ):
+            for external_client in self.state.external_clients:
+                external_client.tls_ca = ca_chain
+        try:
             return self.update_request_ca_bundle()
         except OpenSearchFileOperationError as e:
             logger.error("Error removing old CA during rotation finalization: %s", e)
