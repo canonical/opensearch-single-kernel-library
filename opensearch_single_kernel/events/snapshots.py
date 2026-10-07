@@ -655,6 +655,15 @@ class SnapshotsEventsHandler(Object):
     def _credentials_from_config(
         object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
     ) -> tuple[ObjectStorageCredentials, str | list[str] | None]:
+        """Get Credentials from the related object storage config.
+
+        Args:
+            object_storage_type: The type of object storage (S3, Azure, GCS).
+            object_storage_config: The object storage configuration.
+
+        Returns:
+            A tuple containing the object storage credentials and the S3 TLS CA chain (if applicable).
+        """
         match object_storage_type:
             case ObjectStorageType.S3:
                 s3 = object_storage_config.s3
@@ -667,6 +676,11 @@ class SnapshotsEventsHandler(Object):
     def _credentials_from_peer_cluster(
         self,
     ) -> tuple[ObjectStorageCredentials | None, str | None]:
+        """Get Credentials from the related peer cluster.
+
+        Returns:
+            A tuple containing the object storage credentials and the S3 TLS CA chain (if applicable).
+        """
         if s3_credentials := self.charm.snapshots_manager.s3_info_from_peer_cluster:
             return (
                 S3RelDataCredentials(**s3_credentials),
@@ -697,14 +711,14 @@ class SnapshotsEventsHandler(Object):
                 self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
             return
 
-        # simple deployments or main orchestrator: s3 / azure / gcs relation
-        if object_storage_type not in (
-            ObjectStorageType.S3,
-            ObjectStorageType.AZURE,
-            ObjectStorageType.GCS,
-        ):
+        # Conflict
+        if object_storage_type == ObjectStorageType.CONFLICT:
+            logger.warning(
+                "Cannot restore keystore credentials: more than one object storage integrators integrated."
+            )
             return
 
+        # Simple deployments or main orchestrator
         connection_info = self.charm.state.get_storage_connection_info_from_relation(
             object_storage_type
         )
