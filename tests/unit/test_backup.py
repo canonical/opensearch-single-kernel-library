@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.constants import (
     HealthColors,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError, OpenSearchHttpError
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
@@ -1236,3 +1236,56 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
 
     assert object_storage.verify_gcs_credentials(cfg) is False
     blob.delete.assert_not_called()
+
+
+def _keytool(mocker, *aliases):
+    def run_cmd(cmd, *args, **kwargs):
+        if "-list" in cmd and "-alias s3-snapshots-gateway " in cmd:
+            raise OpenSearchCmdError(
+                cmd,
+                out="keytool error: java.lang.Exception: "
+                "Alias <s3-snapshots-gateway> does not exist\n",
+            )
+        if "-v -list" in cmd:
+            return mocker.Mock(out="".join(f"Alias name: {alias}\n" for alias in aliases))
+        return mocker.Mock(out="")
+
+    return run_cmd
+
+
+def _deleted_aliases(run_cmd):
+    commands = [call.args[0] for call in run_cmd.call_args_list]
+    return [cmd.split("-alias ")[1].split()[0] for cmd in commands if "-delete" in cmd]
+
+
+def test_remove_s3_ca_deletes_s3_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "ca-0", "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+
+    harness.charm.snapshots_manager.remove_s3_ca()
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+
+
+def test_store_s3_ca_deletes_old_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+    mocker.patch.object(
+        harness.charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False
+    )
+    store_ca_chain = mocker.patch("opensearch_single_kernel.managers.snapshots.store_ca_chain")
+
+    harness.charm.snapshots_manager.store_s3_ca(S3_CONN_INFO_WITH_CA["tls_ca_chain"])
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+    store_ca_chain.assert_called_once()
