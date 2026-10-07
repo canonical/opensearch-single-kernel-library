@@ -7,6 +7,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
@@ -94,7 +95,16 @@ class ExternalClientsEventsHandler(Object):
                 event.index,
                 event.relation.id,
             )
+            self._set_external_client_failure_status(
+                ExternalClientsStatuses.INVALID_INDEX_NAME.value,
+                relation_id=event.relation.id,
+                index=event.index,
+            )
             return
+
+        self._clear_external_client_failure_status(
+            ExternalClientsStatuses.INVALID_INDEX_NAME.value, relation_id=event.relation.id
+        )
 
         self.charm.status_handler.set_running_status(
             format_status(
@@ -114,8 +124,17 @@ class ExternalClientsEventsHandler(Object):
             logger.error(
                 f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
             )
+            self._set_external_client_failure_status(
+                ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                relation_id=event.relation.id,
+                index=event.index,
+            )
             event.defer()
             return
+
+        self._clear_external_client_failure_status(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value, relation_id=event.relation.id
+        )
 
         try:
             username, pwd = self.charm.external_clients_manager.create_opensearch_users(
@@ -123,8 +142,17 @@ class ExternalClientsEventsHandler(Object):
             )
         except OpenSearchUserMgmtError as err:
             logger.error(err)
+            self._set_external_client_failure_status(
+                ExternalClientsStatuses.USER_CREATION_FAILED.value,
+                relation_id=event.relation.id,
+            )
             event.defer()
             return
+
+        self._clear_external_client_failure_status(
+            ExternalClientsStatuses.USER_CREATION_FAILED.value, relation_id=event.relation.id
+        )
+
         try:
             external_client.version = self.charm.workload.version
         except OpenSearchCmdError as e:
@@ -182,6 +210,10 @@ class ExternalClientsEventsHandler(Object):
         """Handle client relation-broken event."""
         if not self.charm.unit.is_leader():
             return
+
+        for status in ExternalClientsStatuses:
+            self._clear_external_client_failure_status(status.value, relation_id=event.relation.id)
+
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.warning("No external client found for relation id %d", event.relation.id)
             return
@@ -210,3 +242,28 @@ class ExternalClientsEventsHandler(Object):
             self.charm.external_clients_manager.update_relation_endpoints(
                 external_client, nodes, omit_endpoints=omit_endpoints
             )
+
+    def _set_external_client_failure_status(
+        self, status: StatusObject, relation_id: int, **params: str
+    ) -> None:
+        self.charm.state.add_status_if_not_present(
+            status,
+            "unit",
+            self.charm.external_clients_manager.name,
+            dynamic_params={
+                "id": relation_id,
+                **params,
+            },
+            search_parameters={"id": relation_id},
+        )
+
+    def _clear_external_client_failure_status(
+        self, status: StatusObject, relation_id: int
+    ) -> None:
+        self.charm.state.remove_status_if_present(
+            status,
+            "unit",
+            self.charm.external_clients_manager.name,
+            interpolated=True,
+            search_parameters={"id": relation_id},
+        )
