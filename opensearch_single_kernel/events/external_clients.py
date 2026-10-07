@@ -7,7 +7,7 @@
 import logging
 from typing import TYPE_CHECKING
 
-from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
+from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent, hookcmds
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
 from opensearch_single_kernel.common.exceptions import (
@@ -176,9 +176,15 @@ class ExternalClientsEventsHandler(Object):
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle client relation-broken event."""
-        if self.charm.is_unit_going_away(event):
+        try:
+            is_unit_going_away = self.charm.is_unit_going_away(event)
+        except hookcmds.Error:
+            logger.info("Keeping the user of client relation %d.", event.relation.id)
+            return
+        if is_unit_going_away:
             logger.info(
-                "Unit is going away, keeping the user of client relation %d.", event.relation.id
+                "Unit is going away, keeping the user of client relation %d.",
+                event.relation.id,
             )
             return
         if not self.charm.unit.is_leader():

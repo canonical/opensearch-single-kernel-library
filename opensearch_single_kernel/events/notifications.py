@@ -15,6 +15,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ops import hookcmds
 from ops.charm import RelationBrokenEvent, SecretChangedEvent
 from ops.framework import Object
 
@@ -194,7 +195,13 @@ class NotificationsEvents(Object):
         Args:
             event: RelationBrokenEvent
         """
-        if self.charm.is_unit_going_away(event):
+        try:
+            is_unit_going_away = self.charm.is_unit_going_away(event)
+        except hookcmds.Error:
+            logger.info("Deferring SMTP cleanup of relation %d.", event.relation.id)
+            event.defer()
+            return
+        if is_unit_going_away:
             logger.info(
                 "Unit is going away, keeping the SMTP configuration of relation %d.",
                 event.relation.id,

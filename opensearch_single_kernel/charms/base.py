@@ -192,6 +192,9 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         Returns:
             True if this unit is dying or when the whole
             application is removed or scaled down to 0.
+
+        Raises:
+            ops.hookcmds.Error: if the goal-state could not be fetched.
         """
         departing_unit = getattr(event, "departing_unit", None)
         if departing_unit is not None and departing_unit == self.unit:
@@ -200,12 +203,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         try:
             goal_state = ops.hookcmds.goal_state()
         except ops.hookcmds.Error as e:
-            logger.warning(
-                "Failed to fetch the goal-state (%s), assuming unit %s is going away.",
-                e,
-                self.unit.name,
-            )
-            return True
+            logger.warning("Failed to fetch the goal-state: %s", e.stderr or e)
+            raise
 
         unit_goal = goal_state.units.get(self.unit.name)
         if unit_goal is None or unit_goal.status == "dying":

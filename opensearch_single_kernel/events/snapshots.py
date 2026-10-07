@@ -12,7 +12,7 @@ from object_storage import (
     StorageConnectionInfoChangedEvent,
     StorageConnectionInfoGoneEvent,
 )
-from ops import ActionEvent, Object
+from ops import ActionEvent, Object, hookcmds
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -211,7 +211,20 @@ class SnapshotsEventsHandler(Object):
         self, event: StorageConnectionInfoGoneEvent
     ) -> None:
         """Handler for backup credentials gone event."""
-        if self.charm.is_unit_going_away(event):
+        if self.charm.state.has_other_relation(event.relation):
+            logger.info(
+                "A different %s relation exists, skipping snapshots cleanup",
+                event.relation.name,
+            )
+            return
+
+        try:
+            is_unit_going_away = self.charm.is_unit_going_away(event)
+        except hookcmds.Error:
+            logger.info("Deferring snapshots cleanup of relation %d.", event.relation.id)
+            event.defer()
+            return
+        if is_unit_going_away:
             logger.info(
                 "Unit is going away, keeping the snapshot configuration of relation %d.",
                 event.relation.id,
@@ -509,7 +522,13 @@ class SnapshotsEventsHandler(Object):
 
     def _on_peer_clusters_relation_departed_for_snapshots(self, event) -> None:  # noqa C901
         """Cleanup snapshot config if the main orchestrator we got it from is gone."""
-        if self.charm.is_unit_going_away(event):
+        try:
+            is_unit_going_away = self.charm.is_unit_going_away(event)
+        except hookcmds.Error:
+            logger.info("Deferring snapshots cleanup")
+            event.defer()
+            return
+        if is_unit_going_away:
             logger.info("Unit is going away, skipping the snapshot configuration cleanup.")
             return
 
@@ -522,17 +541,17 @@ class SnapshotsEventsHandler(Object):
             logger.debug(
                 "Orchestrator %s still has units on the relation, "
                 "skipping snapshot configuration cleanup.",
-                event.relation.app.name,
+                event.app.name,
             )
             return
 
         orchestrators = self.charm.state.application.orchestrators
         main_app = orchestrators.main_app if orchestrators else None
-        if main_app and main_app.name != event.relation.app.name:
+        if main_app and main_app.name != event.app.name:
             logger.debug(
                 "Departed orchestrator %s is not the main orchestrator %s, "
                 "skipping snapshots configuration cleanup",
-                event.relation.app.name,
+                event.app.name,
                 main_app.name,
             )
             return
