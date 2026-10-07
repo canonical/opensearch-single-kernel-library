@@ -130,7 +130,7 @@ class TlsManager(BaseManager):
 
             if cert_issuer != ca_issuer:
                 return False
-        logger.info("All TLS resources are stored on disk and valid.")
+        logger.debug("All TLS resources are stored on disk and valid.")
         return True
 
     def read_stored_ca(self, alias: str = CA_ALIAS) -> str | None:
@@ -274,7 +274,6 @@ class TlsManager(BaseManager):
         if secret:
             key = secret.get("key") if secret.get("key") else None
             password = secret.get("key-password", None)
-
         if key is None:
             key = generate_private_key()
         else:

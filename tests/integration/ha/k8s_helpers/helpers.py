@@ -304,7 +304,7 @@ def pebble_patch_restart_delay(
     for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3)):
         with attempt:
             result = subprocess.run(
-                f"juju ssh --container opensearch {unit_name} lsof -ti:9200".split(),
+                f"juju ssh --container opensearch {unit_name} lsof -ti:9200 -sTCP:LISTEN".split(),
                 capture_output=True,
                 text=True,
                 stdin=subprocess.DEVNULL,

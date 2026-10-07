@@ -255,12 +255,13 @@ class PeerClusterEventsHandler(Object):
     def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster relation changed event."""
         logger.debug("Peer cluster relation changed: %s", event)
+
+        if not self.charm.unit.is_leader():
+            return
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Current cluster not ready. Deferring event.")
             event.defer()
-            return
-
-        if not self.charm.unit.is_leader():
             return
 
         if (

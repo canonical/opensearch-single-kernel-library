@@ -35,6 +35,9 @@ from opensearch_single_kernel.core.models import (
     S3RelData,
 )
 
+logging.getLogger("boto3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

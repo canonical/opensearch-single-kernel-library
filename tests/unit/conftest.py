@@ -1,8 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import socket
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 import yaml
@@ -13,14 +14,31 @@ from opensearch_single_kernel.charms.k8s import OpenSearchK8sCharm
 from opensearch_single_kernel.charms.vm import OpenSearchVMCharm
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
+    CONTAINER_NAME,
     GCS_RELATION,
     PEER_RELATION,
     S3_RELATION,
     TLS_RELATION,
     UPGRADE_RELATION,
+    DeploymentType,
+    StartMode,
+    State,
+)
+from opensearch_single_kernel.core.models import (
+    App,
+    DeploymentDescription,
+    DeploymentState,
+    PeerClusterConfig,
 )
 from tests.helpers import Substrate
-from tests.integration.conftest import ACTIONS, CONFIG, METADATA
+from tests.integration.conftest import (
+    ACTIONS,
+    CONFIG,
+    K8S_ACTIONS,
+    K8S_CONFIG,
+    K8S_METADATA,
+    METADATA,
+)
 from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S3_INFO
 
 
@@ -66,6 +84,22 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             "opensearch_single_kernel.managers.upgrades_k8s.UpgradesManagerK8s.reconcile_compatibility_matrix",
         )
 
+        # Unit tests should not reach the Kubernetes API
+        k8s_client = "opensearch_single_kernel.common.k8s.K8sClient"
+        mocker.patch(f"{k8s_client}.get_partition", return_value=0)
+        mocker.patch(f"{k8s_client}.set_partition")
+        mocker.patch(f"{k8s_client}.get_revision", return_value="revision-0")
+        mocker.patch(
+            f"{k8s_client}.list_revisions",
+            side_effect=lambda: {"opensearch/0": "revision-0"},
+        )
+        mocker.patch(f"{k8s_client}.check_if_deployed_without_trust")
+        mocker.patch(
+            "opensearch_single_kernel.core.state.ClusterState.fqdn_resolvable",
+            new_callable=PropertyMock,
+            return_value=True,
+        )
+
     # In K8s, the container hostname is the Pod name ("opensearch-0").
     # When running unit tests on a local machine, socket.gethostname() would
     # return the host machine name which breaks node.name-dependent logic.
@@ -103,10 +137,57 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
     return harness
 
 
+@pytest.fixture
+def patch_deployment_desc(mocker):
+    """Patch deployment_desc and the file-based internal-user operations it triggers"""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=DeploymentDescription(
+            config=PeerClusterConfig(
+                cluster_name="", init_hold=False, roles=[], profile="production"
+            ),
+            start=StartMode.WITH_GENERATED_ROLES,
+            pending_directives=[],
+            typ=DeploymentType.MAIN_ORCHESTRATOR,
+            app=App(model_uuid="model-uuid", name="opensearch"),
+            state=DeploymentState(value=State.ACTIVE),
+        ),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
+    )
+
+
 @pytest.fixture(autouse=True)
 def context(substrate):
-    charm_type = OpenSearchVMCharm if substrate == "vm" else OpenSearchK8sCharm
-    return testing.Context(charm_type=charm_type, config=CONFIG, meta=METADATA, actions=ACTIONS)
+    if substrate == "vm":
+        return testing.Context(
+            charm_type=OpenSearchVMCharm, config=CONFIG, meta=METADATA, actions=ACTIONS
+        )
+    return testing.Context(
+        charm_type=OpenSearchK8sCharm, config=K8S_CONFIG, meta=K8S_METADATA, actions=K8S_ACTIONS
+    )
+
+
+@pytest.fixture
+def containers(substrate) -> set[testing.Container]:
+    """Workload containers for a testing.State"""
+    if substrate == "vm":
+        return set()
+    return {testing.Container(CONTAINER_NAME, can_connect=True)}
+
+
+@pytest.fixture(autouse=True)
+def no_waits(mocker) -> None:
+    """Skip sleeps and network calls."""
+    mocker.patch("time.sleep")
+    mocker.patch("socket.create_connection", side_effect=ConnectionRefusedError)
+    mocker.patch("socket.gethostbyaddr", side_effect=socket.herror)
+    mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
 
 
 @pytest.fixture(autouse=True)

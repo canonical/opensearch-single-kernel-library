@@ -5,7 +5,9 @@ type: charm
 # Note: name, summary, and description are defined in metadata.yaml
 platforms:
   ubuntu@22.04:amd64:
+  ubuntu@22.04:arm64:
   ubuntu@24.04:amd64:
+  ubuntu@24.04:arm64:
 # Files implicitly created by charmcraft without a part:
 # - dispatch (https://github.com/canonical/charmcraft/pull/1898)
 # - manifest.yaml

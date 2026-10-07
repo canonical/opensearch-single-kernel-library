@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.constants import (
     HealthColors,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import OpenSearchCmdError, OpenSearchHttpError
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
@@ -68,7 +68,7 @@ def _mock_backup(
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     create_snapshot = mocker.patch(
@@ -84,7 +84,7 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
     _mock_backup(mocker)
 
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     # When
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -95,7 +95,7 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
 
 
 def test_create_backup_when_all_ok_then_success_result_is_returned(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -112,7 +112,7 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     # When
     context.run(context.on.action("create-backup"), st)
 
@@ -124,7 +124,7 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
 
 
 def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository_missing_error(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     _mock_backup(mocker)
@@ -141,6 +141,7 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
 
     # When
     st = testing.State(
+        containers=containers,
         leader=True,
         relations={s3_relation()},
     )
@@ -152,7 +153,9 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     patch_create_snapshot.assert_not_called()
 
 
-def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
+def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(
+    mocker, harness, context, containers
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
@@ -169,7 +172,7 @@ def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, h
     _mock_backup(mocker)
     s3_no_ca = {k: v for k, v in S3_CONN_INFO_WITH_CA.items() if k != "tls_ca_chain"}
     use_s3(mocker=mocker, info=s3_no_ca)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     # When
     context.run(context.on.action("create-backup"), st)
@@ -182,7 +185,7 @@ def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, h
 
 
 def test_list_backups_when_json_requested_then_json_is_returned(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -192,7 +195,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     snapshots = {
         "2025-01-01T10:00:00Z": {"state": "success", "indices": []},
         "2025-01-01T09:00:00Z": {"state": "failed", "indices": []},
@@ -211,7 +214,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
 
 
 def test_list_backups_when_table_requested_then_table_is_returned(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -220,7 +223,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     snapshots = {
         "2025-01-01T10:00:00Z": {"state": "success", "indices": []},
         "2025-01-01T09:00:00Z": {"state": "in_progress", "indices": []},
@@ -242,7 +245,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
 
 
 def test_list_backups_when_manager_raises_http_error_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -255,7 +258,7 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
         return_value={"snapshot": "2025-01-01T10:00:00Z", "state": "SUCCESS"},
     )
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     get_snapshot.side_effect = None
     original = OpenSearchClient.list_snapshots
@@ -277,25 +280,8 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
     assert "server error" in msg or "503" in msg
 
 
-def test_list_backups_when_not_leader_then_action_fails(harness, mocker, backend_setup, context):
-    # Given
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
-        return_value=True,
-    )
-    _mock_backup(mocker)
-    backend, rels = backend_setup
-
-    st = testing.State(leader=False, relations=rels)
-    # When
-    with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("list-backups", params={"output": "json"}), st)
-    # Assert
-    assert "leader" in err.value.message.lower()
-
-
-def test_restore_when_prereqs_missing_then_action_fails(
-    harness, mocker, backend_setup, monkeypatch, context
+def test_list_backups_when_not_leader_then_action_fails(
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -305,7 +291,26 @@ def test_restore_when_prereqs_missing_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
+    # When
+    with pytest.raises(testing.ActionFailed) as err:
+        context.run(context.on.action("list-backups", params={"output": "json"}), st)
+    # Assert
+    assert "leader" in err.value.message.lower()
+
+
+def test_restore_when_prereqs_missing_then_action_fails(
+    harness, mocker, backend_setup, monkeypatch, context, containers
+):
+    # Given
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
+        return_value=True,
+    )
+    _mock_backup(mocker)
+    backend, rels = backend_setup
+
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     mocker.patch(
         "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler._action_missing_pre_requisites",
@@ -322,7 +327,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
 
 
 def test_restore_when_snapshot_not_found_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -332,7 +337,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
         return_value=None,
@@ -345,7 +350,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
 
 
 def test_restore_when_get_snapshot_http_error_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -355,7 +360,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -379,6 +384,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
 )
 def test_restore_when_closing_indices_varies_then_paths_are_handled(
     context,
+    containers,
     harness,
     mocker,
     backend_setup,
@@ -395,7 +401,7 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -428,7 +434,7 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
 
 
 def test_restore_when_start_fails_then_action_fails_with_message(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -438,7 +444,7 @@ def test_restore_when_start_fails_then_action_fails_with_message(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -469,7 +475,7 @@ def test_restore_when_start_fails_then_action_fails_with_message(
 
 
 def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -483,7 +489,7 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     monkeypatch.setattr(
         "opensearch_single_kernel.common.client.OpenSearchClient.close_snapshot_indices_open_in_cluster",
@@ -503,7 +509,7 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
 
 
 def test_restore_when_http_error_on_close_indices_then_action_fails(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -513,7 +519,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -539,7 +545,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
 
 
 def test_restore_when_all_ok_then_health_apply_is_called(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -552,7 +558,7 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot.return_value = {
         "snapshot": "2025-01-01T10:00:00Z",
         "state": "SUCCESS",
@@ -583,7 +589,9 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     assert called["ok"]
 
 
-def test_restore_when_not_leader_then_action_fails(mocker, context, harness, backend_setup):
+def test_restore_when_not_leader_then_action_fails(
+    mocker, context, containers, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -592,7 +600,7 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=False, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -604,7 +612,9 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
     assert "leader" in err.value.message.lower()
 
 
-def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, backend_setup):
+def test_prereq_when_not_leader_then_action_fails(
+    context, containers, mocker, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -613,7 +623,7 @@ def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, back
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=False, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -624,7 +634,7 @@ def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, back
 
 
 def test_prereq_when_deployment_not_ready_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -647,7 +657,7 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
         return_value=object_storage_type,
     )
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -656,23 +666,34 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
     assert "deployment not ready" in err.value.message.lower()
 
 
-# TODO: Re-enable this test when upgrade is implemented
-@pytest.mark.skip(reason="Upgrade not implemented yet")
-def test_prereq_when_upgrade_in_progress_then_action_fails(self, monkeypatch):
-    st = testing.State(leader=True)
-    monkeypatch.setattr(
-        "src.charm.OpenSearchOperatorCharm.upgrade_in_progress",
-        property(lambda _self: True),
+def test_prereq_when_upgrade_in_progress_then_action_fails(
+    context, containers, mocker, harness, backend_setup
+):
+    # Given
+    _mock_backup(mocker)
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.in_progress",
+        new_callable=PropertyMock,
+        return_value=True,
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.is_compatible",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    backend, rels = backend_setup
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
+    # When
     with pytest.raises(testing.ActionFailed) as err:
-        self.ctx.run(self.ctx.on.action("create-backup"), st)
+        context.run(context.on.action("create-backup"), st)
 
+    # Assert
     assert "upgrade in-progress" in err.value.message.lower()
 
 
 def test_prereq_when_storage_relation_missing_then_action_fails(
-    context, mocker, harness, monkeypatch
+    context, containers, mocker, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -680,7 +701,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
         return_value=True,
     )
     _mock_backup(mocker)
-    st = testing.State(leader=True)
+    st = testing.State(containers=containers, leader=True)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -690,7 +711,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
 
 
 def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
-    mocker, context, harness, monkeypatch
+    mocker, context, containers, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -698,7 +719,9 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
         return_value=True,
     )
     _mock_backup(mocker)
-    st = testing.State(leader=True, relations={s3_relation(), azure_relation()})
+    st = testing.State(
+        containers=containers, leader=True, relations={s3_relation(), azure_relation()}
+    )
     # When
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -707,7 +730,7 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
 
 
 def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     is_repository_created = mocker.patch(
@@ -717,7 +740,7 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     is_repository_created.side_effect = [False, False]
     monkeypatch.setattr(
@@ -732,13 +755,13 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
 
 
 def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     def return_error(*_a, **_k):
         raise OpenSearchHttpError(response_text="precheck-failed", response_code=500)
@@ -758,7 +781,7 @@ def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
     "color", [HealthColors.RED, HealthColors.YELLOW_TEMP, HealthColors.UNKNOWN]
 )
 def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
-    context, harness, mocker, color
+    context, containers, harness, mocker, color
 ):
     # Given
     mocker.patch(
@@ -767,7 +790,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
     )
     _mock_backup(mocker)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
     mocker.patch(
         "opensearch_single_kernel.managers.health.HealthManager.get",
         return_value=color,
@@ -781,7 +804,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
     assert any(k in msg for k in ["red", "relocating", "unknown"])
 
 
-def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness):
+def test_prereq_when_snapshot_running_then_action_fails(context, containers, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -793,14 +816,14 @@ def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness
     )
     _mock_backup(mocker, backup_running_return_value=True)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
     assert "operation in progress" in err.value.message.lower()
 
 
-def test_prereq_when_restore_running_then_action_fails(context, mocker, harness):
+def test_prereq_when_restore_running_then_action_fails(context, containers, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -815,7 +838,7 @@ def test_prereq_when_restore_running_then_action_fails(context, mocker, harness)
     )
     _mock_backup(mocker, restore_running_return_value=True)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -1213,3 +1236,56 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
 
     assert object_storage.verify_gcs_credentials(cfg) is False
     blob.delete.assert_not_called()
+
+
+def _keytool(mocker, *aliases):
+    def run_cmd(cmd, *args, **kwargs):
+        if "-list" in cmd and "-alias s3-snapshots-gateway " in cmd:
+            raise OpenSearchCmdError(
+                cmd,
+                out="keytool error: java.lang.Exception: "
+                "Alias <s3-snapshots-gateway> does not exist\n",
+            )
+        if "-v -list" in cmd:
+            return mocker.Mock(out="".join(f"Alias name: {alias}\n" for alias in aliases))
+        return mocker.Mock(out="")
+
+    return run_cmd
+
+
+def _deleted_aliases(run_cmd):
+    commands = [call.args[0] for call in run_cmd.call_args_list]
+    return [cmd.split("-alias ")[1].split()[0] for cmd in commands if "-delete" in cmd]
+
+
+def test_remove_s3_ca_deletes_s3_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "ca-0", "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+
+    harness.charm.snapshots_manager.remove_s3_ca()
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+
+
+def test_store_s3_ca_deletes_old_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+    mocker.patch.object(
+        harness.charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False
+    )
+    store_ca_chain = mocker.patch("opensearch_single_kernel.managers.snapshots.store_ca_chain")
+
+    harness.charm.snapshots_manager.store_s3_ca(S3_CONN_INFO_WITH_CA["tls_ca_chain"])
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+    store_ca_chain.assert_called_once()
