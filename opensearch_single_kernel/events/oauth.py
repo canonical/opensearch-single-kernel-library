@@ -109,6 +109,10 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
+        if self.charm.state.has_other_relation(event.relation):
+            logger.info("A different OAuth relation exists, skipping cleanup")
+            return
+
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
