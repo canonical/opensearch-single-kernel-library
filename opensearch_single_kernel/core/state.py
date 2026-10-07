@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
-from ops import JujuVersion, Object, Relation, Unit
+from ops import JujuVersion, Object, Relation, Unit, hookcmds
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -155,6 +155,12 @@ class ClusterState(Object):
     def lock_relation(self) -> Relation | None:
         """Get Node Lock Peer Relation."""
         return self.model.get_relation(NODE_LOCK_RELATION)
+
+    @property
+    def unit_dying(self) -> bool:
+        """Whether this unit, or the whole application, is being removed."""
+        unit_goal = hookcmds.goal_state().units.get(self.model.unit.name)
+        return unit_goal is None or unit_goal.status == "dying"
 
     @property
     def tls_relation(self) -> Relation | None:
