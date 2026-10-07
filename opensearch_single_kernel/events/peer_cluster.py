@@ -12,7 +12,6 @@ from ops import (
     RelationChangedEvent,
     RelationDepartedEvent,
     RelationJoinedEvent,
-    hookcmds,
 )
 
 from opensearch_single_kernel.common.constants import (
@@ -431,19 +430,13 @@ class PeerClusterEventsHandler(Object):
         # recompute the deployment desc
         self._reconcile_deployment_desc_from_peer_cluster_data(data)
 
-    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):  # noqa: C901
+    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):
         """Handle when 'main/failover'-CMs leave the relation (app or relation removal)."""
         logger.debug("Peer cluster relation departed: %s", event)
         if not self.charm.unit.is_leader():
             return
 
-        try:
-            is_unit_going_away = self.charm.is_unit_going_away(event)
-        except hookcmds.Error:
-            logger.info("Deferring orchestrator cleanup")
-            event.defer()
-            return
-        if is_unit_going_away:
+        if self.charm.is_unit_going_away(event):
             logger.info("Unit is going away, keeping the registered orchestrators.")
             return
 
@@ -456,17 +449,10 @@ class PeerClusterEventsHandler(Object):
             return
 
         orchestrators = self.charm.state.application.orchestrators
-        # check the departed cluster which triggered this hook.
-        if event.relation.id == orchestrators.main_rel_id:
-            event_src_cluster_type = "main"
-        elif event.relation.id == orchestrators.failover_rel_id:
-            event_src_cluster_type = "failover"
-        else:
-            logger.debug(
-                "Relation %d is not a registered orchestrator, skipping cleanup.",
-                event.relation.id,
-            )
-            return
+        # check the departed cluster which triggered this hook
+        event_src_cluster_type = (
+            "main" if event.relation.id == orchestrators.main_rel_id else "failover"
+        )
 
         self.charm.peer_cluster_manager.delete_departed_orchestrator(
             event_src_cluster_type, orchestrators

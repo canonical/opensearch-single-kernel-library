@@ -210,10 +210,6 @@ class ClusterState(Object):
         """Check if the relation exists"""
         return bool(self.model.get_relation(relation_name))
 
-    def has_other_relation(self, relation: Relation) -> bool:
-        """Check if another relation exists on the endpoint of given relation."""
-        return any(rel.id != relation.id for rel in self.model.relations[relation.name])
-
     @property
     def upgrade_relation(self) -> Relation | None:
         """Get peer upgrade relation."""

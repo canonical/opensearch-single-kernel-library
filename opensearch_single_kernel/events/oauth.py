@@ -11,7 +11,6 @@ from ops import (
     Object,
     RelationBrokenEvent,
     RelationCreatedEvent,
-    hookcmds,
 )
 
 from opensearch_single_kernel.common.constants import (
@@ -110,22 +109,12 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handler for `relation_broken` event."""
-        if self.charm.state.has_other_relation(event.relation):
-            logger.info("A different OAuth relation exists, skipping cleanup")
-            return
-
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
-        try:
-            is_unit_going_away = self.charm.is_unit_going_away(event)
-        except hookcmds.Error:
-            logger.info("Deferring OAuth cleanup.")
-            event.defer()
-            return
-        if is_unit_going_away:
+        if self.charm.is_unit_going_away(event):
             logger.info("Unit is going away, keeping the OAuth configuration.")
             return
 

@@ -25,7 +25,6 @@ from ops import (
     StopEvent,
     StorageDetachingEvent,
     UpdateStatusEvent,
-    hookcmds,
 )
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
@@ -430,17 +429,12 @@ class OpenSearchEventsHandler(Object):
         ):
             # If update status runs after relation-broken for clients in dying leader unit
             # users would be wrongly considered lingering and deleted
-            try:
-                is_unit_going_away = self.charm.is_unit_going_away(event)
-            except hookcmds.Error:
-                logger.info("Skipping `remove_lingering_relation_users_and_roles`")
+            if self.charm.is_unit_going_away(event):
+                logger.info(
+                    "Unit is going away, skipping `remove_lingering_relation_users_and_roles`."
+                )
             else:
-                if is_unit_going_away:
-                    logger.info(
-                        "Unit is going away, skipping `remove_lingering_relation_users_and_roles`."
-                    )
-                else:
-                    self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+                self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
