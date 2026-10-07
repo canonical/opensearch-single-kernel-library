@@ -693,7 +693,7 @@ class TlsManager(BaseManager):
         try:
             return self.update_request_ca_bundle()
         except OpenSearchFileOperationError as e:
-            logger.error("Error removing old CA during rotation finalization: %s", e)
+            logger.error("Error updating the request CA during rotation finalization: %s", e)
             return False
 
     def get_unit_certificates(self) -> dict[CertType, str]:
