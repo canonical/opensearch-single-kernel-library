@@ -950,12 +950,6 @@ class ClusterManager(BaseManager):
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
-        try:
-            user_roles = self._user_config().roles
-        except ValidationError:
-            status_list.append(PeerClusterStatuses.INVALID_ROLES.value)
-            return None
-
         if not (deployment_desc := self.state.application.deployment_desc):
             return None
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
@@ -970,6 +964,11 @@ class ClusterManager(BaseManager):
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
         # Validate current juju `roles` config (DPE #75).
+        try:
+            user_roles = self._user_config().roles
+        except ValidationError:
+            status_list.append(PeerClusterStatuses.INVALID_ROLES.value)
+            return None
         if "cluster_manager" in user_roles and "voting_only" in user_roles:
             status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
 
