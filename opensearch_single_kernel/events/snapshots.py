@@ -700,6 +700,13 @@ class SnapshotsEventsHandler(Object):
         if not (object_storage_type := self.charm.state.storage_type):
             return
 
+        # Conflict
+        if object_storage_type == ObjectStorageType.CONFLICT:
+            logger.warning(
+                "Cannot restore keystore credentials: more than one object storage integrators integrated."
+            )
+            return
+
         # large deployments (non main orchestrator apps): credentials come from the peer cluster
         if object_storage_type in (
             ObjectStorageType.S3_PCLUSTER,
@@ -709,13 +716,6 @@ class SnapshotsEventsHandler(Object):
             credentials, tls_ca_chain = self._credentials_from_peer_cluster()
             if credentials:
                 self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
-            return
-
-        # Conflict
-        if object_storage_type == ObjectStorageType.CONFLICT:
-            logger.warning(
-                "Cannot restore keystore credentials: more than one object storage integrators integrated."
-            )
             return
 
         # Simple deployments or main orchestrator
