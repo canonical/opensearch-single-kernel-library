@@ -510,8 +510,9 @@ class ClusterManager(BaseManager):
 
     def get_nodes(self, use_localhost: bool) -> list[Node]:
         """Fetch the list of nodes of the cluster, depending on the requester."""
-        if self.state.planned_units == 0 and not self.state.application.deployment_desc:
-            # This app is going away and the -broken event already happened
+        if not self.state.application.deployment_desc:
+            # Either the app(or leader-unit) is going away and the
+            # peer relation is already gone, or the unit hasn't started yet.
             return []
 
         # This means it's the first unit on the cluster.
