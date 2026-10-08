@@ -956,6 +956,7 @@ class ClusterManager(BaseManager):
             status_list.append(PeerClusterStatuses.INVALID_ROLES.value)
             return None
 
+        # Validate current juju `roles` config (DPE #75).
         if "cluster_manager" in user_roles and "voting_only" in user_roles:
             status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
 
