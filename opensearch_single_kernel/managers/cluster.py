@@ -973,7 +973,6 @@ class ClusterManager(BaseManager):
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
-        # Validate current juju `roles` config (DPE #75).
 
         # Flag forbidden role removals against last applied roles.
         prev_roles = set(deployment_desc.config.roles or [])
