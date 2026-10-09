@@ -280,6 +280,12 @@ class PeerClusterStatuses(Enum):
         check="Role configuration for independent start.",
         action="Adjust the roles config to include a startable role set.",
     )
+    INVALID_ROLES = StatusObject(
+        status="blocked",
+        message="Invalid roles provided in config.",
+        check="Config roles are valid OpenSearch roles.",
+        action="Fix the `roles` config option value, refer to `juju config <app>` for the full list of supported roles.",
+    )
     INVALID_CM_AND_VOTING_ONLY_ROLES = StatusObject(
         status="blocked",
         message="cluster_manager and voting_only roles cannot be both set on the same node.",

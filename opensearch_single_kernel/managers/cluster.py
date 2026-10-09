@@ -117,7 +117,11 @@ class ClusterManager(BaseManager):
               re-broadcasted.
         """
         logger.debug("Running peer cluster manager reconcile function")
-        user_config = self._user_config()
+        try:
+            user_config = self._user_config()
+        except ValidationError as e:
+            logger.error("Invalid roles config: %s", e)
+            return False
         if not (current_deployment_desc := self.state.application.deployment_desc):
             # new cluster
             deployment_desc = self._new_cluster_setup(user_config)
@@ -947,6 +951,16 @@ class ClusterManager(BaseManager):
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
+        try:
+            user_roles = self._user_config().roles
+        except ValidationError:
+            status_list.append(PeerClusterStatuses.INVALID_ROLES.value)
+            return None
+
+        # Validate current juju `roles` config (DPE #75).
+        if "cluster_manager" in user_roles and "voting_only" in user_roles:
+            status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
+
         if not (deployment_desc := self.state.application.deployment_desc):
             return None
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
@@ -960,10 +974,6 @@ class ClusterManager(BaseManager):
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
 
-        # Validate current juju `roles` config (DPE #75).
-        user_roles = self._user_config().roles
-        if "cluster_manager" in user_roles and "voting_only" in user_roles:
-            status_list.append(PeerClusterStatuses.INVALID_CM_AND_VOTING_ONLY_ROLES.value)
 
         # Flag forbidden role removals against last applied roles.
         prev_roles = set(deployment_desc.config.roles or [])
