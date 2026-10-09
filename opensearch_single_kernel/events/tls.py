@@ -296,6 +296,26 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
+        if not old_ca_present:
+            if not admin_secrets.get("cert"):
+                if not self.charm.tls_manager.update_request_ca_bundle():
+                    event.defer()
+                    return
+
+            # while the old CA is still in the trust store the fleet has not reloaded the new
+            # one yet: external clients only get it in finalize_ca_certs_rotation()
+            for external_client in self.charm.state.external_clients:
+                try:
+                    external_client.tls_ca = self.charm.state.secrets.get_object(
+                        Scope.APP, CertType.APP_ADMIN.val
+                    )["chain"]
+                except KeyError as e:
+                    # As we are setting the ca_chain, it should not be likely to happen a KeyError
+                    # at update_certs. This logic is left for a very corner case.
+                    logger.error("Failed to update relation TLS info: missing key %s", str(e))
+                    event.defer()
+                    return
+
         if admin_secrets.get("chain") and not old_ca_present:
             if not self.charm.tls_manager.update_request_ca_bundle():
                 event.defer()
@@ -312,18 +332,6 @@ class TLSEventsHandler(Object):
                     return
             else:
                 logger.info("Admin certificate not available yet. Waiting for next events.")
-                event.defer()
-                return
-
-        for external_client in self.charm.state.external_clients:
-            try:
-                external_client.tls_ca = self.charm.state.secrets.get_object(
-                    Scope.APP, CertType.APP_ADMIN.val
-                )["chain"]
-            except KeyError as e:
-                # As we are setting the ca_chain, it should not be likely to happen a KeyError at
-                # update_certs. This logic is left for a very corner case.
-                logger.error("Failed to update relation TLS info: missing key %s", str(e))
                 event.defer()
                 return
 

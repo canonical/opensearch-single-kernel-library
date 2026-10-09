@@ -216,6 +216,7 @@ class SnapshotsEventsHandler(Object):
                 "A different %s relation exists, skipping snapshots cleanup",
                 event.relation.name,
             )
+            self._set_credentials_cleanup_failed_status(False)
             return
 
         if self.charm.is_unit_going_away(event):
@@ -533,7 +534,7 @@ class SnapshotsEventsHandler(Object):
 
         orchestrators = self.charm.state.application.orchestrators
         main_app = orchestrators.main_app if orchestrators else None
-        if main_app and main_app.name != event.app.name:
+        if main_app and orchestrators.main_rel_id != event.relation.id:
             logger.debug(
                 "Departed orchestrator %s is not the main orchestrator %s, "
                 "skipping snapshots configuration cleanup",

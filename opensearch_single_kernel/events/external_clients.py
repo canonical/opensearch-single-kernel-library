@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING
 
 from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
 
-from opensearch_single_kernel.common.constants import CLIENT_RELATION
+from opensearch_single_kernel.common.constants import CLIENT_RELATION, OLD_CA_ALIAS
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchUserMgmtError,
 )
@@ -94,6 +95,16 @@ class ExternalClientsEventsHandler(Object):
                 event.index,
                 event.relation.id,
             )
+            return
+
+        try:
+            if self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS):
+                logger.debug("CA rotation in progress. Deferring index requested event.")
+                event.defer()
+                return
+        except OpenSearchFileOperationError as e:
+            logger.error("Failed to read stored CA: %s", str(e))
+            event.defer()
             return
 
         self.charm.status_handler.set_running_status(
