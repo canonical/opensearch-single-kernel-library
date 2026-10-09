@@ -717,6 +717,14 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        try:
+            self.charm.snapshots_events.restore_stored_credentials()
+            self.charm.notifications_events.restore_keystore_credentials()
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Failed to restore keystore credentials: %s", e)
+            event.defer()
+            return
+
         # Configure OpenSearch Users
         if not self.charm.unit.is_leader():
             try:

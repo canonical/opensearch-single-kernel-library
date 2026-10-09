@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     SMTP_SECRET_LABEL,
     DeploymentType,
     Scope,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
@@ -252,6 +253,25 @@ class NotificationsEvents(Object):
         if self.charm.state.is_peer_cluster_provider():
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
                 event.defer()
+
+    def restore_keystore_credentials(self) -> None:
+        """Restore the SMTP keystore entries lost with the K8s container filesystem."""
+        if self.charm.substrate != Substrates.K8S:
+            return
+
+        app_plugins = self.charm.state.application.plugin_config_info
+        for label, unit_plugin in self.charm.state.server.plugin_config_info.items():
+            app_plugin = app_plugins.get(label)
+            if not (unit_plugin.cleanup.get("keys") and app_plugin and app_plugin.secret_id):
+                continue
+
+            secret = self.charm.state.secrets.get_tracked_secret(
+                app_plugin.secret_id, Scope.APP, label
+            )
+            if secret and (
+                plugin_config := decode_plugin_secret_content(secret.get_content(), label)
+            ):
+                self.charm.keystore_manager.put_entries(plugin_config.get("keys") or {})
 
     def _set_smtp_configuration_error_status(self, component: str, relation_id: int) -> None:
         """Cache blocked status for a failed SMTP apply (apply path only)."""
