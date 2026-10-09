@@ -197,13 +197,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         if departing_unit is not None and departing_unit == self.unit:
             return True
 
-        goal_state = ops.hookcmds.goal_state()
-
-        unit_goal = goal_state.units.get(self.unit.name)
-        if unit_goal is None or unit_goal.status == "dying":
-            return True
-
-        return False
+        return self.state.unit_dying
 
     def stop_opensearch(self, *, restart: bool = False) -> None:
         """Stop OpenSearch service."""

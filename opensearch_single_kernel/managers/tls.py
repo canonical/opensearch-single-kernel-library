@@ -875,6 +875,7 @@ class TlsManager(BaseManager):
             if (
                 self.state.application.deployment_desc
                 and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                and not self.state.unit_dying
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
