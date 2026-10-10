@@ -14,14 +14,107 @@ from ops import testing
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
+    DeploymentType,
     HealthColors,
     ObjectStorageType,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError, OpenSearchHttpError
+from opensearch_single_kernel.core.models import PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+
+@pytest.mark.parametrize(
+    "deployment_type", [DeploymentType.OTHER, DeploymentType.FAILOVER_ORCHESTRATOR]
+)
+@pytest.mark.parametrize(
+    "storage_credentials, expected_type",
+    [
+        ({}, None),
+        ({"s3": {}, "azure": {}, "gcs": {}}, None),
+        ({"s3": None, "azure": None, "gcs": None}, None),
+        ({"s3": {"access-key": "access"}}, None),
+        ({"azure": {"storage-account": "account"}}, None),
+        ({"gcs": {"secret-key": ""}}, None),
+        (
+            {"s3": {"access-key": "access", "secret-key": "secret"}},
+            ObjectStorageType.S3_PCLUSTER,
+        ),
+        (
+            {"azure": {"storage-account": "account", "secret-key": "secret"}},
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        (
+            {
+                "s3": None,
+                "azure": {"storage-account": "account", "secret-key": "secret"},
+                "gcs": None,
+            },
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        ({"gcs": {"secret-key": '{"project_id": "test"}'}}, ObjectStorageType.GCS_PCLUSTER),
+        (
+            {
+                "s3": {"access-key": "access"},
+                "azure": {"storage-account": "account", "secret-key": "secret"},
+            },
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        (
+            {
+                "azure": {"storage-account": "account"},
+                "gcs": {"secret-key": '{"project_id": "test"}'},
+            },
+            ObjectStorageType.GCS_PCLUSTER,
+        ),
+    ],
+)
+def test_peer_storage_type_matches_populated_credentials(
+    harness, mocker, deployment_type, storage_credentials, expected_type
+):
+    """Unconfigured peer backends must remain absent when selecting credentials."""
+    data = PeerClusterRelData.peer_cluster_rel_data_from_str(
+        harness.charm.state.secrets,
+        json.dumps(
+            {
+                "cluster_name": "test",
+                "cm_nodes": [],
+                "deployment_desc": None,
+                "credentials": {
+                    "admin_username": "admin",
+                    "admin_password": "password",
+                    "admin_password_hash": "hash",
+                    "kibana_password": "password",
+                    "kibana_password_hash": "hash",
+                    **storage_credentials,
+                },
+            }
+        ),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["data-only"].model_copy(
+            update={"typ": deployment_type}
+        ),
+    )
+    mocker.patch.object(
+        harness.charm.state, "get_rel_data_from_main_orchestrator", return_value=data
+    )
+
+    backend = expected_type.value.removesuffix("-pcluster") if expected_type else None
+    for name in ("s3", "azure", "gcs"):
+        if name != backend:
+            assert getattr(data.credentials, name) is None
+
+    assert harness.charm.state.storage_type == expected_type
+    credentials, _ = harness.charm.snapshots_events._credentials_from_peer_cluster()
+    if expected_type is None:
+        assert credentials is None
+    else:
+        assert credentials == getattr(data.credentials, backend)
 
 
 def _mock_backup(

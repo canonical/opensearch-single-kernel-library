@@ -742,7 +742,8 @@ class PeerClusterRelData(Model):
                     peek_secrets=peek_secrets,
                 )
         else:
-            credentials["s3"] = {}
+            credentials["s3"] = None
+
         if (
             credentials.get("azure")
             and credentials["azure"].get("storage-account")
@@ -759,16 +760,16 @@ class PeerClusterRelData(Model):
                 peek_secrets=peek_secrets,
             )
         else:
-            credentials["azure"] = {}
+            credentials["azure"] = None
 
-        if credentials.get("gcs", {}).get("secret-key"):
+        if credentials.get("gcs") and credentials["gcs"].get("secret-key"):
             credentials["gcs"]["secret-key"] = secrets.resolve_credential(
                 credentials["gcs"]["secret-key"],
                 content_key="gcs-secret-key",
                 peek_secrets=peek_secrets,
             )
         else:
-            credentials["gcs"] = {}
+            credentials["gcs"] = None
 
         return PeerClusterRelData.from_dict(content)
 
