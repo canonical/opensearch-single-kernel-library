@@ -33,7 +33,10 @@ from opensearch_single_kernel.common.constants import (
     ObjectStorageType,
     Substrates,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpError,
+    OpenSearchRestoreIndexConflictError,
+)
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
@@ -358,15 +361,24 @@ class OpenSearchClient:
             "include_global_state": False,
         }
 
-        restore_resp = self.request(
-            "POST",
-            f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
-            payload=payload,
-            alt_hosts=alt_hosts,
-            timeout=10 * 60,
-            retries=3,
-            wait_strategy=wait_fixed(3),
-        )
+        try:
+            restore_resp = self.request(
+                "POST",
+                f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
+                payload=payload,
+                alt_hosts=alt_hosts,
+                timeout=10 * 60,
+            )
+        except OpenSearchHttpError as exc:
+            # This conflict is rejected before the restore starts.
+            match exc.response_body:
+                case {"error": {"type": "snapshot_restore_exception", "reason": str(reason)}} if (
+                    "because an open index with same name already exists in the cluster." in reason
+                ):
+                    raise OpenSearchRestoreIndexConflictError(
+                        response_text=exc.response_text, response_code=exc.response_code
+                    ) from exc
+            raise
         logger.info("Restore of snapshot '%s' response: %s", snapshot_id, restore_resp)
 
         # this only serves as documentation and should always be true if no previous HTTP error

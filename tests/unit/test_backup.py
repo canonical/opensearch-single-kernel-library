@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import json
+import re
 from unittest.mock import Mock, PropertyMock
+from urllib.parse import urlsplit
 
 import pytest
+import requests
+import responses
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 from botocore.exceptions import ClientError
 from google.api_core.exceptions import Conflict, Forbidden
@@ -524,6 +528,147 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
             context.on.action("restore", params={"backup-id": "2025-01-01T10:00:00Z"}),
             st,
         )
+
+
+def _restore_response(state, snapshot, conflict):
+    """Simulate restore submission, including a writer racing with index closure."""
+    state["restore_requests"] += 1
+    if state["failure"] == "timeout":
+        # The restore was accepted, but its response never reached the charm.
+        state["restored"] = list(snapshot["indices"])
+        raise requests.Timeout("restore response timed out")
+    if state["failure"] in ("shards", "auth"):
+        status = 500 if state["failure"] == "shards" else 403
+        return status, {
+            "error": {
+                "type": "snapshot_restore_exception" if status == 500 else "security_exception",
+                "reason": "shard count mismatch" if status == 500 else "access denied",
+            },
+            "status": status,
+        }
+    # A background writer creates a snapshot target after the inventory.
+    if state["restore_requests"] == 1 or state["failure"] == "conflict":
+        state["indices"]["top_queries"] = "open"
+    if any(state["indices"].get(name) == "open" for name in snapshot["indices"]):
+        return 500, conflict
+    state["restored"] = list(snapshot["indices"])
+    return 200, {"snapshot": {"snapshot": "S"}}
+
+
+@pytest.fixture
+def restore_race(harness, mocker, backend_setup):
+    """Simulate OpenSearch HTTP responses while exercising the real restore flow."""
+    _mock_backup(mocker)
+    backend, relations = backend_setup
+    snapshot = {"snapshot": "S", "state": "SUCCESS", "indices": ["user-index", "top_queries"]}
+    mocker.patch.object(OpenSearchClient, "get_snapshot", return_value=snapshot)
+    mocker.patch.object(OpenSearchClient, "is_snapshots_repository_created", return_value=True)
+    state = {
+        "failure": None,
+        "indices": {"user-index": "open", "unrelated-index": "open"},
+        "closes": [],
+        "restore_requests": 0,
+        "restored": [],
+    }
+    conflict = {
+        "error": {
+            "type": "snapshot_restore_exception",
+            "reason": "[repo:S/id] cannot restore index [top_queries] because an open index "
+            "with same name already exists in the cluster. Either close or delete the "
+            "existing index or restore the index under a different name by providing "
+            "a rename pattern and replacement name",
+        },
+        "status": 500,
+    }
+
+    def respond(request):
+        path = urlsplit(request.url).path
+        status = 200
+        if path == "/_cluster/state":
+            body = {
+                "metadata": {
+                    "indices": {name: {"state": value} for name, value in state["indices"].items()}
+                }
+            }
+        elif path == "/_cluster/health":
+            body = {"indices": {name: {"status": "green"} for name in state["indices"]}}
+        elif path.endswith("/_close"):
+            names = path.removeprefix("/").removesuffix("/_close").split(",")
+            state["closes"].append(names)
+            for name in names:
+                state["indices"][name] = "close"
+            body = {"acknowledged": True, "shards_acknowledged": True}
+        elif path.endswith("/_restore"):
+            status, body = _restore_response(state, snapshot, conflict)
+        elif path == "/_cat/recovery":
+            if state["failure"] == "recovery":
+                # Even this error shape must not restart an accepted restore.
+                status, body = 500, conflict
+            else:
+                body = [
+                    {
+                        "type": "snapshot",
+                        "repository": f"{backend}-repository",
+                        "snapshot": "S",
+                        "index": name,
+                        "stage": "done",
+                    }
+                    for name in state["restored"]
+                ]
+        else:
+            raise AssertionError(
+                "Unexpected restore request: %s %s" % (request.method, request.url)
+            )
+        return status, {"Content-Type": "application/json"}, json.dumps(body)
+
+    with responses.RequestsMock() as http:
+        for method in (responses.GET, responses.POST):
+            http.add_callback(method, re.compile(r"https://[^/]+/.*"), callback=respond)
+        yield state, relations
+
+
+def test_restore_rechecks_indices_after_conflict(context, containers, restore_race):
+    """A target created after inventory is closed before resubmitting restore."""
+    state, relations = restore_race
+    context.run(
+        context.on.action("restore", params={"backup-id": "S"}),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert context.action_results == {"restored-backup-id": "S", "status": "success"}
+    assert state["restored"] == ["user-index", "top_queries"]
+    assert state["closes"] == [["user-index"], ["top_queries"]]
+    assert state["indices"]["unrelated-index"] == "open"
+    assert state["restore_requests"] == 2
+
+
+@pytest.mark.parametrize(
+    "failure, expected_requests, expected_closes, message",
+    [
+        ("conflict", 3, 3, "rejected after 3 attempts"),
+        ("timeout", 1, 1, "Check restore progress before retrying"),
+        ("shards", 1, 1, "shard count mismatch"),
+        ("auth", 1, 1, "access denied"),
+        ("recovery", 2, 2, "Check restore progress before retrying"),
+    ],
+)
+def test_restore_failure_does_not_restart_unknown_or_accepted_restore(
+    context, containers, restore_race, failure, expected_requests, expected_closes, message
+):
+    """Only explicit POST conflicts retry; other failures reach the action result."""
+    state, relations = restore_race
+    state["failure"] = failure
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("restore", params={"backup-id": "S"}),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert message in error.value.message
+    assert state["restore_requests"] == expected_requests
+    assert len(state["closes"]) == expected_closes
+    if failure == "conflict":
+        assert "cannot restore index [top_queries]" in error.value.message
+    if failure in ("timeout", "recovery"):
+        assert state["restored"] == ["user-index", "top_queries"]
 
 
 def test_restore_when_start_fails_then_action_fails_with_message(

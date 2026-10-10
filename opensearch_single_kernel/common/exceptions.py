@@ -55,6 +55,10 @@ class OpenSearchHttpError(OpenSearchError):
         super().__init__(message)
 
 
+class OpenSearchRestoreIndexConflictError(OpenSearchHttpError):
+    """Restore was rejected because a target index is open."""
+
+
 class OpenSearchHAError(OpenSearchError):
     """Exception thrown when the HA of the OpenSearch charm is violated."""
 
