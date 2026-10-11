@@ -5,6 +5,10 @@
 
 from unittest.mock import PropertyMock, call, patch
 
+import pytest
+from ops import LeaderElectedEvent
+from ops.pebble import APIError
+
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
 )
@@ -85,6 +89,89 @@ def test_on_leader_elected(harness, mocker):
         any_order=True,
     )
     set_running_status.assert_not_called()
+
+
+@pytest.mark.parametrize("security_index_initialised", [False, True])
+def test_on_leader_elected_workload_unavailable(harness, mocker, security_index_initialised):
+    """Leader election defers before operational work if the workload is unavailable."""
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    harness.charm.state.application.is_security_index_initialised = security_index_initialised
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        return_value=deployment_descriptions["ok"],
+        new_callable=PropertyMock,
+    )
+    mocker.patch.object(
+        type(harness.charm.workload),
+        "workload_present",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    purge = mocker.patch.object(
+        harness.charm.internal_users_manager, "purge_initial_default_users"
+    )
+    put_user = mocker.patch.object(
+        harness.charm.internal_users_manager, "put_or_update_internal_user_leader"
+    )
+    is_node_up = mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    event = mocker.Mock(spec=LeaderElectedEvent)
+
+    harness.charm.opensearch_events._on_leader_elected(event)
+
+    event.defer.assert_called_once()
+    is_node_up.assert_not_called()
+    purge.assert_not_called()
+    put_user.assert_not_called()
+    assert not harness.charm.state.application.is_admin_user_initialized
+
+
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize("operation", ["list_files", "pull", "push"])
+def test_on_leader_elected_filesystem_access_denied(harness, mocker, caplog, operation):
+    """A ready container can still reject file operations without resetting credentials."""
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        return_value=deployment_descriptions["ok"],
+        new_callable=PropertyMock,
+    )
+    container = harness.charm.workload.container
+    path = str(harness.charm.workload.paths.conf / "opensearch-security/internal_users.yml")
+    content = "_meta:\n  type: internalusers\nadmin:\n  hash: existing-hash\n"
+    container.push(path, content, make_dirs=True)
+    event = mocker.Mock(spec=LeaderElectedEvent)
+
+    with patch.object(
+        container, operation, side_effect=APIError({}, 403, "Forbidden", "access denied")
+    ):
+        # Repeated denials must remain visible and must not enter user initialization.
+        for _ in range(2):
+            harness.charm.opensearch_events._on_leader_elected(event)
+
+    assert event.defer.call_count == 2
+    assert (
+        caplog.text.count("An error occurred while purging initial default users: access denied")
+        == 2
+    )
+    assert not harness.charm.state.application.is_admin_user_initialized
+    assert harness.charm.state.application.get_user_password("admin") is None
+    with container.pull(path) as file:
+        assert file.read() == content
+
+    # Once file access recovers, the same deferred bootstrap can complete.
+    harness.charm.opensearch_events._on_leader_elected(event)
+    assert event.defer.call_count == 2
+    assert harness.charm.state.application.is_admin_user_initialized
+    password = harness.charm.state.application.get_user_password("admin")
+    assert password
+
+    # Further bootstrap replays must reuse the credentials already stored in Juju.
+    harness.charm.opensearch_events._on_leader_elected(event)
+    assert harness.charm.state.application.get_user_password("admin") == password
 
 
 def test_on_leader_elected_index_initialised(harness, mocker):

@@ -573,6 +573,11 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.workload.workload_present:
+            logger.debug("Workload is not ready; deferring leader election.")
+            event.defer()
+            return
+
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
             if not self.charm.cluster_manager.opensearch_client.is_node_up():

@@ -202,16 +202,11 @@ class K8sWorkload(BaseWorkload):
         - Uses system Java at /usr/lib/jvm/java-21-openjdk-amd64 (JAVA_HOME is set explicitly)
         - Runs OpenSearch as a non-root user/group defined in the Pebble layer
         """
-        try:
-            # The K8s image exposes the OpenSearch launcher directly as `opensearch`.
-            layer = self._build_pebble_layer()
-            self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
+        # The K8s image exposes the OpenSearch launcher directly as `opensearch`.
+        layer = self._build_pebble_layer()
+        self.container.add_layer(OPENSEARCH_PEBBLE_SERVICE_NAME, layer, combine=True)
 
-            logger.info("Configured pebble plan for %s service", OPENSEARCH_PEBBLE_SERVICE_NAME)
-
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.warning("Failed to configure pebble plan: %s", e)
-            # this might be called before container is ready
+        logger.info("Configured pebble plan for %s service", OPENSEARCH_PEBBLE_SERVICE_NAME)
 
     def _build_pebble_layer(self) -> Layer:
         """Build Pebble layer for OpenSearch service."""
@@ -254,13 +249,13 @@ class K8sWorkload(BaseWorkload):
         errors: str | None = None,
         suffix: str | None = None,
     ) -> Generator[PathProtocol, None, None]:
-        """Create a temporary file in the container and return the file path.
+        """Create a temporary file on the supplied path's filesystem and return its path.
 
         Args:
             mode: file mode
             data: Optional string data to write to the file.
             encoding: encoding for data writing (defaults to utf-8).
-            dir: Optional directory path.
+            dir: Optional local or container directory path; defaults to the workload temp path.
             delete: If True, delete the file when context exits.
             errors: Error handling mode
             suffix: Optional suffix to append to filename.
@@ -269,7 +264,7 @@ class K8sWorkload(BaseWorkload):
             PathProtocol: Path object representing the temporary file.
 
         Raises:
-            PebbleError: if file operations fail.
+            OpenSearchFileOperationError: if directory creation or writing the file fails.
         """
         # PathProtocol exposes text operations.
         temp_dir_path = dir or self.paths.tmp
@@ -285,7 +280,7 @@ class K8sWorkload(BaseWorkload):
 
         try:
             if data is not None:
-                file_path.write_text(data)
+                self.write_text(data, file_path)
             yield file_path
         finally:
             if not delete:
