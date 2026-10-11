@@ -7,7 +7,8 @@
 
 import logging
 
-from ops.model import Application, Relation
+from ops import SecretNotFoundError
+from ops.model import Application, ModelError, Relation
 from pydantic import ValidationError
 
 from opensearch_single_kernel.core.models import (
@@ -20,6 +21,8 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 
 logger = logging.getLogger(__name__)
+
+REQUESTED_ENTITY_SECRET = "requested-entity-secret"
 
 
 class ExternalOpenSearchClient(RelationState):
@@ -147,16 +150,52 @@ class ExternalOpenSearchClient(RelationState):
             return None
 
     def get_requested_entity(self) -> ExternalClientRequestedEntity | None:
-        """Retrieve and validate entity from requested entity secret using model.
+        """Retrieve and validate the entity requested on this relation.
+
+        The entity is never accepted in plain text: it is either read from the Juju secret shared
+        by the requirer or, in cross-model relations where requirer secrets cannot be shared,
+        from the content that was encrypted with the encryption key of this relation.
 
         If content is invalid or absent the None is returned and error is logged.
         """
-        if not (requested_entity := self.relation_data.get("requested-entity-secret")):
+        if not (requested_entity := self.relation_data.get(REQUESTED_ENTITY_SECRET)):
             logger.info(
                 "No requested entities secret provided for GROUP requirer relation %d",
                 self.relation.id,
             )
             return None
+
+        if requested_entity.startswith("secret:"):
+            try:
+                content = self.data_interface._model.get_secret(id=requested_entity).get_content(
+                    refresh=True
+                )
+            except (SecretNotFoundError, ModelError) as e:
+                logger.error(
+                    "Cannot read requested entities secret for requirer relation %d: %s",
+                    self.relation.id,
+                    e,
+                )
+                return None
+            if not (username := content.get("entity-name")):
+                logger.error(
+                    "Invalid requested entities secret content for requirer relation %d",
+                    self.relation.id,
+                )
+                return None
+            return ExternalClientRequestedEntity(
+                username=username, password=content.get("password", "None")
+            )
+
+        raw_databag = self.relation.data.get(self.relation.app, {})
+        if requested_entity == raw_databag.get(REQUESTED_ENTITY_SECRET):
+            # not a secret and not decrypted by the data interface: sent in plain text
+            logger.error(
+                "Rejecting requested entity sent in plain text on requirer relation %d",
+                self.relation.id,
+            )
+            return None
+
         requested_entity = requested_entity.split(":", maxsplit=1)
         if len(requested_entity) != 2:
             logger.error(

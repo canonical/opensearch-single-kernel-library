@@ -70,8 +70,44 @@ def opensearch_client(mocker) -> MagicMock:
     return client
 
 
+def _requested_entity_client(resolved, raw=None, secret_content=None):
+    """Build a client whose requested entity resolves to `resolved` from the `raw` databag."""
+    relation_data = {"requested-entity-secret": resolved} if resolved else {}
+    relation = MagicMock(id=1)
+    relation.data.get.return_value = {"requested-entity-secret": raw} if raw else {}
+    data_interface = MagicMock(as_dict=MagicMock(return_value=relation_data))
+    data_interface._model.get_secret.return_value.get_content.return_value = secret_content
+    return ExternalOpenSearchClient(
+        relation=relation,
+        data_interface=data_interface,
+        component=MagicMock(),
+        relation_name=CLIENT_RELATION,
+    )
+
+
 @pytest.mark.parametrize(
     "secret_content, expected",
+    [
+        (
+            {"entity-name": "alice", "password": "secret"},
+            ExternalClientRequestedEntity("alice", "secret"),
+        ),
+        ({"entity-name": "alice"}, ExternalClientRequestedEntity("alice", "None")),
+        ({"password": "secret"}, None),
+    ],
+    ids=["valid", "no-password", "no-entity-name"],
+)
+def test_requested_entity_read_from_secret(secret_content, expected):
+    external_client = _requested_entity_client(
+        "secret:abc", raw="secret:abc", secret_content=secret_content
+    )
+
+    assert external_client.get_requested_entity() == expected
+    external_client.data_interface._model.get_secret.assert_called_once_with(id="secret:abc")
+
+
+@pytest.mark.parametrize(
+    "decrypted, expected",
     [
         ("alice:secret", ExternalClientRequestedEntity("alice", "secret")),
         ("alice:pass:word", ExternalClientRequestedEntity("alice", "pass:word")),
@@ -80,16 +116,16 @@ def opensearch_client(mocker) -> MagicMock:
     ],
     ids=["valid", "colon-in-password", "no-password", "absent"],
 )
-def test_requested_entity_read_from_relation(secret_content, expected):
-    relation_data = {"requested-entity-secret": secret_content} if secret_content else {}
-    external_client = ExternalOpenSearchClient(
-        relation=MagicMock(id=1),
-        data_interface=MagicMock(as_dict=MagicMock(return_value=relation_data)),
-        component=MagicMock(),
-        relation_name=CLIENT_RELATION,
-    )
+def test_requested_entity_read_from_encrypted_relation_data(decrypted, expected):
+    external_client = _requested_entity_client(decrypted, raw="gAAAAAB-encrypted")
 
     assert external_client.get_requested_entity() == expected
+
+
+def test_requested_entity_in_plain_text_is_rejected():
+    external_client = _requested_entity_client("alice:secret", raw="alice:secret")
+
+    assert external_client.get_requested_entity() is None
 
 
 @pytest.mark.parametrize(
