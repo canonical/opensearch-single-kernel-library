@@ -18,7 +18,7 @@ from charmlibs.interfaces.certificate_transfer import (
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
-from ops import JujuVersion, Object, Relation, Unit
+from ops import JujuVersion, Object, Relation, Unit, hookcmds
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -171,6 +171,12 @@ class ClusterState(Object):
         return self.model.get_relation(NODE_LOCK_RELATION)
 
     @property
+    def unit_dying(self) -> bool:
+        """Whether this unit, or the whole application, is being removed."""
+        unit_goal = hookcmds.goal_state().units.get(self.model.unit.name)
+        return unit_goal is None or unit_goal.status == "dying"
+
+    @property
     def tls_relation(self) -> Relation | None:
         """Get TLS relation."""
         return self.model.get_relation(TLS_RELATION)
@@ -223,6 +229,10 @@ class ClusterState(Object):
     def relation_exists(self, relation_name) -> bool:
         """Check if the relation exists"""
         return bool(self.model.get_relation(relation_name))
+
+    def has_other_relation(self, relation: Relation) -> bool:
+        """Check if another relation exists on the endpoint of given relation."""
+        return any(rel.id != relation.id for rel in self.model.relations[relation.name])
 
     @property
     def upgrade_relation(self) -> Relation | None:

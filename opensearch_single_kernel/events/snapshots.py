@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     HealthColors,
     ObjectStorageType,
+    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
@@ -37,6 +38,7 @@ from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
     AzureRelDataCredentials,
     GcsRelDataCredentials,
+    ObjectStorageConfig,
     ObjectStorageCredentials,
     S3RelDataCredentials,
 )
@@ -157,15 +159,9 @@ class SnapshotsEventsHandler(Object):
         # Update backup credentials
         # Catch file operation exceptions
         try:
-            tls_ca_chain = None
-            match object_storage_type:
-                case ObjectStorageType.S3:
-                    object_storage_credentials = object_storage_config.s3.credentials
-                    tls_ca_chain = object_storage_config.s3.tls_ca_chain
-                case ObjectStorageType.AZURE:
-                    object_storage_credentials = object_storage_config.azure.credentials
-                case ObjectStorageType.GCS:
-                    object_storage_credentials = object_storage_config.gcs.credentials
+            object_storage_credentials, tls_ca_chain = self._credentials_from_config(
+                object_storage_type, object_storage_config
+            )
             self.update_stored_credentials(
                 object_storage_type, object_storage_credentials, tls_ca_chain
             )
@@ -205,12 +201,27 @@ class SnapshotsEventsHandler(Object):
 
         self._clear_repository_misconfigured_status()
         # Refresh peer relations
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: StorageConnectionInfoGoneEvent
     ) -> None:
         """Handler for backup credentials gone event."""
+        if self.charm.state.has_other_relation(event.relation):
+            logger.info(
+                "A different %s relation exists, skipping snapshots cleanup",
+                event.relation.name,
+            )
+            self._set_credentials_cleanup_failed_status(False)
+            return
+
+        if self.charm.is_unit_going_away(event):
+            logger.info(
+                "Unit is going away, keeping the snapshot configuration of relation %d.",
+                event.relation.id,
+            )
+            return
+
         if event.relation.name == S3_RELATION:
             object_storage_type = ObjectStorageType.S3
         elif event.relation.name == GCS_RELATION:
@@ -249,9 +260,7 @@ class SnapshotsEventsHandler(Object):
 
         if self.charm.unit.is_leader():
             # Refresh peer relations
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id if hasattr(event, "relation") else None
-            )
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
         self._set_credentials_cleanup_failed_status(False)
 
@@ -452,24 +461,11 @@ class SnapshotsEventsHandler(Object):
                     return None
             self._set_credentials_cleanup_failed_status(False)
 
-            tls_ca_chain = None
-            if self.charm.snapshots_manager.s3_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.S3
-                s3_credentials = self.charm.snapshots_manager.s3_info_from_peer_cluster
-                object_storage_credentials = S3RelDataCredentials(**s3_credentials)
-                tls_ca_chain = s3_credentials.get("s3_tls_ca_chain")
-            elif self.charm.snapshots_manager.azure_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.AZURE
-                azure_credentials = self.charm.snapshots_manager.azure_info_from_peer_cluster
-                object_storage_credentials = AzureRelDataCredentials(**azure_credentials)
-            elif self.charm.snapshots_manager.gcs_info_from_peer_cluster:
-                object_storage_type = ObjectStorageType.GCS
-                gcs_credentials = self.charm.snapshots_manager.gcs_info_from_peer_cluster
-                object_storage_credentials = GcsRelDataCredentials(**gcs_credentials)
+            object_storage_credentials, tls_ca_chain = self._credentials_from_peer_cluster()
 
             try:
                 self.update_stored_credentials(
-                    object_storage_type,
+                    self.charm.state.storage_type,
                     object_storage_credentials=object_storage_credentials,
                     s3_tls_ca_chain=tls_ca_chain,
                 )
@@ -501,20 +497,32 @@ class SnapshotsEventsHandler(Object):
         self.charm.snapshots_manager.set_credentials_saved(None)
 
     def _on_peer_clusters_relation_departed_for_snapshots(self, event) -> None:  # noqa C901
-        """Cleanup snapshot config if the orchestrator we depended on is gone."""
+        """Cleanup snapshot config if the main orchestrator we got it from is gone."""
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, skipping the snapshot configuration cleanup.")
+            return
+
         if not self.charm.state.application.deployment_desc:
             logger.debug("Deployment description not ready; deferring %s", event)
             event.defer()
             return
 
-        if (
-            self.charm.state.application.orchestrators
-            and self.charm.state.application.orchestrators.main_app
-            and self.charm.state.application.orchestrators.main_app.name == event.relation.app.name
-            and len(event.relation.units) > 0
-        ):
+        if len(event.relation.units) > 0:
             logger.debug(
-                "Main orchestrator still accessible; do not cleanup as it can be scale down"
+                "Orchestrator %s still has units on the relation, "
+                "skipping snapshot configuration cleanup.",
+                event.app.name,
+            )
+            return
+
+        orchestrators = self.charm.state.application.orchestrators
+        main_app = orchestrators.main_app if orchestrators else None
+        if main_app and orchestrators.main_rel_id != event.relation.id:
+            logger.debug(
+                "Departed orchestrator %s is not the main orchestrator %s, "
+                "skipping snapshots configuration cleanup",
+                event.app.name,
+                main_app.name,
             )
             return
 
@@ -668,6 +676,87 @@ class SnapshotsEventsHandler(Object):
                 self.charm.snapshots_manager.name,
             )
 
+    @staticmethod
+    def _credentials_from_config(
+        object_storage_type: ObjectStorageType, object_storage_config: ObjectStorageConfig
+    ) -> tuple[ObjectStorageCredentials, str | list[str] | None]:
+        """Get Credentials from the related object storage config.
+
+        Args:
+            object_storage_type: The type of object storage (S3, Azure, GCS).
+            object_storage_config: The object storage configuration.
+
+        Returns:
+            A tuple containing the object storage credentials and the S3 TLS CA chain (if applicable).
+        """
+        match object_storage_type:
+            case ObjectStorageType.S3:
+                s3 = object_storage_config.s3
+                return s3.credentials, s3.tls_ca_chain
+            case ObjectStorageType.AZURE:
+                return object_storage_config.azure.credentials, None
+            case _:
+                return object_storage_config.gcs.credentials, None
+
+    def _credentials_from_peer_cluster(
+        self,
+    ) -> tuple[ObjectStorageCredentials | None, str | None]:
+        """Get Credentials from the related peer cluster.
+
+        Returns:
+            A tuple containing the object storage credentials and the S3 TLS CA chain (if applicable).
+        """
+        if s3_credentials := self.charm.snapshots_manager.s3_info_from_peer_cluster:
+            return (
+                S3RelDataCredentials(**s3_credentials),
+                s3_credentials.get("s3_tls_ca_chain"),
+            )
+        if azure_credentials := self.charm.snapshots_manager.azure_info_from_peer_cluster:
+            return AzureRelDataCredentials(**azure_credentials), None
+        if gcs_credentials := self.charm.snapshots_manager.gcs_info_from_peer_cluster:
+            return GcsRelDataCredentials(**gcs_credentials), None
+        return None, None
+
+    def restore_stored_credentials(self) -> None:
+        """Restore the keystore credentials and S3 CA lost with the K8s container filesystem."""
+        if self.charm.substrate != Substrates.K8S:
+            return
+
+        if not (object_storage_type := self.charm.state.storage_type):
+            return
+
+        # Conflict
+        if object_storage_type == ObjectStorageType.CONFLICT:
+            logger.warning(
+                "Cannot restore keystore credentials: more than one object storage integrators integrated."
+            )
+            return
+
+        # large deployments (non main orchestrator apps): credentials come from the peer cluster
+        if object_storage_type in (
+            ObjectStorageType.S3_PCLUSTER,
+            ObjectStorageType.AZURE_PCLUSTER,
+            ObjectStorageType.GCS_PCLUSTER,
+        ):
+            credentials, tls_ca_chain = self._credentials_from_peer_cluster()
+            if credentials:
+                self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
+            return
+
+        # Simple deployments or main orchestrator
+        connection_info = self.charm.state.get_storage_connection_info_from_relation(
+            object_storage_type
+        )
+        try:
+            config = storage_config_from_connection_info(object_storage_type, connection_info)
+        except OpenSearchObjectStorageConfigValidationError:
+            return
+        if not config:
+            return
+
+        credentials, tls_ca_chain = self._credentials_from_config(object_storage_type, config)
+        self.update_stored_credentials(object_storage_type, credentials, tls_ca_chain)
+
     def update_stored_credentials(
         self,
         object_storage_type: ObjectStorageType,
@@ -675,9 +764,10 @@ class SnapshotsEventsHandler(Object):
         s3_tls_ca_chain: str | list[str] | None = None,
     ) -> None:
         """Update the stored credentials."""
-        if object_storage_type == ObjectStorageType.GCS and isinstance(
-            object_storage_credentials, GcsRelDataCredentials
-        ):
+        if object_storage_type in {
+            ObjectStorageType.GCS,
+            ObjectStorageType.GCS_PCLUSTER,
+        } and isinstance(object_storage_credentials, GcsRelDataCredentials):
             with self.charm.workload.temp_file(
                 chown="snap_daemon:root", dir=self.charm.workload.paths.conf
             ) as temp_path:
@@ -689,9 +779,10 @@ class SnapshotsEventsHandler(Object):
                 )
             return
 
-        if object_storage_type == ObjectStorageType.S3 and isinstance(
-            object_storage_credentials, S3RelDataCredentials
-        ):
+        if object_storage_type in {
+            ObjectStorageType.S3,
+            ObjectStorageType.S3_PCLUSTER,
+        } and isinstance(object_storage_credentials, S3RelDataCredentials):
             if s3_tls_ca_chain:
                 if not self.charm.snapshots_manager.is_custom_s3_ca_stored(s3_tls_ca_chain):
                     # Content differs: rotate / store new chain

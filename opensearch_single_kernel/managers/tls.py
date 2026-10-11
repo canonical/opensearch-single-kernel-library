@@ -274,7 +274,6 @@ class TlsManager(BaseManager):
         if secret:
             key = secret.get("key") if secret.get("key") else None
             password = secret.get("key-password", None)
-
         if key is None:
             key = generate_private_key()
         else:
@@ -679,9 +678,21 @@ class TlsManager(BaseManager):
         logger.info("CA rotation completed. Deleting old CA and updating request bundle.")
         try:
             self.remove_old_ca()
-            return self.update_request_ca_bundle()
         except OpenSearchFileOperationError as e:
             logger.error("Error removing old CA during rotation finalization: %s", e)
+            return False
+
+        # the whole fleet reloaded the new CA and dropped the old one, it is now safe
+        # to expose the new CA to the external clients
+        if self.state.server.is_app_leader and (
+            ca_chain := self.state.application.admin_secrets.get("chain")
+        ):
+            for external_client in self.state.external_clients:
+                external_client.tls_ca = ca_chain
+        try:
+            return self.update_request_ca_bundle()
+        except OpenSearchFileOperationError as e:
+            logger.error("Error updating the request CA during rotation finalization: %s", e)
             return False
 
     def get_unit_certificates(self) -> dict[CertType, str]:
@@ -864,6 +875,7 @@ class TlsManager(BaseManager):
             if (
                 self.state.application.deployment_desc
                 and self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+                and not self.state.unit_dying
             ):
                 status_list.append(TlsStatuses.TLS_RELATION_MISSING.value)
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

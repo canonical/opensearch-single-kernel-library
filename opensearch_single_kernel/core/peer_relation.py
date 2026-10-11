@@ -174,6 +174,26 @@ class OpenSearchServer(RelationState):
         self.relation.data[self.unit].pop("tls_configured", None)
 
     @property
+    def certs_reissue_pending(self) -> set[str]:
+        """Cert types whose CSR was revoked and still awaits being re-requested."""
+        return set(
+            filter(
+                None,
+                self.relation_data.get("certs_reissue_pending", "").split(","),
+            )
+        )
+
+    @certs_reissue_pending.setter
+    def certs_reissue_pending(self, value: set[str]) -> None:
+        """Set the cert types awaiting a re-request in the unit databag."""
+        self.update({"certs_reissue_pending": ",".join(sorted(value))})
+
+    @certs_reissue_pending.deleter
+    def certs_reissue_pending(self) -> None:
+        """Remove the value of 'certs_reissue_pending' from the unit databag."""
+        self.relation.data[self.unit].pop("certs_reissue_pending", None)
+
+    @property
     def update_ts(self) -> str:
         """Get the value of 'update-ts' from the unit databag."""
         return self.relation_data.get("update-ts", "")
@@ -332,23 +352,6 @@ class OpenSearchServer(RelationState):
     def http_keystore_password(self) -> str | None:
         """Get the keystore-password of HTTP TLS cert from the TLS cert_secret."""
         return self.http_secrets.get("keystore-password")
-
-    def get_relation_departing(self, relation: Relation) -> bool:
-        """Return whether relation broken event should be skipped."""
-        return (
-            self.relation.data[self.unit]
-            .get(f"{relation.name}_{relation.id}_departing", "")
-            .lower()
-            == "true"
-        )
-
-    def set_relation_departing(self, relation: Relation) -> None:
-        """Set whether relation broken event should be skipped."""
-        self.update({f"{relation.name}_{relation.id}_departing": "true"})
-
-    def remove_relation_departing(self, relation: Relation) -> None:
-        """Cleanup mark whether relation broken event should be skipped."""
-        self.relation.data[self.unit].pop(f"{relation.name}_{relation.id}_departing", None)
 
 
 class OpenSearchApplication(RelationState):

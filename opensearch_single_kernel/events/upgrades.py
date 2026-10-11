@@ -541,6 +541,15 @@ class UpgradesEventsHandler(Object):
             event.defer()
             return
 
+        # The refreshed pod lost the keystore entries and S3 CA with its container filesystem
+        try:
+            self.charm.snapshots_events.restore_stored_credentials()
+            self.charm.notifications_events.restore_keystore_credentials()
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Failed to restore keystore credentials after upgrade: %s", e)
+            event.defer()
+            return
+
         # Mark the new version of the unit since in Kubernetes this unit is upgraded now.
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload

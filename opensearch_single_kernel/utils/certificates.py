@@ -332,15 +332,10 @@ def remove_ca(
         if _is_keystore_missing_error(e, str(store_path)):
             logger.debug("Truststore %s does not exist, nothing to remove.", store_path)
             return
-        if is_alias_missing_error(e, alias):
-            logger.debug(
-                "Alias %s not found in %s when listing before delete, ignoring.",
-                alias,
-                store_path,
-            )
-            return
-        # Anything else is a real error
-        raise
+        if not is_alias_missing_error(e, alias):
+            # alias not found is expected for chains
+            # Anything else is a real error
+            raise
 
     sudo_prefix = "sudo " if use_sudo else ""
     try:
@@ -355,7 +350,6 @@ def remove_ca(
     _remove_ca_aliases(
         workload=workload, alias_base=alias, store_pwd=store_pwd, store_path=store_path
     )
-    logger.info("Removed %s from truststore %s.", alias, store_path)
 
 
 def _remove_ca_aliases(
