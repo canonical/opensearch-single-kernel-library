@@ -9,7 +9,26 @@ import pytest
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import CertType, Scope
-from opensearch_single_kernel.core.models import PeerClusterRelData
+from opensearch_single_kernel.core.models import PeerClusterRelData, PeerClusterRelErrorData
+
+
+def test_legacy_wrong_orchestrator_error_produces_blocked_status():
+    """The stable operator's message must map to a status instead of None."""
+    error = PeerClusterRelErrorData.from_dict(
+        {
+            "cluster_name": "upgrades",
+            "should_sever_relation": True,
+            "should_wait": False,
+            "blocked_message": "Related to non 'main/failover'-orchestrator cluster.",
+            "deployment_desc": None,
+        }
+    )
+
+    status = error.get_status()
+
+    assert status is not None
+    assert status.status == "blocked"
+    assert status.message == "Related to non 'main/failover'-orchestrator cluster."
 
 
 @pytest.fixture

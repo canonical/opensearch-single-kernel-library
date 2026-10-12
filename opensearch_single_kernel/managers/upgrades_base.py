@@ -31,9 +31,14 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
-from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
+from opensearch_single_kernel.core.models import (
+    JWTAuthConfiguration,
+    UnitUpgradesState,
+    UpgradeVersions,
+)
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.status import (
     cached_non_running_statuses,
     format_status,
@@ -53,6 +58,34 @@ class UpgradesManagerBase(BaseManager):
         workload: BaseWorkload,
     ) -> None:
         super().__init__(state, workload, "upgrades_manager")
+
+    def migrate_legacy_auth_configuration(self) -> None:
+        """Restore unit auth state from the stable (2.19.4) operator's security configuration.
+
+        Called by upgrade-charm before configuration can be regenerated from unit state.
+        """
+        server = self.state.server
+        migrate_jwt = self.state.jwt_relation is not None and server.jwt_auth_configuration is None
+        migrate_oidc = (
+            self.state.oauth_relation is not None and server.oauth_openid_connect_url is None
+        )
+        if not (migrate_jwt or migrate_oidc):
+            return
+
+        config = YamlConfigSetter(self.workload).load("opensearch-security/config.yml")
+        authc = config["config"]["dynamic"]["authc"]
+
+        jwt = authc.get("jwt_auth_domain", {})
+        if migrate_jwt and jwt.get("http_enabled"):
+            server.jwt_auth_configuration = JWTAuthConfiguration.from_dict(
+                jwt["http_authenticator"]["config"]
+            )
+
+        oidc = authc.get("openid_auth_domain", {})
+        if migrate_oidc and oidc.get("http_enabled"):
+            server.oauth_openid_connect_url = oidc["http_authenticator"]["config"][
+                "openid_connect_url"
+            ]
 
     @property
     def current_versions(self) -> UpgradeVersions:

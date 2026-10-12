@@ -353,7 +353,7 @@ class PeerClusterErrorDataStatuses(Enum):
     )
     RELATED_TO_NON_MAIN_OR_FAILOVER = StatusObject(
         status="blocked",
-        message="Related to non 'main/failover'-orchestrator cluster",
+        message="Related to non 'main/failover'-orchestrator cluster.",
         short_message="Wrong orchestrator type",
         check="Remote cluster is main or failover orchestrator.",
         action="Relate only to main- or failover-orchestrator applications.",
