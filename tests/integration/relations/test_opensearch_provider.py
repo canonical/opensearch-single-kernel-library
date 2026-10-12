@@ -59,6 +59,8 @@ ALL_APPS = [
 NUM_UNITS = 3
 
 DATA_INTEGRATOR_CHARM = "data-integrator"
+# Revisions are built per architecture; both come from the same latest/edge release
+DATA_INTEGRATOR_REVISIONS = {"amd64": 500, "arm64": 501}
 GROUP_ENTITY_NAME = "test-group"
 
 GROUP_CLIENT_APP_NAME = "group-client"
@@ -807,6 +809,34 @@ async def _entity_auth_status(ops_test: OpsTest, password: str) -> int:
     )
 
 
+async def _group_entity_status(ops_test: OpsTest, resource: str) -> int:
+    """Get the response status of fetching the role or internal user named as the group entity."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    return await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/{resource}/{GROUP_ENTITY_NAME}",
+        resp_status_code=True,
+        verify=False,
+    )
+
+
+async def _group_role_index_patterns(ops_test: OpsTest) -> list[str]:
+    """Get the index patterns the role of the group entity grants permissions on."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    roles = await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/roles/{GROUP_ENTITY_NAME}",
+        verify=False,
+    )
+    return [
+        pattern
+        for permission in roles[GROUP_ENTITY_NAME]["index_permissions"]
+        for pattern in permission["index_patterns"]
+    ]
+
+
 async def _wait_for_group_entity_conflict(ops_test: OpsTest) -> None:
     """Wait for the charm to report the group entity requested by two relations."""
     await wait_until(
@@ -823,18 +853,18 @@ async def _wait_for_group_entity_conflict(ops_test: OpsTest) -> None:
 
 
 @pytest.mark.abort_on_fail
-async def test_group_entity_relation(ops_test: OpsTest):
+async def test_group_entity_relation(ops_test: OpsTest, architecture: str):
     """Test that a relation requesting a group entity is provided with it."""
     await asyncio.gather(
         ops_test.model.deploy(
             DATA_INTEGRATOR_CHARM,
-            revision=500,
+            revision=DATA_INTEGRATOR_REVISIONS[architecture],
             channel="latest/edge",
             application_name=GROUP_CLIENT_APP_NAME,
         ),
         ops_test.model.deploy(
             DATA_INTEGRATOR_CHARM,
-            revision=500,
+            revision=DATA_INTEGRATOR_REVISIONS[architecture],
             channel="latest/edge",
             application_name=CONFLICTING_CLIENT_APP_NAME,
         ),
@@ -870,7 +900,11 @@ async def test_group_entity_relation(ops_test: OpsTest):
         idle_period=70,
     )
 
-    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
+    # A group entity is a role which, without requested permissions, is scoped to its index...
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
+    # ...and never a user, even when requested along with a password.
+    assert await _group_entity_status(ops_test, "internalusers") == 404
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 401
 
 
 @pytest.mark.abort_on_fail
@@ -879,10 +913,9 @@ async def test_conflicting_group_entity_relation(ops_test: OpsTest):
     await ops_test.model.integrate(OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME)
     await _wait_for_group_entity_conflict(ops_test)
 
-    # The entity keeps the password of the relation owning it...
-    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
-    # ...and never the one of the relation requesting it afterwards.
-    assert await _entity_auth_status(ops_test, CONFLICTING_ENTITY_PASSWORD) == 401
+    # The entity keeps the permissions of the relation owning it and never the ones of the
+    # relation requesting it afterwards.
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
 
 
 @pytest.mark.abort_on_fail
@@ -897,7 +930,7 @@ async def test_conflicting_group_entity_relation_broken(ops_test: OpsTest):
         idle_period=70,
     )
 
-    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 200
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
 
 
 @pytest.mark.abort_on_fail
@@ -921,5 +954,5 @@ async def test_group_entity_provided_on_owning_relation_broken(ops_test: OpsTest
         idle_period=70,
     )
 
-    assert await _entity_auth_status(ops_test, CONFLICTING_ENTITY_PASSWORD) == 200
-    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 401
+    assert await _group_role_index_patterns(ops_test) == [CONFLICTING_CLIENT_CONFIG["index-name"]]
+    assert await _group_entity_status(ops_test, "internalusers") == 404

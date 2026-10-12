@@ -18,7 +18,7 @@ from charmlibs.interfaces.certificate_transfer import (
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
-from ops import JujuVersion, Object, Relation, Unit, hookcmds
+from ops import JujuVersion, Object, Relation, Secret, Unit, hookcmds
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -879,7 +879,7 @@ class ClusterState(Object):
             ):
                 continue
             res.setdefault(username, []).append(username)
-            if external_client.entity_type == ENTITY_GROUP and external_client.extra_group_roles:
+            if external_client.entity_type == ENTITY_GROUP:
                 for group in external_client.extra_group_roles:
                     res.setdefault(group, []).append(username)
         return res
@@ -1387,6 +1387,15 @@ class ClusterState(Object):
             if (relation := self.ldap_relation)
             else None
         )
+
+    def is_ldap_bind_password_secret(self, secret: Secret) -> bool:
+        """Whether the secret is the one holding the bind password of the LDAP relation."""
+        if not (relation := self.ldap_relation) or not relation.app:
+            return False
+        if not (secret_id := relation.data[relation.app].get("bind_password_secret")):
+            return False
+        # Secret ids may or may not carry the model uuid: compare their unique part only.
+        return secret.unique_identifier == secret_id.rsplit("/", 1)[-1].removeprefix("secret:")
 
     @property
     def ldap_certificates(self) -> set[str]:

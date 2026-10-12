@@ -2,11 +2,15 @@
 # See LICENSE file for licensing details.
 
 import asyncio
+import json
 import logging
+import socket
+import ssl
 from asyncio import gather
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -86,6 +90,8 @@ AUTHENTIK_USERS = {
     "alice": ("alicepassword", SEARCH_ADMIN_ROLE),
     "bob": ("bobpassword", SEARCH_READONLY_ROLE),
 }
+
+LDAPS_PORT = 636
 
 LDAP_OFFER = "ldap"
 LDAP_CERT_OFFER = "ldap-cert"
@@ -181,6 +187,33 @@ async def _deploy_glauth(ops_test_k8s: OpsTest, k8s_model: Model, architecture: 
     await _apply_ldif(ops_test_k8s, k8s_model)
 
 
+async def _wait_for_trusted_ldaps(ops_test_k8s: OpsTest) -> None:
+    """Wait until Traefik serves LDAPS with a certificate trusted by the transferred CA.
+
+    OpenSearch validates the LDAPS certificate, hostname included, against the CA it receives
+    from the TLS provider: an LDAP login can only succeed once the same validation passes here.
+    """
+    ca_certificate = (
+        await run_action(ops_test_k8s, 0, "get-ca-certificate", app=TLS_CERTIFICATES_APP_NAME)
+    ).response["ca-certificate"]
+    proxied_endpoints = json.loads(
+        (await run_action(ops_test_k8s, 0, "show-proxied-endpoints", app=TRAEFIK_CHARM)).response[
+            "proxied-endpoints"
+        ]
+    )
+    # The outpost advertises LDAPS on the external host of Traefik
+    host = urlparse(proxied_endpoints[TRAEFIK_CHARM]["url"]).hostname
+    assert host, f"failed to retrieve the external host of traefik: {proxied_endpoints}"
+
+    context = ssl.create_default_context(cadata=ca_certificate)
+    # Traefik serves its default certificate until the requested one is issued
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(10), reraise=True):
+        with attempt:
+            with socket.create_connection((host, LDAPS_PORT), timeout=10) as sock:
+                with context.wrap_socket(sock, server_hostname=host):
+                    logger.info("LDAPS certificate of %s:%s is trusted", host, LDAPS_PORT)
+
+
 async def _deploy_authentik(ops_test_k8s: OpsTest, k8s_model: Model, architecture: str) -> None:
     """Deploy the Authentik LDAP stack, relate it and add users through the Authentik API."""
     await asyncio.gather(
@@ -219,12 +252,17 @@ async def _deploy_authentik(ops_test_k8s: OpsTest, k8s_model: Model, architectur
         k8s_model.integrate(f"{AUTHENTIK_SERVER}:authentik-server-info", AUTHENTIK_LDAP_OUTPOST),
         k8s_model.integrate(f"{AUTHENTIK_SERVER}:traefik-route", TRAEFIK_CHARM),
         k8s_model.integrate(f"{AUTHENTIK_LDAP_OUTPOST}:traefik-route", TRAEFIK_CHARM),
-        k8s_model.integrate(f"{TRAEFIK_CHARM}:certificates", TLS_CERTIFICATES_APP_NAME),
     )
+
+    # Traefik requests its certificate for its LoadBalancer address, and only does so on
+    # config-changed or on `certificates` relation events. Related any earlier, these may all
+    # fire before the address is assigned, leaving Traefik on its default certificate for good.
+    await wait_until(ops_test_k8s, apps=[TLS_CERTIFICATES_APP_NAME, TRAEFIK_CHARM], timeout=1800)
+    await k8s_model.integrate(f"{TRAEFIK_CHARM}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # PostgreSQL is left out: once related its agent flips executing/idle every ~10s, so no idle
     # period it takes part in ever elapses. An active authentik-server already implies a working
-    # database.
+    # database, and a certificate served by Traefik: it requires a secure public ingress.
     await wait_until(
         ops_test_k8s,
         apps=[
@@ -236,6 +274,7 @@ async def _deploy_authentik(ops_test_k8s: OpsTest, k8s_model: Model, architectur
         ],
         timeout=1800,
     )
+    await _wait_for_trusted_ldaps(ops_test_k8s)
 
     token = (await get_secret_by_label(ops_test_k8s, API_TOKEN_SECRET_LABEL))["api-token"]
     host = (await get_application_unit_ips(ops_test_k8s, AUTHENTIK_SERVER))[0]
@@ -286,8 +325,10 @@ AUTHENTIK = LdapProvider(
         for provider in (GLAUTH, AUTHENTIK)
     ],
 )
-def ldap_provider(request: pytest.FixtureRequest) -> LdapProvider:
+def ldap_provider(request: pytest.FixtureRequest, architecture: str) -> LdapProvider:
     """The LDAP server flavor; select one with `-m 'group(id="<name>")'`."""
+    if request.param is AUTHENTIK and architecture == "arm64":
+        pytest.skip("Authentik is not supported on arm64")
     return request.param
 
 

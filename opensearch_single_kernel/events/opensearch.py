@@ -543,7 +543,8 @@ class OpenSearchEventsHandler(Object):
         profile_restart_needed = self.charm.config_manager.update_profile_configuration(
             config_profile
         )
-        if self.charm.unit.is_leader():
+        # The roles mappings are shared by the whole cluster: only its main orchestrator owns them.
+        if self.charm.unit.is_leader() and self.charm.state.is_main_orchestrator:
             try:
                 self.charm.external_clients_manager.reconcile_role_mappings()
             except OpenSearchUserMgmtError as e:

@@ -239,6 +239,13 @@ class ExternalClientsStatuses(Enum):
         check="Client relation index name validation.",
         action="Correct the index name on the client / data-integrator relation.",
     )
+    RELATION_INVALID = StatusObject(
+        status="blocked",
+        message="Client relation {id} must be created with Main-cluster-orchestrator.",
+        short_message="Clients only on main",
+        check="Client related to main orchestrator.",
+        action="Relate clients only to the main-cluster-orchestrator.",
+    )
     USER_CREATION_FAILED = StatusObject(
         status="blocked",
         message="Failed to create users for client relation {id}",
@@ -255,10 +262,24 @@ class ExternalClientsStatuses(Enum):
     )
     USER_ENTITY_GROUP_CONFLICT = StatusObject(
         status="blocked",
-        message="Conflicting group entity on client relation {id}",
-        short_message="Conflicting client group entity",
-        check="Repetition of OpenSearch username across client relations.",
-        action="Change group entity username and retry the client relation.",
+        message="Conflicting requested entity on client relation {id}",
+        short_message="Conflicting client entity",
+        check="Repetition of OpenSearch entity name across client relations.",
+        action="Change the requested entity name and retry the client relation.",
+    )
+    ENTITY_NAME_RESERVED = StatusObject(
+        status="blocked",
+        message="Requested entity name is reserved on client relation {id}",
+        short_message="Reserved client entity name",
+        check="Requested entity name against the users and roles managed by the charm.",
+        action="Change the requested entity name and retry the client relation.",
+    )
+    ENTITY_PERMISSIONS_INVALID = StatusObject(
+        status="blocked",
+        message="Invalid entity-permissions on client relation {id}",
+        short_message="Invalid client entity permissions",
+        check="Entity permissions validation for entity-type=GROUP client relations.",
+        action="Fix entity-permissions and retry the client relation.",
     )
 
 

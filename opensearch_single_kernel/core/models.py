@@ -890,12 +890,12 @@ class ExternalClientRequestedEntity(NamedTuple):
     """Model class for the entity credentials requested on a client relation.
 
     Attributes:
-        username: username of the requested entity.
-        password: password of the requested entity or `None` if only the role is requested.
+        username: name of the requested entity.
+        password: password of the requested entity or `None` if no password is requested.
     """
 
     username: str
-    password: str
+    password: str | None
 
 
 class ExternalClientEntityPermission(Model):

@@ -81,8 +81,11 @@ def apply_security_config(mocker) -> MagicMock:
 
 @pytest.mark.parametrize("handler_name", ALL_HANDLERS)
 def test_security_config_applied(
-    harness, ldap_ready, update_security_config, apply_security_config, handler_name
+    harness, mocker, ldap_ready, update_security_config, apply_security_config, handler_name
 ):
+    # the certificates directory does not exist in the K8s test container
+    mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.write_text")
+
     event = MagicMock()
     getattr(harness.charm.ldap_events, handler_name)(event)
 
@@ -175,6 +178,71 @@ def test_certificates_deleted_on_every_orchestrator(
 
     unlink.assert_called_once_with(harness.charm.workload.paths.ldap_chain, missing_ok=True)
     assert apply_security_config.called is is_main_orchestrator
+
+
+def test_withdrawn_certificates_deleted(
+    harness, mocker, ldap_ready, update_security_config, apply_security_config
+):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ldap_certificates",
+        new_callable=PropertyMock,
+        return_value=set(),
+    )
+    write_text = mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.write_text")
+    unlink = mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.unlink")
+
+    harness.charm.ldap_events._on_ldap_certificate_available(MagicMock())
+
+    write_text.assert_not_called()
+    unlink.assert_called_once_with(harness.charm.workload.paths.ldap_chain, missing_ok=True)
+    apply_security_config.assert_called_once()
+
+
+@pytest.mark.parametrize("is_bind_password", [True, False], ids=["bind-password", "other-secret"])
+def test_security_config_applied_on_bind_password_rotation(
+    harness, mocker, ldap_ready, update_security_config, apply_security_config, is_bind_password
+):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.is_ldap_bind_password_secret",
+        return_value=is_bind_password,
+    )
+
+    event = MagicMock()
+    harness.charm.ldap_events._on_secret_changed(event)
+
+    assert event.secret.get_content.called is is_bind_password
+    assert update_security_config.called is is_bind_password
+    assert apply_security_config.called is is_bind_password
+
+
+@pytest.mark.parametrize(
+    "databag_secret_id, event_secret_id, expected",
+    [
+        ("secret:abc123", "secret:abc123", True),
+        ("secret://model-uuid/abc123", "secret:abc123", True),
+        ("secret:abc123", "secret://model-uuid/abc123", True),
+        ("secret:abc123", "secret:other", False),
+        (None, "secret:abc123", False),
+    ],
+    ids=["same", "databag-with-model", "event-with-model", "other", "no-secret-in-databag"],
+)
+def test_ldap_bind_password_secret_matched_by_id(
+    harness, mocker, databag_secret_id, event_secret_id, expected
+):
+    relation = MagicMock()
+    relation.data = {
+        relation.app: {"bind_password_secret": databag_secret_id} if databag_secret_id else {}
+    }
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ldap_relation",
+        new_callable=PropertyMock,
+        return_value=relation,
+    )
+    secret = MagicMock(
+        unique_identifier=event_secret_id.rsplit("/", 1)[-1].removeprefix("secret:")
+    )
+
+    assert harness.charm.state.is_ldap_bind_password_secret(secret) is expected
 
 
 def test_security_config_left_to_leader(

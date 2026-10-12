@@ -22,7 +22,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
-from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
 from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
@@ -30,7 +29,6 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     IndexRequestedEvent,
     OpenSearchProvides,
 )
-from opensearch_single_kernel.utils.helpers import validate_index_name
 from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
@@ -73,36 +71,28 @@ class ExternalClientsEventsHandler(Object):
         control over node & index security policies, and therefore differentiating between types of
         network endpoints is unnecessary.
 
-        Raises:
-            OpenSearchHttpError if we can't create the required index
         """
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
-        requested_entity = external_client.get_requested_entity()
-
-        if not self._validate_client_request(event, external_client, requested_entity):
+        if not self._validate_client_request(event, external_client):
             return
 
+        requested_entity = external_client.get_requested_entity()
+
         try:
-            self.charm.external_clients_manager.provide_client_entity(
-                external_client, requested_entity
-            )
-
-            self.charm.status_handler.set_running_status(
-                format_status(
-                    ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
-                    {
-                        "index": event.index,
-                        "id": event.relation.id,
-                    },
-                ),
-                "unit",
-                component_name=self.charm.external_clients_manager.name,
-            )
-
-            self.charm.external_clients_manager.provide_client_index(external_client)
+            if external_client.entity_type == ENTITY_GROUP:
+                # The index of a group is created before the role granting access to it.
+                self._provide_client_index(event, external_client)
+                self.charm.external_clients_manager.provide_client_entity(
+                    external_client, requested_entity
+                )
+            else:
+                self.charm.external_clients_manager.provide_client_entity(
+                    external_client, requested_entity
+                )
+                self._provide_client_index(event, external_client)
 
             external_client.version = self.charm.workload.version
 
@@ -124,11 +114,30 @@ class ExternalClientsEventsHandler(Object):
 
         logger.info("new index %s available", event.index)
 
+    def _provide_client_index(
+        self,
+        event: IndexRequestedEvent | IndexEntityRequestedEvent,
+        external_client: ExternalOpenSearchClient,
+    ) -> None:
+        """Create the index requested by a client relation while reporting it in the status."""
+        self.charm.status_handler.set_running_status(
+            format_status(
+                ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+                {
+                    "index": event.index,
+                    "id": event.relation.id,
+                },
+            ),
+            "unit",
+            component_name=self.charm.external_clients_manager.name,
+        )
+
+        self.charm.external_clients_manager.provide_client_index(external_client)
+
     def _validate_client_request(
         self,
         event: IndexRequestedEvent | IndexEntityRequestedEvent,
         external_client: ExternalOpenSearchClient,
-        requested_entity: ExternalClientRequestedEntity | None,
     ) -> bool:
         """Validate client request and return whether we should process it.
 
@@ -152,9 +161,17 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
+        # The node is up: the deployment description, hence the type of the app, is known.
+        if not self.charm.state.is_main_orchestrator:
+            logger.error(
+                "Client relation %s must be created with the main orchestrator.",
+                event.relation.id,
+            )
+            return False
+
         try:
             if self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS):
-                logger.debug("CA rotation in progress. Deferring index requested event.")
+                logger.debug("CA rotation in progress. Deferring index/entity requested event.")
                 event.defer()
                 return False
         except OpenSearchFileOperationError as e:
@@ -162,27 +179,15 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
-        if not event.index or not validate_index_name(event.index):
+        if error := self.charm.external_clients_manager.get_request_error(external_client):
             logger.error(
-                "Invalid index name %s on client relation %s",
-                event.index,
+                "Cannot serve the request of client relation %s: %s",
                 event.relation.id,
+                error.name,
             )
-            return False
-
-        if external_client.entity_type == ENTITY_GROUP and not requested_entity:
-            logger.error(
-                "Cannot get requested entity on client relation %s",
-                event.relation.id,
-            )
-            return False
-
-        if requested_entity and requested_entity.username in [
-            name
-            for relation_id, name in self.charm.state.application.client_users_dict.items()
-            if relation_id != str(event.relation.id)
-        ]:
-            event.defer()
+            # A conflicting entity is released once the relation owning it is removed.
+            if error is ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT:
+                event.defer()
             return False
 
         return True

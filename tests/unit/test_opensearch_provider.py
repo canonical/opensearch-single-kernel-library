@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
+from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, KIBANA_SERVER_USER
 from opensearch_single_kernel.common.exceptions import OpenSearchUserMgmtError
@@ -15,10 +16,10 @@ from opensearch_single_kernel.core.external_clients_relation import (
 from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
-    ENTITY_USER,
 )
 from opensearch_single_kernel.managers.external_clients import ExternalClientsManager
 from opensearch_single_kernel.utils.status import format_status
+from tests.unit.helpers import deployment_descriptions
 
 GROUP_ENTITY = ExternalClientRequestedEntity("devs_group", "secret")
 GROUP_PERMISSIONS = {
@@ -28,14 +29,14 @@ GROUP_PERMISSIONS = {
 
 def make_client(
     relation_id: int = 1,
-    entity_type: str = ENTITY_USER,
+    entity_type: str = "",
     groups: list[str] | None = None,
     **attributes,
 ) -> MagicMock:
     return MagicMock(
         relation=MagicMock(id=relation_id),
         entity_type=entity_type,
-        extra_group_roles=groups or [""],
+        extra_group_roles=groups or [],
         index="logs",
         relation_username=f"{CLIENT_RELATION}_{relation_id}",
         **attributes,
@@ -75,10 +76,12 @@ def opensearch_client(mocker) -> MagicMock:
     [
         ("alice:secret", ExternalClientRequestedEntity("alice", "secret")),
         ("alice:pass:word", ExternalClientRequestedEntity("alice", "pass:word")),
+        ("alice:None", ExternalClientRequestedEntity("alice", None)),
         ("alice", None),
+        (":secret", None),
         (None, None),
     ],
-    ids=["valid", "colon-in-password", "no-password", "absent"],
+    ids=["valid", "colon-in-password", "no-password", "no-separator", "no-name", "absent"],
 )
 def test_requested_entity_read_from_relation(secret_content, expected):
     relation_data = {"requested-entity-secret": secret_content} if secret_content else {}
@@ -93,16 +96,65 @@ def test_requested_entity_read_from_relation(secret_content, expected):
 
 
 @pytest.mark.parametrize(
+    "entity_permissions, expected",
+    [
+        (None, None),
+        (
+            '[{"resource_name":"logs","resource_type":"index_permissions","privileges":["read"]}]',
+            GROUP_PERMISSIONS,
+        ),
+    ],
+    ids=["absent", "valid"],
+)
+def test_entity_permissions_read_from_relation(entity_permissions, expected):
+    relation_data = {"entity-permissions": entity_permissions} if entity_permissions else {}
+    external_client = ExternalOpenSearchClient(
+        relation=MagicMock(id=1),
+        data_interface=MagicMock(as_dict=MagicMock(return_value=relation_data)),
+        component=MagicMock(),
+        relation_name=CLIENT_RELATION,
+    )
+
+    assert external_client.entity_permissions == expected
+
+
+@pytest.mark.parametrize(
+    "entity_permissions",
+    [
+        "not-a-json",
+        '[{"resource_name":"logs","resource_type":"unknown","privileges":["read"]}]',
+    ],
+    ids=["invalid-json", "unknown-resource-type"],
+)
+def test_invalid_entity_permissions_rejected(entity_permissions):
+    external_client = ExternalOpenSearchClient(
+        relation=MagicMock(id=1),
+        data_interface=MagicMock(
+            as_dict=MagicMock(return_value={"entity-permissions": entity_permissions})
+        ),
+        component=MagicMock(),
+        relation_name=CLIENT_RELATION,
+    )
+
+    with pytest.raises(ValidationError):
+        external_client.entity_permissions
+
+
+@pytest.mark.parametrize(
     "requested_entity, expected_user, expected_password",
     [
         (None, f"{CLIENT_RELATION}_1", "generated"),
         (ExternalClientRequestedEntity("alice", "secret"), "alice", "secret"),
+        (ExternalClientRequestedEntity("alice", None), "alice", "generated"),
     ],
-    ids=["generated", "requested"],
+    ids=["generated", "requested", "requested-without-password"],
 )
-def test_user_client_credentials(
-    opensearch_client, requested_entity, expected_user, expected_password
+def test_legacy_client_gets_user_with_dedicated_role(
+    opensearch_client, mocker, requested_entity, expected_user, expected_password
 ):
+    reconcile_role_mappings = mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
+    )
     state = make_state()
     external_client = make_client(extra_user_roles="admin")
 
@@ -110,20 +162,23 @@ def test_user_client_credentials(
         external_client, requested_entity
     )
 
+    opensearch_client.create_role.assert_called_once()
+    assert opensearch_client.create_role.call_args.args == (expected_user,)
+    assert set(opensearch_client.create_role.call_args.kwargs) == {
+        "cluster_permissions",
+        "index_permissions",
+    }
     opensearch_client.create_user.assert_called_once_with(
         expected_user, [expected_user], f"hash-of-{expected_password}"
     )
     assert external_client.username == expected_user
     assert external_client.password == expected_password
     assert state.application.client_users_dict == {"1": expected_user}
+    reconcile_role_mappings.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "password, user_created", [("secret", True), ("None", False)], ids=["user", "role-only"]
-)
-def test_group_client_role_gets_requested_permissions(
-    opensearch_client, mocker, password, user_created
-):
+@pytest.mark.parametrize("password", ["secret", None], ids=["with-password", "without-password"])
+def test_group_client_gets_role_only(opensearch_client, mocker, password):
     reconcile_role_mappings = mocker.patch(
         "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
     )
@@ -134,12 +189,47 @@ def test_group_client_role_gets_requested_permissions(
         external_client, ExternalClientRequestedEntity("devs_group", password)
     )
 
-    opensearch_client.create_user_role.assert_called_once_with(
-        role_name="devs_group", permissions=GROUP_PERMISSIONS
-    )
-    assert opensearch_client.create_user.called is user_created
+    opensearch_client.create_role.assert_called_once_with("devs_group", **GROUP_PERMISSIONS)
+    opensearch_client.create_user.assert_not_called()
+    opensearch_client.patch_user.assert_not_called()
+    assert external_client.entity_name == "devs_group"
     assert state.application.client_users_dict == {"1": "devs_group"}
     reconcile_role_mappings.assert_called_once()
+
+
+def test_group_client_without_permissions_gets_role_scoped_to_its_index(opensearch_client, mocker):
+    mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
+    )
+    external_client = make_client(entity_type=ENTITY_GROUP, entity_permissions=None)
+
+    ExternalClientsManager(make_state(), MagicMock()).provide_client_entity(
+        external_client, ExternalClientRequestedEntity("devs_group", None)
+    )
+
+    opensearch_client.create_role.assert_called_once()
+    assert opensearch_client.create_role.call_args.args == ("devs_group",)
+    assert set(opensearch_client.create_role.call_args.kwargs) == {"index_permissions"}
+    assert [
+        (permissions["index_patterns"], permissions["allowed_actions"])
+        for permissions in opensearch_client.create_role.call_args.kwargs["index_permissions"]
+    ] == [(["logs"], ["indices_monitor", "data_access"])]
+
+
+def test_group_client_with_invalid_permissions_not_provided(opensearch_client):
+    external_client = make_client(entity_type=ENTITY_GROUP)
+    type(external_client).entity_permissions = PropertyMock(
+        side_effect=ValidationError.from_exception_data("entity-permissions", [])
+    )
+    state = make_state()
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        ExternalClientsManager(state, MagicMock()).provide_client_entity(
+            external_client, ExternalClientRequestedEntity("devs_group", None)
+        )
+
+    opensearch_client.create_role.assert_not_called()
+    assert state.application.client_users_dict == {}
 
 
 def test_dashboards_client_gets_kibanaserver_credentials(opensearch_client):
@@ -180,6 +270,12 @@ def client_request_ready(harness, mocker):
     with harness.hooks_disabled():
         harness.set_leader(True)
 
+    # the K8s node host is built from the deployment description
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
         return_value=True,
@@ -241,10 +337,53 @@ def test_client_request_provides_requested_entity_and_index(
     event.defer.assert_not_called()
 
 
+def test_group_client_index_provided_before_its_role(
+    harness, mocker, client_request_ready, group_client
+):
+    manager = mocker.patch.object(harness.charm, "external_clients_manager")
+    manager.get_request_error.return_value = None
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    assert [name for name, _, _ in manager.method_calls if name.startswith("provide_")] == [
+        "provide_client_index",
+        "provide_client_entity",
+    ]
+
+
 def test_group_request_without_entity_rejected(
     harness, client_request_ready, group_client, provide_client_entity
 ):
     group_client.get_requested_entity.return_value = None
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_not_called()
+    event.defer.assert_not_called()
+
+
+def test_request_rejected_outside_main_orchestrator(
+    harness, mocker, client_request_ready, group_client, provide_client_entity
+):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.is_main_orchestrator",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+
+    event = MagicMock(index="logs", relation=group_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    provide_client_entity.assert_not_called()
+    event.defer.assert_not_called()
+
+
+def test_request_for_reserved_name_rejected(
+    harness, client_request_ready, group_client, provide_client_entity
+):
+    group_client.get_requested_entity.return_value = ExternalClientRequestedEntity("admin", "pwd")
 
     event = MagicMock(index="logs", relation=group_client.relation)
     harness.charm.external_clients_events._on_client_requested(event)
@@ -292,7 +431,7 @@ def test_failed_entity_provisioning_retried(
     event = MagicMock(index="logs", relation=group_client.relation)
     harness.charm.external_clients_events._on_client_requested(event)
 
-    provide_client_index.assert_not_called()
+    assert group_client.tls_ca != "admin-chain"
     event.defer.assert_called_once()
 
 
@@ -324,6 +463,9 @@ def test_mapped_roles_map_ldap_groups_to_group_entity_clients(harness, mocker):
     }.items() <= mapped_roles.items()
     assert "ignored" not in mapped_roles
     assert "unprovisioned" not in mapped_roles
+    assert {"app_user", "devs_ops_group", "devs_group"} <= set(
+        harness.charm.state.managed_mappings
+    )
 
 
 @pytest.mark.parametrize(
@@ -347,33 +489,84 @@ def test_mapped_users_from_roles_mapping_config(harness, roles_mapping, expected
 
 
 @pytest.mark.parametrize(
-    "requested_entity, client_users, expected_statuses",
+    "entity_type, requested_entity, permissions_valid, client_users, expected_statuses",
     [
         (
+            ENTITY_GROUP,
             None,
+            True,
             {},
             [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_INVALID.value, {"id": 1})],
         ),
         (
+            ENTITY_GROUP,
             GROUP_ENTITY,
+            False,
+            {},
+            [format_status(ExternalClientsStatuses.ENTITY_PERMISSIONS_INVALID.value, {"id": 1})],
+        ),
+        (
+            ENTITY_GROUP,
+            ExternalClientRequestedEntity("admin", None),
+            True,
+            {},
+            [format_status(ExternalClientsStatuses.ENTITY_NAME_RESERVED.value, {"id": 1})],
+        ),
+        (
+            "",
+            ExternalClientRequestedEntity("kibanaserver", "secret"),
+            True,
+            {},
+            [format_status(ExternalClientsStatuses.ENTITY_NAME_RESERVED.value, {"id": 1})],
+        ),
+        (
+            ENTITY_GROUP,
+            ExternalClientRequestedEntity("all_access", None),
+            True,
+            {},
+            [format_status(ExternalClientsStatuses.ENTITY_NAME_RESERVED.value, {"id": 1})],
+        ),
+        (
+            ENTITY_GROUP,
+            GROUP_ENTITY,
+            True,
             {"2": "devs_group"},
             [format_status(ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value, {"id": 1})],
         ),
         (
+            ENTITY_GROUP,
             GROUP_ENTITY,
+            True,
             {"1": "devs_group"},
             [GeneralStatuses.ACTIVE_IDLE.value],
         ),
     ],
-    ids=["missing-entity", "username-used-by-other-relation", "username-owned-by-relation"],
+    ids=[
+        "group-missing-entity",
+        "invalid-permissions",
+        "system-user-name",
+        "system-user-name-on-legacy-relation",
+        "managed-role-name",
+        "name-used-by-other-relation",
+        "name-owned-by-relation",
+    ],
 )
-def test_group_entity_client_statuses(
-    opensearch_client, requested_entity, client_users, expected_statuses
+def test_entity_client_statuses(
+    opensearch_client,
+    entity_type,
+    requested_entity,
+    permissions_valid,
+    client_users,
+    expected_statuses,
 ):
     relation = MagicMock(id=1)
     relation.data = {relation.app: {"index": "logs"}}
-    external_client = make_client(entity_type=ENTITY_GROUP)
+    external_client = make_client(entity_type=entity_type)
     external_client.get_requested_entity.return_value = requested_entity
+    if not permissions_valid:
+        type(external_client).entity_permissions = PropertyMock(
+            side_effect=ValidationError.from_exception_data("entity-permissions", [])
+        )
 
     state = make_state(client_users)
     state.external_client_relations = [relation]
@@ -383,3 +576,46 @@ def test_group_entity_client_statuses(
     statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
 
     assert statuses == expected_statuses
+
+
+def test_client_status_outside_main_orchestrator(opensearch_client):
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}}
+    state = make_state()
+    state.is_main_orchestrator = False
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = make_client()
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [format_status(ExternalClientsStatuses.RELATION_INVALID.value, {"id": 1})]
+
+
+@pytest.mark.parametrize("is_main_orchestrator", [True, False], ids=["main", "non-main"])
+def test_role_mappings_reconciled_on_config_changed_by_main_orchestrator_only(
+    harness, mocker, client_request_ready, is_main_orchestrator
+):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.is_main_orchestrator",
+        new_callable=PropertyMock,
+        return_value=is_main_orchestrator,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.cluster.ClusterManager.reconcile_cluster_config",
+        return_value=False,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        return_value=False,
+    )
+    reconcile_role_mappings = mocker.patch(
+        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
+    )
+
+    harness.charm.opensearch_events._on_config_changed(MagicMock())
+
+    assert reconcile_role_mappings.called is is_main_orchestrator

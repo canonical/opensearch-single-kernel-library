@@ -262,6 +262,9 @@ MANAGED_ROLES = [
     "snapshot_management_read_access",
 ]
 
+# Names that client relations cannot request for their entities.
+RESERVED_ENTITY_NAMES = OPENSEARCH_USERS | set(MANAGED_ROLES) | {KIBANA_SERVER_ROLE}
+
 # OpenSearch indices
 OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
 SYSTEM_INDICES = {
@@ -386,9 +389,9 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
 # Endpoints
-USER_ENDPOINT = "/_plugins/_security/api/internalusers"
-USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
-USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+INTERNAL_USER_ENDPOINT = "/_plugins/_security/api/internalusers"
+ROLE_ENDPOINT = "/_plugins/_security/api/roles"
+ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
 
 # Root group id (gid 0). Used when we want root to have group-level access.

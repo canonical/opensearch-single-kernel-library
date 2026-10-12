@@ -10,7 +10,14 @@ from charmlibs.interfaces.certificate_transfer import (
     CertificatesAvailableEvent,
     CertificatesRemovedEvent,
 )
-from ops import ConfigChangedEvent, EventBase, Object
+from ops import (
+    ConfigChangedEvent,
+    EventBase,
+    ModelError,
+    Object,
+    Relation,
+    SecretChangedEvent,
+)
 
 from opensearch_single_kernel.lib.charms.glauth_k8s.v0.ldap import (
     LdapReadyEvent,
@@ -43,9 +50,32 @@ class LdapEventsHandler(Object):
             self._on_ldap_certificate_removed,
         )
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
 
     def _on_ldap_ready(self, event: LdapReadyEvent) -> None:
         """Handle the LDAP integration event."""
+        self._apply_ldap_data(event, event.relation)
+
+    def _on_secret_changed(self, event: SecretChangedEvent) -> None:
+        """Handle the rotation of the LDAP bind password.
+
+        The provider rotates the password within the same secret, so the relation data does not
+        change and the LDAP ready event is not emitted again.
+        """
+        if not self.charm.state.is_ldap_bind_password_secret(event.secret):
+            return
+
+        try:
+            # The LDAP library reads the tracked revision: move to the latest one first.
+            event.secret.get_content(refresh=True)
+        except ModelError as e:
+            logger.error("Cannot refresh LDAP bind password secret: %s", e)
+            return
+
+        self._apply_ldap_data(event, self.charm.state.ldap_relation)
+
+    def _apply_ldap_data(self, event: EventBase, relation: Relation | None) -> None:
+        """Apply the data received over the LDAP relation to the security config."""
         if not self.charm.workload.can_connect:
             logger.debug("Workload connection failure. Deferring event.")
             event.defer()
@@ -57,7 +87,7 @@ class LdapEventsHandler(Object):
 
         if not (
             ldap_data := self.charm.state.ldap_requirer.consume_ldap_relation_data(
-                relation=event.relation
+                relation=relation
             )
         ):
             logger.debug("LDAP relation data absent. Early exiting event.")
@@ -93,14 +123,15 @@ class LdapEventsHandler(Object):
             event.defer()
             return
 
-        if not (ca_certs := self.charm.state.ldap_certificates):
-            logger.debug("Ldap certificates not published by provider. Early exiting event.")
-            return
-
-        logger.debug("Writing ldap certificates files")
-        self.charm.workload.write_text(
-            "\n".join(sorted(ca_certs)), self.charm.workload.paths.ldap_chain
-        )
+        if ca_certs := self.charm.state.ldap_certificates:
+            logger.debug("Writing ldap certificates files")
+            self.charm.workload.write_text(
+                "\n".join(sorted(ca_certs)), self.charm.workload.paths.ldap_chain
+            )
+        else:
+            # The provider withdrew its certificates while keeping the relation.
+            logger.debug("Ldap certificates not published by provider. Removing stale files")
+            self.charm.workload.unlink(self.charm.workload.paths.ldap_chain, missing_ok=True)
 
         if not self.charm.state.is_main_orchestrator:
             logger.debug("Not the main orchestrator. Early exiting event.")
