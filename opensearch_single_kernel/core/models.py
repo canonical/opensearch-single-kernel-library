@@ -717,7 +717,7 @@ class PeerClusterRelData(Model):
             credentials["admin_tls"] = secrets.resolve_credential(
                 credentials["admin_tls"], peek_secrets=peek_secrets
             )
-        else:
+        elif not credentials.get("admin_tls"):
             credentials["admin_tls"] = None
 
         if (
