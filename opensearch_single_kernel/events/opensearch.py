@@ -854,6 +854,12 @@ class OpenSearchEventsHandler(Object):
                         "unit",
                         self.charm.cluster_manager.name,
                     )
+                elif isinstance(e, OpenSearchNotFullyReadyError):
+                    self.charm.state.add_status_if_not_present(
+                        GeneralStatuses.WAITING_TO_START.value,
+                        "unit",
+                        self.charm.cluster_manager.name,
+                    )
                 event.defer()
             except OpenSearchUserMgmtError as e:
                 # Either generic start failure or cluster is not read

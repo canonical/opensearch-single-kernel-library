@@ -9,10 +9,12 @@ import pytest
 from ops import LeaderElectedEvent
 from ops.pebble import APIError
 
+from opensearch_single_kernel.common.constants import STATUS_PEERS_RELATION, HealthColors
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
+    OpenSearchNotFullyReadyError,
 )
-from opensearch_single_kernel.common.statuses import InternalUsersStatuses
+from opensearch_single_kernel.common.statuses import GeneralStatuses, InternalUsersStatuses
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -335,6 +337,111 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     start.assert_called_once()
     _post_start_init.assert_called_once()
     update_opensearch_config.assert_called()
+
+
+@pytest.mark.parametrize("main_orchestrator", [False, True])
+@pytest.mark.parametrize("already_waiting_to_start", [False, True])
+def test_running_node_defers_with_startup_status(
+    harness, mocker, main_orchestrator, already_waiting_to_start
+):
+    """Failed post-start checks leave Waiting or the existing, stronger startup error."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+    manager = charm.cluster_manager
+    charm.status_handler.components = (manager, charm.health_manager)
+    mocker.patch.object(charm.health_manager, "get", return_value=HealthColors.UNKNOWN)
+    waiting = GeneralStatuses.WAITING_TO_START.value
+    if already_waiting_to_start:
+        charm.status_handler.set_running_status(
+            waiting, "unit", statuses_state=charm.state.statuses, component_name=manager.name
+        )
+    mocker.patch.object(charm.state, "is_peer_cluster_consumer", return_value=False)
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=main_orchestrator)
+    for name in (
+        "is_data_role_in_cluster_fleet_apps",
+        "bootstrapped",
+        "is_security_index_initialised",
+    ):
+        mocker.patch.object(
+            type(charm.state.application), name, new_callable=PropertyMock, return_value=True
+        )
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(
+        manager,
+        "wait_for_opensearch_up",
+        side_effect=OpenSearchNotFullyReadyError("Node started but not fully ready yet."),
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    event = mocker.Mock(after_upgrade=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    expected = GeneralStatuses.SERVICE_START_ERROR.value if main_orchestrator else waiting
+    stored = charm.state.statuses.get("unit", manager.name).root
+    assert (waiting in stored) == (already_waiting_to_start or not main_orchestrator)
+    assert expected in stored
+    assert expected in manager.get_statuses("unit", recompute=True)
+    assert charm.health_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+    charm.status_handler._recompute_statuses_for_scope("unit", charm.health_manager)
+    collect = mocker.Mock()
+    charm.status_handler._on_collect_unit_status(collect)
+    assert collect.add_status.call_args.args[0].name == expected.status
+
+
+@pytest.mark.parametrize(
+    "readiness_check", ["wait_for_opensearch_up", "assert_current_node_joined_cluster"]
+)
+def test_post_start_waiting_survives_failure_and_clears_on_retry(harness, mocker, readiness_check):
+    """Post-start work must complete before its persisted Waiting status is cleared."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+    manager = charm.cluster_manager
+    waiting = GeneralStatuses.WAITING_TO_START.value
+    charm.state.add_status_if_not_present(waiting, "unit", manager.name)
+    mocker.patch.object(manager, "wait_for_opensearch_up")
+    mocker.patch.object(manager, "assert_current_node_joined_cluster")
+    failed_check = getattr(manager, readiness_check)
+    failed_check.side_effect = OpenSearchNotFullyReadyError("Node is not ready")
+    mocker.patch.object(charm.exclusions_manager, "delete_current")
+    mocker.patch.object(charm.lock_manager, "release")
+    mocker.patch.object(manager, "apply_upstream_fixes")
+    mocker.patch.object(charm, "apply_health")
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=False)
+    ca_rotation = mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    event = mocker.Mock(after_upgrade=False)
+
+    with pytest.raises(OpenSearchNotFullyReadyError):
+        charm.opensearch_events._post_start_init(event)
+
+    assert waiting in manager.get_statuses("unit", recompute=True)
+    ca_rotation.assert_not_called()
+
+    failed_check.side_effect = None
+    charm.opensearch_events._post_start_init(event)
+
+    assert waiting not in manager.get_statuses("unit", recompute=True)
+    ca_rotation.assert_called_once()
+    event.defer.assert_not_called()
+
+    # CA rotation can synchronously initiate another startup attempt.
+    def restart_during_ca_rotation():
+        assert waiting not in manager.get_statuses("unit", recompute=True)
+        charm.state.add_status_if_not_present(waiting, "unit", manager.name)
+
+    ca_rotation.side_effect = restart_during_ca_rotation
+    charm.opensearch_events._post_start_init(event)
+    assert waiting in manager.get_statuses("unit", recompute=True)
 
 
 def test_app_peers_data(harness):
