@@ -25,6 +25,7 @@ from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
+    ENTITY_USER,
     IndexEntityRequestedEvent,
     IndexRequestedEvent,
     OpenSearchProvides,
@@ -76,41 +77,44 @@ class ExternalClientsEventsHandler(Object):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
+        if self._is_user_entity_requested(external_client):
+            return
+
         if not self._validate_client_request(event, external_client):
             return
 
         requested_entity = external_client.get_requested_entity()
 
         try:
-            if external_client.entity_type == ENTITY_GROUP:
-                # The index of a group is created before the role granting access to it.
-                self._provide_client_index(event, external_client)
-                self.charm.external_clients_manager.provide_client_entity(
-                    external_client, requested_entity
-                )
-            else:
-                self.charm.external_clients_manager.provide_client_entity(
-                    external_client, requested_entity
-                )
-                self._provide_client_index(event, external_client)
-
-            external_client.version = self.charm.workload.version
-
-            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
+            # The index is created before the entity granted access to it: nothing is provided
+            # to the client if it fails.
+            self._provide_client_index(event, external_client)
+            self.charm.external_clients_manager.provide_client_entity(
+                external_client, requested_entity
+            )
         except OpenSearchUserMgmtError as e:
             logger.error("Failed to provide client or entity: %s", str(e))
             event.defer()
             return
+
+        try:
+            external_client.version = self.charm.workload.version
         except OpenSearchCmdError as e:
             logger.error("Failed to update relation version info: %s", str(e))
             event.defer()
             return
+
+        try:
+            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
         except KeyError as e:
             logger.error("Failed to update relation TLS info: missing key %s", str(e))
             event.defer()
             return
 
         self.update_external_client_endpoints(external_client)
+        if external_client.entity_type != ENTITY_GROUP:
+            # A user was provided: the LDAP authorization has to skip it.
+            self.charm.reconcile_security_config(event)
 
         logger.info("new index %s available", event.index)
 
@@ -133,6 +137,20 @@ class ExternalClientsEventsHandler(Object):
         )
 
         self.charm.external_clients_manager.provide_client_index(external_client)
+
+    def _is_user_entity_requested(self, external_client: ExternalOpenSearchClient) -> bool:
+        """Check whether a client relation requests a USER entity, which is not supported.
+
+        Nothing is provided to such a relation: the status of the app reports it.
+        """
+        if external_client.entity_type != ENTITY_USER:
+            return False
+
+        logger.error(
+            "Ignoring client relation %d: entity-type=USER is not supported.",
+            external_client.relation.id,
+        )
+        return True
 
     def _validate_client_request(
         self,
@@ -179,13 +197,21 @@ class ExternalClientsEventsHandler(Object):
             event.defer()
             return False
 
-        if error := self.charm.external_clients_manager.get_request_error(external_client):
+        try:
+            error = self.charm.external_clients_manager.get_request_error(external_client)
+        except OpenSearchHttpError as e:
+            logger.error("Failed to validate the request of client relation: %s", str(e))
+            event.defer()
+            return False
+
+        if error:
             logger.error(
                 "Cannot serve the request of client relation %s: %s",
                 event.relation.id,
                 error.name,
             )
-            # A conflicting entity is released once the relation owning it is removed.
+            # A conflicting entity is released once the relation owning it, or the role
+            # holding its name, is removed.
             if error is ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT:
                 event.defer()
             return False
@@ -201,6 +227,8 @@ class ExternalClientsEventsHandler(Object):
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
             return
+        if self._is_user_entity_requested(external_client):
+            return
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.update_external_client_endpoints(external_client)
         else:
@@ -213,6 +241,8 @@ class ExternalClientsEventsHandler(Object):
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
+            return
+        if self._is_user_entity_requested(external_client):
             return
         # remove departing unit from endpoints available to requirer charm.
         if event.departing_unit and event.departing_unit.app == self.charm.app:
@@ -236,6 +266,8 @@ class ExternalClientsEventsHandler(Object):
                 "The charm may be in a broken, unrecoverable state"
             )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+        # The users which were removed are no longer to be skipped by the LDAP authorization.
+        self.charm.reconcile_security_config(event)
 
     def update_external_client_endpoints(
         self, external_client: ExternalOpenSearchClient, omit_endpoints: set | None = None

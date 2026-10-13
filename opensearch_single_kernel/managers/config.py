@@ -13,7 +13,10 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     Substrates,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -49,8 +52,8 @@ class ConfigManager(BaseManager):
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
-        Updates opensearch.yml & unicast_hosts.txt & opensearch-security/config.yml config files
-        and assures jvm.options is populated with right static options.
+        Updates opensearch.yml & unicast_hosts.txt config files and assures jvm.options is
+        populated with right static options.
 
         Args:
             roles: override node roles got from nodes_config.
@@ -79,8 +82,6 @@ class ConfigManager(BaseManager):
 
         self._update_static_jvm_options()
 
-        self.update_security_config()
-
         if cm_hosts:
             self._update_seeds_file(cm_hosts)
         else:
@@ -93,7 +94,8 @@ class ConfigManager(BaseManager):
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
 
-        Updates opensearch-security/config.yml config file.
+        Updates opensearch-security/config.yml config file. It has its own lifecycle: OpenSearch
+        only reads it from the security index, to which it must be applied once updated.
 
         Returns:
             whether the config was changed.
@@ -116,6 +118,80 @@ class ConfigManager(BaseManager):
         }
 
         return self.yaml_setter.rewrite(self.SECURITY_CONFIG_YML, config)
+
+    def reconcile_security_config(self, force: bool = False) -> bool:
+        """Update the security config and apply it to the security index if it changed.
+
+        The file only keeps what is applied: it is restored when its application fails, for the
+        change to be seen again by the next call.
+
+        Args:
+            force: whether to apply the security config even if it did not change.
+
+        Returns:
+            whether the security index holds the security config. If not, to call again later.
+        """
+        if not self.workload.can_connect or not self.workload.is_service_started():
+            logger.debug("Workload not running: the security config is not reconciled.")
+            return False
+
+        if not self.opensearch_client.is_node_up():
+            logger.debug("OpenSearch not ready: the security config is not reconciled.")
+            return False
+
+        if not (admin_secrets := self.state.application.admin_secrets):
+            logger.debug("Admin secrets absent: the security config is not reconciled.")
+            return False
+
+        path = self.workload.paths.conf / self.SECURITY_CONFIG_YML
+        applied_config = self.workload.read_text(path)
+        if not self.update_security_config() and not force:
+            logger.debug("Security config unchanged.")
+            return True
+
+        logger.debug("Updating security config")
+        applied = False
+        try:
+            applied = self.apply_security_config(admin_secrets, self.SECURITY_CONFIG_YML)
+        finally:
+            if not applied:
+                self.workload.write_text(applied_config, path)
+
+        return applied
+
+    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> bool:
+        """Run the security_admin script for specified config file, avoiding changes to others.
+
+        Returns:
+            True on success, False if the script failed.
+        """
+        if not file.startswith("opensearch-security"):
+            raise ValueError("security config is expected")
+
+        args = [
+            f"-f {self.workload.paths.conf}/{file}",
+            f"-cn {self.state.application.deployment_desc.config.cluster_name}",
+            f"-h {self.state.node_host}",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
+            f"-tspass {admin_secrets['truststore-password']}",
+            "-tst PKCS12",
+            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-kspass {admin_secrets['keystore-password']}",
+            "-kst PKCS12",
+        ]
+
+        admin_key_pwd = admin_secrets.get("key-password", None)
+        if admin_key_pwd is not None:
+            args.append(f"-keypass {admin_key_pwd}")
+
+        try:
+            self.workload.run_script(
+                "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+            )
+        except OpenSearchCmdError as e:
+            logger.debug("Error when updating the security index: %s", e.out)
+            return False
+        return True
 
     @staticmethod
     def _opensearch_static_config() -> dict[str, Any]:
@@ -280,7 +356,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via HTTP Basic against internal users database",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 5,
+                "order": 4,
                 "http_authenticator": {
                     "type": "basic",
                     "challenge": True,
@@ -293,7 +369,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via SSL client certificates",
                 "http_enabled": True,
                 "transport_enabled": True,
-                "order": 3,
+                "order": 2,
                 "http_authenticator": {
                     "type": "clientcert",
                     "challenge": False,
@@ -304,7 +380,7 @@ class ConfigManager(BaseManager):
             "kerberos_auth_domain": {
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 7,
+                "order": 6,
                 "http_authenticator": {
                     "type": "kerberos",
                     "challenge": True,
@@ -316,7 +392,7 @@ class ConfigManager(BaseManager):
                 "description": "Authenticate via proxy",
                 "http_enabled": False,
                 "transport_enabled": False,
-                "order": 4,
+                "order": 3,
                 "http_authenticator": {
                     "type": "proxy",
                     "challenge": False,
@@ -383,7 +459,7 @@ class ConfigManager(BaseManager):
                     # NOTE: Order value needs to be lower than basic_internal_auth_domain section,
                     # which is set to 4 by default. Only available number is 1, if we want a
                     # different number, all other numbers need to be reshuffled.
-                    "order": 2,
+                    "order": 1,
                     "http_authenticator": {
                         "type": "openid",
                         "challenge": False,
@@ -417,7 +493,7 @@ class ConfigManager(BaseManager):
                     "http_enabled": True,
                     "transport_enabled": False,
                     # Authentik slowly responds causing is_node_up timeouts.
-                    "order": 6,
+                    "order": 5,
                     "http_authenticator": {
                         "type": "basic",
                         "challenge": False,
@@ -451,7 +527,7 @@ class ConfigManager(BaseManager):
                     "http_enabled": False,
                     "transport_enabled": False,
                     # Authentik slowly responds causing is_node_up timeouts.
-                    "order": 6,
+                    "order": 5,
                     "http_authenticator": {
                         "type": "basic",
                         "challenge": False,
@@ -544,7 +620,10 @@ class ConfigManager(BaseManager):
                             "rolename": self.state.config.get("ldap_role_name_attr", ""),
                             "rolesearch_enabled": False,
                             "resolve_nested_roles": False,
-                            "skip_users": sorted(OPENSEARCH_USERS),
+                            "skip_users": sorted(
+                                OPENSEARCH_USERS
+                                | set(self.state.application.client_users_dict.values())
+                            ),
                         },
                     },
                 },

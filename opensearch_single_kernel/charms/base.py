@@ -196,6 +196,38 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         if on_current_unit:
             self.on[PEER_RELATION].relation_changed.emit(self.state.peer_relation)
 
+    def reconcile_security_config(self, event: ops.EventBase, force: bool = False) -> None:
+        """Have the security index follow the security config, deferring the event until done.
+
+        The security config is shared by the whole cluster: only the leader of its main
+        orchestrator applies it.
+
+        Args:
+            event: the event being handled.
+            force: whether to apply the security config even if it did not change.
+        """
+        if not self.unit.is_leader():
+            return
+
+        if not self.state.application.deployment_desc:
+            logger.debug("Deployment description absent. Deferring event.")
+            event.defer()
+            return
+
+        if not self.state.is_main_orchestrator:
+            return
+
+        if self.is_unit_going_away(event):
+            # The relations only go away for this unit: the cluster keeps its security config.
+            logger.debug("Unit is going away. Keeping the security config.")
+            return
+
+        if self.upgrades_manager.in_progress or not (
+            self.config_manager.reconcile_security_config(force)
+        ):
+            logger.debug("Security config not reconciled. Deferring event.")
+            event.defer()
+
     def is_unit_going_away(self, event: ops.EventBase | None = None) -> bool:
         """Whether this unit, or the whole application, is being removed.
 

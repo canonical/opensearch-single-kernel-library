@@ -552,6 +552,9 @@ class OpenSearchEventsHandler(Object):
                 event.defer()
                 return
 
+        # Some options are part of the security config, e.g. the ones of LDAP.
+        self.charm.reconcile_security_config(event)
+
         if self.charm.cluster_manager.workload.is_service_started() and (
             profile_restart_needed or config_restart_needed
         ):
@@ -600,6 +603,10 @@ class OpenSearchEventsHandler(Object):
                 except OpenSearchFileOperationError as e:
                     logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
+
+            # the security config file of a unit tells nothing about what the previous leader
+            # applied: the security index is aligned with the one of the new leader
+            self.charm.reconcile_security_config(event, force=True)
             return
 
         # TODO: check if cluster can start independently
@@ -718,8 +725,8 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.ldap_manager.restore_ldap_ca()
         try:
+            self.charm.ldap_manager.restore_ldap_ca()
             self.charm.snapshots_events.restore_stored_credentials()
             self.charm.notifications_events.restore_keystore_credentials()
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
@@ -1026,6 +1033,8 @@ class OpenSearchEventsHandler(Object):
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
+            # the security index is initialised with the content of the security config files
+            self.charm.config_manager.update_security_config()
             self.charm.cluster_manager.initialise_security_index()
             if (
                 self.charm.state.application.deployment_desc.typ

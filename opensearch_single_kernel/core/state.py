@@ -24,6 +24,7 @@ from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     CLIENT_RELATION,
     COS_RELATION,
+    DEFAULT_BACKEND_ROLES_MAPPING,
     GCS_RELATION,
     GENERATED_ROLES,
     GRAFANA_K8S_RELATION,
@@ -865,15 +866,12 @@ class ClusterState(Object):
         Format: role -> mapped backend roles.
         """
         res = {
-            "manage_snapshots": ["snapshotrestore"],
-            "logstash": ["logstash"],
-            "kibana_user": ["kibanauser"],
-            "all_access": ["admin"],
-            "readall": ["readall"],
+            role: list(backend_roles)
+            for role, backend_roles in DEFAULT_BACKEND_ROLES_MAPPING.items()
         }
         for external_client in self.external_clients:
             if not (
-                username := self.application.client_users_dict.get(
+                username := self.application.client_entities_dict.get(
                     str(external_client.relation.id)
                 )
             ):
@@ -885,12 +883,12 @@ class ClusterState(Object):
         return res
 
     @property
-    def managed_mappings(self) -> list[str]:
+    def managed_roles(self) -> list[str]:
         """Return all of the roles for which the charm should manage roles mappings.
 
         External client roles also included in the results.
         """
-        return MANAGED_ROLES + list(self.application.client_users_dict.values())
+        return MANAGED_ROLES + list(self.application.client_entities_dict.values())
 
     def computed_roles(self) -> list[str]:
         """Return computed_roles"""
@@ -1125,9 +1123,7 @@ class ClusterState(Object):
         of_failover = (
             orchestrators.failover_app
             and self.peer_cluster_by_relation_id(
-                is_provider=False,
-                relation_id=orchestrators.failover_rel_id,
-                remote=True,
+                is_provider=False, relation_id=orchestrators.failover_rel_id, remote=True
             )
             is not None
         )
@@ -1156,8 +1152,7 @@ class ClusterState(Object):
 
         if not self.peer_cluster_orchestrator_relation_exists(orchestrators.main_rel_id):
             logger.info(
-                "relation with id %s not found for main orchestrator",
-                orchestrators.main_rel_id,
+                "relation with id %s not found for main orchestrator", orchestrators.main_rel_id
             )
             return None
 
@@ -1210,14 +1205,16 @@ class ClusterState(Object):
 
         # non-main orchestrator
         peer_data = self.get_rel_data_from_main_orchestrator(peek_secrets=True)
-        if not peer_data or not peer_data.credentials:
+        if not peer_data or not (credentials := peer_data.credentials):
             return None
-        if peer_data.credentials.s3:
+        # The credentials of the storages which are not in use are passed as empty objects.
+        if (s3 := credentials.s3) and s3.access_key and s3.secret_key:
             return ObjectStorageType.S3_PCLUSTER
-        if peer_data.credentials.azure:
+        if (azure := credentials.azure) and azure.storage_account and azure.secret_key:
             return ObjectStorageType.AZURE_PCLUSTER
-        if peer_data.credentials.gcs:
+        if (gcs := credentials.gcs) and gcs.secret_key:
             return ObjectStorageType.GCS_PCLUSTER
+        return None
 
     def get_storage_connection_info_from_relation(
         self, object_storage_type: ObjectStorageType
@@ -1360,9 +1357,7 @@ class ClusterState(Object):
                 self.secrets.put(Scope.APP, "s3-tls-ca-chain", s3_tls_ca_chain)
 
             return S3RelDataCredentials(
-                access_key=access_key,
-                secret_key=secret_key,
-                s3_tls_ca_chain=s3_tls_ca_chain,
+                access_key=access_key, secret_key=secret_key, s3_tls_ca_chain=s3_tls_ca_chain
             )
 
         if not self.secrets.get(Scope.APP, "s3-access-key"):
@@ -1404,7 +1399,11 @@ class ClusterState(Object):
 
     @property
     def is_main_orchestrator(self) -> bool:
-        """Get whether the current application is not a sub-cluster."""
+        """Get whether the current application is known to be the main orchestrator.
+
+        It is the case of the only application of a small deployment. `False` is returned as
+        long as the deployment description is not available.
+        """
         return (
             deployment_desc := self.application.deployment_desc
         ) is not None and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

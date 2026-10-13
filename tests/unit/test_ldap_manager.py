@@ -83,6 +83,27 @@ def test_ldap_relation_statuses(state, expected_statuses):
     assert manager.get_statuses("app") == [status.value for status in expected_statuses]
 
 
+@pytest.mark.parametrize(
+    "ldap_data, ldap_certificates",
+    [(None, CERTIFICATES), (LDAPS_DATA, set()), (None, set())],
+    ids=["no-provider-data", "no-certificates", "nothing"],
+)
+def test_no_ldap_status_without_unit_of_the_provider(ldap_data, ldap_certificates):
+    """The relation is being set up or removed: nothing is expected from the operator."""
+    state = make_state(ldap_data=ldap_data, ldap_certificates=ldap_certificates)
+    state.ldap_relation.units = set()
+
+    assert LdapManager(state, MagicMock()).get_statuses("app") == [
+        GeneralStatuses.ACTIVE_IDLE.value
+    ]
+
+
+def test_app_is_not_blocked_while_the_provider_has_not_shared_its_data():
+    manager = LdapManager(make_state(ldap_data=None), MagicMock())
+
+    assert [status.status for status in manager.get_statuses("app")] == ["waiting"]
+
+
 @pytest.mark.parametrize("chain_content", [None, "cert-old"], ids=["missing", "outdated"])
 def test_certificates_restored_on_k8s(chain_content):
     workload = make_workload(chain_content)

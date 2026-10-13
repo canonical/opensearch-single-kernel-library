@@ -238,11 +238,7 @@ class OpenSearchClient:
             True if snapshot is running else False
         """
         response = self.request(
-            "GET",
-            "_snapshot/_status",
-            alt_hosts=alt_hosts,
-            retries=3,
-            wait_strategy=wait_fixed(3),
+            "GET", "_snapshot/_status", alt_hosts=alt_hosts, retries=3, wait_strategy=wait_fixed(3)
         )
         return len(response.get("snapshots", [])) > 0
 
@@ -559,6 +555,25 @@ class OpenSearchClient:
 
         return resp
 
+    def get_role(self, role_name: str) -> dict[str, Any] | None:
+        """Get the given role from opensearch API.
+
+        Args:
+            role_name: name of the role to get.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+
+        Returns:
+            The definition of the role, None if it does not exist.
+        """
+        try:
+            return self.request("GET", f"{ROLE_ENDPOINT}/{role_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return None
+            raise e
+
     def remove_role(self, role_name: str) -> dict[str, Any]:
         """Remove the given role from opensearch API.
 
@@ -717,9 +732,10 @@ class OpenSearchClient:
         Raises:
             OpenSearchHttpError: If the request fails.
         """
-        # TODO: Understand why we are removing here
         if not users and not backend_roles:
-            return self.remove_role_mapping(role)
+            # Nothing is expected to be mapped to the role: its mapping is removed.
+            self.remove_role_mapping(role)
+            return
         try:
             resp = self.request(
                 "PUT",
@@ -966,11 +982,7 @@ class OpenSearchClient:
         return None
 
     def get_roles_by_unit_name(
-        self,
-        unit_name: str,
-        unit_number: int,
-        alt_hosts: list[str] | None,
-        substrate: Substrates,
+        self, unit_name: str, unit_number: int, alt_hosts: list[str] | None, substrate: Substrates
     ) -> list[str]:
         """Get the list of the roles assigned to this node.
 

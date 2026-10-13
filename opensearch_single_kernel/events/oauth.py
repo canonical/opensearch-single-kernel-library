@@ -20,6 +20,7 @@ from opensearch_single_kernel.common.constants import (
     OAUTH_CLIENT_SCOPE,
     OAUTH_RELATION,
 )
+from opensearch_single_kernel.core.models import DeploymentType
 from opensearch_single_kernel.lib.charms.hydra.v0.oauth import (
     ClientConfig,
     OAuthRequirer,
@@ -61,9 +62,9 @@ class OAuthEventsHandler(Object):
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         """Handler for `relation_created` event."""
-        if not self.charm.state.is_main_orchestrator:
-            # in large deployments, OAuth config must only be handled by the main orchestrator
-            # this is a safeguard to avoid different sources for applying security configuration
+        if (
+            deployment_desc := self.charm.state.application.deployment_desc
+        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             logger.warning("OAuth relation created on non-main orchestrator.")
 
     def _on_oauth_relation_changed(self, event: EventBase) -> None:
@@ -71,9 +72,9 @@ class OAuthEventsHandler(Object):
 
         Updates the security config.yml with the OIDC info and update the cluster.
         """
-        if not self.charm.state.is_main_orchestrator:
-            # in large deployments, OAuth config must only be handled by the main orchestrator
-            # this is a safeguard to avoid different sources for applying security configuration
+        if (
+            deployment_desc := self.charm.state.application.deployment_desc
+        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
         if not (relation := self.charm.state.oauth_relation):
@@ -100,7 +101,7 @@ class OAuthEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
@@ -112,7 +113,9 @@ class OAuthEventsHandler(Object):
             logger.info("A different OAuth relation exists, skipping cleanup")
             return
 
-        if not self.charm.state.is_main_orchestrator:
+        if (
+            deployment_desc := self.charm.state.application.deployment_desc
+        ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
         if self.charm.is_unit_going_away(event):
@@ -131,7 +134,7 @@ class OAuthEventsHandler(Object):
         if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()

@@ -60,7 +60,7 @@ async def test_build_and_deploy_with_manual_tls(
     logger.info("Deployed %s application", MANUAL_TLS_CERTIFICATES_APP_NAME)
 
     # Integrate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(f"${APP_NAME}:certificates", MANUAL_TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", MANUAL_TLS_CERTIFICATES_APP_NAME)
     logger.info("Integrated %s with %s", APP_NAME, MANUAL_TLS_CERTIFICATES_APP_NAME)
 
     # Initialize the ManualTLSAgent to process the CSRs

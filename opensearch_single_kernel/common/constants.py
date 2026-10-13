@@ -262,6 +262,15 @@ MANAGED_ROLES = [
     "snapshot_management_read_access",
 ]
 
+# Backend roles mapped by default to the built-in roles, as shipped in `roles_mapping.yml`.
+DEFAULT_BACKEND_ROLES_MAPPING = {
+    "manage_snapshots": ["snapshotrestore"],
+    "logstash": ["logstash"],
+    "kibana_user": ["kibanauser"],
+    "all_access": ["admin"],
+    "readall": ["readall"],
+}
+
 # Names that client relations cannot request for their entities.
 RESERVED_ENTITY_NAMES = OPENSEARCH_USERS | set(MANAGED_ROLES) | {KIBANA_SERVER_ROLE}
 

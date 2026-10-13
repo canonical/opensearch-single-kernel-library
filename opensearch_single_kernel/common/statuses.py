@@ -248,23 +248,30 @@ class ExternalClientsStatuses(Enum):
     )
     USER_CREATION_FAILED = StatusObject(
         status="blocked",
-        message="Failed to create users for client relation {id}",
-        short_message="Client user create failed",
-        check="OpenSearch user for client relation.",
+        message="Failed to create the user or role for client relation {id}",
+        short_message="Client entity create failed",
+        check="OpenSearch user or role for client relation.",
         action="Check unit logs and retry the client relation.",
+    )
+    ENTITY_TYPE_UNSUPPORTED = StatusObject(
+        status="blocked",
+        message="entity-type=USER is not supported on client relation {id}",
+        short_message="Unsupported client entity type",
+        check="Entity type requested on client relations.",
+        action="Request entity-type=GROUP or no entity type and retry the client relation.",
     )
     USER_ENTITY_GROUP_INVALID = StatusObject(
         status="blocked",
-        message="Missing or invalid group entity on client relation {id}",
-        short_message="Invalid group entity from client",
-        check="Entity validation for entity-type=GROUP client relations.",
-        action="Change entity-type or provide valid entity through client relation.",
+        message="Missing or invalid requested entity on client relation {id}",
+        short_message="Invalid entity from client",
+        check="Requested entity validation for client relations.",
+        action="Provide a valid entity name through the client relation.",
     )
     USER_ENTITY_GROUP_CONFLICT = StatusObject(
         status="blocked",
         message="Conflicting requested entity on client relation {id}",
         short_message="Conflicting client entity",
-        check="Repetition of OpenSearch entity name across client relations.",
+        check="Requested entity name against the roles and the other client relations.",
         action="Change the requested entity name and retry the client relation.",
     )
     ENTITY_NAME_RESERVED = StatusObject(
@@ -689,11 +696,10 @@ class LdapStatuses(Enum):
     """Collection of charm statuses related to LDAP relation."""
 
     LDAP_DATA_UNAVAILABLE = StatusObject(
-        status="blocked",
-        message="LDAP data is unavailable; configure LDAP provider and check logs.",
-        short_message="LDAP data is unavailable",
+        status="waiting",
+        message="Waiting for the LDAP provider to share its data.",
+        short_message="Waiting for LDAP data",
         check="LDAP relation app databag content.",
-        action="Configure LDAP provider and check logs.",
     )
     LDAPS_NOT_ENABLED = StatusObject(
         status="blocked",
