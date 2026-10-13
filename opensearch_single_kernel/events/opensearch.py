@@ -388,6 +388,7 @@ class OpenSearchEventsHandler(Object):
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
+
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
         except OpenSearchHttpError:
@@ -398,18 +399,15 @@ class OpenSearchEventsHandler(Object):
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
-        if (
-            health := self.charm.apply_health(
-                wait_for_green_first=True, app=self.charm.unit.is_leader()
-            )
-        ) not in [
+
+        if (health := self.charm.apply_health(app=self.charm.unit.is_leader())) not in [
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
             logger.warning("Update status: exclusions updated and cluster health is %s.", health)
-
             if health == HealthColors.UNKNOWN:
                 return
+
         if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)

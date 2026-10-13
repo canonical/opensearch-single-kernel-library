@@ -1140,7 +1140,7 @@ class OpenSearchClient:
         timeout = 5
         if wait_for_green:
             endpoint = f"{endpoint}?wait_for_status=green&timeout=1m"
-            timeout = 61
+            timeout = 65
 
         try:
             return self.request(
@@ -1150,9 +1150,12 @@ class OpenSearchClient:
                 alt_hosts=alt_hosts,
                 timeout=timeout,
                 retries=3,
-                wait_strategy=wait_exponential(min=2),
+                ignore_retry_on=[408] if wait_for_green else None,
             )
         except OpenSearchHttpError as e:
+            if wait_for_green and e.response_code == 408 and e.response_body.get("timed_out"):
+                # The wait expired, but OpenSearch still returns the current health
+                return e.response_body
             logger.error("HTTP error when checking cluster health: %s", e)
             return None
 

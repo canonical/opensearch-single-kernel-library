@@ -1,18 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Unit tests for health and upgrades pure status compute."""
+"""Unit tests for upgrade manager statuses."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from opensearch_single_kernel.common.constants import HealthColors
-from opensearch_single_kernel.common.statuses import (
-    GeneralStatuses,
-    HealthStatuses,
-    UpgradesStatuses,
-)
-from opensearch_single_kernel.managers.health import HealthManager
+from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.managers.upgrades_base import UpgradesManagerBase
 from opensearch_single_kernel.utils.status import format_status
 
@@ -58,30 +52,6 @@ class _UpgradesManager(UpgradesManagerBase):
     @property
     def _app_workload_container_version(self) -> str:
         return ""
-
-
-def test_health_red_app_status_merges_running():
-    state = MagicMock()
-    running = SimpleNamespace(status="maintenance", message="something")
-    state.statuses.get.return_value = SimpleNamespace(root=[running])
-    mgr = HealthManager(state, MagicMock())
-    mgr.get = MagicMock(return_value=HealthColors.RED)
-
-    statuses = mgr.get_statuses("app", recompute=False)
-
-    assert running in statuses
-    assert HealthStatuses.CLUSTER_HEALTH_RED.value in statuses
-    mgr.get.assert_called_once_with(wait_for_green_first=False)
-
-
-def test_health_recompute_waits_for_green():
-    state = MagicMock()
-    state.statuses.get.return_value = SimpleNamespace(root=[])
-    mgr = HealthManager(state, MagicMock())
-    mgr.get = MagicMock(return_value=HealthColors.GREEN)
-
-    assert mgr.get_statuses("app", recompute=True) == [GeneralStatuses.ACTIVE_IDLE.value]
-    mgr.get.assert_called_once_with(wait_for_green_first=True)
 
 
 def test_upgrades_unit_status_merged_with_running():
