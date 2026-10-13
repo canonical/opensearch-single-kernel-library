@@ -69,7 +69,8 @@ class ExternalClientsManager(BaseManager):
         )
         if extra_user_roles == KIBANA_SERVER_ROLE:
             username = KIBANA_SERVER_USER
-            pwd = self.state.application.kibana_server_password
+            if not (pwd := self.state.application.kibana_server_password):
+                raise OpenSearchUserMgmtError("'kibanaserver' password is not available yet.")
         else:
             username = external_client.relation_username
             hashed_pwd, pwd = generate_hashed_password()
@@ -275,13 +276,11 @@ class ExternalClientsManager(BaseManager):
                 user, self.state.get_relation_mapped_users(user)
             )
 
-    def update_dashboards_password(self):
-        """Update each Opensearch Dashboards relation with the latest kibanaserver."""
-        # only get the secret once to optimize performance
-        pwd = self.state.application.kibana_server_password
+    def update_dashboards_password(self, password: str) -> None:
+        """Publish the refreshed kibanaserver password to Dashboard relations."""
         for dashboards_client in self.state.dashboards_clients:
             dashboards_client.username = KIBANA_SERVER_USER
-            dashboards_client.password = pwd
+            dashboards_client.password = password
 
     @override
     def get_statuses(

@@ -3,18 +3,30 @@
 
 """Unit Tests for Charm related operations."""
 
-from unittest.mock import PropertyMock, call, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
+import bcrypt
 import pytest
-from ops import LeaderElectedEvent
+from ops import LeaderElectedEvent, ModelError
 from ops.pebble import APIError
 
-from opensearch_single_kernel.common.constants import STATUS_PEERS_RELATION, HealthColors
+from opensearch_single_kernel.common.client import OpenSearchClient
+from opensearch_single_kernel.common.constants import (
+    COS_USER,
+    STATUS_PEERS_RELATION,
+    USER_ENDPOINT,
+    DeploymentType,
+    HealthColors,
+    Scope,
+    StartMode,
+)
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, InternalUsersStatuses
+from opensearch_single_kernel.core.models import App, DeploymentDescription, PeerClusterConfig
+from opensearch_single_kernel.utils.secrets import password_key
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -442,6 +454,148 @@ def test_post_start_waiting_survives_failure_and_clears_on_retry(harness, mocker
     ca_rotation.side_effect = restart_during_ca_rotation
     charm.opensearch_events._post_start_init(event)
     assert waiting in manager.get_statuses("unit", recompute=True)
+
+
+@pytest.fixture
+def started_leader(harness, mocker):
+    """A running main leader with real user management and secret persistence."""
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.implements_secrets",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    charm = harness.charm
+    charm.state.application.deployment_desc = DeploymentDescription(
+        app=App(name=charm.app.name, model_uuid="model"),
+        config=PeerClusterConfig(cluster_name="cluster", init_hold=False, roles=[]),
+        start=StartMode.WITH_GENERATED_ROLES,
+        pending_directives=[],
+        typ=DeploymentType.MAIN_ORCHESTRATOR,
+    )
+    charm.state.application.is_security_index_initialised = True
+    for method in (
+        "wait_for_opensearch_up",
+        "assert_current_node_joined_cluster",
+        "apply_upstream_fixes",
+    ):
+        mocker.patch.object(charm.cluster_manager, method)
+    mocker.patch.object(charm.exclusions_manager, "delete_current")
+    mocker.patch.object(charm.lock_manager, "release")
+    mocker.patch.object(charm, "apply_health")
+    mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    return charm
+
+
+def test_repeated_leader_start_preserves_monitor_password(started_leader, monkeypatch):
+    """Startup creates the monitor once; subsequent starts must not rotate it."""
+    charm = started_leader
+    live_user = {}
+
+    def request(client, method, endpoint, payload=None, **kwargs):
+        assert endpoint == f"{USER_ENDPOINT}/monitor"
+        if method == "PUT":
+            live_user.update(payload)
+            return {"status": "CREATED"}
+        assert method == "PATCH"
+        for operation in payload:
+            live_user[operation["path"].removeprefix("/")] = operation["value"]
+        return {"status": "OK"}
+
+    monkeypatch.setattr(OpenSearchClient, "request", request)
+    event = MagicMock(after_upgrade=False)
+    charm.opensearch_events._post_start_init(event)
+    password = charm.state.secrets.get(Scope.APP, password_key(COS_USER))
+    original_user = live_user.copy()
+    assert password
+    assert bcrypt.checkpw(password.encode(), live_user["hash"].encode())
+    assert live_user["opendistro_security_roles"] == ["readall_and_monitor"]
+
+    charm.opensearch_events._post_start_init(event)
+
+    assert charm.state.secrets.get(Scope.APP, password_key(COS_USER)) == password
+    assert live_user == original_user
+    event.defer.assert_not_called()
+    assert any(port.port == 9200 for port in charm.unit.opened_ports())
+
+
+@pytest.mark.parametrize("failure", ["PUT", "PATCH"])
+def test_failed_monitor_creation_defers_startup(started_leader, monkeypatch, failure):
+    """Neither a failed user creation nor a failed role update can finish startup."""
+    charm = started_leader
+
+    def request(client, method, endpoint, payload=None, **kwargs):
+        assert endpoint == f"{USER_ENDPOINT}/monitor"
+        if method == failure:
+            raise OpenSearchHttpError("unavailable", 503)
+        return {"status": "CREATED"}
+
+    monkeypatch.setattr(OpenSearchClient, "request", request)
+    event = MagicMock(after_upgrade=False)
+
+    charm.opensearch_events._post_start_init(event)
+
+    event.defer.assert_called_once()
+    assert charm.state.secrets.get(Scope.APP, password_key(COS_USER)) is None
+    assert not charm.unit.opened_ports()
+
+
+@pytest.mark.parametrize("failure_stage", ["monitor", "peer-publication"])
+def test_start_retries_secret_failure_without_reinitialising_security(
+    started_leader, harness, mocker, failure_stage, caplog
+):
+    """A running leader retries Juju reads without replacing users or the security index."""
+    charm = started_leader
+    key = password_key(COS_USER)
+    secrets = charm.state.secrets
+    secrets.put(Scope.APP, key, "existing-monitor-password")
+    label = secrets.label(Scope.APP, key)
+    secret_id = secrets.get_secret_id(Scope.APP, key)
+    secrets.cached_secrets.delete(Scope.APP, label)
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
+    initialise = mocker.patch.object(charm.cluster_manager, "initialise_security_index")
+    request = mocker.patch.object(OpenSearchClient, "request")
+    publish = mocker.patch.object(charm.peer_cluster_orchestrator_manager, "refresh_relation_data")
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("Juju temporarily unavailable")
+        return get_secret(*args, **kwargs)
+
+    if failure_stage == "monitor":
+        failed = mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    else:
+        publish.side_effect = ModelError("Juju temporarily unavailable")
+    event = MagicMock(after_upgrade=False)
+    charm.opensearch_events._on_start_opensearch(event)
+    event.defer.assert_called_once()
+    assert "Juju temporarily unavailable" in caplog.text
+    request.assert_not_called()
+    initialise.assert_not_called()
+    if failure_stage == "monitor":
+        publish.assert_not_called()
+        assert not charm.unit.opened_ports()
+        mocker.stop(failed)
+    else:
+        publish.side_effect = None
+
+    event.reset_mock()
+    charm.opensearch_events._on_start_opensearch(event)
+    event.defer.assert_not_called()
+    initialise.assert_not_called()
+    request.assert_not_called()
+    assert secrets.get_secret_id(Scope.APP, key) == secret_id
+    assert secrets.get(Scope.APP, key) == "existing-monitor-password"
+    assert any(port.port == 9200 for port in charm.unit.opened_ports())
 
 
 def test_app_peers_data(harness):

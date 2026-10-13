@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
+    ModelError,
     Object,
     RelationBrokenEvent,
     RelationChangedEvent,
@@ -75,7 +76,7 @@ class TLSEventsHandler(Object):
         self.framework.observe(self.charm.on.set_password_action, self._on_set_password_action)
         self.framework.observe(self.charm.on.get_password_action, self._on_get_password_action)
 
-    def _on_set_private_key(self, event: ActionEvent) -> None:
+    def _on_set_private_key(self, event: ActionEvent) -> None:  # noqa: C901
         """Set the TLS private key, which will be used for requesting the certificate."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
@@ -143,6 +144,8 @@ class TLSEventsHandler(Object):
 
         except ValueError as e:
             event.fail(str(e))
+        except ModelError as e:
+            event.fail(f"Cannot access TLS credentials: {e}")
 
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
@@ -170,42 +173,50 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if self.charm.unit.is_leader() and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR:
-            # create passwords for both ca trust_store/admin key_store
-            self.charm.tls_manager.create_store_pwd_if_not_exists(
-                Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
-            )
-            self.charm.tls_manager.create_store_pwd_if_not_exists(
-                Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE
-            )
-            csr = self.charm.tls_manager.create_certificate_signing_request(
-                Scope.APP, CertType.APP_ADMIN
-            )
-            self.certs.request_certificate_creation(certificate_signing_request=csr)
-        elif not self.charm.state.application.admin_secrets.get("truststore-password"):
-            logger.debug("Truststore-password from main-orchestrator not available yet.")
+        try:
+            cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
+            if (
+                self.charm.unit.is_leader()
+                and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            ):
+                self.charm.tls_manager.create_store_pwd_if_not_exists(
+                    Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
+                )
+                cert_types.insert(0, CertType.APP_ADMIN)
+            elif not self.charm.state.application.admin_secrets.get("truststore-password"):
+                logger.debug("Truststore-password from main-orchestrator not available yet.")
+                event.defer()
+                return
+
+            for cert_type in cert_types:
+                scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
+                self.charm.tls_manager.create_store_pwd_if_not_exists(
+                    scope, cert_type, StoreType.KEYSTORE
+                )
+                # Reuse the saved request when a previous bootstrap attempt was deferred.
+                secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+                if csr := secrets.get("csr"):
+                    csr = csr.encode("utf-8")
+                else:
+                    csr = self.charm.tls_manager.create_certificate_signing_request(
+                        scope, cert_type
+                    )
+                self.certs.request_certificate_creation(certificate_signing_request=csr)
+        except ModelError as e:
+            logger.warning("Cannot access Juju credentials; deferring TLS bootstrap: %s", e)
             event.defer()
-            return
 
-        # create passwords for both unit-http/transport key_stores
-        self.charm.tls_manager.create_store_pwd_if_not_exists(
-            Scope.UNIT, CertType.UNIT_TRANSPORT, StoreType.KEYSTORE
-        )
-        self.charm.tls_manager.create_store_pwd_if_not_exists(
-            Scope.UNIT, CertType.UNIT_HTTP, StoreType.KEYSTORE
-        )
+    def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:
+        """Install the available certificate, retrying failed Juju operations."""
+        try:
+            self._install_certificate(event)
+        except ModelError as e:
+            logger.warning(
+                "Cannot access Juju credentials; deferring certificate installation: %s", e
+            )
+            event.defer()
 
-        unit_transport_csr = self.charm.tls_manager.create_certificate_signing_request(
-            Scope.UNIT, CertType.UNIT_TRANSPORT
-        )
-        unit_http_csr = self.charm.tls_manager.create_certificate_signing_request(
-            Scope.UNIT, CertType.UNIT_HTTP
-        )
-
-        self.certs.request_certificate_creation(certificate_signing_request=unit_transport_csr)
-        self.certs.request_certificate_creation(certificate_signing_request=unit_http_csr)
-
-    def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
+    def _install_certificate(self, event: CertificateAvailableEvent) -> None:  # noqa: C901
         """Enable TLS when TLS certificate available.
 
         CertificateAvailableEvents fire whenever a new certificate is created by the TLS charm.
@@ -368,6 +379,10 @@ class TLSEventsHandler(Object):
         except TypeError:
             logger.debug("Unknown certificate expiring.")
             return
+        except ModelError as e:
+            logger.warning("Cannot read TLS credentials; deferring certificate renewal: %s", e)
+            event.defer()
+            return
 
         old_csr = secrets["csr"]
 
@@ -407,7 +422,7 @@ class TLSEventsHandler(Object):
         logger.debug("Received certificate invalidation. Reason: %s", event.reason)
         self._on_certificate_expiring(event)
 
-    def _on_tls_relation_changed(self, _: RelationChangedEvent) -> None:
+    def _on_tls_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle the TLS relation changed event.
 
         This is mainly used for checking if the provider has dropped the
@@ -427,7 +442,12 @@ class TLSEventsHandler(Object):
                 logger.warning("Unknown cert type %s flagged for reissue.", cert_type_val)
                 continue
 
-            secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+            try:
+                secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
+            except ModelError as e:
+                logger.warning("Cannot read TLS credentials; deferring certificate reissue: %s", e)
+                event.defer()
+                return
             # If we have already dropped the CSR from our secrets, we cannot re-request it anymore.
             if not (csr := secrets["csr"]):
                 logger.warning(
@@ -549,8 +569,8 @@ class TLSEventsHandler(Object):
             event.set_results({label: password})
             # We know we are already running for MAIN_ORCH. and its leader unit
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-        except OpenSearchError as e:
-            event.fail(f"Failed changing the password: {e}")
+        except (OpenSearchError, ModelError) as e:
+            event.fail(f"Failed to complete password change for {user_name}: {e}")
 
     def _on_get_password_action(self, event: ActionEvent) -> None:
         """Return the password and cert chain for the admin user of the cluster."""
@@ -567,16 +587,21 @@ class TLSEventsHandler(Object):
             event.fail(f"{user_name} user not configured yet.")
             return
 
-        if not self.charm.tls_manager.is_fully_configured():
-            event.fail("TLS certificates not configured yet.")
-            return
+        try:
+            if not self.charm.tls_manager.is_fully_configured():
+                event.fail("TLS certificates not configured yet.")
+                return
 
-        password = self.charm.state.application.get_user_password(user_name)
+            password = self.charm.state.application.get_user_password(user_name)
+            ca_chain = self.charm.state.application.admin_secrets["chain"]
+        except ModelError as e:
+            event.fail(f"Cannot read credentials for {user_name}: {e}")
+            return
 
         event.set_results(
             {
                 "username": user_name,
                 "password": password,
-                "ca-chain": self.charm.state.application.admin_secrets["chain"],
+                "ca-chain": ca_chain,
             }
         )
