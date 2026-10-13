@@ -220,6 +220,176 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
     }
 
 
+def _snapshot_put_response(state, snapshot_id):
+    """Simulate whether a failed request reached snapshot creation on the server."""
+    if state["snapshot"]:
+        return 400, {"error": {"type": "invalid_snapshot_name_exception"}}
+    failure = state["failure"]
+    if failure in ("connect-timeout", "busy") and len(state["puts"]) > 1:
+        failure = None
+    if failure in ("busy", "busy-unavailable"):
+        return 429, {"error": {"type": "rejected_execution_exception"}}
+    if failure == "auth":
+        return 403, {"error": {"type": "security_exception"}}
+    if failure not in ("connect-timeout", "connect-unavailable", "unconfirmed"):
+        state["snapshot"] = {"snapshot": snapshot_id, "state": state["snapshot_state"]}
+    errors = {
+        "connect-timeout": requests.ConnectTimeout("connection establishment timed out"),
+        "connect-unavailable": requests.ConnectTimeout("connection establishment timed out"),
+        "read-timeout": requests.ReadTimeout("snapshot response timed out"),
+        "unconfirmed": requests.ReadTimeout("snapshot response timed out"),
+        "connection-lost": requests.ConnectionError("connection lost after submission"),
+    }
+    if error := errors.get(failure):
+        raise error
+    if failure == "server-error":
+        return 503, {"error": {"type": "server_exception"}}
+    return 200, {"accepted": True}
+
+
+@pytest.fixture
+def snapshot_submission(harness, mocker, backend_setup):
+    """Exercise the action and HTTP client against a snapshot accepted before a timeout."""
+    _mock_backup(mocker)
+    backend, relations = backend_setup
+    mocker.patch.object(OpenSearchClient, "is_snapshots_repository_created", return_value=True)
+    state = {
+        "failure": "read-timeout",
+        "snapshot": None,
+        "snapshot_state": "IN_PROGRESS",
+        "puts": [],
+        "gets": [],
+        "missing_reads": 0,
+        "failed_reads": 0,
+    }
+
+    def respond(request):
+        path = urlsplit(request.url).path
+        assert path.startswith(f"/_snapshot/{backend}-repository/")
+        snapshot_id = path.rsplit("/", 1)[1]
+        status = 200
+        if request.method == "PUT":
+            state["puts"].append(snapshot_id)
+            status, body = _snapshot_put_response(state, snapshot_id)
+        else:
+            assert request.method == "GET"
+            state["gets"].append(snapshot_id)
+            if state["failed_reads"]:
+                state["failed_reads"] -= 1
+                raise requests.ReadTimeout("snapshot lookup timed out")
+            if state["missing_reads"] or state["snapshot"] is None:
+                state["missing_reads"] = max(0, state["missing_reads"] - 1)
+                status, body = 404, {"error": {"type": "snapshot_missing_exception"}}
+            else:
+                body = {"snapshots": [state["snapshot"]]}
+        return status, {"Content-Type": "application/json"}, json.dumps(body)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for method in (responses.GET, responses.PUT):
+            http.add_callback(method, re.compile(r"https://[^/]+/.*"), callback=respond)
+        yield state, relations
+
+
+@pytest.mark.parametrize("failure", ["read-timeout", "connection-lost", "server-error"])
+@pytest.mark.parametrize("snapshot_state", ["IN_PROGRESS", "SUCCESS", "FAILED"])
+def test_create_backup_reconciles_ambiguous_submission(
+    context, containers, snapshot_submission, failure, snapshot_state
+):
+    """A lost response must not resubmit the PUT or misreport the snapshot's state."""
+    state, relations = snapshot_submission
+    state.update(failure=failure, snapshot_state=snapshot_state)
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert set(state["gets"]) == {state["puts"][0]}
+    assert context.action_results == {
+        "backup-id": state["puts"][0],
+        "status": snapshot_state.lower(),
+    }
+
+
+@pytest.mark.parametrize("failure", ["connect-timeout", "busy"])
+def test_create_backup_retries_when_submission_was_rejected(
+    context, containers, snapshot_submission, failure
+):
+    """A transient failure before acceptance permits another PUT using the same ID."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 2
+    assert len(set(state["puts"])) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize("read_problem", ["missing_reads", "failed_reads"])
+def test_create_backup_retries_confirmation_reads(
+    context, containers, snapshot_submission, read_problem
+):
+    """Temporary absence or a failed confirmation read must not repeat creation."""
+    state, relations = snapshot_submission
+    state[read_problem] = 2
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize(
+    "failure, put_attempts, message",
+    [
+        ("unconfirmed", 1, "not confirmed"),
+        ("connect-unavailable", 3, "connection establishment timed out"),
+        ("busy-unavailable", 3, "rejected_execution_exception"),
+        ("auth", 1, "security_exception"),
+    ],
+)
+def test_create_backup_reports_failure_without_blind_retries(
+    context, containers, snapshot_submission, failure, put_attempts, message
+):
+    """Unknown outcomes remain explicit; definite rejection does not become success."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert message in error.value.message
+    assert len(state["puts"]) == put_attempts
+    if failure == "unconfirmed":
+        assert state["puts"][0] in error.value.message
+        assert "snapshot response timed out" in error.value.message
+        assert len(state["gets"]) == 3
+    else:
+        assert state["gets"] == []
+
+
+def test_create_backup_reports_unknown_outcome_when_confirmation_fails(
+    context, containers, snapshot_submission, caplog
+):
+    """An unreadable snapshot must not hide the submission error or trigger another PUT."""
+    state, relations = snapshot_submission
+    state["failed_reads"] = 3
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert len(state["puts"]) == 1
+    assert len(state["gets"]) == 3
+    assert state["puts"][0] in error.value.message
+    assert "not confirmed" in error.value.message
+    assert "snapshot response timed out" in error.value.message
+    assert "snapshot lookup timed out" in caplog.text
+
+
 def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository_missing_error(
     mocker, harness, backend_setup, context, containers
 ):
