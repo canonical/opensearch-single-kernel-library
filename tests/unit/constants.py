@@ -29,8 +29,9 @@ DEFAULT_S3_INFO = {
 }
 
 DEFAULT_AZURE_INFO = {
-    "storage_account": "account",
-    "secret_key": "key",
+    "storage-account": "account",
+    "secret-key": "key",
+    "connection-protocol": "https",
     "container": "backups",
     "endpoint": "https://acct.blob.core.windows.net",
     "path": "base/path",
@@ -40,7 +41,7 @@ DEFAULT_GCS_INFO = {
     "bucket": "my-gcs-bucket",
     "path": "base/path",
     "storage-class": "STANDARD",
-    "secret_key": """{
+    "secret-key": """{
         "type": "service_account",
         "project_id": "my-gcp-project",
         "private_key_id": "fakeprivatekeyid",

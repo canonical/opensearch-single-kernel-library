@@ -33,6 +33,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
@@ -154,8 +155,10 @@ class SnapshotsEventsHandler(Object):
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
+            self._set_credentials_incorrect_status(failed=True)
             return
 
+        self._set_credentials_incorrect_status(failed=False)
         # Update backup credentials
         # Catch file operation exceptions
         try:
@@ -234,6 +237,8 @@ class SnapshotsEventsHandler(Object):
 
         # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
+        self._set_credentials_incorrect_status(failed=False)
+        self._clear_relation_data_incomplete_status()
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
@@ -444,9 +449,14 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
-        info_to_save, object_storage_type_to_cleanup = (
-            self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
-        )
+        try:
+            info_to_save, object_storage_type_to_cleanup = (
+                self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
+            )
+        except OpenSearchSnapshotsPeerClusterDataConflictError:
+            logger.warning("Ignoring conflicting snapshots data received over peer-clusters.")
+            return None
+
         if info_to_save:
             for object_storage_type in object_storage_type_to_cleanup:
                 if not self.charm.keystore_manager.cleanup_storage_credentials(
@@ -616,7 +626,12 @@ class SnapshotsEventsHandler(Object):
             except OpenSearchInvalidStorageTypeError as e:
                 logger.error(str(e))
                 return "Object storage credentials are invalid."
-            except OpenSearchObjectStorageConfigValidationError:
+            except OpenSearchObjectStorageConfigValidationError as e:
+                if e.missing_fields:
+                    return (
+                        "Object storage configuration missing fields: "
+                        f"{', '.join(e.missing_fields)}."
+                    )
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
@@ -640,6 +655,21 @@ class SnapshotsEventsHandler(Object):
 
         return None
 
+    def _set_credentials_incorrect_status(self, failed: bool) -> None:
+        """Cache or clear incorrect credentials status."""
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+
     def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
         """Cache blocked status for repository registration failure (apply path only)."""
         self.charm.state.add_status_if_not_present(
@@ -659,6 +689,14 @@ class SnapshotsEventsHandler(Object):
             "app",
             self.charm.snapshots_manager.name,
             interpolated=True,
+        )
+
+    def _clear_relation_data_incomplete_status(self) -> None:
+        """Clear relation data incomplete status."""
+        self.charm.state.remove_status_if_present(
+            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
+            "app",
+            self.charm.snapshots_manager.name,
         )
 
     def _set_credentials_cleanup_failed_status(self, failed: bool) -> None:

@@ -393,22 +393,23 @@ class S3RelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):
         """Validate the core fields of the S3 relation data."""
-        if (
-            not (self.credentials)
-            or not self.credentials.access_key
-            or not self.credentials.secret_key
-        ):
-            raise ValueError("Missing fields: access_key, secret_key")
+        missing = []
+        if not self.credentials or not self.credentials.access_key:
+            missing.append("access-key")
+        if not self.credentials or not self.credentials.secret_key:
+            missing.append("secret-key")
 
         # NOTE: Both bucket and endpoint must be set. If none of them are set,
         # but credentials were found, this likely means that we are validating for a
         # non cluster_manager application, which only needs credentials.
         if self.bucket and not self.endpoint:
-            raise ValueError("Missing field: endpoint")
+            missing.append("endpoint")
         if self.endpoint and not self.bucket:
-            raise ValueError("Missing field: bucket")
+            missing.append("bucket")
         if not self.region:
-            raise ValueError("Missing field: region")
+            missing.append("region")
+        if missing:
+            raise ValueError(f"Missing fields: {', '.join(missing)}")
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -460,7 +461,7 @@ class S3RelData(Model):
     @staticmethod
     def get_endpoint_protocol(endpoint: str) -> str:
         """Returns the protocol based on the endpoint."""
-        if not endpoint:
+        if not isinstance(endpoint, str) or not endpoint:
             return "https"
 
         if endpoint.startswith("http://"):
@@ -512,12 +513,13 @@ class AzureRelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):  # noqa: N805
         """Validate the core fields of the azure relation data."""
-        if (
-            not (self.credentials)
-            or not self.credentials.storage_account
-            or not self.credentials.secret_key
-        ):
-            raise ValueError("Missing fields: storage_account, secret_key")
+        missing = []
+        if not self.credentials or not self.credentials.storage_account:
+            missing.append("storage-account")
+        if not self.credentials or not self.credentials.secret_key:
+            missing.append("secret-key")
+        if missing:
+            raise ValueError(f"Missing fields: {', '.join(missing)}")
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -603,11 +605,13 @@ class GcsRelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):
         """Validate the core fields of the gcs relation data."""
+        missing = []
         if not self.credentials or not self.credentials.secret_key:
-            raise ValueError("Missing fields: secret-key")
-
+            missing.append("secret-key")
         if not self.bucket:
-            raise ValueError("Missing field: bucket")
+            missing.append("bucket")
+        if missing:
+            raise ValueError(f"Missing fields: {', '.join(missing)}")
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
