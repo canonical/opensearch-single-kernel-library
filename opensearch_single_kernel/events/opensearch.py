@@ -806,6 +806,9 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
+        if not self.charm.state.application.deployment_desc:
+            return
+
         # This will block unit to start if it is an upgrade
         # until the user unblock with `force-refresh-start`
         if (
