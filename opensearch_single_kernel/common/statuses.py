@@ -91,6 +91,12 @@ class HealthStatuses(Enum):
         short_message="Waiting for local shards to build",
         check="Shards initializing/relocating.",
     )
+    WAITING_FOR_ANY_BUSY_SHARDS = StatusObject(
+        status="waiting",
+        message="Some shards in the cluster need to complete building",
+        short_message="Waiting for local shards to build",
+        check="Shards initializing/relocating.",
+    )
 
 
 class ProfileStatuses(Enum):

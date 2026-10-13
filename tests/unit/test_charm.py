@@ -21,13 +21,38 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHAError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
+    OpenSearchStopError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, InternalUsersStatuses
 from opensearch_single_kernel.core.models import App, DeploymentDescription, PeerClusterConfig
 from opensearch_single_kernel.utils.secrets import password_key
 from tests.unit.helpers import deployment_descriptions
+
+
+def test_stop_wait_failure_leaves_workload_running(harness, mocker):
+    """A relocation timeout follows the stop-error contract used by restart and upgrade."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    mocker.patch.object(
+        harness.charm.health_manager,
+        "wait_for_shards_relocation",
+        side_effect=OpenSearchHAError("Shards haven't completed relocating."),
+    )
+    stop = mocker.patch.object(harness.charm.cluster_manager, "stop_workload")
+
+    with pytest.raises(OpenSearchStopError, match="Shards haven't completed relocating"):
+        harness.charm.stop_opensearch(restart=True)
+
+    stop.assert_not_called()
 
 
 def test_on_install(harness, substrate):

@@ -5,12 +5,11 @@
 """Base class for the OpenSearch Health management."""
 
 import logging
-import time
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
 
 from opensearch_single_kernel.common.constants import (
     HealthColors,
@@ -63,9 +62,6 @@ class HealthManager(BaseManager):
 
         host = self.state.node_host if use_localhost else None
         response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
-        if wait_for_green_first and not response:
-            response = self.opensearch_client.get_health(host, False, self.alt_hosts)
-
         if not response:
             return HealthColors.UNKNOWN
 
@@ -97,18 +93,30 @@ class HealthManager(BaseManager):
 
         return status
 
-    @retry(stop=stop_after_attempt(90), wait=wait_fixed(5), reraise=True)
+    @retry(
+        retry=retry_if_exception_type(OpenSearchHAError),
+        stop=stop_after_delay(15 * 60),
+        wait=wait_fixed(5),
+        reraise=True,
+    )
     def wait_for_shards_relocation(self) -> None:
-        """Blocking function until the shards relocation completes in the cluster."""
-        time.sleep(5)
+        """Wait for initialization and relocation with a fifteen-minute retry budget."""
+        # Poll current counters: waiting for green can take a minute and is unrelated
+        # to whether shards are moving (a red cluster can also be relocating shards).
+        health = self.opensearch_client.get_health(self.state.node_host, False, self.alt_hosts)
+        if not health:
+            # Preserve recovery restarts and teardown when the API is unavailable.
+            return
 
-        health = self.get(local_app_only=False)
-
-        if health == HealthColors.YELLOW_TEMP:
-            logger.info("Shards still moving before stopping Opensearch.")
-            # we throw an error because various operations should NOT start while data
+        if health["initializing_shards"] > 0 or health["relocating_shards"] > 0:
+            logger.info(
+                "Waiting before stopping OpenSearch: %s initializing shards, %s relocating shards.",
+                health["initializing_shards"],
+                health["relocating_shards"],
+            )
+            # we throw an exception because various operations should NOT start while data
             # is being relocated. Examples are: simple stop, unit removal, upgrade
-            raise OpenSearchHAError("Shards haven't completed relocating.")
+            raise OpenSearchHAError("Shards haven't completed initializing or relocating.")
 
     @override
     def get_statuses(
@@ -120,7 +128,7 @@ class HealthManager(BaseManager):
         if not self.state.application.is_security_index_initialised:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        status = self.get(wait_for_green_first=recompute)
+        status = self.get(wait_for_green_first=recompute and scope == "app")
 
         if scope == "app":
             match status:
@@ -130,15 +138,26 @@ class HealthManager(BaseManager):
                     status_list.append(HealthStatuses.WAITING_FOR_BUSY_SHARDS.value)
                 case HealthColors.YELLOW:
                     status_list.append(HealthStatuses.CLUSTER_HEALTH_YELLOW.value)
-        elif status == HealthColors.YELLOW and (
-            busy_shards := self.opensearch_client.get_busy_shards_by_unit(alt_hosts=self.alt_hosts)
-        ):
-            message = sorted([f"{key}/{','.join(val)}" for key, val in busy_shards.items()])
-            status_list.append(
-                format_status(
-                    HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value,
-                    {"shards": " - ".join(message)},
-                )
-            )
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
+        if status != HealthColors.YELLOW_TEMP:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        try:
+            busy_shards = self.opensearch_client.get_busy_shards_by_unit(alt_hosts=self.alt_hosts)
+        except OpenSearchHttpError as e:
+            logger.warning("Unable to fetch details of initializing or relocating shards: %s", e)
+            status_list.append(HealthStatuses.WAITING_FOR_ANY_BUSY_SHARDS.value)
+            return status_list
+
+        if not busy_shards:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+        message = sorted([f"{key}/{','.join(val)}" for key, val in busy_shards.items()])
+        status_list.append(
+            format_status(
+                HealthStatuses.WAITING_FOR_SPECIFIC_BUSY_SHARDS.value,
+                {"shards": " - ".join(message)},
+            )
+        )
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]

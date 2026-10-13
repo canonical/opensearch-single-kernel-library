@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock
 from urllib.parse import urlsplit
 
@@ -22,12 +23,129 @@ from opensearch_single_kernel.common.constants import (
     HealthColors,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError, OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+    OpenSearchHttpError,
+)
 from opensearch_single_kernel.core.models import PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+
+@pytest.fixture
+def peer_snapshot_cleanup(harness, mocker):
+    charm = harness.charm
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch.object(
+        charm.snapshots_manager, "read_snapshots_data_from_peer_cluster", return_value=(None, [])
+    )
+    mocker.patch.object(charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False)
+    mocker.patch.object(charm.snapshots_manager, "remove_s3_ca")
+    mocker.patch.object(charm.snapshots_manager, "set_credentials_saved")
+    mocker.patch("ops.framework.BoundEvent.emit")
+    mocker.patch.object(type(charm.workload), "exists", return_value=True)
+    mocker.patch.object(
+        type(charm.workload), "run_cmd", return_value=SimpleNamespace(out="keystore.seed\n")
+    )
+    return charm
+
+
+def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.remove_s3_ca.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+def test_peer_snapshot_cleanup_removes_existing_credentials_and_reloads(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    commands = [args.args[1] for args in charm.workload.run_cmd.call_args_list]
+    assert commands == ["list", "list", "remove s3.client.default.access_key"]
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OpenSearchCmdError("list", err="unavailable"), OpenSearchFileOperationError("unavailable")],
+)
+def test_peer_snapshot_cleanup_read_failure_defers(peer_snapshot_cleanup, error):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.side_effect = error
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    event.defer.assert_called_once_with()
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+def test_peer_snapshot_ca_failure_preserves_credentials_for_retry(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    charm.snapshots_manager.remove_s3_ca.side_effect = OpenSearchCmdError("keytool", err="busy")
+
+    with pytest.raises(OpenSearchCmdError):
+        charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+@pytest.mark.parametrize("failed_attempts", [1, 3])
+def test_peer_snapshot_cleanup_retries_partial_removal(peer_snapshot_cleanup, failed_attempts):
+    charm = peer_snapshot_cleanup
+    entries = {"keystore.seed", "s3.client.default.access_key", "s3.client.default.secret_key"}
+    failures = 0
+
+    def run_cmd(command, args):
+        nonlocal failures
+        if args == "list":
+            return SimpleNamespace(out="\n".join(sorted(entries)))
+        key = args.removeprefix("remove ")
+        if key == "s3.client.default.secret_key" and failures < failed_attempts:
+            failures += 1
+            raise OpenSearchCmdError(command, err="temporarily unavailable")
+        entries.remove(key)
+
+    charm.workload.run_cmd.side_effect = run_cmd
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    # Even after a partial failure, removed settings must be unloaded from OpenSearch.
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    if failed_attempts == 1:
+        assert entries == {"keystore.seed"}
+        event.defer.assert_not_called()
+        charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    else:
+        assert entries == {"keystore.seed", "s3.client.default.secret_key"}
+        event.defer.assert_called_once_with()
+        charm.snapshots_manager.set_credentials_saved.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -218,6 +336,176 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
         "backup-id": "2025-01-01T10:00:00Z",
         "status": "success",
     }
+
+
+def _snapshot_put_response(state, snapshot_id):
+    """Simulate whether a failed request reached snapshot creation on the server."""
+    if state["snapshot"]:
+        return 400, {"error": {"type": "invalid_snapshot_name_exception"}}
+    failure = state["failure"]
+    if failure in ("connect-timeout", "busy") and len(state["puts"]) > 1:
+        failure = None
+    if failure in ("busy", "busy-unavailable"):
+        return 429, {"error": {"type": "rejected_execution_exception"}}
+    if failure == "auth":
+        return 403, {"error": {"type": "security_exception"}}
+    if failure not in ("connect-timeout", "connect-unavailable", "unconfirmed"):
+        state["snapshot"] = {"snapshot": snapshot_id, "state": state["snapshot_state"]}
+    errors = {
+        "connect-timeout": requests.ConnectTimeout("connection establishment timed out"),
+        "connect-unavailable": requests.ConnectTimeout("connection establishment timed out"),
+        "read-timeout": requests.ReadTimeout("snapshot response timed out"),
+        "unconfirmed": requests.ReadTimeout("snapshot response timed out"),
+        "connection-lost": requests.ConnectionError("connection lost after submission"),
+    }
+    if error := errors.get(failure):
+        raise error
+    if failure == "server-error":
+        return 503, {"error": {"type": "server_exception"}}
+    return 200, {"accepted": True}
+
+
+@pytest.fixture
+def snapshot_submission(harness, mocker, backend_setup):
+    """Exercise the action and HTTP client against a snapshot accepted before a timeout."""
+    _mock_backup(mocker)
+    backend, relations = backend_setup
+    mocker.patch.object(OpenSearchClient, "is_snapshots_repository_created", return_value=True)
+    state = {
+        "failure": "read-timeout",
+        "snapshot": None,
+        "snapshot_state": "IN_PROGRESS",
+        "puts": [],
+        "gets": [],
+        "missing_reads": 0,
+        "failed_reads": 0,
+    }
+
+    def respond(request):
+        path = urlsplit(request.url).path
+        assert path.startswith(f"/_snapshot/{backend}-repository/")
+        snapshot_id = path.rsplit("/", 1)[1]
+        status = 200
+        if request.method == "PUT":
+            state["puts"].append(snapshot_id)
+            status, body = _snapshot_put_response(state, snapshot_id)
+        else:
+            assert request.method == "GET"
+            state["gets"].append(snapshot_id)
+            if state["failed_reads"]:
+                state["failed_reads"] -= 1
+                raise requests.ReadTimeout("snapshot lookup timed out")
+            if state["missing_reads"] or state["snapshot"] is None:
+                state["missing_reads"] = max(0, state["missing_reads"] - 1)
+                status, body = 404, {"error": {"type": "snapshot_missing_exception"}}
+            else:
+                body = {"snapshots": [state["snapshot"]]}
+        return status, {"Content-Type": "application/json"}, json.dumps(body)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for method in (responses.GET, responses.PUT):
+            http.add_callback(method, re.compile(r"https://[^/]+/.*"), callback=respond)
+        yield state, relations
+
+
+@pytest.mark.parametrize("failure", ["read-timeout", "connection-lost", "server-error"])
+@pytest.mark.parametrize("snapshot_state", ["IN_PROGRESS", "SUCCESS", "FAILED"])
+def test_create_backup_reconciles_ambiguous_submission(
+    context, containers, snapshot_submission, failure, snapshot_state
+):
+    """A lost response must not resubmit the PUT or misreport the snapshot's state."""
+    state, relations = snapshot_submission
+    state.update(failure=failure, snapshot_state=snapshot_state)
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert set(state["gets"]) == {state["puts"][0]}
+    assert context.action_results == {
+        "backup-id": state["puts"][0],
+        "status": snapshot_state.lower(),
+    }
+
+
+@pytest.mark.parametrize("failure", ["connect-timeout", "busy"])
+def test_create_backup_retries_when_submission_was_rejected(
+    context, containers, snapshot_submission, failure
+):
+    """A transient failure before acceptance permits another PUT using the same ID."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 2
+    assert len(set(state["puts"])) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize("read_problem", ["missing_reads", "failed_reads"])
+def test_create_backup_retries_confirmation_reads(
+    context, containers, snapshot_submission, read_problem
+):
+    """Temporary absence or a failed confirmation read must not repeat creation."""
+    state, relations = snapshot_submission
+    state[read_problem] = 2
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize(
+    "failure, put_attempts, message",
+    [
+        ("unconfirmed", 1, "not confirmed"),
+        ("connect-unavailable", 3, "connection establishment timed out"),
+        ("busy-unavailable", 3, "rejected_execution_exception"),
+        ("auth", 1, "security_exception"),
+    ],
+)
+def test_create_backup_reports_failure_without_blind_retries(
+    context, containers, snapshot_submission, failure, put_attempts, message
+):
+    """Unknown outcomes remain explicit; definite rejection does not become success."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert message in error.value.message
+    assert len(state["puts"]) == put_attempts
+    if failure == "unconfirmed":
+        assert state["puts"][0] in error.value.message
+        assert "snapshot response timed out" in error.value.message
+        assert len(state["gets"]) == 3
+    else:
+        assert state["gets"] == []
+
+
+def test_create_backup_reports_unknown_outcome_when_confirmation_fails(
+    context, containers, snapshot_submission, caplog
+):
+    """An unreadable snapshot must not hide the submission error or trigger another PUT."""
+    state, relations = snapshot_submission
+    state["failed_reads"] = 3
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert len(state["puts"]) == 1
+    assert len(state["gets"]) == 3
+    assert state["puts"][0] in error.value.message
+    assert "not confirmed" in error.value.message
+    assert "snapshot response timed out" in error.value.message
+    assert "snapshot lookup timed out" in caplog.text
 
 
 def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository_missing_error(

@@ -16,6 +16,9 @@ import urllib3
 from tenacity import (
     RetryCallState,
     Retrying,
+    before_sleep_log,
+    retry,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -34,7 +37,9 @@ from opensearch_single_kernel.common.constants import (
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpConnectTimeoutError,
     OpenSearchHttpError,
+    OpenSearchHttpNoResponseError,
     OpenSearchRestoreIndexConflictError,
 )
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
@@ -45,6 +50,18 @@ from opensearch_single_kernel.utils.object_storage import (
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def _can_retry_snapshot_submission(error: BaseException) -> bool:
+    """Retry only failures that establish the snapshot request was not accepted."""
+    if isinstance(error, OpenSearchHttpConnectTimeoutError):
+        return True
+    if not isinstance(error, OpenSearchHttpError):
+        return False
+    return (
+        error.response_code == 429
+        and error.response_body.get("error", {}).get("type") == "rejected_execution_exception"
+    )
 
 
 class OpenSearchClient:
@@ -307,12 +324,46 @@ class OpenSearchClient:
         Returns:
             snapshot_id: Snapshot ID
         """
-        repo_name = repository_name(object_storage_type)
         snapshot_id = datetime.now().strftime(OPENSEARCH_BACKUP_ID_FORMAT).lower()
+        try:
+            self._submit_snapshot(object_storage_type, snapshot_id, alt_hosts)
+        except OpenSearchHttpError as error:
+            server_error = error.response_code and error.response_code >= 500
+            if not (isinstance(error, OpenSearchHttpNoResponseError) or server_error):
+                raise
+
+            logger.warning(
+                "Snapshot %s submission had no confirmation; checking its state: %s",
+                snapshot_id,
+                error,
+            )
+            if not self._confirm_snapshot_creation(object_storage_type, snapshot_id, alt_hosts):
+                raise OpenSearchHttpError(
+                    f"Snapshot {snapshot_id} creation not confirmed. "
+                    f"Check list-backups before retrying. Submission error: {error}"
+                ) from error
+
+        logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
+        return snapshot_id
+
+    @retry(
+        retry=retry_if_exception(_can_retry_snapshot_submission),
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(3),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    def _submit_snapshot(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot_id: str,
+        alt_hosts: list[str] | None,
+    ) -> None:
+        """Submit the same snapshot ID, retrying only when the request was not accepted."""
+        repo_name = repository_name(object_storage_type)
         ignore = [f"-{idx}" for idx in SYSTEM_INDICES]
         indices_clause = ",".join(["*"] + ignore)
-        logger.info("indices_clause: %s", indices_clause)
-        # create snapshot
+        logger.info("Submitting snapshot %s for indices: %s", snapshot_id, indices_clause)
         response = self.request(
             "PUT",
             f"_snapshot/{repo_name}/{snapshot_id}?wait_for_completion=false",
@@ -323,17 +374,21 @@ class OpenSearchClient:
             },
             alt_hosts=alt_hosts,
             timeout=30,
-            retries=3,
-            wait_strategy=wait_fixed(3),
         )
-
-        logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
-        logger.debug("Create snapshot request with id: %s - response: %s", snapshot_id, response)
-
-        # This should always pass and is set for documentation purposes
         assert response.get("accepted") is True
 
-        return snapshot_id
+    def _confirm_snapshot_creation(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot_id: str,
+        alt_hosts: list[str] | None,
+    ) -> bool:
+        """Return whether snapshot creation can be confirmed through the existing GET retries."""
+        try:
+            return bool(self.get_snapshot(object_storage_type, snapshot_id, alt_hosts))
+        except OpenSearchHttpError as error:
+            logger.warning("Cannot read snapshot %s after submission: %s", snapshot_id, error)
+            return False
 
     def restore_snapshot(
         self,
@@ -1085,7 +1140,7 @@ class OpenSearchClient:
         timeout = 5
         if wait_for_green:
             endpoint = f"{endpoint}?wait_for_status=green&timeout=1m"
-            timeout = 61
+            timeout = 65
 
         try:
             return self.request(
@@ -1095,9 +1150,12 @@ class OpenSearchClient:
                 alt_hosts=alt_hosts,
                 timeout=timeout,
                 retries=3,
-                wait_strategy=wait_exponential(min=2),
+                ignore_retry_on=[408] if wait_for_green else None,
             )
         except OpenSearchHttpError as e:
+            if wait_for_green and e.response_code == 408 and e.response_body.get("timed_out"):
+                # The wait expired, but OpenSearch still returns the current health
+                return e.response_body
             logger.error("HTTP error when checking cluster health: %s", e)
             return None
 
@@ -1377,9 +1435,13 @@ class OpenSearchClient:
             if resp_status_code:
                 return e.response_code
             raise
+        except requests.ConnectTimeout as e:
+            raise OpenSearchHttpConnectTimeoutError(response_text=str(e)) from e
+        except (requests.Timeout, requests.ConnectionError) as e:
+            raise OpenSearchHttpNoResponseError(response_text=str(e)) from e
         except (requests.RequestException, urllib3.exceptions.HTTPError) as e:
             if not isinstance(e, requests.RequestException) or e.response is None:
-                raise OpenSearchHttpError(response_text=str(e))
+                raise OpenSearchHttpError(response_text=str(e)) from e
 
             if resp_status_code:
                 return e.response.status_code
