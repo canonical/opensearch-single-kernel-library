@@ -226,17 +226,13 @@ async def _deploy_authentik(ops_test_k8s: OpsTest, k8s_model: Model, architectur
         ),
         k8s_model.deploy(AUTHENTIK_SERVER, channel=AUTHENTIK_CHANNEL, trust=True),
         k8s_model.deploy(AUTHENTIK_WORKER, channel=AUTHENTIK_CHANNEL, trust=True),
-        # `direct` reads the live Authentik state; the default `cached` modes would serve a
-        # directory snapshot taken before the users are created
+        # Binds and searches keep their default `cached` modes: the users created below only
+        # show up in LDAP searches once the outpost refreshes its snapshot of the directory
         k8s_model.deploy(
             AUTHENTIK_LDAP_OUTPOST,
             channel=AUTHENTIK_CHANNEL,
             trust=True,
-            config={
-                "base_dn": AUTHENTIK_BASE_DN,
-                "search_mode": "direct",
-                "bind_mode": "direct",
-            },
+            config={"base_dn": AUTHENTIK_BASE_DN},
         ),
         k8s_model.deploy(
             TLS_CERTIFICATES_APP_NAME,
