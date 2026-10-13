@@ -1315,7 +1315,20 @@ class OpenSearchEventsHandler(Object):
             logging.info(f"Label {event.secret.label} was meaningless for us, returning")
             return
 
-        # Handle system credentials here; integrations own their secret-change events.
+        # We need to take action on 5 secret types
+        # 1. TLS credentials change
+        #     - Action: update credentials files
+        # 2. 'kibanaserver' user credentials change
+        #     - Action: Dashboard relation (secret) needs to be updated
+        # 3. System user hash secret update
+        #     - Action: Every unit needs to update local internal_users.yml
+        #     - Note: Leader is updated already
+        # 4. S3 credentials (secret / access keys) in large relations
+        #     - Action: write them into the opensearch.yml by running backup module
+        # 5. Azure credentials (storage account / secret key)
+        #
+        # On a separate note: Handling for JWT-config related secrets (e.g. signing-key) happens
+        # in the `JwtHandler` class, as it is a secret that is provided from another application
         system_user_hash_keys = [hash_key(user) for user in OPENSEARCH_SYSTEM_USERS]
         keys_to_process = system_user_hash_keys + [
             CertType.APP_ADMIN.val,
