@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock
 from urllib.parse import urlsplit
 
@@ -22,12 +23,129 @@ from opensearch_single_kernel.common.constants import (
     HealthColors,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError, OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+    OpenSearchHttpError,
+)
 from opensearch_single_kernel.core.models import PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+
+@pytest.fixture
+def peer_snapshot_cleanup(harness, mocker):
+    charm = harness.charm
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch.object(
+        charm.snapshots_manager, "read_snapshots_data_from_peer_cluster", return_value=(None, [])
+    )
+    mocker.patch.object(charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False)
+    mocker.patch.object(charm.snapshots_manager, "remove_s3_ca")
+    mocker.patch.object(charm.snapshots_manager, "set_credentials_saved")
+    mocker.patch("ops.framework.BoundEvent.emit")
+    mocker.patch.object(type(charm.workload), "exists", return_value=True)
+    mocker.patch.object(
+        type(charm.workload), "run_cmd", return_value=SimpleNamespace(out="keystore.seed\n")
+    )
+    return charm
+
+
+def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.remove_s3_ca.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+def test_peer_snapshot_cleanup_removes_existing_credentials_and_reloads(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    commands = [args.args[1] for args in charm.workload.run_cmd.call_args_list]
+    assert commands == ["list", "list", "remove s3.client.default.access_key"]
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OpenSearchCmdError("list", err="unavailable"), OpenSearchFileOperationError("unavailable")],
+)
+def test_peer_snapshot_cleanup_read_failure_defers(peer_snapshot_cleanup, error):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.side_effect = error
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    event.defer.assert_called_once_with()
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+def test_peer_snapshot_ca_failure_preserves_credentials_for_retry(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    charm.snapshots_manager.remove_s3_ca.side_effect = OpenSearchCmdError("keytool", err="busy")
+
+    with pytest.raises(OpenSearchCmdError):
+        charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+@pytest.mark.parametrize("failed_attempts", [1, 3])
+def test_peer_snapshot_cleanup_retries_partial_removal(peer_snapshot_cleanup, failed_attempts):
+    charm = peer_snapshot_cleanup
+    entries = {"keystore.seed", "s3.client.default.access_key", "s3.client.default.secret_key"}
+    failures = 0
+
+    def run_cmd(command, args):
+        nonlocal failures
+        if args == "list":
+            return SimpleNamespace(out="\n".join(sorted(entries)))
+        key = args.removeprefix("remove ")
+        if key == "s3.client.default.secret_key" and failures < failed_attempts:
+            failures += 1
+            raise OpenSearchCmdError(command, err="temporarily unavailable")
+        entries.remove(key)
+
+    charm.workload.run_cmd.side_effect = run_cmd
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    # Even after a partial failure, removed settings must be unloaded from OpenSearch.
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    if failed_attempts == 1:
+        assert entries == {"keystore.seed"}
+        event.defer.assert_not_called()
+        charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    else:
+        assert entries == {"keystore.seed", "s3.client.default.secret_key"}
+        event.defer.assert_called_once_with()
+        charm.snapshots_manager.set_credentials_saved.assert_not_called()
 
 
 @pytest.mark.parametrize(
