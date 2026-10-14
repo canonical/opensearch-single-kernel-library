@@ -159,6 +159,18 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        # # we want to have the most up-to-date info broadcasted to related sub-clusters
+        # Peer TLS readiness must reach consumers even while cluster health is pending.
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
+            try:
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            except ModelError as e:
+                logger.warning(
+                    "Cannot publish peer-cluster credentials; deferring event: %s", e
+                )
+                event.defer()
+                return
+
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
         ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
@@ -177,18 +189,6 @@ class OpenSearchEventsHandler(Object):
             nodes = []
 
         if self.charm.unit.is_leader():
-            # we want to have the most up-to-date info broadcasted to related sub-clusters
-
-            if self.charm.state.is_peer_cluster_provider():
-                try:
-                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-                except ModelError as e:
-                    logger.warning(
-                        "Cannot publish peer-cluster credentials; deferring event: %s", e
-                    )
-                    event.defer()
-                    return
-
             # update any orchestrators about planned units
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
@@ -908,6 +908,7 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.name,
                 )
                 event.defer()
+
             if (
                 self.charm.state.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
@@ -1030,6 +1031,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             logger.debug("Node started but not fully ready: %s", e)
             event.defer()
+
         # In large deployments with cluster-manager-only-nodes, the startup might fail
         # for the cluster-manager if a joining data node did not yet initialize the
         # security index. We still want to update and broadcast the latest relation data.

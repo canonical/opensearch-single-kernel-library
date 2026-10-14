@@ -294,13 +294,19 @@ class K8sWorkload(BaseWorkload):
 
     @override
     def run_script(
-        self, script_name: str, args: str | None = None, stdin: str | None = None
+        self,
+        script_name: str,
+        args: str | None = None,
+        stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run script provided by OpenSearch in the container.
 
         Args:
             script_name: the name of script file to execute.
             args: arguments passed to the script as a space-separated string.
+            timeout: maximum execution time in seconds.
 
         Returns:
             SimpleNamespace: command result with cmd, out, err, returncode attributes.
@@ -310,7 +316,7 @@ class K8sWorkload(BaseWorkload):
         """
         script_path = f"{self.paths.home}/{script_name}"
         bash_cmd = f"bash {script_path}"
-        result = self.run_cmd(bash_cmd, args, stdin=stdin)
+        result = self.run_cmd(bash_cmd, args, stdin=stdin, timeout=timeout)
         return SimpleNamespace(cmd=bash_cmd, out=result.out, err=result.err, returncode=0)
 
     @property
@@ -501,6 +507,8 @@ class K8sWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run command in the container.
 
@@ -509,6 +517,7 @@ class K8sWorkload(BaseWorkload):
             args: additional command line arguments
             stdin: string input to be passed on the standard input
             use_errors_replace: decode the command output with errors="replace"
+            timeout: maximum execution time in seconds
 
         Returns:
             SimpleNamespace with cmd, out, err, return code attributes
@@ -535,11 +544,11 @@ class K8sWorkload(BaseWorkload):
                     stdin=stdin.encode("utf-8") if stdin is not None else None,
                     encoding=None,
                     combine_stderr=True,
-                    timeout=30,
+                    timeout=timeout,
                 )
             else:
                 process = self.container.exec(
-                    cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=30
+                    cmd_list, stdin=stdin, encoding="utf-8", combine_stderr=True, timeout=timeout
                 )
 
             stdout, stderr = wait_for_process_output(process, masked_command, command)

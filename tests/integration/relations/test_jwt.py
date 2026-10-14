@@ -254,19 +254,33 @@ async def test_configure_and_use_jwt_large_cluster(
         f"{JWT_APP_NAME}:{JWT_CONFIG_RELATION}",
         f"{MAIN_APP}:{JWT_CONFIG_RELATION}",
     )
+
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        idle_period=60,
     )
 
-    logger.info("Test access to `/_cat/nodes` with JWT")
     ip_address = await get_leader_unit_ip(ops_test, app=MAIN_APP)
+    security_config = await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_address}:9200/_plugins/_security/api/securityconfig",
+        app=MAIN_APP,
+    )
+    jwt_domain = security_config["config"]["dynamic"]["authc"]["jwt_auth_domain"]
+    assert jwt_domain["http_enabled"], "JWT authentication is not enabled"
+
+    logger.info("Test access to `/_cat/nodes` with JWT")
     url = f"https://{ip_address}:9200/_cat/nodes"
     result = requests.get(
-        url, headers={"Authorization": f"Bearer {generated_jwt['token']}"}, verify=False
+        url,
+        headers={"Authorization": f"Bearer {generated_jwt['token']}"},
+        verify=False,
+        timeout=10,
     )
-    assert result.status_code == 200, "Request failed"
+    assert result.status_code == 200, f"JWT request failed: HTTP {result.status_code}"
     logger.info("Access with JWT successful")
 
 
