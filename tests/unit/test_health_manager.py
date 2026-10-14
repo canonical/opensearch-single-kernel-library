@@ -35,6 +35,9 @@ def health_manager(mocker):
     mocker.patch.object(HealthManager, "alt_hosts", new_callable=PropertyMock, return_value=None)
     state = MagicMock()
     state.node_host = "localhost"
+    state.peer_unit_hosts = set()
+    state.application.nodes_config = {}
+    state.get_rel_data_from_main_orchestrator.return_value = None
     return HealthManager(state, workload)
 
 
@@ -56,9 +59,16 @@ def cluster_health_manager(mocker):
 
 
 def test_health_checks_alternative_hosts_only_once(cluster_health_manager):
-    """A five-node health read needs four discovery probes and one health request."""
+    """Discover peers from all topology sources, then probe each candidate once."""
     manager = cluster_health_manager
-    manager.state.peer_unit_hosts = {f"node{i}" for i in range(5)}
+    manager.state.peer_unit_hosts = {"node0", "node1", "node2"}
+    manager.state.application.nodes_config = {
+        "node2": SimpleNamespace(ip="node2"),
+        "node3": SimpleNamespace(ip="node3"),
+    }
+    manager.state.get_rel_data_from_main_orchestrator.return_value = SimpleNamespace(
+        cm_nodes=[SimpleNamespace(ip="node3"), SimpleNamespace(ip="node4")]
+    )
     with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
         for i in range(5):
             http.get(f"https://node{i}:9200/", json={})
@@ -70,6 +80,7 @@ def test_health_checks_alternative_hosts_only_once(cluster_health_manager):
         assert manager.get() == HealthColors.GREEN
         assert Counter(call.request.url for call in http.calls) == Counter(
             {
+                "https://node0:9200/": 1,
                 "https://node1:9200/": 1,
                 "https://node2:9200/": 1,
                 "https://node3:9200/": 1,
@@ -77,6 +88,31 @@ def test_health_checks_alternative_hosts_only_once(cluster_health_manager):
                 "https://node0:9200/_cluster/health": 1,
             }
         )
+
+
+def test_local_only_topology_has_no_alternative_hosts(cluster_health_manager):
+    """Callers can append the local host even when no peers are known."""
+    cluster_health_manager.state.peer_unit_hosts = {"node0"}
+
+    assert cluster_health_manager.alt_hosts == []
+
+
+@pytest.mark.parametrize("property_name", ["peer_hosts", "alt_hosts"])
+def test_empty_topology_does_not_require_local_address(
+    cluster_health_manager, mocker, property_name
+):
+    """No peers must be safe before the local address is available."""
+    manager = cluster_health_manager
+    manager.state.peer_unit_hosts = set()
+    mocker.patch.object(
+        type(manager.state),
+        "node_host",
+        new_callable=PropertyMock,
+        side_effect=RuntimeError("Local address is unavailable"),
+        create=True,
+    )
+
+    assert getattr(manager, property_name) == []
 
 
 @pytest.mark.parametrize("failure", ["connection", "timeout", "503"])
@@ -96,6 +132,7 @@ def test_health_falls_back_when_primary_request_fails(cluster_health_manager, fa
 
         assert cluster_health_manager.get() == HealthColors.GREEN
         assert [call.request.url for call in http.calls] == [
+            "https://node0:9200/",
             "https://node1:9200/",
             "https://node0:9200/_cluster/health",
             "https://node1:9200/_cluster/health",
@@ -117,12 +154,39 @@ def test_unavailable_health_keeps_three_attempt_limit(
             )
 
         assert cluster_health_manager.get() == HealthColors.UNKNOWN
-        assert [call.request.url for call in http.calls] == [
+        expected = [
+            "https://node0:9200/",
             "https://node1:9200/",
-            "https://node0:9200/_cluster/health",
-            f"https://{'node1' if alternative_reachable else 'node0'}:9200/_cluster/health",
-            "https://node0:9200/_cluster/health",
         ]
+        if alternative_reachable:
+            expected += ["https://node1:9200/_cluster/health"] * 3
+        assert [call.request.url for call in http.calls] == expected
+
+
+@pytest.mark.parametrize("host", [None, "node2"])
+@pytest.mark.parametrize("wait_for_green", [False, True])
+def test_health_skips_frozen_primary(cluster_health_manager, host, wait_for_green):
+    """A frozen primary only receives a short probe, never a long health request."""
+    client = cluster_health_manager.opensearch_client
+    primary = host or "node0"
+    alternatives = ["node1"]
+    endpoint = "/_cluster/health"
+    if wait_for_green:
+        endpoint += "?wait_for_status=green&timeout=1m"
+    health = {"status": "green", "initializing_shards": 0, "relocating_shards": 0}
+    with responses.RequestsMock() as http:
+        http.get(f"https://{primary}:9200/", body=requests.ReadTimeout("frozen"))
+        http.get("https://node1:9200/", json={})
+        http.get(f"https://node1:9200{endpoint}", json=health)
+
+        assert client.get_health(host, wait_for_green, alternatives) == health
+        assert [call.request.url for call in http.calls] == [
+            f"https://{primary}:9200/",
+            "https://node1:9200/",
+            f"https://node1:9200{endpoint}",
+        ]
+        assert http.calls[0].request.req_kwargs["timeout"] == (1, 1)
+        assert alternatives == ["node1"]
 
 
 @pytest.mark.parametrize("status", ["yellow", "red"])

@@ -61,7 +61,7 @@ class HealthManager(BaseManager):
             return HealthColors.IGNORE
 
         host = self.state.node_host if use_localhost else None
-        response = self.opensearch_client.get_health(host, wait_for_green_first, self.alt_hosts)
+        response = self.opensearch_client.get_health(host, wait_for_green_first, self.peer_hosts)
         if not response:
             return HealthColors.UNKNOWN
 
@@ -103,7 +103,7 @@ class HealthManager(BaseManager):
         """Wait for initialization and relocation with a fifteen-minute retry budget."""
         # Poll current counters: waiting for green can take a minute and is unrelated
         # to whether shards are moving (a red cluster can also be relocating shards).
-        health = self.opensearch_client.get_health(self.state.node_host, False, self.alt_hosts)
+        health = self.opensearch_client.get_health(self.state.node_host, False, self.peer_hosts)
         if not health:
             # Preserve recovery restarts and teardown when the API is unavailable.
             return
