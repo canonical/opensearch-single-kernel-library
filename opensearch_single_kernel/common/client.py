@@ -1150,6 +1150,7 @@ class OpenSearchClient:
                 alt_hosts=alt_hosts,
                 timeout=timeout,
                 retries=3,
+                check_hosts_reach=False,
                 ignore_retry_on=[408] if wait_for_green else None,
             )
         except OpenSearchHttpError as e:
