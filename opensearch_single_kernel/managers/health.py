@@ -118,6 +118,44 @@ class HealthManager(BaseManager):
             # is being relocated. Examples are: simple stop, unit removal, upgrade
             raise OpenSearchHAError("Shards haven't completed initializing or relocating.")
 
+    @retry(
+        retry=retry_if_exception_type((OpenSearchHAError, OpenSearchHttpError)),
+        stop=stop_after_delay(15 * 60),
+        wait=wait_fixed(5),
+        reraise=True,
+    )
+    def wait_for_safe_removal(self) -> None:
+        """Wait for settled shards with an in-sync copy on a surviving node."""
+        if not (hosts := self.alt_hosts):
+            raise OpenSearchHAError("No surviving node online to verify safe removal.")
+
+        shards = self.opensearch_client.get_shards(hosts[0], hosts[1:], verbose=True)
+        all_shards = {(shard["index"], shard["shard"]) for shard in shards}
+        surviving_shards = {
+            (shard["index"], shard["shard"])
+            for shard in shards
+            if shard["node"] != self.state.unit_name
+            and shard["state"] == "STARTED"
+            and shard["in_sync"]
+        }
+        # A replica may remain on the departing node when survivors cannot hold all
+        # replicas. A started, in-sync copy elsewhere is sufficient for promotion.
+        unsafe = all_shards - surviving_shards
+        unsettled = any(
+            shard["state"] in ("INITIALIZING", "RELOCATING")
+            or (shard["prirep"] == "p" and shard["state"] != "STARTED")
+            for shard in shards
+        )
+        if unsafe or unsettled:
+            logger.info(
+                "Waiting for safe removal: unsettled=%s, shards without surviving copies=%s",
+                unsettled,
+                sorted(unsafe),
+            )
+            raise OpenSearchHAError(
+                "Shards have not settled with an in-sync copy on a surviving node."
+            )
+
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

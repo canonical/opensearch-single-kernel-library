@@ -201,37 +201,48 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         return self.state.unit_dying
 
-    def stop_opensearch(self, *, restart: bool = False) -> None:
-        """Stop OpenSearch service."""
+    def stop_opensearch(self, *, restart: bool = False, removing: bool = False) -> None:
+        """Stop OpenSearch; removal from a surviving cluster requires safe shard copies."""
         self.status_handler.set_running_status(
             GeneralStatuses.SERVICE_IS_STOPPING.value,
             "unit",
             component_name=self.cluster_manager.name,
         )
 
-        if self.cluster_manager.opensearch_client.is_node_up():
+        node_up = self.cluster_manager.opensearch_client.is_node_up()
+        if node_up or removing:
             try:
-                nodes = self.cluster_manager.get_nodes(True)
-                # do not add exclusions if it's the last unit to stop
-                # otherwise cluster manager election will be blocked when starting up again
-                # and reusing storage
-                if len(nodes) > 1:
-                    # 1. Add current node to the voting + alloc exclusions
+                if removing:
+                    node_names = self.cluster_manager.opensearch_client.get_cluster_node_names(
+                        self.cluster_manager.alt_hosts
+                    )
+                else:
+                    node_names = {node.name for node in self.cluster_manager.get_nodes(True)}
+                if removing and not (node_names - {self.state.unit_name}):
+                    raise OpenSearchStopError("No other node joined the cluster for safe removal.")
+                # Leave the final node eligible to bootstrap reused storage. A removal
+                # retry may skip exclusions only once cluster state confirms absence.
+                if len(node_names) > 1 and (not removing or self.state.unit_name in node_names):
                     self.exclusions_manager.add_current(
                         scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
                         voting=True,
                         allocation=not restart,
+                        raise_error=removing,
                     )
-            except (OpenSearchHttpError, OpenSearchExclusionsException):
+            except (OpenSearchHttpError, OpenSearchExclusionsException) as e:
+                if removing:
+                    raise OpenSearchStopError(str(e)) from e
                 logger.error("Failed to get online nodes, voting and alloc exclusions not added")
 
         # Let ongoing shard initialization and relocation finish before stopping.
         try:
-            self.health_manager.wait_for_shards_relocation()
-        except OpenSearchHAError as e:
+            if removing:
+                self.health_manager.wait_for_safe_removal()
+            else:
+                self.health_manager.wait_for_shards_relocation()
+        except (OpenSearchHAError, OpenSearchHttpError) as e:
             raise OpenSearchStopError(str(e)) from e
 
-        # Stop the workload
         self.cluster_manager.stop_workload()
 
     def apply_health(

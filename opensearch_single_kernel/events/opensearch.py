@@ -290,10 +290,15 @@ class OpenSearchEventsHandler(Object):
             )
 
         planned_units = self.charm.app.planned_units()
+        cluster_survives = planned_units > 0 or any(
+            app.app.id != self.charm.state.application.deployment_desc.app.id
+            and app.planned_units > 0
+            for app in self.charm.state.application.apps_in_fleet
+        )
 
         # acquire lock to ensure only 1 unit removed at a time
         # Closes canonical/opensearch-operator#378
-        if planned_units > 0:
+        if cluster_survives:
             for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
                 with attempt:
                     if not self.charm.lock_manager.acquire():
@@ -305,67 +310,68 @@ class OpenSearchEventsHandler(Object):
                             "Unable to acquire lock: Another unit is starting or stopping."
                         )
 
-        logger.info(
-            "Unit %s is being removed. Starting pre-removal process.", self.charm.unit.name
-        )
-        # if the leader is departing, and this hook fails "leader elected" won't trigger,
-        # so we want to re-balance the node roles from here
-        if self.charm.unit.is_leader():
-            self.charm.cluster_manager.reconcile_before_unit_removal(
-                is_last_unit=planned_units == 0
-            )
-            if planned_units == 0:
-                if self.charm.state.is_peer_cluster_provider():
-                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                        event.relation.id if hasattr(event, "relation") else None,
-                    )
-                    logger.debug("demoting main orchestrator")
-                    self.charm.cluster_manager.demote_deployment_type()
-                    del self.charm.state.application.orchestrators
-                    self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
-                elif self.charm.state.is_peer_cluster_consumer():
-                    self.charm.peer_cluster_manager.refresh_requirer_relation_data()
-            # No cluster managers left in the cluster fleet
-            # raise so we do not lose the cluster state
-            if (
-                self.charm.cluster_manager.opensearch_client.is_node_up()
-                and self.charm.cluster_manager.no_cluster_manager_left
-            ):
-                logger.error(
-                    "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
-                )
-                raise OpenSearchNoClusterManagersError()
-        # we attempt to flush the translog to disk
-        self.charm.cluster_manager.flush_translog_to_disk()
-
         try:
-            self.charm.stop_opensearch()
+            logger.info(
+                "Unit %s is being removed. Starting pre-removal process.", self.charm.unit.name
+            )
+            # Rebalance here: a failing removal hook prevents leader-elected from firing.
+            if self.charm.unit.is_leader():
+                if planned_units > 0:
+                    self.charm.cluster_manager.reconcile_before_unit_removal(is_last_unit=False)
+                # No cluster managers left in the cluster fleet: preserve the cluster state.
+                if (
+                    self.charm.cluster_manager.opensearch_client.is_node_up()
+                    and self.charm.cluster_manager.no_cluster_manager_left
+                ):
+                    logger.error(
+                        "No cluster managers left in the cluster fleet. Please scale up your cluster manager units."
+                    )
+                    raise OpenSearchNoClusterManagersError()
+            self.charm.cluster_manager.flush_translog_to_disk()
+
+            self.charm.stop_opensearch(removing=cluster_survives)
             if self.charm.cluster_manager.alt_hosts:
-                # There is enough peers available for us to try removing the unit
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
-                self.charm.exclusions_manager.delete_current(scope)
-            # safeguards in case planned_units > 0
-            if planned_units > 0:
-                # check cluster status
+                self.charm.exclusions_manager.delete_current(scope, raise_error=cluster_survives)
+            if cluster_survives:
                 if not self.charm.cluster_manager.alt_hosts:
                     raise OpenSearchHAError(
                         "No unit online, cannot determine if it's safe to scale-down."
                     )
 
-                health_color = self.charm.apply_health(
-                    wait_for_green_first=True, use_localhost=False, unit=False
+                health_color = self.charm.health_manager.get(
+                    wait_for_green_first=True, use_localhost=False, local_app_only=False
                 )
-                if health_color == HealthColors.RED:
+                if health_color in (HealthColors.RED, HealthColors.UNKNOWN):
                     raise OpenSearchHAError(
-                        "1 or more 'primary' shards are not assigned, please scale your application up."
+                        "Cannot confirm primary shard availability after removal."
                     )
-        finally:
-            if planned_units > 0 and (
-                self.charm.cluster_manager.opensearch_client.is_node_up()
-                or self.charm.cluster_manager.alt_hosts
-            ):
-                # release lock
+        except Exception:
+            # A secondary release failure must not replace the removal error.
+            if cluster_survives:
+                try:
+                    self.charm.lock_manager.release()
+                except Exception:
+                    logger.exception("Failed to release the node lock after removal failed.")
+            raise
+        else:
+            if cluster_survives:
                 self.charm.lock_manager.release()
+
+        # Keep fleet addresses available until stop, exclusion cleanup and lock release
+        # finish. These relation updates are committed together at the end of the hook.
+        if self.charm.unit.is_leader() and planned_units == 0:
+            self.charm.cluster_manager.reconcile_before_unit_removal(is_last_unit=True)
+            if self.charm.state.is_peer_cluster_provider():
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None,
+                )
+                logger.debug("demoting main orchestrator")
+                self.charm.cluster_manager.demote_deployment_type()
+                del self.charm.state.application.orchestrators
+                self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
+            elif self.charm.state.is_peer_cluster_consumer():
+                self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
     def _on_update_status(self, event: UpdateStatusEvent) -> None:  # noqa: C901
         """On update status event.

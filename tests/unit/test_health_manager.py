@@ -210,3 +210,117 @@ def test_health_unit_handles_missing_shard_details(health_manager, mocker, looku
         assert statuses == [HealthStatuses.WAITING_FOR_ANY_BUSY_SHARDS.value]
     else:
         assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def removal_routing(copies):
+    """Build an API response with explicit routing and in-sync allocation IDs."""
+    return {
+        "nodes": {node: {"name": node} for node in ("departing", "survivor")},
+        "metadata": {
+            "indices": {
+                "data": {
+                    "in_sync_allocations": {
+                        "0": [str(i) for i, (_, _, _, in_sync) in enumerate(copies) if in_sync]
+                    }
+                }
+            }
+        },
+        "routing_table": {
+            "indices": {
+                "data": {
+                    "shards": {
+                        "0": [
+                            {
+                                "node": node,
+                                "primary": primary,
+                                "state": state,
+                                "allocation_id": {"id": str(i)},
+                            }
+                            for i, (node, primary, state, _) in enumerate(copies)
+                        ]
+                    }
+                }
+            }
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "copies,safe",
+    [
+        ([("departing", True, "STARTED", True)], False),
+        ([("survivor", True, "STARTED", True)], True),
+        (
+            [("departing", True, "RELOCATING", True), ("survivor", True, "INITIALIZING", False)],
+            False,
+        ),
+        ([("departing", True, "STARTED", True), ("survivor", False, "STARTED", True)], True),
+        ([("departing", False, "STARTED", True), ("survivor", True, "STARTED", True)], True),
+        ([("departing", True, "STARTED", True), ("survivor", False, "STARTED", False)], False),
+        ([(None, True, "UNASSIGNED", False), ("survivor", False, "STARTED", True)], False),
+    ],
+    ids=[
+        "only-copy-departing",
+        "primary-moved",
+        "recovering",
+        "promotable-replica",
+        "redundant-replica",
+        "search-only-or-stale-copy",
+        "unavailable-primary",
+    ],
+)
+def test_safe_removal_requires_surviving_copy(health_manager, mocker, copies, safe):
+    """Only settled, in-sync copies on surviving nodes authorize permanent removal."""
+    health_manager.state.unit_name = "departing"
+    mocker.patch.object(
+        HealthManager, "alt_hosts", new_callable=PropertyMock, return_value=["survivor"]
+    )
+    with responses.RequestsMock() as http:
+        http.get(
+            "https://survivor:9200/_cluster/state/routing_table,metadata,nodes",
+            json=removal_routing(copies),
+        )
+        wait = health_manager.wait_for_safe_removal.retry_with(stop=stop_after_attempt(1))
+        if safe:
+            wait(health_manager)
+        else:
+            with pytest.raises(OpenSearchHAError):
+                wait(health_manager)
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_safe_removal_retries_until_data_is_safe(health_manager, mocker, unavailable):
+    """A failed read or an unmoved primary must not be treated as an empty cluster."""
+    health_manager.state.unit_name = "departing"
+    mocker.patch.object(
+        HealthManager, "alt_hosts", new_callable=PropertyMock, return_value=["survivor"]
+    )
+    endpoint = "https://survivor:9200/_cluster/state/routing_table,metadata,nodes"
+    with responses.RequestsMock() as http:
+        if unavailable:
+            for _ in range(3):
+                http.get(endpoint, status=503)
+        else:
+            http.get(endpoint, json=removal_routing([("departing", True, "STARTED", True)]))
+        http.get(endpoint, json=removal_routing([("survivor", True, "STARTED", True)]))
+        health_manager.wait_for_safe_removal.retry_with(stop=stop_after_attempt(2))(health_manager)
+        assert len(http.calls) == (4 if unavailable else 2)
+
+
+def test_safe_removal_without_survivor_fails(health_manager):
+    """A missing survivor cannot authorize removal even if the local API is running."""
+    with pytest.raises(OpenSearchHAError):
+        health_manager.wait_for_safe_removal.retry_with(stop=stop_after_attempt(1))(health_manager)
+
+
+def test_removal_membership_comes_from_cluster_state(health_manager):
+    """Use the cluster manager's membership, not per-node info responses."""
+    with responses.RequestsMock() as http:
+        http.get(
+            "https://localhost:9200/_cluster/state/nodes",
+            json={"nodes": {"id1": {"name": "departing"}, "id2": {"name": "survivor"}}},
+        )
+        assert health_manager.opensearch_client.get_cluster_node_names() == {
+            "departing",
+            "survivor",
+        }

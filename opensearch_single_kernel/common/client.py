@@ -954,14 +954,14 @@ class OpenSearchClient:
 
     def add_allocation_exclusions(
         self,
-        node: Node,
+        node_name: str,
         allocations: set[str] | None = None,
         override: bool = False,
         alt_hosts: list[str] | None = None,
     ) -> bool:
         """Register new allocation exclusions."""
         existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
+        all_exclusions = existing.union(allocations if allocations is not None else {node_name})
         response = self.request(
             "PUT",
             "/_cluster/settings",
@@ -970,7 +970,7 @@ class OpenSearchClient:
             retries=3,
             wait_strategy=wait_exponential(min=2),
         )
-        return "acknowledged" in response
+        return response.get("acknowledged") is True
 
     def get_current_node(
         self,
@@ -1026,12 +1026,19 @@ class OpenSearchClient:
         )
         return node.roles if node else []
 
+    def get_cluster_node_names(self, alt_hosts: list[str] | None = None) -> set[str]:
+        """Get membership from cluster state, unaffected by partial node-info responses."""
+        cluster_state = self.request(
+            "GET", "/_cluster/state/nodes", alt_hosts=alt_hosts, retries=3
+        )
+        return {node["name"] for node in cluster_state["nodes"].values()}
+
     def get_shards(
         self,
         host: str | None = None,
         alt_hosts: list[str] | None = None,
         verbose: bool = False,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Get all shards of all indexes in the cluster."""
         cluster_state = self.request(
             "GET",
@@ -1068,6 +1075,10 @@ class OpenSearchClient:
                         shard_info["unassigned.reason"] = shard.get("unassigned_info", {}).get(
                             "reason", None
                         )
+                        in_sync = cluster_state["metadata"]["indices"][index_name][
+                            "in_sync_allocations"
+                        ][shard_num]
+                        shard_info["in_sync"] = shard.get("allocation_id", {}).get("id") in in_sync
                     shards_info.append(shard_info)
         return shards_info
 

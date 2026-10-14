@@ -692,7 +692,13 @@ class ClusterManager(BaseManager):
         """Clean up cluster state on last unit removal."""
         if self.state.peer_relation:
             del self.state.application.bootstrap_contributors_count
-            del self.state.application.nodes_config
+            # Other units may still be departing (planned_units is already zero).
+            # Keep remote fleet addresses available for their cleanup and lock release.
+            self.state.application.nodes_config = {
+                name: node
+                for name, node in (self.state.application.nodes_config or {}).items()
+                if node.app.id != self.state.application.deployment_desc.app.id
+            }
             # we delete the security index initialised and bootstrapped flags
             # if there are no data units left in all cluster
             if not self.state.application.is_data_role_in_cluster_fleet_apps:
