@@ -141,6 +141,23 @@ async def _configure_data_integrators(model: Model) -> None:
     )
 
 
+# This is from Dashboards since python libjuju is not supporting resolute :)
+async def _deploy_traefik(ops_test_k8s: OpsTest) -> None:
+    """Deploy Traefik through the Juju CLI and wait for it to be active.
+
+    On arm64, traefik-k8s is only published for ubuntu@26.04 (resolute), which libjuju cannot
+    resolve ("Unknown series").
+    """
+    await ops_test_k8s.juju(
+        "deploy", TRAEFIK_CHARM, "--channel", "latest/stable", "--trust", check=True
+    )
+    # A CLI deploy may not be reflected in libjuju's model cache yet
+    await ops_test_k8s.model.block_until(
+        lambda: TRAEFIK_CHARM in ops_test_k8s.model.applications, timeout=1000
+    )
+    await ops_test_k8s.model.wait_for_idle(apps=[TRAEFIK_CHARM], status="active", timeout=1000)
+
+
 async def _deploy_glauth(ops_test_k8s: OpsTest, k8s_model: Model, architecture: str) -> None:
     """Deploy glauth and all required charms coming with glauth, relate them and add users."""
     await asyncio.gather(
@@ -161,7 +178,7 @@ async def _deploy_glauth(ops_test_k8s: OpsTest, k8s_model: Model, architecture: 
             TLS_CERTIFICATES_APP_NAME,
             channel=TLS_STABLE_CHANNEL,
         ),
-        k8s_model.deploy(TRAEFIK_CHARM, channel="latest/stable", trust=True),
+        _deploy_traefik(ops_test_k8s),
     )
 
     await k8s_model.wait_for_idle(
@@ -239,7 +256,7 @@ async def _deploy_authentik(ops_test_k8s: OpsTest, k8s_model: Model, architectur
             channel=TLS_STABLE_CHANNEL,
         ),
         # Traefik terminates LDAPS for the outpost, which never provisions a certificate itself
-        k8s_model.deploy(TRAEFIK_CHARM, channel="latest/stable", trust=True),
+        _deploy_traefik(ops_test_k8s),
     )
 
     await asyncio.gather(
