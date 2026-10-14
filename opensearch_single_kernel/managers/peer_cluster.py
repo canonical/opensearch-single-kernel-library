@@ -140,10 +140,6 @@ class PeerClusterManager(BaseManager):
             remote_orchestrators,
         )
 
-        # fetch the (main/failover)-cluster-orchestrator relations
-        for remote_peer_cluster in self.state.peer_clusters(is_provider=False, remote=True):
-            remote_orchestrators.update(remote_peer_cluster.orchestrators)
-
         local_orchestrators = self.state.application.orchestrators_dict
 
         if (trigger in {"main", "failover"}) and (relation_units > 0):
