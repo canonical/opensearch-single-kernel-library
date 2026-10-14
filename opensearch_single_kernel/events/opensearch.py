@@ -157,6 +157,10 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        # Peer TLS readiness must reach consumers even while cluster health is pending.
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
         ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
@@ -175,11 +179,6 @@ class OpenSearchEventsHandler(Object):
             nodes = []
 
         if self.charm.unit.is_leader():
-            # we want to have the most up-to-date info broadcasted to related sub-clusters
-
-            if self.charm.state.is_peer_cluster_provider():
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-
             # update any orchestrators about planned units
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
