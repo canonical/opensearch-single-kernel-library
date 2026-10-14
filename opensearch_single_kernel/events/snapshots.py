@@ -12,7 +12,7 @@ from object_storage import (
     StorageConnectionInfoChangedEvent,
     StorageConnectionInfoGoneEvent,
 )
-from ops import ActionEvent, Object
+from ops import ActionEvent, ModelError, Object
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -202,7 +202,12 @@ class SnapshotsEventsHandler(Object):
 
         self._clear_repository_misconfigured_status()
         # Refresh peer relations
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+        try:
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+        except ModelError as e:
+            logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
+            event.defer()
+            return
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: StorageConnectionInfoGoneEvent
@@ -261,7 +266,12 @@ class SnapshotsEventsHandler(Object):
 
         if self.charm.unit.is_leader():
             # Refresh peer relations
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            try:
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            except ModelError as e:
+                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
+                event.defer()
+                return
 
         self._set_credentials_cleanup_failed_status(False)
 

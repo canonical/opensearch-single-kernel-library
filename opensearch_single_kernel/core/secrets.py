@@ -10,7 +10,7 @@ to an event handler.
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import ModelError, Relation, Secret, SecretNotFoundError
+from ops import Relation, Secret, SecretNotFoundError
 from ops.framework import Object
 from overrides import override
 
@@ -72,6 +72,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         return SECRETS_LABEL_SEPARATOR.join(components)
 
     def _get_juju_secret(self, scope: Scope, key: str) -> Secret | None:
+        """Return None only for a missing secret; lookup failures must reach callers."""
         label = self.label(scope, key)
 
         cached_secret_meta = self.cached_secrets.get_meta(scope, label)
@@ -173,7 +174,11 @@ class OpenSearchSecrets(Object, RelationDataStore):
             )
             return
 
-        secret.remove_all_revisions()
+        try:
+            secret.remove_all_revisions()
+        except SecretNotFoundError:
+            logger.info("Secret %s:%s already absent in Juju", scope.val, key)
+
         label = self.label(scope, key)
         self.cached_secrets.delete(scope, label)
         if scope == Scope.APP:
@@ -296,16 +301,9 @@ class OpenSearchSecrets(Object, RelationDataStore):
         )
 
     def grant_secret_to_relation(self, secret_id: str, relation: Relation):
-        """Grant a secret to a relation."""
-        try:
-            secret = self._charm.model.get_secret(id=secret_id)
-            secret.grant(relation)
-        except SecretNotFoundError:
-            logger.error("Could not find secret: %s", secret_id)
-            return False
-        except ModelError:
-            logger.error("Not owner of secret: %s. Cannot grant to relation", secret_id)
-            return False
+        """Grant a secret, propagating failures so callers cannot publish ungranted IDs."""
+        secret = self._charm.model.get_secret(id=secret_id)
+        secret.grant(relation)
         return True
 
     def grant_secret_to_subclusters(self, secret_id: str, is_provider: bool) -> bool:

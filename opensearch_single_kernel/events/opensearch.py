@@ -21,6 +21,7 @@ from ops import (
     RelationDepartedEvent,
     RelationJoinedEvent,
     SecretChangedEvent,
+    SecretNotFoundError,
     StartEvent,
     StopEvent,
     StorageDetachingEvent,
@@ -32,6 +33,7 @@ from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     CERTS_EXPIRATION_DATE_FORMAT,
     CONTAINER_NAME,
+    COS_USER,
     KIBANA_SERVER_USER,
     NODE_LOCK_RELATION,
     OLD_CA_ALIAS,
@@ -157,9 +159,15 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        # # we want to have the most up-to-date info broadcasted to related sub-clusters
         # Peer TLS readiness must reach consumers even while cluster health is pending.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            try:
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            except ModelError as e:
+                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
+                event.defer()
+                return
 
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
@@ -316,9 +324,14 @@ class OpenSearchEventsHandler(Object):
             )
             if planned_units == 0:
                 if self.charm.state.is_peer_cluster_provider():
-                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                        event.relation.id if hasattr(event, "relation") else None,
-                    )
+                    try:
+                        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                            event.relation.id if hasattr(event, "relation") else None,
+                        )
+                    except ModelError as e:
+                        logger.warning(
+                            "Cannot publish peer-cluster credentials during removal: %s", e
+                        )
                     logger.debug("demoting main orchestrator")
                     self.charm.cluster_manager.demote_deployment_type()
                     del self.charm.state.application.orchestrators
@@ -558,7 +571,15 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+        """Handle leader election and retry failed Juju operations."""
+        try:
+            self._initialize_leader(event)
+        except ModelError as e:
+            logger.warning("Juju operation failed; deferring leader initialization: %s", e)
+            event.defer()
+
+    def _initialize_leader(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
         # was deferred, then juju proceeded with a new leader election, and this now deferred-event
@@ -639,7 +660,15 @@ class OpenSearchEventsHandler(Object):
             self.charm.internal_users_manager.name,
         )
 
-    def _on_start(self, event: StartEvent) -> None:  # noqa: C901
+    def _on_start(self, event: StartEvent) -> None:
+        """Prepare startup and retry failed Juju operations."""
+        try:
+            self._prepare_start(event)
+        except ModelError as e:
+            logger.warning("Juju operation failed; deferring start preparation: %s", e)
+            event.defer()
+
+    def _prepare_start(self, event: StartEvent) -> None:  # noqa: C901
         """Event handler for start event."""
         if (
             self.charm.state.substrate == Substrates.K8S
@@ -806,7 +835,15 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.start_opensearch_event.emit()
 
-    def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
+    def _on_start_opensearch(self, event: StartOpenSearch) -> None:
+        """Start OpenSearch and retry failed Juju operations."""
+        try:
+            self._start_opensearch(event)
+        except ModelError as e:
+            logger.warning("Juju operation failed; deferring OpenSearch startup: %s", e)
+            event.defer()
+
+    def _start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
         # This will block unit to start if it is an upgrade
         # until the user unblock with `force-refresh-start`
@@ -869,14 +906,14 @@ class OpenSearchEventsHandler(Object):
                     self.charm.cluster_manager.name,
                 )
                 event.defer()
-            finally:
-                if (
-                    self.charm.state.is_peer_cluster_provider(typ="main")
-                    and self.charm.unit.is_leader()
-                ):
-                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                        event.relation.id if hasattr(event, "relation") else None
-                    )
+
+            if (
+                self.charm.state.is_peer_cluster_provider(typ="main")
+                and self.charm.unit.is_leader()
+            ):
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
             return
 
         if self.charm.state.server.started:
@@ -992,18 +1029,14 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             logger.debug("Node started but not fully ready: %s", e)
             event.defer()
-        finally:
-            # In large deployments with cluster-manager-only-nodes, the startup might fail
-            # for the cluster-manager if a joining data node did not yet initialize the
-            # security index. We still want to update and broadcast the latest relation data.
-            if (
-                self.charm.state.is_peer_cluster_provider(typ="main")
-                and self.charm.unit.is_leader()
-            ):
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
-            pass
+
+        # In large deployments with cluster-manager-only-nodes, the startup might fail
+        # for the cluster-manager if a joining data node did not yet initialize the
+        # security index. We still want to update and broadcast the latest relation data.
+        if self.charm.state.is_peer_cluster_provider(typ="main") and self.charm.unit.is_leader():
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                event.relation.id if hasattr(event, "relation") else None
+            )
 
     def _post_start_init(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Initialisation post OpenSearch start"""
@@ -1097,8 +1130,11 @@ class OpenSearchEventsHandler(Object):
             and self.charm.state.application.deployment_desc.typ
             == DeploymentType.MAIN_ORCHESTRATOR
         ):
-            # Creating the monitoring user
-            self.charm.internal_users_manager.create_cos_user()
+            if not self.charm.internal_users_manager.put_or_update_internal_user_leader(
+                COS_USER, update=False
+            ):
+                event.defer()
+                return
 
         self.charm.unit.open_port("tcp", 9200)
 
@@ -1255,10 +1291,19 @@ class OpenSearchEventsHandler(Object):
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:  # noqa: C901
         """Refresh secret and re-run corresponding actions if needed."""
+        # Advance credentials consumed by ID and by later observers (including COS),
+        # even when this handler has no label-specific action for them.
         try:
-            event.secret.get_content(refresh=True)
+            content = event.secret.get_content(refresh=True)
+        except SecretNotFoundError:
+            logger.info("Secret %s no longer exists; ignoring its change event.", event.secret.id)
+            return
         except ModelError as e:
-            logger.error("Cannot refresh secret: %s", e)
+            logger.warning(
+                "Cannot refresh secret %s; deferring secret change: %s", event.secret.id, e
+            )
+            event.defer()
+            return
 
         if not event.secret.label:
             logger.info("Secret %s has no label, ignoring it.", event.secret.id)
@@ -1269,6 +1314,7 @@ class OpenSearchEventsHandler(Object):
         except ValueError:
             logging.info(f"Label {event.secret.label} was meaningless for us, returning")
             return
+
         # We need to take action on 5 secret types
         # 1. TLS credentials change
         #     - Action: update credentials files
@@ -1288,6 +1334,7 @@ class OpenSearchEventsHandler(Object):
             CertType.APP_ADMIN.val,
             password_key(KIBANA_SERVER_USER),
         ]
+
         # Variables for better readability
         label_key = label_parts["key"]
         is_leader = self.charm.unit.is_leader()
@@ -1303,24 +1350,23 @@ class OpenSearchEventsHandler(Object):
 
         logger.debug("Secret change for %s", str(label_key))
 
-        if is_leader and label_key == password_key(KIBANA_SERVER_USER):
-            self.charm.external_clients_manager.update_dashboards_password()
+        try:
+            if is_leader and label_key == password_key(KIBANA_SERVER_USER):
+                self.charm.external_clients_manager.update_dashboards_password(content[label_key])
 
-        # Non-leader units need to maintain local users in internal_users.yml
-        elif not is_leader and label_key in system_user_hash_keys:
-            password = event.secret.get_content()[label_key]
-            if sys_user := user_from_hash_key(label_key):
-                try:
+            # Non-leader units need to maintain local users in internal_users.yml
+            elif not is_leader and label_key in system_user_hash_keys:
+                password = content[label_key]
+                if sys_user := user_from_hash_key(label_key):
                     self.charm.internal_users_manager.put_internal_user(sys_user, password)
-                except (OpenSearchFileOperationError, OpenSearchUserMgmtError) as e:
-                    logger.error("An error occurred while updating internal user: %s", str(e))
-                    event.defer()
-                    return
 
-        if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id if hasattr(event, "relation") else None
-            )
+            if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
+        except (OpenSearchFileOperationError, OpenSearchUserMgmtError, ModelError) as e:
+            logger.warning("Cannot apply system credentials; deferring secret change: %s", e)
+            event.defer()
 
     def unit_allowed_to_start(self, event: StartOpenSearch) -> bool:
         """Check if the unit is allowed to start.
