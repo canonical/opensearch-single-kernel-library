@@ -14,6 +14,61 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchStartError,
 )
+from opensearch_single_kernel.managers.cluster import ClusterManager
+
+
+@pytest.fixture
+def command_runner(harness, mocker, substrate):
+    """Keep the workload runners real and replace only process execution."""
+    workload = harness.charm.workload
+    if substrate == "vm":
+        mocker.patch("opensearch_single_kernel.workload.vm.os.access", return_value=True)
+        backend = mocker.patch("opensearch_single_kernel.workload.vm.subprocess.run")
+        backend.return_value = Mock(stdout="done", stderr="", returncode=0)
+    else:
+        backend = mocker.patch.object(workload.container, "exec")
+        backend.return_value.wait_output.return_value = ("done", "")
+    return workload, backend
+
+
+@pytest.mark.parametrize("timeout", [None, 60])
+@pytest.mark.parametrize(
+    "method, replace_errors", [("run_cmd", False), ("run_cmd", True), ("run_script", False)]
+)
+def test_command_timeout_reaches_execution_backend(
+    command_runner, timeout, method, replace_errors
+):
+    """Commands default to 30 seconds and honor an explicit per-call override."""
+    workload, backend = command_runner
+    kwargs = {} if timeout is None else {"timeout": timeout}
+    if method == "run_cmd":
+        kwargs["use_errors_replace"] = replace_errors
+
+    getattr(workload, method)("test-command", **kwargs)
+
+    assert backend.call_args.kwargs["timeout"] == (30 if timeout is None else timeout)
+
+
+@pytest.mark.parametrize("initialise", [False, True])
+def test_security_initialisation_has_longer_timeout_than_config_updates(
+    command_runner, initialise
+):
+    """Only initial security-index creation gets a 60-second execution deadline."""
+    workload, backend = command_runner
+    state = Mock()
+    state.application.admin_secrets = {"truststore-password": "trust", "keystore-password": "key"}
+    state.application.is_security_index_initialised = False
+    manager = ClusterManager(state, workload)
+
+    if initialise:
+        manager.initialise_security_index()
+        assert state.application.is_security_index_initialised is True
+    else:
+        assert manager.apply_security_config(
+            state.application.admin_secrets, "opensearch-security/config.yml"
+        )
+
+    assert backend.call_args.kwargs["timeout"] == (60 if initialise else 30)
 
 
 @pytest.mark.parametrize("operation", ["exists", "write_text", "unlink"])

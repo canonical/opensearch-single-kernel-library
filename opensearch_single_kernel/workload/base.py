@@ -365,7 +365,14 @@ class BaseWorkload(ABC):
             return False
 
     @abstractmethod
-    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
+    def run_script(
+        self,
+        script_name: str,
+        args: str = None,
+        stdin: str | None = None,
+        *,
+        timeout: int = 30,
+    ):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
         pass
 
@@ -376,6 +383,8 @@ class BaseWorkload(ABC):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run Command in CLI"""
         pass

@@ -440,7 +440,7 @@ class ClusterManager(BaseManager):
             args.append(f"-keypass {admin_key_pwd}")
 
         self.workload.run_script(
-            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args), timeout=60
         )
         logger.info("securityadmin.sh execution completed successfully")
         self.state.application.is_security_index_initialised = True
