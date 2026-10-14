@@ -165,9 +165,7 @@ class OpenSearchEventsHandler(Object):
             try:
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
             except ModelError as e:
-                logger.warning(
-                    "Cannot publish peer-cluster credentials; deferring event: %s", e
-                )
+                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
                 event.defer()
                 return
 
