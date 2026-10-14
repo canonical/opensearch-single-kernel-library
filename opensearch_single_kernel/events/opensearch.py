@@ -157,6 +157,10 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        # Peer TLS readiness must reach consumers even while cluster health is pending.
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
         ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
@@ -175,11 +179,6 @@ class OpenSearchEventsHandler(Object):
             nodes = []
 
         if self.charm.unit.is_leader():
-            # we want to have the most up-to-date info broadcasted to related sub-clusters
-
-            if self.charm.state.is_peer_cluster_provider():
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-
             # update any orchestrators about planned units
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
@@ -388,6 +387,7 @@ class OpenSearchEventsHandler(Object):
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
+
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
         except OpenSearchHttpError:
@@ -398,18 +398,15 @@ class OpenSearchEventsHandler(Object):
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
-        if (
-            health := self.charm.apply_health(
-                wait_for_green_first=True, app=self.charm.unit.is_leader()
-            )
-        ) not in [
+
+        if (health := self.charm.apply_health(app=self.charm.unit.is_leader())) not in [
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
             logger.warning("Update status: exclusions updated and cluster health is %s.", health)
-
             if health == HealthColors.UNKNOWN:
                 return
+
         if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
@@ -570,6 +567,11 @@ class OpenSearchEventsHandler(Object):
             return
 
         if not (deployment_desc := self.charm.state.application.deployment_desc):
+            event.defer()
+            return
+
+        if not self.charm.workload.workload_present:
+            logger.debug("Workload is not ready; deferring leader election.")
             event.defer()
             return
 
@@ -846,6 +848,12 @@ class OpenSearchEventsHandler(Object):
                     )
                     self.charm.state.add_status_if_not_present(
                         GeneralStatuses.SERVICE_START_ERROR.value,
+                        "unit",
+                        self.charm.cluster_manager.name,
+                    )
+                elif isinstance(e, OpenSearchNotFullyReadyError):
+                    self.charm.state.add_status_if_not_present(
+                        GeneralStatuses.WAITING_TO_START.value,
                         "unit",
                         self.charm.cluster_manager.name,
                     )

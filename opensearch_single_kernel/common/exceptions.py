@@ -55,6 +55,18 @@ class OpenSearchHttpError(OpenSearchError):
         super().__init__(message)
 
 
+class OpenSearchHttpConnectTimeoutError(OpenSearchHttpError):
+    """The connection timed out before the OpenSearch request could be sent."""
+
+
+class OpenSearchHttpNoResponseError(OpenSearchHttpError):
+    """A timeout or connection failure left the OpenSearch request's outcome unknown."""
+
+
+class OpenSearchRestoreIndexConflictError(OpenSearchHttpError):
+    """Restore was rejected because a target index is open."""
+
+
 class OpenSearchHAError(OpenSearchError):
     """Exception thrown when the HA of the OpenSearch charm is violated."""
 

@@ -27,6 +27,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
+    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
@@ -459,6 +460,7 @@ class SnapshotsEventsHandler(Object):
                     self._set_credentials_cleanup_failed_status(True)
                     event.defer()
                     return None
+
             self._set_credentials_cleanup_failed_status(False)
 
             object_storage_credentials, tls_ca_chain = self._credentials_from_peer_cluster()
@@ -471,28 +473,43 @@ class SnapshotsEventsHandler(Object):
                 )
             except OpenSearchFileOperationError:
                 logger.error("Failed to update stored backup credentials.")
-                return
+                event.defer()
+                return None
 
             # Reload keystore
             self.charm.reload_keystore_event.emit()
             self.charm.snapshots_manager.set_credentials_saved(info_to_save)
-            return
+            return None
 
-        for object_storage_type in [
-            ObjectStorageType.S3,
-            ObjectStorageType.AZURE,
-            ObjectStorageType.GCS,
-        ]:
+        try:
+            stored_storage_types = self.charm.keystore_manager.stored_storage_types
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.warning("Could not read backup credentials from the keystore: %s", e)
+            self._set_credentials_cleanup_failed_status(True)
+            event.defer()
+            return None
+
+        # Clean the CA first so a failure leaves credentials in place for the next cleanup.
+        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
+            self.charm.snapshots_manager.remove_s3_ca()
+
+        cleanup_failed = False
+        for object_storage_type in stored_storage_types:
             if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
                     "Failed to cleanup keystore credentials for %s.", object_storage_type
                 )
+                cleanup_failed = True
 
-        # clean S3 CA
-        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
-            self.charm.snapshots_manager.remove_s3_ca()
+        if stored_storage_types:
+            # Reload after attempted cleanup, including any partial removal before a failure.
+            self.charm.reload_keystore_event.emit()
 
-        self.charm.reload_keystore_event.emit()
+        self._set_credentials_cleanup_failed_status(cleanup_failed)
+
+        if cleanup_failed:
+            event.defer()
+            return None
 
         self.charm.snapshots_manager.set_credentials_saved(None)
 

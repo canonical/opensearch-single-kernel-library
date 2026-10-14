@@ -206,6 +206,8 @@ class UpgradesEventsHandler(Object):
         )
         # TODO check backwards compatibility for profiles
         if self.charm.substrate == Substrates.VM:
+            # The stable (2.19.4) vm charm stored JWT/OIDC configuration only in YAML
+            self.charm.upgrades_manager.migrate_legacy_auth_configuration()
             self.machine_upgrade()
         else:
             self.kubernetes_upgrade(event)

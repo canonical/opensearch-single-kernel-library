@@ -116,7 +116,7 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return self.relation_data.get("started", "")
+        return self.relation.data[self.unit].get("started", "")
 
     @started.setter
     def started(self, value: str) -> None:

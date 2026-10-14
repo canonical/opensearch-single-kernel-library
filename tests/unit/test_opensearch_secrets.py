@@ -1,11 +1,67 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+from ops import ModelError, Secret, SecretNotFoundError
 
 from opensearch_single_kernel.common.constants import Scope
+
+
+@pytest.mark.parametrize("scope", [Scope.APP, Scope.UNIT])
+@pytest.mark.parametrize("empty_content", [False, True])
+def test_delete_clears_persisted_secret_id(harness, mocker, scope, empty_content):
+    """Deletion must not leave the old operator's label-to-ID reference behind."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.implements_secrets",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        secrets = harness.charm.state.secrets
+        secrets.put_object(scope, "test-key", {"value": "original"})
+        secrets.put_object(scope, "other-key", {"value": "keep"})
+        secret_id = secrets.get_secret_id(scope, "test-key")
+        assert secret_id is not None
+
+        if empty_content:
+            secrets.put_object(scope, "test-key", {"value": None})
+        else:
+            secrets.delete(scope, "test-key")
+
+        with pytest.raises(SecretNotFoundError):
+            harness.model.get_secret(id=secret_id).get_content()
+        assert secrets.get_object(scope, "test-key") is None
+        assert secrets.get_secret_id(scope, "test-key") is None
+        assert secrets.get_object(scope, "other-key") == {"value": "keep"}
+
+        secrets.put_object(scope, "test-key", {"value": "replacement"})
+        assert secrets.get_secret_id(scope, "test-key") != secret_id
+        assert secrets.get_object(scope, "test-key") == {"value": "replacement"}
+
+
+@pytest.mark.parametrize("scope", [Scope.APP, Scope.UNIT])
+def test_failed_delete_preserves_secret_id(harness, mocker, scope):
+    """Keep the reference when Juju has not deleted the secret."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.implements_secrets",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        secrets = harness.charm.state.secrets
+        secrets.put_object(scope, "test-key", {"value": "original"})
+        secret_id = secrets.get_secret_id(scope, "test-key")
+        mocker.patch.object(Secret, "remove_all_revisions", side_effect=ModelError("unavailable"))
+
+        with pytest.raises(ModelError, match="unavailable"):
+            secrets.delete(scope, "test-key")
+
+        assert secrets.get_secret_id(scope, "test-key") == secret_id
+        assert harness.model.get_secret(id=secret_id).get_content() == {"value": "original"}
 
 
 def test_on_secret_changed_app(mocker, harness, context):
