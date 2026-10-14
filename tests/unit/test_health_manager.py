@@ -3,10 +3,12 @@
 
 """Unit tests for the health manager."""
 
+from collections import Counter
 from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
+import requests
 import responses
 from tenacity import stop_after_attempt
 
@@ -34,6 +36,93 @@ def health_manager(mocker):
     state = MagicMock()
     state.node_host = "localhost"
     return HealthManager(state, workload)
+
+
+@pytest.fixture
+def cluster_health_manager(mocker):
+    """Keep host discovery and HTTP preflights real; replace only network I/O."""
+    workload = MagicMock()
+    workload.chain_path.return_value = "/ca.pem"
+    workload.is_reachable.return_value = True
+    state = MagicMock()
+    state.node_host = "node0"
+    state.peer_unit_hosts = {"node0", "node1"}
+    state.application.nodes_config = {}
+    state.get_rel_data_from_main_orchestrator.return_value = None
+    state.application.admin_password = "password"
+    mocker.patch("random.shuffle", side_effect=lambda hosts: hosts.sort())
+    mocker.patch("time.sleep")
+    return HealthManager(state, workload)
+
+
+def test_health_checks_alternative_hosts_only_once(cluster_health_manager):
+    """A five-node health read needs four discovery probes and one health request."""
+    manager = cluster_health_manager
+    manager.state.peer_unit_hosts = {f"node{i}" for i in range(5)}
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for i in range(5):
+            http.get(f"https://node{i}:9200/", json={})
+        http.get(
+            "https://node0:9200/_cluster/health",
+            json={"status": "green", "initializing_shards": 0, "relocating_shards": 0},
+        )
+
+        assert manager.get() == HealthColors.GREEN
+        assert Counter(call.request.url for call in http.calls) == Counter(
+            {
+                "https://node1:9200/": 1,
+                "https://node2:9200/": 1,
+                "https://node3:9200/": 1,
+                "https://node4:9200/": 1,
+                "https://node0:9200/_cluster/health": 1,
+            }
+        )
+
+
+@pytest.mark.parametrize("failure", ["connection", "timeout", "503"])
+def test_health_falls_back_when_primary_request_fails(cluster_health_manager, failure):
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for host in ("node0", "node1"):
+            http.get(f"https://{host}:9200/", json={})
+        if failure == "503":
+            http.get("https://node0:9200/_cluster/health", status=503)
+        else:
+            error = requests.ConnectionError if failure == "connection" else requests.Timeout
+            http.get("https://node0:9200/_cluster/health", body=error("unavailable"))
+        http.get(
+            "https://node1:9200/_cluster/health",
+            json={"status": "green", "initializing_shards": 0, "relocating_shards": 0},
+        )
+
+        assert cluster_health_manager.get() == HealthColors.GREEN
+        assert [call.request.url for call in http.calls] == [
+            "https://node1:9200/",
+            "https://node0:9200/_cluster/health",
+            "https://node1:9200/_cluster/health",
+        ]
+
+
+@pytest.mark.parametrize("alternative_reachable", [False, True])
+def test_unavailable_health_keeps_three_attempt_limit(
+    cluster_health_manager, alternative_reachable
+):
+    """Handle both no available peers and a peer that fails after its discovery probe."""
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        http.get("https://node0:9200/", status=503)
+        http.get("https://node1:9200/", status=200 if alternative_reachable else 503)
+        for host in ("node0", "node1"):
+            http.get(
+                f"https://{host}:9200/_cluster/health",
+                body=requests.ConnectionError("unavailable"),
+            )
+
+        assert cluster_health_manager.get() == HealthColors.UNKNOWN
+        assert [call.request.url for call in http.calls] == [
+            "https://node1:9200/",
+            "https://node0:9200/_cluster/health",
+            f"https://{'node1' if alternative_reachable else 'node0'}:9200/_cluster/health",
+            "https://node0:9200/_cluster/health",
+        ]
 
 
 @pytest.mark.parametrize("status", ["yellow", "red"])
