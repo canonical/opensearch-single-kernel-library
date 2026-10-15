@@ -42,17 +42,18 @@ class ProfilesManager(BaseManager):
                 self.state.config.get("profile"),
             )
 
-    def get_missing_requirements(self) -> list[str]:
-        """Get the profile missing requirements."""
+    def get_missing_requirements(self, profile: OpenSearchProfile | None = None) -> list[str]:
+        """Get the missing requirements of a profile, defaulting to the current profile."""
+        profile = profile or self.profile
         missing_requirements: list[str] = []
 
         missing_requirements.extend(self.workload.check_missing_system_requirements())
-        missing_requirements.extend(self.check_memory_requirements(self.profile))
-        missing_requirements.extend(self.check_cluster_topology(self.profile))
+        missing_requirements.extend(self.check_memory_requirements(profile))
+        missing_requirements.extend(self.check_cluster_topology(profile))
         return missing_requirements
 
-    def check_profile_requirements(self) -> bool:
-        """Check all requirements of profile.
+    def check_profile_requirements(self, profile: OpenSearchProfile | None = None) -> bool:
+        """Check all requirements of a profile, defaulting to the current profile.
 
         Returns:
             True if the profile passed validation and all requirements.
@@ -66,7 +67,7 @@ class ProfilesManager(BaseManager):
             )
             return False
         try:
-            return not self.get_missing_requirements()
+            return not self.get_missing_requirements(profile)
         except OpenSearchCmdError as e:
             logger.error("An error occurred while checking profile requirements: %s", str(e))
             return False
@@ -153,13 +154,13 @@ class ProfilesManager(BaseManager):
 
         if scope == "unit":
             try:
-                _ = self.get_config_profile()
+                config_profile = self.get_config_profile()
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
                 return status_list
 
             try:
-                if missing_requirements := self.get_missing_requirements():
+                if missing_requirements := self.get_missing_requirements(config_profile):
                     status_list.append(
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
