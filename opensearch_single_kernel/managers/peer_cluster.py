@@ -130,7 +130,7 @@ class PeerClusterManager(BaseManager):
         relation_app_name: str,
         relation_units: int,
     ) -> PeerClusterOrchestrators:
-        """Fetch related orchestrator IDs and App names."""
+        """Get the orchestrator announced by the ``relation_id``."""
         if not (remote_orchestrators := remote_peer_cluster.orchestrators):
             remote_orchestrators = json.loads(data["orchestrators"])
         logger.debug(
@@ -139,10 +139,6 @@ class PeerClusterManager(BaseManager):
             relation_id,
             remote_orchestrators,
         )
-
-        # fetch the (main/failover)-cluster-orchestrator relations
-        for remote_peer_cluster in self.state.peer_clusters(is_provider=False, remote=True):
-            remote_orchestrators.update(remote_peer_cluster.orchestrators)
 
         local_orchestrators = self.state.application.orchestrators_dict
 
@@ -161,10 +157,11 @@ class PeerClusterManager(BaseManager):
             if local_orchestrators.get(f"{opposite}_rel_id") == relation_id:
                 local_orchestrators[f"{opposite}_rel_id"] = -1
                 local_orchestrators[f"{opposite}_app"] = None
+            # The app is only taken from the event relation
             local_orchestrators.update(
                 {
                     f"{trigger}_rel_id": relation_id,
-                    f"{trigger}_app": remote_orchestrators[f"{trigger}_app"],
+                    f"{trigger}_app": remote_orchestrators.get(f"{trigger}_app"),
                 }
             )
             self.state.application.orchestrators = PeerClusterOrchestrators.from_dict(
