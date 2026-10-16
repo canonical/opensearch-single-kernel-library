@@ -148,6 +148,19 @@ def normalized_tls_subject(subject: str) -> str:
     return subject.replace("/", ",")
 
 
+def certificate_subject_dn(cert: str) -> str | None:
+    """Return the subject DN of a PEM certificate, in the RFC 2253 form OpenSearch compares.
+
+    The issuer is free to rewrite the subject of a CSR (e.g. Vault PKI drops the organization),
+    so the DN of the issued certificate is the only reliable source for `admin_dn`.
+    """
+    try:
+        return x509.load_pem_x509_certificate(data=cert.encode()).subject.rfc4514_string()
+    except ValueError as e:
+        logger.warning("Unable to read the subject of the certificate: %s", e)
+        return None
+
+
 def cert_expiration_remaining_hours(cert: str) -> int:
     """Returns the remaining hours for the cert to expire."""
     certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
