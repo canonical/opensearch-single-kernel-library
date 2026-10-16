@@ -26,6 +26,7 @@ from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
     ENTITY_USER,
+    IndexEntityPermissionsChangedEvent,
     IndexEntityRequestedEvent,
     IndexRequestedEvent,
     OpenSearchProvides,
@@ -36,6 +37,10 @@ if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 logger = logging.getLogger(__name__)
+
+ClientRequestEvent = (
+    IndexRequestedEvent | IndexEntityRequestedEvent | IndexEntityPermissionsChangedEvent
+)
 
 
 class ExternalClientsEventsHandler(Object):
@@ -56,6 +61,10 @@ class ExternalClientsEventsHandler(Object):
         self.framework.observe(
             self.opensearch_provides.on.index_entity_requested, self._on_client_requested
         )
+        # The role of the client relation is updated with the new permissions.
+        self.framework.observe(
+            self.opensearch_provides.on.index_entity_permissions_changed, self._on_client_requested
+        )
         self.framework.observe(
             charm.on[CLIENT_RELATION].relation_changed, self._on_relation_changed
         )
@@ -64,8 +73,8 @@ class ExternalClientsEventsHandler(Object):
         )
         self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
-    def _on_client_requested(self, event: IndexRequestedEvent | IndexEntityRequestedEvent) -> None:
-        """Handle client index-requested & index-entity-requested events.
+    def _on_client_requested(self, event: ClientRequestEvent) -> None:
+        """Handle client index-requested, index-entity-requested & permissions-changed events.
 
         The read-only-endpoints field of DatabaseProvides is unused in this relation because this
         concept is irrelevant to OpenSearch. In this relation, the application charm should have
@@ -120,7 +129,7 @@ class ExternalClientsEventsHandler(Object):
 
     def _provide_client_index(
         self,
-        event: IndexRequestedEvent | IndexEntityRequestedEvent,
+        event: ClientRequestEvent,
         external_client: ExternalOpenSearchClient,
     ) -> None:
         """Create the index requested by a client relation while reporting it in the status."""
@@ -154,7 +163,7 @@ class ExternalClientsEventsHandler(Object):
 
     def _validate_client_request(
         self,
-        event: IndexRequestedEvent | IndexEntityRequestedEvent,
+        event: ClientRequestEvent,
         external_client: ExternalOpenSearchClient,
     ) -> bool:
         """Validate client request and return whether we should process it.

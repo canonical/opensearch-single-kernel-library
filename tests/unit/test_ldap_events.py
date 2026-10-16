@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
+from ops import ModelError
 
 from tests.unit.helpers import deployment_descriptions
 
@@ -177,9 +178,19 @@ def test_certificates_await_the_workload(
     reconcile_security_config.assert_not_called()
 
 
-@pytest.mark.parametrize("is_bind_password", [True, False], ids=["bind-password", "other-secret"])
+@pytest.mark.parametrize(
+    "is_bind_password, refresh_error, reconciled",
+    [(True, None, True), (False, None, False), (True, ModelError("secret not found"), False)],
+    ids=["bind-password", "other-secret", "bind-password-not-refreshed"],
+)
 def test_security_config_reconciled_on_bind_password_rotation(
-    harness, mocker, ldap_ready, reconcile_security_config, is_bind_password
+    harness,
+    mocker,
+    ldap_ready,
+    reconcile_security_config,
+    is_bind_password,
+    refresh_error,
+    reconciled,
 ):
     mocker.patch(
         "opensearch_single_kernel.core.state.ClusterState.is_ldap_bind_password_secret",
@@ -187,10 +198,13 @@ def test_security_config_reconciled_on_bind_password_rotation(
     )
 
     event = MagicMock()
+    event.secret.get_content.side_effect = refresh_error
     harness.charm.ldap_events._on_secret_changed(event)
 
     assert event.secret.get_content.called is is_bind_password
-    assert reconcile_security_config.called is is_bind_password
+    assert reconcile_security_config.called is reconciled
+    # A refresh which failed is retried
+    assert event.defer.called is bool(refresh_error)
 
 
 @pytest.mark.parametrize(

@@ -165,7 +165,7 @@ def test_invalid_entity_permissions_rejected(entity_permissions):
     ],
     ids=["generated", "requested", "requested-without-password"],
 )
-def test_legacy_client_gets_user_with_dedicated_role(
+def test_classic_client_gets_user_with_dedicated_role(
     opensearch_client, mocker, requested_entity, expected_user, expected_password
 ):
     reconcile_role_mappings = mocker.patch(
@@ -173,11 +173,17 @@ def test_legacy_client_gets_user_with_dedicated_role(
     )
     state = make_state()
     external_client = make_client(extra_user_roles="admin")
+    # The users recorded when the user is created: the relation owns its role by then
+    users_on_user_creation = []
+    opensearch_client.create_user.side_effect = lambda *_: users_on_user_creation.append(
+        dict(state.application.client_users_dict)
+    )
 
     ExternalClientsManager(state, MagicMock()).provide_client_entity(
         external_client, requested_entity
     )
 
+    assert users_on_user_creation == [{"1": expected_user}]
     opensearch_client.create_role.assert_called_once()
     assert opensearch_client.create_role.call_args.args == (expected_user,)
     assert set(opensearch_client.create_role.call_args.kwargs) == {
@@ -199,7 +205,7 @@ def test_legacy_client_gets_user_with_dedicated_role(
     [({"1": f"{CLIENT_RELATION}_1"}, "provided"), ({}, "generated")],
     ids=["already-provided", "not-provided-yet"],
 )
-def test_legacy_client_keeps_its_password_when_request_is_handled_again(
+def test_classic_client_keeps_its_password_when_request_is_handled_again(
     opensearch_client, mocker, client_users, expected_password
 ):
     mocker.patch(
@@ -290,24 +296,42 @@ def test_removed_client_relations_cleaned_up_by_kind(opensearch_client, mocker):
         "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.reconcile_role_mappings"
     )
     state = make_state(
-        client_users={"1": "app_user", "2": "kept_user"},
-        client_groups={"3": "devs_group", "4": "kept_group"},
+        client_users={"1": "app_user", "2": "kept_user", "5": "stuck_user"},
+        client_groups={"3": "devs_group", "4": "kept_group", "6": "stuck_group"},
     )
     state.external_client_relations = [MagicMock(id=2), MagicMock(id=4)]
 
+    def fail_for(name: str):
+        def remove(entity: str) -> None:
+            if entity == name:
+                raise OpenSearchHttpError()
+
+        return remove
+
+    opensearch_client.remove_user.side_effect = fail_for("stuck_user")
+    opensearch_client.remove_role_mapping.side_effect = fail_for("stuck_group")
+
     ExternalClientsManager(state, MagicMock()).remove_lingering_relation_users_and_roles()
 
-    opensearch_client.remove_user.assert_called_once_with("app_user")
+    assert sorted(opensearch_client.remove_user.call_args_list) == [
+        call("app_user"),
+        call("stuck_user"),
+    ]
     assert sorted(opensearch_client.remove_role.call_args_list) == [
         call("app_user"),
         call("devs_group"),
+        call("stuck_group"),
+        call("stuck_user"),
     ]
     assert sorted(opensearch_client.remove_role_mapping.call_args_list) == [
         call("app_user"),
         call("devs_group"),
+        call("stuck_group"),
+        call("stuck_user"),
     ]
-    assert state.application.client_users_dict == {"2": "kept_user"}
-    assert state.application.client_groups_dict == {"4": "kept_group"}
+    # The entities which failed to be removed are kept for the next cleanup to retry
+    assert state.application.client_users_dict == {"2": "kept_user", "5": "stuck_user"}
+    assert state.application.client_groups_dict == {"4": "kept_group", "6": "stuck_group"}
     reconcile_role_mappings.assert_called_once()
 
 
@@ -435,7 +459,7 @@ def test_entity_name_validation(name, valid):
         "generated-name-not-looked-up",
     ],
 )
-def test_legacy_client_request_errors(
+def test_classic_client_request_errors(
     opensearch_client, requested_entity, client_users, existing_role, existing_user, expected
 ):
     external_client = make_client()
@@ -603,7 +627,7 @@ def test_ldap_skipped_users_refreshed_once_client_relation_removed(
     refresh_skipped_users.assert_called_once_with(event)
 
 
-@pytest.mark.parametrize("entity_type", [ENTITY_GROUP, ""], ids=["group", "legacy"])
+@pytest.mark.parametrize("entity_type", [ENTITY_GROUP, ""], ids=["group", "classic"])
 def test_client_index_provided_before_its_entity(
     harness, mocker, client_request_ready, group_client, refresh_skipped_users, entity_type
 ):
@@ -620,7 +644,7 @@ def test_client_index_provided_before_its_entity(
     ]
 
 
-@pytest.mark.parametrize("entity_type", [ENTITY_GROUP, ""], ids=["group", "legacy"])
+@pytest.mark.parametrize("entity_type", [ENTITY_GROUP, ""], ids=["group", "classic"])
 def test_entity_not_provided_when_index_creation_fails(
     harness,
     client_request_ready,
@@ -955,7 +979,7 @@ def test_mapped_users_from_roles_mapping_config(harness, roles_mapping, expected
         "group-missing-entity",
         "invalid-permissions",
         "system-user-name",
-        "system-user-name-on-legacy-relation",
+        "system-user-name-on-classic-relation",
         "managed-role-name",
         "name-used-by-other-relation",
         "name-owned-by-relation",

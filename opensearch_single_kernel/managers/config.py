@@ -512,7 +512,7 @@ class ConfigManager(BaseManager):
                             "bind_dn": ldap_data.bind_dn,
                             "password": ldap_data.bind_password,
                             "userbase": self.state.config.get("ldap_user_base", ""),
-                            "usersearch": self.state.config.get("ldap_user_search", ""),
+                            "usersearch": self._ldap_authc_user_search(),
                             "username_attribute": "cn",
                         },
                     },
@@ -550,6 +550,24 @@ class ConfigManager(BaseManager):
                 }
             }
         )
+
+    def _ldap_protected_users(self) -> list[str]:
+        """Get the users which no LDAP entry may authenticate as.
+
+        These are the internal users and the ones provided to the client relations.
+        """
+        return sorted(OPENSEARCH_USERS | set(self.state.application.client_users_dict.values()))
+
+    def _ldap_authc_user_search(self) -> str:
+        """Get the LDAP user search filter of the authentication, excluding protected users.
+
+        The authenticated user is named after the `cn` of its LDAP entry, and the roles are
+        mapped to users by name: an entry named after a protected user would get its roles.
+        The names of the protected users hold no LDAP filter special characters.
+        """
+        user_search = self.state.config.get("ldap_user_search", "")
+        exclusions = "".join(f"(!(cn={user}))" for user in self._ldap_protected_users())
+        return f"(&{user_search}{exclusions})"
 
     @staticmethod
     def _security_authz_static_config() -> dict[str, Any]:
@@ -620,10 +638,7 @@ class ConfigManager(BaseManager):
                             "rolename": self.state.config.get("ldap_role_name_attr", ""),
                             "rolesearch_enabled": False,
                             "resolve_nested_roles": False,
-                            "skip_users": sorted(
-                                OPENSEARCH_USERS
-                                | set(self.state.application.client_users_dict.values())
-                            ),
+                            "skip_users": self._ldap_protected_users(),
                         },
                     },
                 },

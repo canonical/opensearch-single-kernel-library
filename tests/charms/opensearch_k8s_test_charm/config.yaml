@@ -68,6 +68,9 @@ options:
     default: (cn={0})
     description: |
       LDAP search filter used to locate a user entry. {0} is replaced with the login username.
+      Entries whose cn is the name of an internal user or of a user provided to a client
+      relation are always excluded from the authentication. If set to empty, the authentication
+      search filter only holds these exclusions, matching every other entry of the user base.
 
   ldap_user_rolename:
     type: string

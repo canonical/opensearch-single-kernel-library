@@ -66,6 +66,7 @@ class LdapEventsHandler(Object):
             event.secret.get_content(refresh=True)
         except ModelError as e:
             logger.error("Cannot refresh LDAP bind password secret: %s", e)
+            event.defer()
             return
 
         self.charm.reconcile_security_config(event)

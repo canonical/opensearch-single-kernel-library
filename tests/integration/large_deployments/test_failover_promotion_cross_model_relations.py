@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+import asyncio
 import json
 import logging
 
@@ -53,40 +54,19 @@ async def test_build_and_deploy(
     await ops_test.model.set_config(MODEL_CONFIG)
     # Deploy TLS Certificates operator.
     config = {"ca-common-name": "CN_CA"}
-
-    await ops_test.model.deploy(
-        charm,
-        application_name=MAIN_APP,
-        num_units=APP_UNITS[MAIN_APP],
-        series=series,
-        resources=charm_resources,
-        config={"cluster_name": CLUSTER_NAME} | CONFIG_OPTS,
-        trust=substrate == "k8s",
-    )
-    with ops_test.model_context("failover"):
-        await failover_model.deploy(
+    await asyncio.gather(
+        ops_test.model.deploy(
+            TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
+        ),
+        ops_test.model.deploy(
             charm,
-            application_name=FAILOVER_APP,
-            num_units=APP_UNITS[FAILOVER_APP],
+            application_name=MAIN_APP,
+            num_units=APP_UNITS[MAIN_APP],
             series=series,
             resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True} | CONFIG_OPTS,
+            config={"cluster_name": CLUSTER_NAME} | CONFIG_OPTS,
             trust=substrate == "k8s",
-        )
-    with ops_test.model_context("data"):
-        await data_model.deploy(
-            charm,
-            application_name=DATA_APP,
-            num_units=APP_UNITS[DATA_APP],
-            series=series,
-            resources=charm_resources,
-            config={"cluster_name": CLUSTER_NAME, "init_hold": True, "roles": "data.hot,ml"}
-            | CONFIG_OPTS,
-            trust=substrate == "k8s",
-        )
-
-    await ops_test.model.deploy(
-        TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
+        ),
     )
     await ops_test.model.integrate(f"{MAIN_APP}:certificates", TLS_CERTIFICATES_APP_NAME)
 
@@ -103,6 +83,16 @@ async def test_build_and_deploy(
     consume_certs = f"consume admin/{main_model_name}.{CERTS_OFFER}"
 
     with ops_test.model_context("failover"):
+        await failover_model.deploy(
+            charm,
+            application_name=FAILOVER_APP,
+            num_units=APP_UNITS[FAILOVER_APP],
+            series=series,
+            resources=charm_resources,
+            config={"cluster_name": CLUSTER_NAME, "init_hold": True} | CONFIG_OPTS,
+            trust=substrate == "k8s",
+        )
+
         logger.info("Consuming offers in failover model...")
         await ops_test.juju(*consume_main.split())
         await ops_test.juju(*consume_certs.split())
@@ -127,6 +117,21 @@ async def test_build_and_deploy(
         await ops_test.juju(*failover_peer_cluster_orchestrator_offer.split())
 
     with ops_test.model_context("data"):
+        await data_model.deploy(
+            charm,
+            application_name=DATA_APP,
+            num_units=APP_UNITS[DATA_APP],
+            series=series,
+            resources=charm_resources,
+            config={
+                "cluster_name": CLUSTER_NAME,
+                "init_hold": True,
+                "roles": "data.hot,ml",
+            }
+            | CONFIG_OPTS,
+            trust=substrate == "k8s",
+        )
+
         consume_failover = (
             f"consume admin/{failover_model.info.name}.{FAILOVER_ORCHESTRATOR_OFFER}"
         )

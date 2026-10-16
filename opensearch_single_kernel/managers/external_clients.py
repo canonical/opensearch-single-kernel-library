@@ -84,11 +84,11 @@ class ExternalClientsManager(BaseManager):
             if external_client.entity_type == ENTITY_GROUP:
                 self._provide_group(external_client, requested_entity)
             else:
-                self._provide_legacy_user(external_client, requested_entity)
+                self._provide_classic_user(external_client, requested_entity)
         except OpenSearchHttpError as e:
             raise OpenSearchUserMgmtError(e)
 
-    def _provide_legacy_user(
+    def _provide_classic_user(
         self,
         external_client: ExternalOpenSearchClient,
         requested_entity: ExternalClientRequestedEntity | None,
@@ -125,6 +125,7 @@ class ExternalClientsManager(BaseManager):
         self.opensearch_client.create_role(
             user, **self.get_extra_user_role_permissions(extra_user_roles, external_client.index)
         )
+        self._save_client_entity(external_client, user)
         self.opensearch_client.create_user(user, [user], hash_string(password))
         self.opensearch_client.patch_user(
             user,
@@ -136,7 +137,7 @@ class ExternalClientsManager(BaseManager):
                 }
             ],
         )
-        self._register_client_entity(external_client, user)
+        self.reconcile_role_mappings()
 
         external_client.username = user
         external_client.password = password
@@ -170,14 +171,13 @@ class ExternalClientsManager(BaseManager):
                 ]
             }
         self.opensearch_client.create_role(role, **permissions)
-        self._register_client_entity(external_client, role)
+        self._save_client_entity(external_client, role)
+        self.reconcile_role_mappings()
 
         external_client.entity_name = role
 
-    def _register_client_entity(
-        self, external_client: ExternalOpenSearchClient, name: str
-    ) -> None:
-        """Save the entity provided to a client relation and refresh the roles mappings.
+    def _save_client_entity(self, external_client: ExternalOpenSearchClient, name: str) -> None:
+        """Save the entity provided to a client relation, which makes the relation its owner.
 
         Users and groups are saved apart: the entity of a GROUP client relation is a role.
         """
@@ -186,7 +186,7 @@ class ExternalClientsManager(BaseManager):
         is_group = external_client.entity_type == ENTITY_GROUP
         entities = application.client_groups_dict if is_group else application.client_users_dict
 
-        if registered_entity := entities.get(relation_id):
+        if (registered_entity := entities.get(relation_id)) and registered_entity != name:
             logger.warning(
                 "%s %s is already registered in Peer Relation data for relation %s.",
                 "Group" if is_group else "User",
@@ -199,8 +199,6 @@ class ExternalClientsManager(BaseManager):
             application.client_groups_dict = entities
         else:
             application.client_users_dict = entities
-
-        self.reconcile_role_mappings()
 
     def provide_client_index(self, external_client: ExternalOpenSearchClient) -> None:
         """Create the index requested by a client relation and push name back via it.
@@ -307,17 +305,21 @@ class ExternalClientsManager(BaseManager):
         rel_ids = {str(relation.id) for relation in self.state.external_client_relations}
         cleanup_rel_ids = (set(relation_users) | set(relation_groups)) - rel_ids
 
+        # An entity is forgotten only once removed: a failed removal is retried by the next cleanup.
         for rel_id in cleanup_rel_ids:
-            if username := relation_users.pop(rel_id, None):
+            if username := relation_users.get(rel_id):
+                user_removed = True
                 try:
                     self.opensearch_client.remove_user(username)
                 except OpenSearchHttpError:
                     logger.error("failed to remove user %s", username)
+                    user_removed = False
 
-                self._remove_role_and_mapping(username)
+                if self._remove_role_and_mapping(username) and user_removed:
+                    del relation_users[rel_id]
 
-            if group := relation_groups.pop(rel_id, None):
-                self._remove_role_and_mapping(group)
+            if (group := relation_groups.get(rel_id)) and self._remove_role_and_mapping(group):
+                del relation_groups[rel_id]
 
         self.state.application.client_users_dict = relation_users
         self.state.application.client_groups_dict = relation_groups
@@ -332,17 +334,20 @@ class ExternalClientsManager(BaseManager):
         except OpenSearchUserMgmtError as e:
             logger.error("Failed to refresh the roles mappings: %s", e)
 
-    def _remove_role_and_mapping(self, role: str) -> None:
-        """Remove the role created for a client relation along with its mapping."""
+    def _remove_role_and_mapping(self, role: str) -> bool:
+        """Remove the role created for a client relation along with its mapping.
+
+        Returns:
+            Whether both the role and its mapping were removed.
+        """
         try:
             self.opensearch_client.remove_role(role)
-        except OpenSearchHttpError:
-            logger.error("failed to remove role %s", role)
-
-        try:
             self.opensearch_client.remove_role_mapping(role)
         except OpenSearchHttpError:
-            logger.error("failed to remove role mapping for %s", role)
+            logger.error("failed to remove role %s or its mapping", role)
+            return False
+
+        return True
 
     def reconcile_role_mappings(self) -> None:
         """Refresh the mappings of all the managed roles.
