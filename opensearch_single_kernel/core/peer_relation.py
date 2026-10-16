@@ -37,7 +37,7 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
-from opensearch_single_kernel.utils.helpers import normalized_tls_subject
+from opensearch_single_kernel.utils.helpers import certificate_subject_dn, normalized_tls_subject
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
 
 logger = logging.getLogger(__name__)
@@ -588,11 +588,19 @@ class OpenSearchApplication(RelationState):
 
     @property
     def tls_subject(self) -> str | None:
-        """Get the normalized_tls_subject from the TLS admin_secrets."""
+        """Get the subject DN of the admin certificate from the TLS admin_secrets.
+
+        The subject of the issued certificate takes precedence over the requested one, as
+        the TLS provider may issue the certificate with a different subject than the CSR.
+        """
+        if not (admin_secrets := self.admin_secrets):
+            return None
+
+        if (cert := admin_secrets.get("cert")) and (issued := certificate_subject_dn(cert)):
+            return issued
+
         return (
-            normalized_tls_subject(subject)
-            if (admin_secrets := self.admin_secrets) and (subject := admin_secrets.get("subject"))
-            else None
+            normalized_tls_subject(subject) if (subject := admin_secrets.get("subject")) else None
         )
 
     @property

@@ -2,11 +2,13 @@
 # See LICENSE file for licensing details.
 import logging
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import responses
 from charmlibs.pathops import LocalPath
-from cryptography.hazmat.primitives import serialization
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from ops import Model, Unit
 
@@ -101,6 +103,24 @@ def create_utf8_encoded_private_key() -> str:
             format=serialization.PrivateFormat.TraditionalOpenSSL,
             encryption_algorithm=serialization.NoEncryption(),
         )
+        .decode("utf-8")
+    )
+
+
+def create_certificate_with_subject(subject: x509.Name) -> str:
+    """Creates a self-signed certificate with the given subject."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.now(timezone.utc)
+    return (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+        .public_bytes(serialization.Encoding.PEM)
         .decode("utf-8")
     )
 

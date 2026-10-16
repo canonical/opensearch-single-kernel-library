@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
 import responses
+from cryptography import x509
+from cryptography.x509.oid import NameOID
 from ops import MaintenanceStatus
 
 from opensearch_single_kernel.common.constants import (
@@ -30,6 +32,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.utils.certificates import remove_ca, store_ca_chain
 from tests.unit.helpers import (
+    create_certificate_with_subject,
     create_utf8_encoded_private_key,
     deployment_descriptions,
     mock_response_health_green,
@@ -364,6 +367,53 @@ def test_find_secret(harness):
     assert scope == Scope.APP
     assert certtype == CertType.APP_ADMIN
     assert secret["csr"] == event_data_csr
+
+
+@pytest.mark.parametrize(
+    "issued_subject,expected_dn",
+    [
+        # issuer kept the subject of the CSR (e.g. self-signed-certificates)
+        (
+            [(NameOID.COMMON_NAME, "admin"), (NameOID.ORGANIZATION_NAME, "opensearch-abcd")],
+            "O=opensearch-abcd,CN=admin",
+        ),
+        # issuer dropped the organization (e.g. Vault PKI role without `organization`)
+        ([(NameOID.COMMON_NAME, "admin")], "CN=admin"),
+        # issuer set its own organization, ordered before the CN (e.g. Vault PKI role)
+        (
+            [(NameOID.ORGANIZATION_NAME, "acme"), (NameOID.COMMON_NAME, "admin")],
+            "CN=admin,O=acme",
+        ),
+    ],
+)
+def test_tls_subject_follows_issued_admin_certificate(harness, issued_subject, expected_dn):
+    """The admin DN must be the subject of the issued certificate, not the requested one."""
+    cert = create_certificate_with_subject(
+        x509.Name([x509.NameAttribute(oid, value) for oid, value in issued_subject])
+    )
+    harness.charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"subject": "/O=opensearch-abcd/CN=admin", "cert": cert},
+    )
+
+    assert harness.charm.state.application.tls_subject == expected_dn
+    assert harness.charm.config_manager._opensearch_admin_tls_config() == {
+        "plugins.security.authcz.admin_dn": [expected_dn]
+    }
+
+
+@pytest.mark.parametrize("cert", [None, "not_a_certificate"])
+def test_tls_subject_falls_back_to_requested_subject(harness, cert):
+    """Without a readable admin certificate, the requested subject is used."""
+    assert harness.charm.state.application.tls_subject is None
+
+    secret = {"subject": "/O=opensearch-abcd/CN=admin"}
+    if cert:
+        secret["cert"] = cert
+    harness.charm.state.secrets.put_object(Scope.APP, CertType.APP_ADMIN.val, secret)
+
+    assert harness.charm.state.application.tls_subject == "O=opensearch-abcd,CN=admin"
 
 
 def test_on_relation_created_admin(harness, mocker):
