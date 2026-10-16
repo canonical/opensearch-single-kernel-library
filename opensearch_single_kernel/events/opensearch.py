@@ -435,6 +435,8 @@ class OpenSearchEventsHandler(Object):
                 )
             else:
                 self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+                # The LDAP exclusions follow the client users: drop the removed ones.
+                self.charm.reconcile_security_config(event)
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA

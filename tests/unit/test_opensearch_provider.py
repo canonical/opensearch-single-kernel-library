@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
+from ops import SecretNotFoundError
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, KIBANA_SERVER_USER
@@ -88,22 +89,70 @@ def opensearch_client(mocker) -> MagicMock:
 
 
 @pytest.mark.parametrize(
-    "secret_content, expected",
+    "resolved, raw, secret_content, expected",
     [
-        ("alice:secret", ExternalClientRequestedEntity("alice", "secret")),
-        ("alice:pass:word", ExternalClientRequestedEntity("alice", "pass:word")),
-        ("alice:None", ExternalClientRequestedEntity("alice", None)),
-        ("alice", None),
-        (":secret", None),
-        (None, None),
+        (
+            "secret:abc",
+            "secret:abc",
+            {"entity-name": "alice", "password": "secret"},
+            ExternalClientRequestedEntity("alice", "secret"),
+        ),
+        (
+            "secret:abc",
+            "secret:abc",
+            {"entity-name": "alice"},
+            ExternalClientRequestedEntity("alice", None),
+        ),
+        ("secret:abc", "secret:abc", {"password": "secret"}, None),
+        ("secret:abc", "secret:abc", SecretNotFoundError(), None),
+        # Cross-model: decrypted by the data interface from the encrypted databag content
+        (
+            "alice:secret",
+            "gAAAA-encrypted",
+            None,
+            ExternalClientRequestedEntity("alice", "secret"),
+        ),
+        (
+            "alice:pass:word",
+            "gAAAA-encrypted",
+            None,
+            ExternalClientRequestedEntity("alice", "pass:word"),
+        ),
+        ("alice:None", "gAAAA-encrypted", None, ExternalClientRequestedEntity("alice", None)),
+        ("alice", "gAAAA-encrypted", None, None),
+        (":secret", "gAAAA-encrypted", None, None),
+        ("alice:secret", "alice:secret", None, None),
+        (None, None, None, None),
     ],
-    ids=["valid", "colon-in-password", "no-password", "no-separator", "no-name", "absent"],
+    ids=[
+        "secret",
+        "secret-without-password",
+        "secret-without-name",
+        "secret-not-readable",
+        "encrypted",
+        "encrypted-colon-in-password",
+        "encrypted-without-password",
+        "encrypted-without-separator",
+        "encrypted-without-name",
+        "plain-text-rejected",
+        "absent",
+    ],
 )
-def test_requested_entity_read_from_relation(secret_content, expected):
-    relation_data = {"requested-entity-secret": secret_content} if secret_content else {}
+def test_requested_entity_read_from_relation(resolved, raw, secret_content, expected):
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"requested-entity-secret": raw} if raw else {}}
+    secret = MagicMock()
+    if isinstance(secret_content, Exception):
+        secret.get_content.side_effect = secret_content
+    else:
+        secret.get_content.return_value = secret_content
+    data_interface = MagicMock(
+        as_dict=MagicMock(return_value={"requested-entity-secret": resolved} if resolved else {})
+    )
+    data_interface._model.get_secret.return_value = secret
     external_client = ExternalOpenSearchClient(
-        relation=MagicMock(id=1),
-        data_interface=MagicMock(as_dict=MagicMock(return_value=relation_data)),
+        relation=relation,
+        data_interface=data_interface,
         component=MagicMock(),
         relation_name=CLIENT_RELATION,
     )
