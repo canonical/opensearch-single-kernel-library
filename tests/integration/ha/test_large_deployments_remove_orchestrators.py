@@ -114,7 +114,7 @@ async def test_build_and_deploy(
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     await ops_test.model.integrate(f"{FAILOVER_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
