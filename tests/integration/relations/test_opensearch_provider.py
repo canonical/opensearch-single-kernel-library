@@ -60,7 +60,7 @@ NUM_UNITS = 3
 
 DATA_INTEGRATOR_CHARM = "data-integrator"
 # Revisions are built per architecture; both come from the same latest/edge release
-DATA_INTEGRATOR_REVISIONS = {"amd64": 500, "arm64": 501}
+DATA_INTEGRATOR_REVISIONS = {"amd64": 546, "arm64": 542}
 GROUP_ENTITY_NAME = "test-group"
 
 GROUP_CLIENT_APP_NAME = "group-client"

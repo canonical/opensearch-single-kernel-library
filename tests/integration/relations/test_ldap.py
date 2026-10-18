@@ -40,7 +40,7 @@ ROLE_PASSWORD = "password"
 
 DATA_INTEGRATOR_NAME = "data-integrator"
 # Revisions are built per architecture; both come from the same latest/edge release
-DATA_INTEGRATOR_REVISIONS = {"amd64": 500, "arm64": 501}
+DATA_INTEGRATOR_REVISIONS = {"amd64": 546, "arm64": 542}
 DATA_INTEGRATOR_CONFIG = {
     "index-name": "search-index",
 }
