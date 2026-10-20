@@ -27,6 +27,8 @@ on:
         required: true
       GCP_SERVICE_ACCOUNT:
         required: true
+      OPENROUTER_API_KEY:
+        required: false
 
 jobs:
   collect-integration-tests:
@@ -120,9 +122,10 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 241 # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 246 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
+      pull-requests: read # the diff, for flake0 classify
     steps:
       - name: Disk usage
         timeout-minutes: 1
@@ -141,8 +144,8 @@ jobs:
       # The stop phase already cannot fail; the start phase runs under `set -e`.
       #
       # Trial: points at canonical/flake0's feat/classify branch, which adds Juju
-      # and workload logs to the bundle, and the classify action that ci.yaml runs
-      # on failure. Pin to a release once there is one.
+      # and workload logs to the bundle, and the classify action. Pin to a release
+      # once there is one.
       - name: Start telemetry
         timeout-minutes: 5
         continue-on-error: true
@@ -181,7 +184,10 @@ jobs:
         # TODO: replace with `charmcraft test` when
         # https://github.com/canonical/charmcraft/issues/2105 and
         # https://github.com/canonical/charmcraft/issues/2130 fixed
-        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}'
+        # The tee saves the output for flake0 classify. `shell: bash` adds
+        # pipefail, so the step keeps spread's exit code.
+        shell: bash
+        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}' 2>&1 | tee "$RUNNER_TEMP/spread.log"
         env:
           AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
           AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
@@ -266,3 +272,16 @@ jobs:
         with:
           bundle-path: ${{ steps.collect.outputs.bundle-path }}
           artifact-name: flake0-plot-${{ matrix.job.name_in_artifact }}-${{ github.run_attempt }}
+      # Trial: asks a model, through OpenRouter, whether this job failed from
+      # flakiness or a real bug, from the spread output and the collect bundle.
+      # Writes the verdict to the job summary. Skips without the secret, as on
+      # fork pull requests, and never fails the job.
+      - name: Classify failure
+        timeout-minutes: 5
+        if: failure()
+        uses: canonical/flake0/.github/actions/classify@feat/classify
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          log-path: ${{ runner.temp }}/spread.log
+          bundle-path: ${{ steps.collect.outputs.bundle-path }}
+          job-name: ${{ matrix.job.name }}
