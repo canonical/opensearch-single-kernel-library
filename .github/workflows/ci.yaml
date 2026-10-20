@@ -23,6 +23,8 @@ on:
         required: true
       GCP_SERVICE_ACCOUNT:
         required: true
+      OPENROUTER_API_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -156,3 +158,25 @@ jobs:
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       contents: write # Needed for Allure Report
+
+  # Trial: asks a model, through OpenRouter, whether each failed job in this run
+  # failed from flakiness or a real bug, from its job log and its flake0 collect
+  # bundle. Verdicts go to this job's summary only. Skips without the secret
+  # (fork pull requests, and callers that do not pass it).
+  classify:
+    name: Classify failures
+    needs:
+      - integration-test
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    # One model call per failed job, run one after another
+    timeout-minutes: 30
+    permissions:
+      actions: read # jobs, logs, artifacts
+      contents: read
+      pull-requests: read # the diff
+    steps:
+      - name: Classify failures
+        uses: canonical/flake0/.github/actions/classify@feat/classify
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
