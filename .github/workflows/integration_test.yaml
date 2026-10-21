@@ -297,3 +297,4 @@ jobs:
           leg-id: ${{ matrix.job.name_in_artifact }}
           job-name: ${{ matrix.job.name }}
           verdict-path: ${{ steps.classify.outputs.verdict-path }}
+          job-id: ${{ job.check_run_id }}
