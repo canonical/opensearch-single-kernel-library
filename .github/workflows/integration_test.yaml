@@ -276,9 +276,10 @@ jobs:
       # flakiness or a real bug, from the spread output and the collect bundle.
       # Writes the verdict to the job summary. Skips without the secret, as on
       # fork pull requests, and never fails the job.
+      # Only when spread fails: a setup failure leaves no test output to classify
       - name: Classify failure
         timeout-minutes: 5
-        if: failure()
+        if: ${{ failure() && steps.spread.outcome == 'failure' }}
         uses: canonical/flake0/.github/actions/classify@feat/classify
         with:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
