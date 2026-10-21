@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 246 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
-      pull-requests: read # the diff, for flake0 classify
+      pull-requests: write # the diff and the PR comment, for flake0 classify and summarize
     steps:
       - name: Disk usage
         timeout-minutes: 1
@@ -278,6 +278,7 @@ jobs:
       # fork pull requests, and never fails the job.
       # Only when spread fails: a setup failure leaves no test output to classify
       - name: Classify failure
+        id: classify
         timeout-minutes: 5
         if: ${{ failure() && steps.spread.outcome == 'failure' }}
         uses: canonical/flake0/.github/actions/classify@feat/classify
@@ -286,3 +287,13 @@ jobs:
           log-path: ${{ runner.temp }}/spread.log
           bundle-path: ${{ steps.collect.outputs.bundle-path }}
           job-name: ${{ matrix.job.name }}
+      # Trial: uploads the verdict, or a stub when classify left none, and
+      # posts or updates the run's flake0 comment on the pull request.
+      - name: Update flake0 PR comment
+        timeout-minutes: 5
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+        uses: canonical/flake0/.github/actions/summarize@feat/classify
+        with:
+          leg-id: ${{ matrix.job.name_in_artifact }}
+          job-name: ${{ matrix.job.name }}
+          verdict-path: ${{ steps.classify.outputs.verdict-path }}
