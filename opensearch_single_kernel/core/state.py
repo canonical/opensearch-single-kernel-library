@@ -12,21 +12,27 @@ import socket
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Literal
 
+from charmlibs.interfaces.certificate_transfer import (
+    CertificateTransferRequires,
+)
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from object_storage import AzureStorageRequirer, GCSRequirer, S3Requirer
-from ops import JujuVersion, Object, Relation, Unit
+from ops import JujuVersion, Object, Relation, Secret, Unit, hookcmds
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     CLIENT_RELATION,
     COS_RELATION,
+    DEFAULT_BACKEND_ROLES_MAPPING,
     GCS_RELATION,
     GENERATED_ROLES,
     GRAFANA_K8S_RELATION,
     JWT_CONFIG_RELATION,
     KIBANA_SERVER_ROLE,
+    LDAP_RELATION,
     LOKI_K8S_RELATION,
+    MANAGED_ROLES,
     NODE_LOCK_RELATION,
     OAUTH_RELATION,
     OPENSEARCH_HTTP_PORT,
@@ -82,9 +88,14 @@ from opensearch_single_kernel.core.upgrade_relation import (
     UpgradeServerState,
 )
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    ENTITY_GROUP,
     DataPeerData,
     DataPeerUnitData,
     OpenSearchProvidesData,
+)
+from opensearch_single_kernel.lib.charms.glauth_k8s.v0.ldap import (
+    LdapProviderData,
+    LdapRequirer,
 )
 from opensearch_single_kernel.lib.charms.smtp_integrator.v0.smtp import SmtpRequires
 from opensearch_single_kernel.utils.helpers import (
@@ -117,6 +128,8 @@ class ClusterState(Object):
         s3_requirer: S3Requirer,
         azure_requires: AzureStorageRequirer,
         gcs_requires: GCSRequirer,
+        ldap_requirer: LdapRequirer,
+        ldap_certificate_transfer_requires: CertificateTransferRequires,
     ) -> None:
         super().__init__(charm, "cluster_state")
         self.config = charm.config
@@ -143,6 +156,8 @@ class ClusterState(Object):
         self.s3_requirer = s3_requirer
         self.azure_requires = azure_requires
         self.gcs_requires = gcs_requires
+        self.ldap_requirer = ldap_requirer
+        self.ldap_certificate_transfer_requires = ldap_certificate_transfer_requires
 
     # -- Relations
 
@@ -155,6 +170,12 @@ class ClusterState(Object):
     def lock_relation(self) -> Relation | None:
         """Get Node Lock Peer Relation."""
         return self.model.get_relation(NODE_LOCK_RELATION)
+
+    @property
+    def unit_dying(self) -> bool:
+        """Whether this unit, or the whole application, is being removed."""
+        unit_goal = hookcmds.goal_state().units.get(self.model.unit.name)
+        return unit_goal is None or unit_goal.status == "dying"
 
     @property
     def tls_relation(self) -> Relation | None:
@@ -210,6 +231,10 @@ class ClusterState(Object):
         """Check if the relation exists"""
         return bool(self.model.get_relation(relation_name))
 
+    def has_other_relation(self, relation: Relation) -> bool:
+        """Check if another relation exists on the endpoint of given relation."""
+        return any(rel.id != relation.id for rel in self.model.relations[relation.name])
+
     @property
     def upgrade_relation(self) -> Relation | None:
         """Get peer upgrade relation."""
@@ -239,6 +264,11 @@ class ClusterState(Object):
     def grafana_relation(self) -> Relation | None:
         """Return the grafana relation if present."""
         return self.model.get_relation(GRAFANA_K8S_RELATION)
+
+    @property
+    def ldap_relation(self) -> Relation | None:
+        """Get LDAP relation."""
+        return self.model.get_relation(LDAP_RELATION)
 
     # --- Upgrade Relation State Properties ---
 
@@ -495,12 +525,11 @@ class ClusterState(Object):
     @property
     def dashboards_clients(self) -> list[ExternalOpenSearchClient]:
         """Return the dashboard relations out of all."""
-        result = []
-        for external_client in self.external_clients:
-            if (roles := external_client.extra_user_roles) and KIBANA_SERVER_ROLE in roles:
-                # if any(key.name == "opensearch-dashboards" for key in relation.data.keys()):
-                result.append(external_client)
-        return result
+        return [
+            external_client
+            for external_client in self.external_clients
+            if (roles := external_client.extra_user_roles) and KIBANA_SERVER_ROLE in roles
+        ]
 
     @property
     def jwt(self) -> JwtState:
@@ -805,25 +834,61 @@ class ClusterState(Object):
             ),
         )
 
-    def get_relation_mapped_users(self, role: str) -> list[str]:
-        """Get the list of users mapped to a specific role from config roles_mapping."""
+    @property
+    def mapped_users(self) -> dict[str, list[str]]:
+        """Reconcile the users mappings from roles mapping config.
+
+        Format: role -> mapped users.
+        """
+        res = {}
         config_roles_mapping = self.config.get("roles_mapping")
-        if not config_roles_mapping:
-            return []
+        if not config_roles_mapping or not isinstance(config_roles_mapping, str):
+            return res
         try:
             roles_mapping = json.loads(config_roles_mapping)
             if not isinstance(roles_mapping, dict):
                 logger.error("Bad roles_mapping config value")
-                return []
+                return res
         except JSONDecodeError:
             logger.error("Bad roles_mapping config value")
-            return []
+            return res
+        for user, role in roles_mapping.items():
+            if not isinstance(role, str):
+                logger.error("Bad roles_mapping config value for user %s", user)
+                continue
+            res.setdefault(role, []).append(user)
+        return res
 
-        return [
-            mapped_user
-            for mapped_user, mapped_role in roles_mapping.items()
-            if mapped_role == role
-        ]
+    @property
+    def mapped_roles(self) -> dict[str, list[str]]:
+        """Reconcile the backend roles mappings including client connections.
+
+        Format: role -> mapped backend roles.
+        """
+        res = {
+            role: list(backend_roles)
+            for role, backend_roles in DEFAULT_BACKEND_ROLES_MAPPING.items()
+        }
+        for external_client in self.external_clients:
+            if not (
+                username := self.application.client_entities_dict.get(
+                    str(external_client.relation.id)
+                )
+            ):
+                continue
+            res.setdefault(username, []).append(username)
+            if external_client.entity_type == ENTITY_GROUP:
+                for group in external_client.extra_group_roles:
+                    res.setdefault(group, []).append(username)
+        return res
+
+    @property
+    def managed_roles(self) -> list[str]:
+        """Return all of the roles for which the charm should manage roles mappings.
+
+        External client roles also included in the results.
+        """
+        return MANAGED_ROLES + list(self.application.client_entities_dict.values())
 
     def computed_roles(self) -> list[str]:
         """Return computed_roles"""
@@ -1140,14 +1205,16 @@ class ClusterState(Object):
 
         # non-main orchestrator
         peer_data = self.get_rel_data_from_main_orchestrator(peek_secrets=True)
-        if not peer_data or not peer_data.credentials:
+        if not peer_data or not (credentials := peer_data.credentials):
             return None
-        if peer_data.credentials.s3:
+        # The credentials of the storages which are not in use are passed as empty objects.
+        if (s3 := credentials.s3) and s3.access_key and s3.secret_key:
             return ObjectStorageType.S3_PCLUSTER
-        if peer_data.credentials.azure:
+        if (azure := credentials.azure) and azure.storage_account and azure.secret_key:
             return ObjectStorageType.AZURE_PCLUSTER
-        if peer_data.credentials.gcs:
+        if (gcs := credentials.gcs) and gcs.secret_key:
             return ObjectStorageType.GCS_PCLUSTER
+        return None
 
     def get_storage_connection_info_from_relation(
         self, object_storage_type: ObjectStorageType
@@ -1306,3 +1373,37 @@ class ClusterState(Object):
     def is_highest_ordinal_unit(self) -> bool:
         """Check if the current unit is the highest ordinal unit in the application."""
         return self.server_upgrade.unit.name == self.sorted_upgrades_units[0].unit.name
+
+    @property
+    def ldap_data(self) -> LdapProviderData | None:
+        """Read provider data from LDAP relation if it exists."""
+        return (
+            self.ldap_requirer.consume_ldap_relation_data(relation=relation)
+            if (relation := self.ldap_relation)
+            else None
+        )
+
+    def is_ldap_bind_password_secret(self, secret: Secret) -> bool:
+        """Whether the secret is the one holding the bind password of the LDAP relation."""
+        if not (relation := self.ldap_relation) or not relation.app:
+            return False
+        if not (secret_id := relation.data[relation.app].get("bind_password_secret")):
+            return False
+        # Secret ids may or may not carry the model uuid: compare their unique part only.
+        return secret.unique_identifier == secret_id.rsplit("/", 1)[-1].removeprefix("secret:")
+
+    @property
+    def ldap_certificates(self) -> set[str]:
+        """Get the LDAP CA certificates published over the certificate transfer relation."""
+        return self.ldap_certificate_transfer_requires.get_all_certificates()
+
+    @property
+    def is_main_orchestrator(self) -> bool:
+        """Get whether the current application is known to be the main orchestrator.
+
+        It is the case of the only application of a small deployment. `False` is returned as
+        long as the deployment description is not available.
+        """
+        return (
+            deployment_desc := self.application.deployment_desc
+        ) is not None and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
