@@ -403,9 +403,9 @@ async def test_setup_large_cluster(
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
         if substrate == "k8s":
-            await ops_test.model.integrate(app, "self-signed-certificates")
+            await ops_test.model.integrate(f"{app}:certificates", "self-signed-certificates")
         else:
-            await ops_test.model.integrate(app, "certificates")
+            await ops_test.model.integrate(f"{app}:certificates", "certificates")
 
     # integrate large deployment cluster
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
@@ -414,7 +414,7 @@ async def test_setup_large_cluster(
 
     # integrate with Data integrator
     await ops_test.model.integrate(
-        f"{DATA_APP}:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch"
+        f"{MAIN_APP}:opensearch-client", f"{DATA_INTEGRATOR_NAME}:opensearch"
     )
 
     # Let Juju settle while the cluster forms TLS + security index + peer orchestration
@@ -506,10 +506,10 @@ async def test_oauth_access_large_cluster(
     data_integrator_user = action.results.get("opensearch", {}).get("username")
     assert data_integrator_user, "failed to retrieve data integrator user"
 
-    original_opensearch_config = await ops_test.model.applications[DATA_APP].get_config()
+    original_opensearch_config = await ops_test.model.applications[MAIN_APP].get_config()
     config_with_roles = original_opensearch_config.copy()
     config_with_roles["roles_mapping"] = json.dumps({oauth_client_id: data_integrator_user})
-    await ops_test.model.applications[DATA_APP].set_config(config_with_roles)
+    await ops_test.model.applications[MAIN_APP].set_config(config_with_roles)
     await ops_test.model.wait_for_idle(apps=[MAIN_APP, DATA_APP, FAILOVER_APP], status="active")
 
     opensearch_address = await get_leader_unit_ip(ops_test, DATA_APP)

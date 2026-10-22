@@ -54,27 +54,30 @@ class KeystoreManager(BaseManager):
         gcs_file_path: str | None = None,
     ) -> None:
         """Put object storage credentials in the keystore."""
-        if object_storage_type == ObjectStorageType.S3 and isinstance(
-            object_storage_credentials, S3RelDataCredentials
-        ):
+        if object_storage_type in {
+            ObjectStorageType.S3,
+            ObjectStorageType.S3_PCLUSTER,
+        } and isinstance(object_storage_credentials, S3RelDataCredentials):
             self.put_entries(
                 {
                     "s3.client.default.access_key": object_storage_credentials.access_key,
                     "s3.client.default.secret_key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.AZURE and isinstance(
-            object_storage_credentials, AzureRelDataCredentials
-        ):
+        elif object_storage_type in {
+            ObjectStorageType.AZURE,
+            ObjectStorageType.AZURE_PCLUSTER,
+        } and isinstance(object_storage_credentials, AzureRelDataCredentials):
             self.put_entries(
                 {
                     "azure.client.default.account": object_storage_credentials.storage_account,
                     "azure.client.default.key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.GCS and isinstance(
-            object_storage_credentials, GcsRelDataCredentials
-        ):
+        elif object_storage_type in {
+            ObjectStorageType.GCS,
+            ObjectStorageType.GCS_PCLUSTER,
+        } and isinstance(object_storage_credentials, GcsRelDataCredentials):
             if gcs_file_path is None:
                 raise ValueError(
                     "GCS credentials file path must be provided for GCS object storage."

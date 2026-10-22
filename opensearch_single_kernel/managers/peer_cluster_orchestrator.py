@@ -76,10 +76,17 @@ class PeerClusterOrchestratorManager(BaseManager):
         )
 
         # exit if current cluster should not have been considered a provider
-        if (
-            self.set_peer_cluster_err_data_if_wrong_integration(event_rel_id, rel_err_data)
-            and event_rel_id
-        ):
+        if self.set_peer_cluster_err_data_if_wrong_integration(rel_err_data) and event_rel_id:
+            # delete trigger
+            if local_peer_cluster := self.state.peer_cluster_by_relation_id(
+                relation_id=event_rel_id, is_provider=True, remote=False
+            ):
+                logger.warning(
+                    "Relation with %s severed due to wrong integration: %s",
+                    local_peer_cluster.relation.app.name,
+                    rel_err_data.blocked_message,
+                )
+                del local_peer_cluster.trigger
             return True
 
         # store the main/failover-cm planned units count
@@ -433,7 +440,6 @@ class PeerClusterOrchestratorManager(BaseManager):
 
     def set_peer_cluster_err_data_if_wrong_integration(
         self,
-        event_rel_id: int,
         rel_err_data: PeerClusterRelErrorData | None,
     ) -> bool:
         """Check if relation is invalid and notify related sub-clusters."""
@@ -442,17 +448,6 @@ class PeerClusterOrchestratorManager(BaseManager):
 
         for local_peer_cluster in self.state.peer_clusters(is_provider=True, remote=False):
             local_peer_cluster.error_data = rel_err_data
-
-        # delete trigger
-        if local_peer_cluster := self.state.peer_cluster_by_relation_id(
-            relation_id=event_rel_id, is_provider=True, remote=False
-        ):
-            logger.warning(
-                "Relation with %s severed due to wrong integration: %s",
-                local_peer_cluster.relation.app.name,
-                rel_err_data.blocked_message,
-            )
-            del local_peer_cluster.trigger
         return True
 
     def save_cluster_fleet_apps(

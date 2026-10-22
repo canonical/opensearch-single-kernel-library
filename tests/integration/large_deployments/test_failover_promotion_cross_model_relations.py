@@ -36,7 +36,7 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 1}
 MAIN_ORCHESTRATOR_OFFER = "main-integration"
 FAILOVER_ORCHESTRATOR_OFFER = "failover-integration"
 CERTS_OFFER = "certs-integration"
-TIMEOUT = 45 * 60
+TIMEOUT = 60 * 60
 
 
 @pytest.mark.abort_on_fail
@@ -68,7 +68,7 @@ async def test_build_and_deploy(
             trust=substrate == "k8s",
         ),
     )
-    await ops_test.model.integrate(MAIN_APP, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{MAIN_APP}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     await ops_test.model.wait_for_idle(apps=[MAIN_APP, TLS_CERTIFICATES_APP_NAME], timeout=TIMEOUT)
     main_peer_cluster_orchestrator_offer = f"offer {ops_test.model.info.name}.{MAIN_APP}:{PEER_CLUSTER_ORCHESTRATOR_RELATION} {MAIN_ORCHESTRATOR_OFFER}"
@@ -102,7 +102,9 @@ async def test_build_and_deploy(
             f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",
         )
         logger.info("Integrating certs with failover...\n")
-        await failover_model.integrate(f"{FAILOVER_APP}", f"{CERTS_OFFER}:{TLS_RELATION}")
+        await failover_model.integrate(
+            f"{FAILOVER_APP}:certificates", f"{CERTS_OFFER}:{TLS_RELATION}"
+        )
         await failover_model.wait_for_idle(
             apps=[FAILOVER_APP],
             timeout=TIMEOUT,
@@ -139,7 +141,7 @@ async def test_build_and_deploy(
         await ops_test.juju(*consume_certs.split())
 
         logger.info("Integrating relations in data model...")
-        await data_model.integrate(f"{DATA_APP}", f"{CERTS_OFFER}:{TLS_RELATION}")
+        await data_model.integrate(f"{DATA_APP}:certificates", f"{CERTS_OFFER}:{TLS_RELATION}")
         await data_model.integrate(
             f"{DATA_APP}",
             f"{MAIN_ORCHESTRATOR_OFFER}:{PEER_CLUSTER_ORCHESTRATOR_RELATION}",

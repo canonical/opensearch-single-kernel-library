@@ -66,9 +66,17 @@ class JWTEventsHandler(Object):
 
     def _on_jwt_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Handle the removal of the relation."""
+        if self.charm.state.has_other_relation(event.relation):
+            logger.info("A different JWT relation exists, skipping cleanup")
+            return
+
         if (
             deployment_desc := self.charm.state.application.deployment_desc
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        if self.charm.is_unit_going_away(event):
+            logger.info("Unit is going away, keeping the JWT authentication configuration.")
             return
 
         del self.charm.state.server.jwt_auth_configuration
@@ -122,7 +130,7 @@ class JWTEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             # we need to come back in this case because there will not be a follow-up event
