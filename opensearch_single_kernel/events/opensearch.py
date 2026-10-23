@@ -589,7 +589,7 @@ class OpenSearchEventsHandler(Object):
                 event.defer()
                 return
 
-            # We need profile requiremnets to be met before restarting
+            # We need profile requirements to be met before restarting
             if not self.charm.profiles_manager.check_current_profile_requirements():
                 event.defer()
                 return
