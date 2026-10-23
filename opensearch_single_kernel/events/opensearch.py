@@ -372,17 +372,14 @@ class OpenSearchEventsHandler(Object):
         """On update status event.
 
         We want to periodically check for the following:
-        1- The profile requirements are still met
-        2- Do we have users that need to be deleted, and if so we need to delete them.
-        3- every 6 hours check if certs are expiring soon (in 7 days),
+        1- Do we have users that need to be deleted, and if so we need to delete them.
+        2- every 6 hours check if certs are expiring soon (in 7 days),
             as a safeguard in case relation broken. As there will be data loss
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
         """
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
-            return
-        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         # if node already shutdown - leave
@@ -529,23 +526,26 @@ class OpenSearchEventsHandler(Object):
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
+        # An unmet profile is retried later, without holding back the rest of the config.
+        profile_restart_needed = False
+        profile_pending = False
         try:
-            config_profile = self.charm.profiles_manager.get_config_profile()
+            config_profile = self.charm.state.config_profile
         except ValueError:
+            # Only a new config change can fix the value, there is nothing to retry.
             logger.error(
                 "Invalid profile configuration. Value: %s",
                 self.charm.state.config.get("profile"),
             )
-            return
+        else:
+            # check the profile being applied, not the one already stored on the unit
+            if self.charm.profiles_manager.check_profile_requirements(config_profile):
+                profile_restart_needed = self.charm.config_manager.update_profile_configuration(
+                    config_profile
+                )
+            else:
+                profile_pending = True
 
-        # check the profile being applied, not the one already stored on the unit
-        if not self.charm.profiles_manager.check_profile_requirements(config_profile):
-            event.defer()
-            return
-
-        profile_restart_needed = self.charm.config_manager.update_profile_configuration(
-            config_profile
-        )
         # The roles mappings are shared by the whole cluster: only its main orchestrator owns them.
         if self.charm.unit.is_leader() and self.charm.state.is_main_orchestrator:
             try:
@@ -568,6 +568,9 @@ class OpenSearchEventsHandler(Object):
             )
             self.charm.restart_opensearch_event.emit()
 
+        if profile_pending:
+            event.defer()
+
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
         """Handle leader election event."""
         # We check if the current unit is the leader, in case where the leader elected event
@@ -583,6 +586,11 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
             if not self.charm.cluster_manager.opensearch_client.is_node_up():
+                event.defer()
+                return
+
+            # We need profile requiremnets to be met before restarting
+            if not self.charm.profiles_manager.check_current_profile_requirements():
                 event.defer()
                 return
 
@@ -891,7 +899,7 @@ class OpenSearchEventsHandler(Object):
         # - blocking directives
         # - admin user and security index configured/initialised
         # - cluster health
-        if not self.charm.profiles_manager.check_profile_requirements():
+        if not self.charm.profiles_manager.check_current_profile_requirements():
             logger.info("Conditions not met to start opensearch. Will retry next event.")
             event.defer()
             return
