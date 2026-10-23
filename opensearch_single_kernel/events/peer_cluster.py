@@ -507,11 +507,11 @@ class PeerClusterEventsHandler(Object):
             return
 
         try:
-            config_profile = self.charm.profiles_manager.get_config_profile()
+            config_profile = self.charm.state.config_profile
         except ValueError:
             return
 
-        if not self.charm.profiles_manager.check_profile_requirements():
+        if not self.charm.profiles_manager.check_profile_requirements(config_profile):
             return
 
         self.charm.config_manager._update_jvm_heap_size(
