@@ -13,8 +13,13 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     ObjectStorageType,
 )
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchBackupCredentialsIncorrectError,
+    OpenSearchObjectStorageConfigValidationError,
+)
 from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
 from opensearch_single_kernel.managers.snapshots import SnapshotsManager
+from opensearch_single_kernel.utils.object_storage import storage_config_from_connection_info
 from opensearch_single_kernel.utils.status import format_status
 from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S3_INFO
 from tests.unit.test_backup import _mock_backup
@@ -130,47 +135,53 @@ def test_get_statuses_with_recompute_validates_credentials(mocker, backend, vali
 
 
 @pytest.mark.parametrize("backend", STORAGE)
-def test_get_statuses_before_integrator_fills_connection_info(mocker, backend):
-    verify = _verify(mocker, backend, valid=True)
-
-    statuses = _main_mgr(backend, connection_info={}).get_statuses("app")
-
-    assert statuses == [SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value]
-    verify.assert_not_called()
-
-
-@pytest.mark.parametrize("backend", STORAGE)
 @pytest.mark.parametrize(
     "recompute, cached",
-    [(True, ()), (False, [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value])],
-    ids=["update-status", "cached"],
+    [(False, ()), (True, ()), (False, [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value])],
+    ids=["no-recompute", "recompute", "cached"],
 )
-def test_get_statuses_when_connection_info_empty_on_recompute(mocker, backend, recompute, cached):
+def test_get_statuses_with_empty_connection_info(mocker, backend, recompute, cached):
     verify = _verify(mocker, backend, valid=True)
     manager = _main_mgr(backend, cached=cached, connection_info={})
 
     statuses = manager.get_statuses("app", recompute=recompute)
 
+    assert statuses == [SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value]
+    verify.assert_not_called()
+
+
+REQUIRED_FIELDS = {
+    "s3": ["access-key", "secret-key", "endpoint", "bucket", "region"],
+    "azure": ["storage-account", "secret-key"],
+    "gcs": ["secret-key", "bucket"],
+}
+MISSING_FIELD_CASES = [
+    (backend, field) for backend, fields in REQUIRED_FIELDS.items() for field in fields
+]
+
+
+def _info_missing(field: str, backend: str) -> dict:
+    return {k: v for k, v in STORAGE[backend][1].items() if k != field}
+
+
+@pytest.mark.parametrize("backend, field", MISSING_FIELD_CASES)
+def test_get_statuses_missing_field(mocker, backend, field):
+    verify = _verify(mocker, backend, valid=True)
+
+    manager = _main_mgr(backend, connection_info=_info_missing(field, backend))
+
+    statuses = manager.get_statuses("app")
+
     assert statuses == [SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value]
     verify.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "info, expected",
-    [
-        ({"bucket": "relation-0"}, SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value),
-        (
-            {k: v for k, v in DEFAULT_S3_INFO.items() if k != "region"},
-            SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-        ),
-        (DEFAULT_S3_INFO | {"bucket": 2024}, SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value),
-    ],
-    ids=["no-keys", "no-region", "malformed"],
-)
-def test_get_statuses_invalid_connection_info(mocker, info, expected):
-    _verify(mocker, "s3", valid=True)
+@pytest.mark.parametrize("backend, field", MISSING_FIELD_CASES)
+def test_validation_error_lists_missing_field(backend, field):
+    with pytest.raises(OpenSearchObjectStorageConfigValidationError) as e:
+        storage_config_from_connection_info(STORAGE[backend][0], _info_missing(field, backend))
 
-    assert _main_mgr("s3", connection_info=info).get_statuses("app") == [expected]
+    assert e.value.missing_fields == [field]
 
 
 def _relate_backups(harness, relation):
@@ -178,8 +189,6 @@ def _relate_backups(harness, relation):
         harness.set_leader(is_leader=True)
         harness.add_relation(STATUS_PEERS_RELATION, harness.charm.app.name)
         rel_id = harness.add_relation(relation.endpoint, relation.remote_app_name)
-        # azure/s3 integrators needs "version" to use non-legacy lib
-        harness.update_relation_data(rel_id, relation.remote_app_name, {"version": "1"})
     return rel_id
 
 
@@ -187,15 +196,27 @@ def _cached_statuses(harness):
     return harness.charm.state.statuses.get("app", harness.charm.snapshots_manager.name)
 
 
-def _get_statuses(harness):
-    return harness.charm.snapshots_manager.get_statuses("app")
-
-
-def test_credentials_changed_sets_then_clears_credentials_incorrect(
-    mocker, harness, backend_setup
-):
-    backend, (relation,) = backend_setup
+def test_credentials_changed_sets_credentials_incorrect(mocker, harness, backend_setup):
+    _, (relation,) = backend_setup
     _mock_backup(mocker)
+    _relate_backups(harness, relation)
+    mocker.patch(
+        "opensearch_single_kernel.managers.snapshots.SnapshotsManager.validate_storage_config",
+        side_effect=OpenSearchBackupCredentialsIncorrectError(),
+    )
+
+    harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
+
+    assert _cached_statuses(harness).root == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+
+
+def test_credentials_changed_clears_credentials_incorrect(mocker, harness, backend_setup):
+    _, (relation,) = backend_setup
+    _mock_backup(mocker)
+    _relate_backups(harness, relation)
+    mocker.patch(
+        "opensearch_single_kernel.managers.snapshots.SnapshotsManager.validate_storage_config"
+    )
     mocker.patch(
         "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler.update_stored_credentials"
     )
@@ -207,28 +228,24 @@ def test_credentials_changed_sets_then_clears_credentials_incorrect(
         "opensearch_single_kernel.managers.peer_cluster_orchestrator."
         "PeerClusterOrchestratorManager.refresh_relation_data"
     )
-    verify = _verify(mocker, backend, valid=False)
-    rel_id = _relate_backups(harness, relation)
-
-    harness.update_relation_data(rel_id, relation.remote_app_name, {"trigger": "1"})
-    assert _get_statuses(harness) == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
-
-    verify.return_value = True
-    harness.update_relation_data(rel_id, relation.remote_app_name, {"trigger": "2"})
-    assert _get_statuses(harness) == [GeneralStatuses.ACTIVE_IDLE.value]
-
-
-@pytest.mark.parametrize(
-    "cached_status",
-    [
+    harness.charm.state.add_status_if_not_present(
         SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
-        SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value,
-    ],
-    ids=["credentials-incorrect", "relation-data-incomplete"],
-)
-def test_credentials_gone_clears_cached_status(mocker, harness, backend_setup, cached_status):
+        "app",
+        harness.charm.snapshots_manager.name,
+    )
+
+    assert _cached_statuses(harness).root == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+
+    harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
+
+    assert _cached_statuses(harness).root == []
+
+
+def test_credentials_gone_clears_cached_status(mocker, harness, backend_setup):
+    cached_status = SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value
     _, (relation,) = backend_setup
     _mock_backup(mocker)
+    mocker.patch.object(harness.charm, "is_unit_going_away", return_value=False)
     mocker.patch(
         "opensearch_single_kernel.managers.keystore.KeystoreManager.cleanup_storage_credentials",
         return_value=True,

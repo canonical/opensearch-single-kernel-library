@@ -27,6 +27,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
@@ -48,6 +49,15 @@ from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuse
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 logger = logging.getLogger(__name__)
+
+
+def _missing_fields_error(missing: list[str]) -> PydanticCustomError:
+    """Return a validation error listing the missing object storage fields."""
+    return PydanticCustomError(
+        "missing_fields",
+        "Missing fields: {fields}",
+        {"fields": ", ".join(missing), "missing_fields": missing},
+    )
 
 
 class Model(ABC, BaseModel):
@@ -399,17 +409,14 @@ class S3RelData(Model):
         if not self.credentials or not self.credentials.secret_key:
             missing.append("secret-key")
 
-        # NOTE: Both bucket and endpoint must be set. If none of them are set,
-        # but credentials were found, this likely means that we are validating for a
-        # non cluster_manager application, which only needs credentials.
-        if self.bucket and not self.endpoint:
+        if not self.endpoint:
             missing.append("endpoint")
-        if self.endpoint and not self.bucket:
+        if not self.bucket:
             missing.append("bucket")
         if not self.region:
             missing.append("region")
         if missing:
-            raise ValueError(f"Missing fields: {', '.join(missing)}")
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -519,7 +526,7 @@ class AzureRelData(Model):
         if not self.credentials or not self.credentials.secret_key:
             missing.append("secret-key")
         if missing:
-            raise ValueError(f"Missing fields: {', '.join(missing)}")
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -611,7 +618,7 @@ class GcsRelData(Model):
         if not self.bucket:
             missing.append("bucket")
         if missing:
-            raise ValueError(f"Missing fields: {', '.join(missing)}")
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:

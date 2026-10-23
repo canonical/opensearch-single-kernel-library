@@ -721,20 +721,8 @@ class SnapshotsManager(BaseManager):
                     object_storage_type
                 )
 
-                # connection_info may be empty for a few hooks before being filled
-                # if its empty on recompute then we consider it unconfigured
                 if not connection_info:
-                    if recompute or cached_non_running_statuses(
-                        self.state.statuses,
-                        scope,
-                        self.name,
-                        matches=[SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value],
-                    ):
-                        status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
-                    else:
-                        status_list.append(
-                            SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value
-                        )
+                    status_list.append(SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value)
                     return status_list
 
                 if not (
