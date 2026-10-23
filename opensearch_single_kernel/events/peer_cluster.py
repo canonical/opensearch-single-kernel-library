@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ops import (
+    ModelError,
     Object,
     RelationChangedEvent,
     RelationDepartedEvent,
@@ -82,13 +83,25 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-            event.relation.id if hasattr(event, "relation") else None
-        )
+        try:
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+        except ModelError as e:
+            logger.warning(
+                "Cannot publish peer-cluster credentials; deferring relation join: %s", e
+            )
+            event.defer()
 
-    def _on_peer_cluster_orchestrator_relation_changed(  # noqa: C901
-        self, event: RelationChangedEvent
-    ):
+    def _on_peer_cluster_orchestrator_relation_changed(self, event: RelationChangedEvent):
+        """Reconcile the provider, retrying failed Juju credential operations."""
+        try:
+            self._reconcile_provider(event)
+        except ModelError as e:
+            logger.warning(
+                "Cannot access peer-cluster credentials; deferring provider reconciliation: %s", e
+            )
+            event.defer()
+
+    def _reconcile_provider(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster orchestrator relation changed event."""
         logger.debug("Peer cluster orchestrator relation changed: %s", event)
 
@@ -121,6 +134,7 @@ class PeerClusterEventsHandler(Object):
         ):
             self.charm.cluster_manager.promote_deployment_type()
             self.charm.peer_cluster_orchestrator_manager.promote_failover()
+            self.charm.plugin_manager.remove_plugin_secret_ids()
             # check if any credentials exist without relations
             self.check_credentials_with_missing_relations()
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
@@ -252,7 +266,17 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.application.orchestrators = orchestrators
 
     # ---- PEER CLUSTER RELATION EVENTS ----
-    def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):  # noqa: C901
+    def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):
+        """Reconcile the consumer, retrying failed Juju credential operations."""
+        try:
+            self._reconcile_consumer(event)
+        except ModelError as e:
+            logger.warning(
+                "Cannot access peer-cluster credentials; deferring consumer reconciliation: %s", e
+            )
+            event.defer()
+
+    def _reconcile_consumer(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster relation changed event."""
         logger.debug("Peer cluster relation changed: %s", event)
 
@@ -431,7 +455,7 @@ class PeerClusterEventsHandler(Object):
         # recompute the deployment desc
         self._reconcile_deployment_desc_from_peer_cluster_data(data)
 
-    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):
+    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):  # noqa: C901
         """Handle when 'main/failover'-CMs leave the relation (app or relation removal)."""
         logger.debug("Peer cluster relation departed: %s", event)
         if not self.charm.unit.is_leader():
@@ -469,9 +493,16 @@ class PeerClusterEventsHandler(Object):
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
+                try:
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None
+                    )
+                except ModelError as e:
+                    logger.warning(
+                        "Cannot publish peer-cluster credentials; deferring event: %s", e
+                    )
+                    event.defer()
+                    return
 
         # we leave in case not an orchestrator
         if (

@@ -15,6 +15,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ops import ModelError
 from ops.charm import RelationBrokenEvent, SecretChangedEvent
 from ops.framework import Object
 
@@ -186,8 +187,13 @@ class NotificationsEvents(Object):
 
         # propagate to subclusters if this is the main provider
         if self.charm.state.is_peer_cluster_provider():
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+            try:
+                if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                    event.defer()
+            except ModelError as e:
+                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
                 event.defer()
+                return
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
         """Cleanup for a broken smtp relation (relation-scoped).
@@ -219,8 +225,15 @@ class NotificationsEvents(Object):
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.state.is_peer_cluster_provider():
-                    if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                    try:
+                        if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                            event.defer()
+                    except ModelError as e:
+                        logger.warning(
+                            "Cannot publish peer-cluster credentials; deferring event: %s", e
+                        )
                         event.defer()
+                        return
             return
 
         # Delete notification configs first so we never have configs that reference
@@ -251,8 +264,13 @@ class NotificationsEvents(Object):
         self.charm.plugin_manager.remove_plugin_secret(label)
 
         if self.charm.state.is_peer_cluster_provider():
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+            try:
+                if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                    event.defer()
+            except ModelError as e:
+                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
                 event.defer()
+                return
 
     def restore_keystore_credentials(self) -> None:
         """Restore the SMTP keystore entries lost with the K8s container filesystem."""
