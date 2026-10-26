@@ -688,6 +688,9 @@ class TlsManager(BaseManager):
             ca_chain := self.state.application.admin_secrets.get("chain")
         ):
             for external_client in self.state.external_clients:
+                # only refresh clients that already have a chain
+                if not external_client.tls_ca:
+                    continue
                 external_client.tls_ca = ca_chain
         try:
             return self.update_request_ca_bundle()
