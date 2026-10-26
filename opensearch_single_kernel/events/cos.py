@@ -48,7 +48,7 @@ class CosEventsHandler(Object):
             self.cos_integration = COSAgentProvider(
                 self.charm,
                 relation_name=COS_RELATION,
-                scrape_configs=self.scrape_vm_config,
+                scrape_configs=self.scrape_config,
                 refresh_events=[
                     self.charm.on.config_changed,
                     self.charm.on.set_password_action,
@@ -71,10 +71,11 @@ class CosEventsHandler(Object):
                 self.charm.on.set_password_action,
                 self.charm.on.secret_changed,
                 self.charm.on[PEER_RELATION].relation_changed,
+                self.charm.on[PEER_RELATION].relation_departed,
                 self.charm.on[PEER_CLUSTER_RELATION].relation_changed,
             ],
             alert_rules_path="./src/alert_rules/prometheus",
-            lookaside_jobs_callable=self.scrape_k8s_config,
+            lookaside_jobs_callable=self.scrape_config,
         )
 
         # 2. Logs (Loki)
@@ -88,8 +89,8 @@ class CosEventsHandler(Object):
             self.charm, relation_name="grafana-dashboard"
         )
 
-    def scrape_vm_config(self) -> list[dict[str, Any]]:
-        """Generate the scrape config for VM platform."""
+    def scrape_config(self) -> list[dict[str, Any]]:
+        """Generate the scrape config."""
         if (
             # deployment_desc is used to get unit name which is needed for prometheus labels
             not self.charm.state.application.deployment_desc
@@ -99,46 +100,25 @@ class CosEventsHandler(Object):
         ):
             # Not yet ready, waiting for certain values to be set
             return []
+
+        if self.charm.substrate == Substrates.K8S:
+            # only the leader sends a job, so it should list every unit
+            hosts = sorted(self.charm.state.peer_unit_hosts)
+        else:
+            # every unit sends its own job
+            hosts = [self.charm.state.host_ip]
+
         return [
             {
                 "metrics_path": "/_prometheus/metrics",
                 "static_configs": [
                     {
-                        "targets": [f"{self.charm.state.host_ip}:{COS_PORT}"],
+                        "targets": [f"{host}:{COS_PORT}" for host in hosts],
                         "labels": prometheus_labels,
                     }
                 ],
                 "tls_config": {"ca": ca},
-                "scheme": (
-                    "https" if self.charm.tls_manager.all_tls_resources_stored() else "http"
-                ),
+                "scheme": "https",
                 "basic_auth": {"username": f"{COS_USER}", "password": f"{pwd}"},
             }
         ]
-
-    def scrape_k8s_config(self) -> list[dict[str, Any]]:
-        """Generate the scrape config for K8s platform."""
-        if (
-            # deployment_desc is used to get unit name which is needed for prometheus labels
-            not self.charm.state.application.deployment_desc
-            or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
-        ):
-            # Not yet ready, waiting for certain values to be set
-            return []
-
-        tls_enabled = self.charm.tls_manager.all_tls_resources_stored()
-        config: dict[str, Any] = {
-            "metrics_path": "/_prometheus/metrics",
-            "static_configs": [
-                {
-                    "targets": [f"{self.charm.state.host_ip}:{COS_PORT}"],
-                    "labels": prometheus_labels,
-                }
-            ],
-            "scheme": "https" if tls_enabled else "http",
-            "basic_auth": {"username": f"{COS_USER}", "password": f"{pwd}"},
-        }
-        if tls_enabled:
-            config["tls_config"] = {"insecure_skip_verify": True}
-        return [config]
