@@ -50,12 +50,16 @@ def auth_upgrade(harness, mocker, tmp_path, substrate):
     )
     mocker.patch("opensearch_single_kernel.events.upgrades.get_charm_revision", return_value="1")
     mocker.patch.object(harness.charm.upgrades_manager, "update_grafana_dashboards_title")
-    for method in ("initialise_security_index", "apply_security_config"):
-        mocker.patch.object(
-            harness.charm.cluster_manager,
-            method,
-            side_effect=AssertionError("Auth migration must not write the security index"),
-        )
+    mocker.patch.object(
+        harness.charm.cluster_manager,
+        "initialise_security_index",
+        side_effect=AssertionError("Auth migration must not write the security index"),
+    )
+    mocker.patch.object(
+        manager,
+        "apply_security_config",
+        side_effect=AssertionError("Auth migration must not write the security index"),
+    )
     events = harness.charm.upgrade_events
     mocker.patch.object(events, "machine_upgrade", side_effect=manager.update_security_config)
 

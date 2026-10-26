@@ -15,6 +15,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStartError,
 )
 from opensearch_single_kernel.managers.cluster import ClusterManager
+from opensearch_single_kernel.managers.config import ConfigManager
 
 
 @pytest.fixture
@@ -58,13 +59,12 @@ def test_security_initialisation_has_longer_timeout_than_config_updates(
     state = Mock()
     state.application.admin_secrets = {"truststore-password": "trust", "keystore-password": "key"}
     state.application.is_security_index_initialised = False
-    manager = ClusterManager(state, workload)
 
     if initialise:
-        manager.initialise_security_index()
+        ClusterManager(state, workload).initialise_security_index()
         assert state.application.is_security_index_initialised is True
     else:
-        assert manager.apply_security_config(
+        assert ConfigManager(state, workload).apply_security_config(
             state.application.admin_secrets, "opensearch-security/config.yml"
         )
 
