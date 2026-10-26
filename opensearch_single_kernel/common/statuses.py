@@ -245,12 +245,54 @@ class ExternalClientsStatuses(Enum):
         check="Client relation index name validation.",
         action="Correct the index name on the client / data-integrator relation.",
     )
+    RELATION_INVALID = StatusObject(
+        status="blocked",
+        message="Client relation {id} must be created with Main-cluster-orchestrator.",
+        short_message="Clients only on main",
+        check="Client related to main orchestrator.",
+        action="Relate clients only to the main-cluster-orchestrator.",
+    )
     USER_CREATION_FAILED = StatusObject(
         status="blocked",
-        message="Failed to create users for client relation {id}",
-        short_message="Client user create failed",
-        check="OpenSearch user for client relation.",
+        message="Failed to create the user or role for client relation {id}",
+        short_message="Client entity create failed",
+        check="OpenSearch user or role for client relation.",
         action="Check unit logs and retry the client relation.",
+    )
+    ENTITY_TYPE_UNSUPPORTED = StatusObject(
+        status="blocked",
+        message="entity-type=USER is not supported on client relation {id}",
+        short_message="Unsupported client entity type",
+        check="Entity type requested on client relations.",
+        action="Request entity-type=GROUP or no entity type and retry the client relation.",
+    )
+    USER_ENTITY_GROUP_INVALID = StatusObject(
+        status="blocked",
+        message="Missing or invalid requested entity on client relation {id}",
+        short_message="Invalid entity from client",
+        check="Requested entity validation for client relations.",
+        action="Provide a valid entity name through the client relation.",
+    )
+    USER_ENTITY_GROUP_CONFLICT = StatusObject(
+        status="blocked",
+        message="Conflicting requested entity on client relation {id}",
+        short_message="Conflicting client entity",
+        check="Requested entity name against the roles and the other client relations.",
+        action="Change the requested entity name and retry the client relation.",
+    )
+    ENTITY_NAME_RESERVED = StatusObject(
+        status="blocked",
+        message="Requested entity name is reserved on client relation {id}",
+        short_message="Reserved client entity name",
+        check="Requested entity name against the users and roles managed by the charm.",
+        action="Change the requested entity name and retry the client relation.",
+    )
+    ENTITY_PERMISSIONS_INVALID = StatusObject(
+        status="blocked",
+        message="Invalid entity-permissions on client relation {id}",
+        short_message="Invalid client entity permissions",
+        check="Entity permissions validation for entity-type=GROUP client relations.",
+        action="Fix entity-permissions and retry the client relation.",
     )
 
 
@@ -653,4 +695,36 @@ class UpgradesStatuses(Enum):
         check="Kubernetes app trusted for cluster-scoped refresh ops.",
         action="Run `juju trust {charm_app} --scope=cluster`.",
         approved_critical_component=True,
+    )
+
+
+class LdapStatuses(Enum):
+    """Collection of charm statuses related to LDAP relation."""
+
+    LDAP_DATA_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="Waiting for the LDAP provider to share its data.",
+        short_message="Waiting for LDAP data",
+        check="LDAP relation app databag content.",
+    )
+    LDAPS_NOT_ENABLED = StatusObject(
+        status="blocked",
+        message="LDAPS is not enabled; enable LDAPS on LDAP provider.",
+        short_message="LDAPS is not enabled",
+        check="LDAP relation app databag content.",
+        action="Configure LDAPS on LDAP provider.",
+    )
+    CERT_NOT_CONNECTED = StatusObject(
+        status="blocked",
+        message="LDAP certificates are not connected; connect ldap-certificate-transfer relation.",
+        short_message="LDAP certificates are not connected",
+        check="ldap-certificate-transfer relation.",
+        action="Connect ldap-certificate-transfer relation.",
+    )
+    RELATION_INVALID = StatusObject(
+        status="blocked",
+        message="LDAP relation must be created with Main-cluster-orchestrator.",
+        short_message="LDAP only on main",
+        check="LDAP related to main orchestrator.",
+        action="Relate LDAP only to the main-cluster-orchestrator.",
     )

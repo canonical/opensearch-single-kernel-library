@@ -545,6 +545,7 @@ class UpgradesEventsHandler(Object):
 
         # The refreshed pod lost the keystore entries and S3 CA with its container filesystem
         try:
+            self.charm.ldap_manager.restore_ldap_ca()
             self.charm.snapshots_events.restore_stored_credentials()
             self.charm.notifications_events.restore_keystore_credentials()
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:

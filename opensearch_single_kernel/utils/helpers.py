@@ -208,6 +208,18 @@ def validate_index_name(index_name: str) -> bool:
     return True
 
 
+def validate_entity_name(entity_name: str) -> bool:
+    """Validates that the entity name requested in the relation is acceptable.
+
+    The name ends up in the path of the security API requests: only words made of letters,
+    digits and `_`, `.`, `@`, `-`, separated by single spaces, are accepted.
+    """
+    return (
+        len(entity_name) <= 255
+        and re.fullmatch(r"\w[\w.@-]*(?: [\w.@-]+)*", entity_name) is not None
+    )
+
+
 def diff(desired: Iterable[str], current: Iterable[str]) -> tuple[set[str], set[str]]:
     """Returns diff needed to turn current list into desired list"""
     desired_labels = set(desired)

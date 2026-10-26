@@ -432,6 +432,8 @@ class OpenSearchEventsHandler(Object):
                 )
             else:
                 self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+                # The LDAP exclusions follow the client users: drop the removed ones.
+                self.charm.reconcile_security_config(event)
 
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
@@ -540,13 +542,17 @@ class OpenSearchEventsHandler(Object):
         profile_restart_needed = self.charm.config_manager.update_profile_configuration(
             config_profile
         )
-        if self.charm.unit.is_leader():
+        # The roles mappings are shared by the whole cluster: only its main orchestrator owns them.
+        if self.charm.unit.is_leader() and self.charm.state.is_main_orchestrator:
             try:
-                self.charm.external_clients_manager.update_relations_roles_mapping()
+                self.charm.external_clients_manager.reconcile_role_mappings()
             except OpenSearchUserMgmtError as e:
                 logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()
                 return
+
+        # Some options are part of the security config, e.g. the ones of LDAP.
+        self.charm.reconcile_security_config(event)
 
         if self.charm.cluster_manager.workload.is_service_started() and (
             profile_restart_needed or config_restart_needed
@@ -601,6 +607,10 @@ class OpenSearchEventsHandler(Object):
                 except OpenSearchFileOperationError as e:
                     logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
+
+            # the security config file of a unit tells nothing about what the previous leader
+            # applied: the security index is aligned with the one of the new leader
+            self.charm.reconcile_security_config(event, force=True)
             return
 
         # TODO: check if cluster can start independently
@@ -720,6 +730,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
+            self.charm.ldap_manager.restore_ldap_ca()
             self.charm.snapshots_events.restore_stored_credentials()
             self.charm.notifications_events.restore_keystore_credentials()
         except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
@@ -1032,6 +1043,8 @@ class OpenSearchEventsHandler(Object):
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
+            # the security index is initialised with the content of the security config files
+            self.charm.config_manager.update_security_config()
             self.charm.cluster_manager.initialise_security_index()
             if (
                 self.charm.state.application.deployment_desc.typ
