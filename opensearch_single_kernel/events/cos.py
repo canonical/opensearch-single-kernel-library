@@ -71,6 +71,7 @@ class CosEventsHandler(Object):
                 self.charm.on.set_password_action,
                 self.charm.on.secret_changed,
                 self.charm.on[PEER_RELATION].relation_changed,
+                self.charm.on[PEER_RELATION].relation_departed,
                 self.charm.on[PEER_CLUSTER_RELATION].relation_changed,
             ],
             alert_rules_path="./src/alert_rules/prometheus",
@@ -127,18 +128,19 @@ class CosEventsHandler(Object):
             # Not yet ready, waiting for certain values to be set
             return []
 
-        tls_enabled = self.charm.tls_manager.all_tls_resources_stored()
         config: dict[str, Any] = {
             "metrics_path": "/_prometheus/metrics",
             "static_configs": [
                 {
-                    "targets": [f"{self.charm.state.host_ip}:{COS_PORT}"],
+                    "targets": sorted(
+                        f"{host}:{COS_PORT}" for host in self.charm.state.peer_unit_hosts
+                    ),
                     "labels": prometheus_labels,
                 }
             ],
-            "scheme": "https" if tls_enabled else "http",
+            "scheme": "https",
             "basic_auth": {"username": f"{COS_USER}", "password": f"{pwd}"},
         }
-        if tls_enabled:
-            config["tls_config"] = {"insecure_skip_verify": True}
+        if ca := self.charm.state.application.admin_secrets.get("ca-cert"):
+            config["tls_config"] = {"ca": ca}
         return [config]
