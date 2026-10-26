@@ -553,7 +553,8 @@ class PeerClusterEventsHandler(Object):
             KIBANA_SERVER_USER, data.credentials.kibana_password_hash
         )
 
-        self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
+        if main_data := self.charm.state.get_rel_data_from_main_orchestrator():
+            self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(main_data)
 
     def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterRelData) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""
