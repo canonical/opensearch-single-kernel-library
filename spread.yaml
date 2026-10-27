@@ -89,7 +89,7 @@ backends:
       sudo systemctl daemon-reload
       sudo systemctl start ssh
 
-      sudo passwd -d "$USER"
+      sudo passwd -d "$SPREAD_SYSTEM_USERNAME"
 
       ADDRESS localhost
     # HACK: spread does not pass environment variables set on runner
