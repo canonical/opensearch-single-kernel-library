@@ -566,6 +566,9 @@ class GcsRelDataCredentials(Model):
         if values is None:
             return None
 
+        if isinstance(values, dict):
+            return json.dumps(values)
+
         content = values.decode() if isinstance(values, (bytes, bytearray)) else str(values)
         if not (content := content.strip()):
             return None
