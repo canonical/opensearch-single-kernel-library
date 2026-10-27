@@ -30,7 +30,7 @@ on:
 
 jobs:
   collect-integration-tests:
-    name: Collect integration test spread jobs | ${{ inputs.base }}
+    name: Collect integration test spread jobs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -83,8 +83,8 @@ jobs:
               else:
                   architecture = "amd64"
               label = runner.replace("linux-", "").replace("noble-", "")
-              # Example: "vm/test_tls.py:ubuntu24 | self-hosted-arm64-xlarge | arm64"
-              name = f"{task}:{variant} | {label} | {architecture}"
+              # Example: "vm/test_tls.py | self-hosted-arm64-xlarge | arm64"
+              name = f"{task} | {label} | {architecture}"
               # ":" character not valid in GitHub Actions artifact
               name_in_artifact = f"{task.replace('/', '-')}-{variant}-{architecture}"
               jobs.append({
