@@ -78,7 +78,7 @@ jobs:
                   continue
               # Example: "test_charm.py"
               task = task.removeprefix("tests/spread/")
-              if "arm64" in runner:
+              if "arm" in runner:
                   architecture = "arm64"
               else:
                   architecture = "amd64"
