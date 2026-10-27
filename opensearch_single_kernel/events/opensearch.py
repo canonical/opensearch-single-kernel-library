@@ -157,6 +157,9 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        if self.charm.substrate == Substrates.K8S:
+            self.charm.upgrade_events._reconcile_upgrade()
+
         # Peer TLS readiness must reach consumers even while cluster health is pending.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
             self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
@@ -387,6 +390,9 @@ class OpenSearchEventsHandler(Object):
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
+
+        if self.charm.substrate == Substrates.K8S:
+            self.charm.upgrade_events._reconcile_upgrade()
 
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
@@ -669,6 +675,8 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
+            if self.charm.substrate == Substrates.K8S:
+                self.charm.upgrade_events._reconcile_upgrade()
             return
 
         # VM-specific: Handle host reboot scenario where service should be up but isn't
@@ -1164,6 +1172,8 @@ class OpenSearchEventsHandler(Object):
                 )
             self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             logger.debug("Set upgrade unit state to healthy")
+
+        if event.after_upgrade or self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()
 
         # update the peer cluster rel data with new IP in case of main cluster manager
