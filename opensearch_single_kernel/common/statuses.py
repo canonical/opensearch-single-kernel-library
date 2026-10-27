@@ -511,7 +511,7 @@ class SnapshotsStatuses(Enum):
         message="Waiting for settings from object storage integrator",
         short_message="Waiting for object storage settings",
         check="Object-storage relation data from the integrator.",
-        action="If this lasts, check that the integrator is configured.",
+        action="If this persists, ensure that the integrator is configured.",
     )
     BACKUP_RELATION_DATA_INCOMPLETE = StatusObject(
         status="blocked",
