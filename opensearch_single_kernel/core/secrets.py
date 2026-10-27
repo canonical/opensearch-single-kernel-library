@@ -173,10 +173,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
             )
             return
 
-        try:
-            secret.remove_all_revisions()
-        except SecretNotFoundError:
-            logger.debug("Secret %s:%s is already being removed", str(scope.val), str(key))
+        secret.remove_all_revisions()
         self.cached_secrets.delete(scope, self.label(scope, key))
 
     @override
