@@ -157,7 +157,7 @@ allure-pytest = "^2.16.0"
 allure-pytest-default-results = "^0.1.4"
 pytest-playwright = "^0.8.0"
 oauth_tools = { git = "https://github.com/canonical/iam-bundle", rev = "921d113325eed156e5b54f97c42e6c50810180c0" }
-pyjwt = "^2.13.0"
+pyjwt = "^2.15.0"
 # Avoid httpx-ws 0.9.0 importing anyio.AsyncContextManagerMixin, which is unavailable in
 # the AnyIO version resolved for the integration environment (for oauth tests).
 httpx-ws = ">=0.9.0,<0.10.0"
