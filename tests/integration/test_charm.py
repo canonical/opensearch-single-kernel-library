@@ -14,7 +14,7 @@ import yaml
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_SNAP_REVISION,
+    OPENSEARCH_SNAP_REVISIONS,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, TlsStatuses
 from tests.helpers import Substrate
@@ -67,7 +67,7 @@ async def test_deploy_and_remove_single_unit(
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -135,7 +135,7 @@ async def test_actions_get_admin_password(ops_test: OpsTest, substrate) -> None:
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -276,7 +276,7 @@ async def test_actions_rotate_system_user_password(ops_test: OpsTest, user) -> N
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_substrate("k8s")
-async def test_check_pinned_revision(ops_test: OpsTest) -> None:
+async def test_check_pinned_revision(ops_test: OpsTest, machine_platform: str) -> None:
     """Test check the pinned revision."""
     leader_id = await get_leader_unit_id(ops_test)
 
@@ -299,7 +299,7 @@ async def test_check_pinned_revision(ops_test: OpsTest) -> None:
         ).replace("\r\n", "\n")
     )["installed"].split()
     logger.info(f"Installed snap: {installed_info}")
-    assert installed_info[1] == f"({OPENSEARCH_SNAP_REVISION})"
+    assert installed_info[1] == f"({OPENSEARCH_SNAP_REVISIONS[machine_platform]})"
     assert installed_info[3] == "held"
 
 

@@ -24,6 +24,7 @@ from cryptography import x509
 from ops import Unit, pebble
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_SNAP_REVISIONS,
     PROTECTED_INDEX_NAMES,
     DeploymentType,
     StartMode,
@@ -205,6 +206,18 @@ def validate_index_name(index_name: str) -> bool:
         return False
 
     return True
+
+
+def validate_entity_name(entity_name: str) -> bool:
+    """Validates that the entity name requested in the relation is acceptable.
+
+    The name ends up in the path of the security API requests: only words made of letters,
+    digits and `_`, `.`, `@`, `-`, separated by single spaces, are accepted.
+    """
+    return (
+        len(entity_name) <= 255
+        and re.fullmatch(r"\w[\w.@-]*(?: [\w.@-]+)*", entity_name) is not None
+    )
 
 
 def diff(desired: Iterable[str], current: Iterable[str]) -> tuple[set[str], set[str]]:
@@ -495,3 +508,10 @@ def hash_credentials(credentials: dict[str, str]) -> str:
         hash of the credentials
     """
     return hashlib.sha1(json.dumps(credentials, sort_keys=True).encode()).hexdigest()
+
+
+def pinned_snap_revision() -> str:
+    """Get the snap revision pinned to this charm."""
+    from platform import machine
+
+    return OPENSEARCH_SNAP_REVISIONS[machine()]

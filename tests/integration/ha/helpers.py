@@ -13,6 +13,8 @@ from tenacity import (
     RetryError,
     Retrying,
     retry,
+    retry_if_exception_type,
+    retry_if_result,
     stop_after_attempt,
     stop_after_delay,
     wait_fixed,
@@ -25,6 +27,7 @@ from tests.integration.conftest import APP_NAME
 from tests.integration.ha.helpers_data import index_docs_count
 from tests.integration.helpers import (
     NO_TTY_STDIN,
+    debug_failed_unit,
     get_application_unit_ids,
     get_application_unit_ids_hostnames,
     get_application_unit_ids_ips,
@@ -310,7 +313,7 @@ async def all_processes_down(ops_test: OpsTest, app: str) -> bool:
     """Check if all processes are down."""
     for unit_id in get_application_unit_ids(ops_test, app):
         unit_name = f"{app}/{unit_id}"
-        get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
+        get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200 -sTCP:LISTEN"
         try:
             for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
                 with attempt:
@@ -337,9 +340,9 @@ async def send_kill_signal_to_process(
 
     if opensearch_pid is None:
         if substrate == "vm":
-            get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200"
+            get_pid_cmd = f"ssh {unit_name} -- sudo lsof -ti:9200 -sTCP:LISTEN"
         else:
-            get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200"
+            get_pid_cmd = f"ssh --container opensearch {unit_name} lsof -ti:9200 -sTCP:LISTEN"
         _, opensearch_pid, _ = await ops_test.juju(
             *get_pid_cmd.split(), check=False, stdin=NO_TTY_STDIN
         )
@@ -495,36 +498,36 @@ async def add_juju_secret(
     return secret_uri
 
 
-async def wait_for_backup_system_to_settle(
-    ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
-):
-    """Waits the backup to finish and move to the finished state or throws a RetryException."""
-    for attempt in Retrying(stop=stop_after_attempt(8), wait=wait_fixed(15)):
-        with attempt:
-            # First, check if current backups are finished
-            action = await run_action(
-                ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
-            )
-            # Expected format:
-            # namespace(status='completed', response={'return-code': 0, 'backups': '{"1": ...}'})
-            backups = json.loads(action.response["backups"])
-            logger.debug(f"Backups recovered: {backups}")
-            if action.status != "completed" or len(backups) == 0:
-                raise Exception("Failed to retrieve backup list or list is empty")
+@retry(
+    # list_backups raises AssertionError when the read action fails.
+    retry=retry_if_exception_type(AssertionError)
+    | retry_if_result(lambda state: state in {"missing", "in_progress"}),
+    stop=stop_after_attempt(8),
+    wait=wait_fixed(15),
+    retry_error_callback=lambda attempt: attempt.outcome.result(),
+)
+async def wait_for_backup_completion(
+    ops_test: OpsTest, leader_id: int, backup_id: str, app: str = APP_NAME
+) -> str:
+    """Return this backup's terminal state, or its last state when polling expires."""
+    backups = await list_backups(ops_test, leader_id, app=app)
+    state = backups.get(backup_id, {"state": "missing"})["state"]
+    logger.info("Backup %s state: %s", backup_id, state)
+    return state
 
-            logger.debug(f"list-backups output: {action}")
-            # Now, check if we have finished the restore
-            indices_status = await http_request(
-                ops_test,
-                "GET",
-                f"https://{unit_ip}:9200/_recovery?human",
-                app=app,
-            )
-            for info in indices_status.values():
-                # Now, check the status of each shard
-                for shard in info["shards"]:
-                    if shard["type"] == "SNAPSHOT" and shard["stage"] != "DONE":
-                        raise Exception(f"Recovery failed for shard {shard}")
+
+@retry(stop=stop_after_attempt(8), wait=wait_fixed(15), reraise=True)
+async def wait_for_restore_completion(
+    ops_test: OpsTest, unit_ip: str, app: str = APP_NAME
+) -> None:
+    """Wait for all snapshot recovery shards to finish."""
+    indices_status = await http_request(
+        ops_test, "GET", f"https://{unit_ip}:9200/_recovery?human", app=app
+    )
+    for info in indices_status.values():
+        for shard in info["shards"]:
+            if shard["type"] == "SNAPSHOT" and shard["stage"] != "DONE":
+                raise AssertionError(f"Snapshot recovery is not finished: {shard}")
 
 
 async def assert_start_and_check_continuous_writes(
@@ -554,35 +557,57 @@ async def assert_start_and_check_continuous_writes(
 async def create_backup(
     ops_test: OpsTest, leader_id: int, unit_ip: str, app: str = APP_NAME
 ) -> str:
-    """Runs the backup of the cluster."""
-    action = await run_action(ops_test, leader_id, "create-backup", app=app)
-    logger.debug(f"create-backup output: {action}")
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
-    assert action.status == "completed"
-    st = str(action.response.get("status", ""))
-    assert st in {"in_progress", "success"}, f"unexpected snapshot state: {st}"
-    assert action.response.get("backup-id"), "backup-id is missing in response"
-    return action.response["backup-id"]
+    """Submit one backup and require that exact snapshot to succeed."""
+    action = await ops_test.model.units[f"{app}/{leader_id}"].run_action("create-backup")
+    action = await action.wait()
+    logger.debug("create-backup output: %s", action.results)
+    assert action.status == "completed", (
+        f"create-backup failed: {action.message}; results: {action.results}"
+    )
+    assert action.results.get("backup-id"), "backup-id is missing in response"
+    backup_id = action.results["backup-id"]
+
+    state = str(action.results.get("status", "unknown"))
+
+    if state in {"in_progress", "success"}:
+        state = await wait_for_backup_completion(ops_test, leader_id, backup_id, app=app)
+
+    if state != "success":
+        logger.error("Backup %s did not succeed; last state: %s", backup_id, state)
+        # A failed finalisation can leave no snapshot record, its cause is in the server logs.
+        try:
+            await debug_failed_unit(ops_test, app, f"https://{unit_ip}:9200", level=logging.ERROR)
+        except Exception as error:
+            logger.warning("Could not collect workload logs for backup %s: %s", backup_id, error)
+        raise AssertionError(f"Backup {backup_id} did not succeed; last state: {state}")
+
+    return backup_id
 
 
 async def restore(
     ops_test: OpsTest, backup_id: str, unit_ip: str, leader_id: int, app: str = APP_NAME
 ) -> bool:
-    """Restores a backup."""
-    action = await run_action(
-        ops_test, leader_id, "restore", params={"backup-id": backup_id}, app=app
+    """Submit one restore action, then wait for snapshot recovery."""
+    action = await ops_test.model.units[f"{app}/{leader_id}"].run_action(
+        "restore", **{"backup-id": backup_id}
     )
-    logger.debug(f"restore output: {action}")
+    action = await action.wait()
+    logger.debug("restore output: %s", action.results)
 
-    await wait_for_backup_system_to_settle(ops_test, leader_id, unit_ip, app=app)
-    return action.status == "completed"
+    if action.status != "completed":
+        logger.error(
+            "Restore %s failed: %s; results: %s", backup_id, action.message, action.results
+        )
+        return False
+    await wait_for_restore_completion(ops_test, unit_ip, app=app)
+    return True
 
 
-async def list_backups(ops_test: OpsTest, leader_id: int, app: str = APP_NAME) -> dict[str, str]:
+async def list_backups(ops_test: OpsTest, leader_id: int, app: str = APP_NAME) -> dict[str, dict]:
     action = await run_action(
         ops_test, leader_id, "list-backups", params={"output": "json"}, app=app
     )
-    assert action.status == "completed"
+    assert action.status == "completed", f"list-backups failed: {action}"
     return json.loads(action.response["backups"])
 
 

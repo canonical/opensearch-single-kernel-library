@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
 from hashlib import md5
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator, Literal, NamedTuple
 
 import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -717,7 +717,7 @@ class PeerClusterRelData(Model):
             credentials["admin_tls"] = secrets.resolve_credential(
                 credentials["admin_tls"], peek_secrets=peek_secrets
             )
-        else:
+        elif not credentials.get("admin_tls"):
             credentials["admin_tls"] = None
 
         if (
@@ -742,7 +742,8 @@ class PeerClusterRelData(Model):
                     peek_secrets=peek_secrets,
                 )
         else:
-            credentials["s3"] = {}
+            credentials["s3"] = None
+
         if (
             credentials.get("azure")
             and credentials["azure"].get("storage-account")
@@ -759,16 +760,16 @@ class PeerClusterRelData(Model):
                 peek_secrets=peek_secrets,
             )
         else:
-            credentials["azure"] = {}
+            credentials["azure"] = None
 
-        if credentials.get("gcs", {}).get("secret-key"):
+        if credentials.get("gcs") and credentials["gcs"].get("secret-key"):
             credentials["gcs"]["secret-key"] = secrets.resolve_credential(
                 credentials["gcs"]["secret-key"],
                 content_key="gcs-secret-key",
                 peek_secrets=peek_secrets,
             )
         else:
-            credentials["gcs"] = {}
+            credentials["gcs"] = None
 
         return PeerClusterRelData.from_dict(content)
 
@@ -884,6 +885,47 @@ class SmtpConfig:
     group_id: str
     channel_id: str
     transport_security: SmtpTransportSecurity
+
+
+class ExternalClientRequestedEntity(NamedTuple):
+    """Model class for the entity credentials requested on a client relation.
+
+    Attributes:
+        username: name of the requested entity.
+        password: password of the requested entity or `None` if no password is requested.
+    """
+
+    username: str
+    password: str | None
+
+
+class ExternalClientEntityPermission(Model):
+    """Model class for a single permission entry requested on a client relation."""
+
+    resource_name: str
+    resource_type: Literal["index_permissions"]
+    privileges: list[str]
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return {
+            self.resource_type: [
+                {
+                    "index_patterns": [self.resource_name],
+                    "allowed_actions": self.privileges,
+                }
+            ]
+        }
+
+
+class ExternalClientEntityPermissions(RootModel[list[ExternalClientEntityPermission]]):
+    """Model class for the entity permissions requested on a client relation."""
+
+    root: list[ExternalClientEntityPermission] = Field(min_length=1, max_length=1)
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return self.root[0].to_role_permissions()
 
 
 class JWTAuthConfiguration(Model):

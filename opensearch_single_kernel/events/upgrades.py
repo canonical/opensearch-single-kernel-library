@@ -12,7 +12,6 @@ from data_platform_helpers.version_check import get_charm_revision
 from ops import Object, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
-    OPENSEARCH_SNAP_REVISION,
     UPGRADE_RELATION,
     HealthColors,
     Substrates,
@@ -21,6 +20,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchNotFullyReadyError,
     OpenSearchReconcilePartitionError,
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
@@ -32,6 +32,7 @@ from opensearch_single_kernel.core.models import (
 )
 from opensearch_single_kernel.events.custom_events import UpgradeOpenSearch
 from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
+from opensearch_single_kernel.utils.helpers import pinned_snap_revision
 
 if typing.TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -61,7 +62,8 @@ class UpgradesEventsHandler(Object):
             self._on_upgrade_peer_relation_created,
         )
         self.framework.observe(
-            self.charm.on[UPGRADE_RELATION].relation_changed, self._reconcile_upgrade
+            self.charm.on[UPGRADE_RELATION].relation_changed,
+            self._on_upgrade_peer_relation_changed,
         )
         self.framework.observe(
             self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
@@ -81,7 +83,7 @@ class UpgradesEventsHandler(Object):
     def _on_upgrade_peer_relation_created(self, _) -> None:
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
-            self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+            self.charm.state.server_upgrade.snap_revision = pinned_snap_revision()
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
@@ -95,10 +97,11 @@ class UpgradesEventsHandler(Object):
 
         self.charm.upgrades_manager.save_upgrades_versions()
 
-    def _reconcile_upgrade(  # noqa: C901
-        self,
-        _: typing.Optional[ops.RelationChangedEvent] = None,
-    ) -> None:
+    def _on_upgrade_peer_relation_changed(self, _: ops.RelationChangedEvent) -> None:
+        """Reconcile peer progress without replacing local post-upgrade checks."""
+        self._reconcile_upgrade(during_upgrade=True)
+
+    def _reconcile_upgrade(self, *, during_upgrade: bool = False) -> None:  # noqa: C901
         """Handle upgrade events."""
         if not self.charm.state.upgrade_relation:
             logger.debug("Peer relation not available")
@@ -173,15 +176,30 @@ class UpgradesEventsHandler(Object):
 
         if self.charm.state.substrate == Substrates.K8S:
             if (
-                self.charm.state.application.deployment_desc
+                not during_upgrade
+                and self.charm.upgrades_manager.unit_state is not UnitUpgradesState.HEALTHY
+                and self.charm.state.application.deployment_desc
+                and self.charm.state.application.is_security_index_initialised
                 and self.charm.upgrades_manager.opensearch_client.is_node_up()
             ):
+                try:
+                    self.charm.cluster_manager.assert_current_node_joined_cluster()
+                except (OpenSearchNotFullyReadyError, OpenSearchHttpError):
+                    logger.debug("Waiting for the upgraded node to rejoin the cluster")
+                    return
                 try:
                     self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
                         alt_hosts=self.charm.cluster_manager.alt_hosts
                     )
                 except OpenSearchHttpError:
                     logger.exception("Failed to re-enable allocation after upgrade")
+                    return
+                # Preserve the post-upgrade health gate when recovery is retried by lifecycle hooks.
+                if self.charm.health_manager.get(local_app_only=False) not in (
+                    HealthColors.GREEN,
+                    HealthColors.YELLOW,
+                ):
+                    return
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
@@ -206,6 +224,8 @@ class UpgradesEventsHandler(Object):
         )
         # TODO check backwards compatibility for profiles
         if self.charm.substrate == Substrates.VM:
+            # The stable (2.19.4) vm charm stored JWT/OIDC configuration only in YAML
+            self.charm.upgrades_manager.migrate_legacy_auth_configuration()
             self.machine_upgrade()
         else:
             self.kubernetes_upgrade(event)
@@ -371,7 +391,7 @@ class UpgradesEventsHandler(Object):
                     )
                     self.charm.lock_manager.release()
                     return
-        self.charm.state.server_upgrade.snap_revision = OPENSEARCH_SNAP_REVISION
+        self.charm.state.server_upgrade.snap_revision = pinned_snap_revision()
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
@@ -382,7 +402,7 @@ class UpgradesEventsHandler(Object):
             interpolated=True,
         )
         logger.debug(
-            f"Saved {OPENSEARCH_SNAP_REVISION=} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
+            f"Saved revision={pinned_snap_revision()} and {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
         )
 
         logger.debug("Starting OpenSearch after upgrade")
@@ -538,6 +558,16 @@ class UpgradesEventsHandler(Object):
 
         if not self.charm.tls_manager.all_tls_resources_stored():
             logger.info("TLS resources not yet stored on disk after upgrade. Deferring.")
+            event.defer()
+            return
+
+        # The refreshed pod lost the keystore entries and S3 CA with its container filesystem
+        try:
+            self.charm.ldap_manager.restore_ldap_ca()
+            self.charm.snapshots_events.restore_stored_credentials()
+            self.charm.notifications_events.restore_keystore_credentials()
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Failed to restore keystore credentials after upgrade: %s", e)
             event.defer()
             return
 

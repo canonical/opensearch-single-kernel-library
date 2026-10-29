@@ -27,6 +27,12 @@ from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
+_STORAGE_KEYSTORE_ENTRIES = {
+    ObjectStorageType.S3: ["s3.client.default.access_key", "s3.client.default.secret_key"],
+    ObjectStorageType.AZURE: ["azure.client.default.account", "azure.client.default.key"],
+    ObjectStorageType.GCS: ["gcs.client.default.credentials_file"],
+}
+
 
 class KeystoreManager(BaseManager):
     """Manages keystore."""
@@ -47,6 +53,22 @@ class KeystoreManager(BaseManager):
 
         self.workload.run_cmd(self.keystore, "create")
 
+    def _list_entries(self) -> set[str]:
+        """Read existing entry names, propagating failures to access the keystore."""
+        if not self.workload.exists(self.workload.paths.opensearch_keystore):
+            return set()
+        return set(self.workload.run_cmd(self.keystore, "list").out.splitlines())
+
+    @property
+    def stored_storage_types(self) -> list[ObjectStorageType]:
+        """Storage backends with at least one credential in the local keystore."""
+        entries = self._list_entries()
+        return [
+            storage_type
+            for storage_type, keys in _STORAGE_KEYSTORE_ENTRIES.items()
+            if entries.intersection(keys)
+        ]
+
     def put_object_storage_credentials(
         self,
         object_storage_type: ObjectStorageType,
@@ -54,27 +76,30 @@ class KeystoreManager(BaseManager):
         gcs_file_path: str | None = None,
     ) -> None:
         """Put object storage credentials in the keystore."""
-        if object_storage_type == ObjectStorageType.S3 and isinstance(
-            object_storage_credentials, S3RelDataCredentials
-        ):
+        if object_storage_type in {
+            ObjectStorageType.S3,
+            ObjectStorageType.S3_PCLUSTER,
+        } and isinstance(object_storage_credentials, S3RelDataCredentials):
             self.put_entries(
                 {
                     "s3.client.default.access_key": object_storage_credentials.access_key,
                     "s3.client.default.secret_key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.AZURE and isinstance(
-            object_storage_credentials, AzureRelDataCredentials
-        ):
+        elif object_storage_type in {
+            ObjectStorageType.AZURE,
+            ObjectStorageType.AZURE_PCLUSTER,
+        } and isinstance(object_storage_credentials, AzureRelDataCredentials):
             self.put_entries(
                 {
                     "azure.client.default.account": object_storage_credentials.storage_account,
                     "azure.client.default.key": object_storage_credentials.secret_key,
                 }
             )
-        elif object_storage_type == ObjectStorageType.GCS and isinstance(
-            object_storage_credentials, GcsRelDataCredentials
-        ):
+        elif object_storage_type in {
+            ObjectStorageType.GCS,
+            ObjectStorageType.GCS_PCLUSTER,
+        } and isinstance(object_storage_credentials, GcsRelDataCredentials):
             if gcs_file_path is None:
                 raise ValueError(
                     "GCS credentials file path must be provided for GCS object storage."
@@ -98,26 +123,13 @@ class KeystoreManager(BaseManager):
         Returns:
             True if the cleanup was successful, False otherwise.
         """
-        keystore_entries = []
-        if object_storage_type == ObjectStorageType.S3:
-            keystore_entries = ["s3.client.default.access_key", "s3.client.default.secret_key"]
-        elif object_storage_type == ObjectStorageType.AZURE:
-            keystore_entries = ["azure.client.default.account", "azure.client.default.key"]
-        else:
-            keystore_entries = ["gcs.client.default.credentials_file"]
-
-        if not keystore_entries:
-            logger.warning(
-                "No keystore entries defined for object storage type %s. Skipping cleanup.",
-                object_storage_type,
-            )
-            return True
+        keystore_entries = _STORAGE_KEYSTORE_ENTRIES[object_storage_type]
 
         if not self.remove_entries(keystore_entries):
             logger.warning("Failed to remove keystore entries for %s.", object_storage_type)
             return False
 
-        logger.info("Removed keystore entries for %s.", object_storage_type)
+        logger.debug("Keystore credentials for %s are absent.", object_storage_type)
         return True
 
     def put_entries(self, entries: dict[str, str]) -> None:
@@ -148,28 +160,16 @@ class KeystoreManager(BaseManager):
     def remove_entries(self, keys: list[str]) -> bool:
         """Remove entries from the keystore. Returns True on success, False otherwise."""
         try:
-            self._create_if_needed()
-        except OpenSearchFileOperationError as e:
-            logger.error("Failed to access keystore: %s", e)
-            return False
-
-        for key in keys:
-            if key == "keystore.seed":
-                continue
-
-            try:
-                self.workload.run_cmd(self.keystore, f"remove {key}")
-            except OpenSearchCmdError as e:
-                parts = [
-                    getattr(e, "stdout", "") or "",
-                    getattr(e, "stderr", "") or "",
-                    str(e) or "",
-                ]
-                msg = " ".join(parts).lower()
-                if "does not exist" in msg and "keystore" in msg:
+            entries = self._list_entries()
+            for key in keys:
+                if key == "keystore.seed" or key not in entries:
                     continue
-                logger.error("Failed to remove keystore entry %s: %s", key, e)
-                return False
+
+                self.workload.run_cmd(self.keystore, f"remove {key}")
+                logger.info("Removed keystore entry %s.", key)
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Failed to clean up keystore entries: %s", e)
+            return False
 
         return True
 

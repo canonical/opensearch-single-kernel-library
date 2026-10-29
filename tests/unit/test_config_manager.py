@@ -5,6 +5,7 @@
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import PropertyMock
 
@@ -21,6 +22,7 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from tests.unit.helpers import (
     config_path,
+    deployment_descriptions,
     jvm_options,
     opensearch_yml,
     sec_conf_yml,
@@ -128,6 +130,11 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
     # call method
     harness.charm.config_manager.update_opensearch_config()
 
+    # the security config is left untouched: it is only updated along with the security index
+    assert yaml_conf_setter.load(sec_conf_yml) == security_conf
+
+    harness.charm.config_manager.update_security_config()
+
     # check the changes
     opensearch_conf = yaml_conf_setter.load(opensearch_yml)
     security_conf = yaml_conf_setter.load(sec_conf_yml)
@@ -139,6 +146,112 @@ def test_set_client_auth(harness, mocker, substrate, tmp_config_path):
     assert authc()["basic_internal_auth_domain"]["http_enabled"]
     assert authc()["clientcert_auth_domain"]["http_enabled"]
     assert authc()["clientcert_auth_domain"]["transport_enabled"]
+
+
+@pytest.fixture
+def security_config(harness, mocker, substrate):
+    """Running node whose security config file changes once updated."""
+    workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.can_connect",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch(
+        f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started",
+        return_value=True,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.admin_secrets",
+        new_callable=PropertyMock,
+        return_value={"chain": "admin-chain"},
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.BaseWorkload.read_text",
+        return_value="applied-security-config",
+    )
+    return SimpleNamespace(
+        path=harness.charm.workload.paths.conf / sec_conf_yml,
+        update=mocker.patch(
+            "opensearch_single_kernel.managers.config.ConfigManager.update_security_config",
+            return_value=True,
+        ),
+        apply=mocker.patch(
+            "opensearch_single_kernel.managers.config.ConfigManager.apply_security_config",
+            return_value=True,
+        ),
+        write_text=mocker.patch("opensearch_single_kernel.workload.base.BaseWorkload.write_text"),
+    )
+
+
+@pytest.mark.parametrize("changed", [True, False], ids=["changed", "unchanged"])
+@pytest.mark.parametrize("force", [True, False], ids=["forced", "not-forced"])
+def test_security_config_applied_when_changed_or_forced(harness, security_config, changed, force):
+    security_config.update.return_value = changed
+
+    assert harness.charm.config_manager.reconcile_security_config(force) is True
+
+    assert security_config.apply.called is (changed or force)
+    security_config.write_text.assert_not_called()
+
+
+def test_security_config_restored_for_next_attempt_when_its_application_fails(
+    harness, security_config
+):
+    security_config.apply.return_value = False
+
+    assert harness.charm.config_manager.reconcile_security_config() is False
+
+    security_config.write_text.assert_called_once_with(
+        "applied-security-config", security_config.path
+    )
+
+
+def test_security_config_restored_when_its_application_raises(harness, security_config):
+    security_config.apply.side_effect = RuntimeError("workload unreachable")
+
+    with pytest.raises(RuntimeError):
+        harness.charm.config_manager.reconcile_security_config()
+
+    security_config.write_text.assert_called_once_with(
+        "applied-security-config", security_config.path
+    )
+
+
+@pytest.mark.parametrize("reason", ["service-stopped", "node-down", "no-admin-secrets"])
+def test_security_config_not_updated_until_it_can_be_applied(
+    harness, mocker, substrate, security_config, reason
+):
+    if reason == "service-stopped":
+        workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
+        mocker.patch(
+            f"opensearch_single_kernel.workload.{substrate}.{workload_class}.is_service_started",
+            return_value=False,
+        )
+    elif reason == "node-down":
+        mocker.patch(
+            "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+            return_value=False,
+        )
+    else:
+        mocker.patch(
+            "opensearch_single_kernel.core.state.OpenSearchApplication.admin_secrets",
+            new_callable=PropertyMock,
+            return_value={},
+        )
+
+    assert harness.charm.config_manager.reconcile_security_config(force=True) is False
+
+    security_config.update.assert_not_called()
+    security_config.apply.assert_not_called()
 
 
 # TODO: Add tests related to configuring tls

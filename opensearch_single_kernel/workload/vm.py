@@ -19,7 +19,6 @@ from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
 from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
 
-from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_REVISION
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -35,7 +34,7 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
 )
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
 from opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap import SnapError
-from opensearch_single_kernel.utils.helpers import mask_sensitive_information
+from opensearch_single_kernel.utils.helpers import mask_sensitive_information, pinned_snap_revision
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
 logger = logging.getLogger(__name__)
@@ -110,7 +109,7 @@ class VMWorkload(BaseWorkload):
             cache = snap.SnapCache()
             opensearch_snap = cache["opensearch"]
             # Make sure that we have the exact revision
-            opensearch_snap.ensure(snap.SnapState.Latest, revision=OPENSEARCH_SNAP_REVISION)
+            opensearch_snap.ensure(snap.SnapState.Latest, revision=pinned_snap_revision())
             opensearch_snap.connect("process-control")
             self.opensearch_snap = opensearch_snap
             if not opensearch_snap.held:
@@ -160,19 +159,27 @@ class VMWorkload(BaseWorkload):
                     raise e
 
     @override
-    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
+    def run_script(
+        self,
+        script_name: str,
+        args: str = None,
+        stdin: str | None = None,
+        *,
+        timeout: int = 30,
+    ):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME.
 
         Args:
             script_name (str): The name of script file to execute.
             args (str): Arguments passed to the script.
             stdin (str): String input to be passed on the standard input of the subprocess.
+            timeout: Maximum execution time in seconds.
         """
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):
             self.run_cmd(f"chmod a+x {script_path}")
 
-        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args, timeout=timeout)
 
     @property
     @override
@@ -208,7 +215,7 @@ class VMWorkload(BaseWorkload):
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
         # First, we want to make sure the process is not stopped, dead or zombie.
         try:
-            pid = self.run_cmd("lsof", args="-ti:9200").out.rstrip()
+            pid = self.run_cmd("lsof", args="-ti:9200 -sTCP:LISTEN").out.rstrip()
             if not pid or not os.path.exists(f"/proc/{pid}/stat"):
                 return False
             with open(f"/proc/{pid}/stat") as f:
@@ -326,6 +333,8 @@ class VMWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run command.
 
@@ -334,6 +343,7 @@ class VMWorkload(BaseWorkload):
             args: command line arguments
             stdin: string input to be passed on the standard input of the subprocess
             use_errors_replace: replace errors with empty string
+            timeout: maximum execution time in seconds
 
         Returns the stdout
         """
@@ -351,7 +361,7 @@ class VMWorkload(BaseWorkload):
             shell=True,
             text=True,
             encoding="utf-8",
-            timeout=25,
+            timeout=timeout,
             env=os.environ,
         )
 

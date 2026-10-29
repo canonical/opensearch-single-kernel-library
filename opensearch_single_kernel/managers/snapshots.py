@@ -12,6 +12,7 @@ from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
+from tenacity import Retrying, before_sleep_log, retry_if_exception_type, stop_after_attempt
 
 from opensearch_single_kernel.common.constants import (
     AZURE_CREDENTIALS,
@@ -35,6 +36,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchRestoreIndexConflictError,
     OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -461,31 +463,53 @@ class SnapshotsManager(BaseManager):
 
         try:
             self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
-            # close indices that were snapshotted if they still exist, so they can be restored
-            self.close_snapshot_indices(snapshot)
-            # start the restore
-            logger.info("Starting restore of snapshot %s.", snapshot_id)
-            non_restored_indices = self.opensearch_client.restore_snapshot(
-                object_storage_type=object_storage_type,
-                snapshot=snapshot,
-                alt_hosts=alt_hosts,
-            )
-            if not non_restored_indices:
-                return
-
-            logger.error(
-                "Failed to restore the following indices in snapshot %s: %s.",
-                snapshot_id,
-                non_restored_indices,
-            )
-            raise OpenSearchRestoreBackupError(
-                f"Failed to restore {len(non_restored_indices)} indices. Check logs for details."
-            )
         except OpenSearchHttpError as e:
             logger.error("Failed to restore snapshot %s. Error: %s.", snapshot_id, str(e))
             raise OpenSearchRestoreBackupError(
-                f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
+                "Failed to verify the %s repository for the %s snapshot. Error: %s."
+                % (object_storage_type, snapshot_id, e)
             )
+
+        max_attempts = 3
+        try:
+            for attempt in Retrying(
+                retry=retry_if_exception_type(OpenSearchRestoreIndexConflictError),
+                stop=stop_after_attempt(max_attempts),
+                before_sleep=before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            ):
+                with attempt:
+                    # Close indices, and retry closure + restore in case a new index was created in between
+                    self.close_snapshot_indices(snapshot)
+
+                    # start the restore
+                    logger.info("Starting restore of snapshot %s.", snapshot_id)
+                    non_restored_indices = self.opensearch_client.restore_snapshot(
+                        object_storage_type=object_storage_type,
+                        snapshot=snapshot,
+                        alt_hosts=alt_hosts,
+                    )
+        except OpenSearchRestoreIndexConflictError as exc:
+            raise OpenSearchRestoreBackupError(
+                "Restore %s rejected after %d attempts. %s" % (snapshot_id, max_attempts, exc)
+            ) from exc
+        except OpenSearchHttpError as exc:
+            raise OpenSearchRestoreBackupError(
+                "Restore %s not confirmed. Check restore progress before retrying. %s"
+                % (snapshot_id, exc)
+            ) from exc
+
+        if not non_restored_indices:
+            return
+
+        logger.error(
+            "Failed to restore the following indices in snapshot %s: %s.",
+            snapshot_id,
+            non_restored_indices,
+        )
+        raise OpenSearchRestoreBackupError(
+            "Failed to restore %d indices. Check logs for details." % len(non_restored_indices)
+        )
 
     def close_snapshot_indices(self, snapshot: dict) -> None:
         """Close the given indices.
@@ -535,9 +559,8 @@ class SnapshotsManager(BaseManager):
 
         credentials_hash = hash_credentials(credential_dict)
         logger.info(
-            "Verifying credentials for %s with hash %s",
+            "Verifying credentials for %s",
             object_storage_type,
-            credentials_hash,
         )
 
         # check all other clusters if they have saved the credentials

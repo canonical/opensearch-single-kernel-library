@@ -8,9 +8,11 @@ import re
 import time
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
+from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from tests.integration.conftest import APP_NAME as OPENSEARCH_APP_NAME
 from tests.integration.conftest import (
     CONFIG_OPTS,
@@ -18,6 +20,7 @@ from tests.integration.conftest import (
     SERIES,
 )
 from tests.integration.helpers import (
+    EmptyActiveStatus,
     EmptyBlockedStatus,
     get_application_unit_ids,
     get_leader_unit_id,
@@ -40,6 +43,12 @@ logger = logging.getLogger(__name__)
 CLIENT_APP_NAME = "application"
 SECONDARY_CLIENT_APP_NAME = "secondary-application"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
+K8S_DASHBOARDS_APP_NAME = "opensearch-dashboards-k8s"
+# OpenSearch Dashboards on K8s stays blocked until an ingress is related
+DASHBOARDS_K8S_INGRESS_MISSING = StatusObject(
+    status="blocked",
+    message="Ingress relation missing",
+)
 ALL_APPS = [
     OPENSEARCH_APP_NAME,
     TLS_CERTIFICATES_APP_NAME,
@@ -48,6 +57,21 @@ ALL_APPS = [
 ]
 
 NUM_UNITS = 3
+
+DATA_INTEGRATOR_CHARM = "data-integrator"
+# Revisions are built per architecture; both come from the same latest/edge release
+DATA_INTEGRATOR_REVISIONS = {"amd64": 546, "arm64": 542}
+GROUP_ENTITY_NAME = "test-group"
+
+GROUP_CLIENT_APP_NAME = "group-client"
+GROUP_CLIENT_CONFIG = {"index-name": "group-index", "entity-type": "GROUP"}
+GROUP_ENTITY_SECRET_NAME = "group-entity"
+GROUP_ENTITY_PASSWORD = "group-password"
+
+CONFLICTING_CLIENT_APP_NAME = "conflicting-client"
+CONFLICTING_CLIENT_CONFIG = {"index-name": "conflicting-index", "entity-type": "GROUP"}
+CONFLICTING_ENTITY_SECRET_NAME = "conflicting-group-entity"
+CONFLICTING_ENTITY_PASSWORD = "conflicting-password"
 
 FIRST_RELATION_NAME = "first-index"
 SECOND_RELATION_NAME = "second-index"
@@ -66,7 +90,7 @@ PROTECTED_INDICES = [
 
 @pytest.mark.abort_on_fail
 async def test_create_relation(
-    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate
+    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate, architecture
 ):
     """Test basic functionality of relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
@@ -95,14 +119,18 @@ async def test_create_relation(
             trust=substrate == "k8s",
         ),
     )
-    if substrate == "vm":
+    # TODO: Remove this once we have OSD on arm64
+    if architecture != "arm64":
         await ops_test.model.deploy(
-            DASHBOARDS_APP_NAME,
+            DASHBOARDS_APP_NAME if substrate == "vm" else K8S_DASHBOARDS_APP_NAME,
             application_name=DASHBOARDS_APP_NAME,
             channel="2/edge",
             series=SERIES,
+            trust=substrate == "k8s",
         )
-    await ops_test.model.integrate(OPENSEARCH_APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(
+        f"{OPENSEARCH_APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
+    )
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, OPENSEARCH_APP_NAME],
         status="active",
@@ -121,7 +149,7 @@ async def test_create_relation(
         timeout=1600,
         status="active",
     )
-    if substrate == "vm":
+    if architecture != "arm64":
         await ops_test.model.wait_for_idle(
             apps=[DASHBOARDS_APP_NAME],
             timeout=1600,
@@ -246,11 +274,13 @@ async def get_secret_data(ops_test, secret_uri):
     return json.loads(stdout)[secret_unique_id]["content"]["Data"]
 
 
-# TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
-async def test_dashboard_relation(ops_test: OpsTest):
+async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrate: str):
     """Test we can create relations with admin permissions."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
+        )
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
     dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
@@ -260,9 +290,16 @@ async def test_dashboard_relation(ops_test: OpsTest):
         f"{DASHBOARDS_APP_NAME}:{DASHBOARDS_RELATION_NAME}",
     )
 
+    dashboards_statuses = (
+        {DASHBOARDS_APP_NAME: [EmptyActiveStatus, DASHBOARDS_K8S_INGRESS_MISSING]}
+        if substrate == "k8s"
+        else None
+    )
     await wait_until(
         ops_test,
         apps=ALL_APPS,
+        apps_statuses=dashboards_statuses,
+        units_statuses=dashboards_statuses,
         idle_period=70,
     )
 
@@ -281,11 +318,13 @@ async def test_dashboard_relation(ops_test: OpsTest):
     assert relation_user_pwd == result.response.get("password")
 
 
-# TODO add for k8s once k8s dashboards is available
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
-async def test_dashboard_relation_password_change(ops_test: OpsTest):
+async def test_dashboard_relation_password_change(ops_test: OpsTest, architecture: str):
     """Test we can create relations with admin permissions."""
+    if architecture == "arm64":
+        pytest.skip(
+            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
+        )
     # Changing Opensearch kibanaserver password
     leader_id = await get_leader_unit_id(ops_test)
     result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})
@@ -754,3 +793,166 @@ async def test_data_persists_on_relation_rejoin(ops_test: OpsTest):
         hit.get("_source", {}).get("artist") for hit in results.get("hits", {}).get("hits", [{}])
     ]
     assert set(artists) == {"Herbie Hancock", "Lydian Collective", "Vulfpeck"}
+
+
+async def _entity_auth_status(ops_test: OpsTest, password: str) -> int:
+    """Get the response status of an authentication attempt as the group entity."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    return await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/authinfo",
+        user=GROUP_ENTITY_NAME,
+        user_password=password,
+        resp_status_code=True,
+        verify=False,
+    )
+
+
+async def _group_entity_status(ops_test: OpsTest, resource: str) -> int:
+    """Get the response status of fetching the role or internal user named as the group entity."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    return await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/{resource}/{GROUP_ENTITY_NAME}",
+        resp_status_code=True,
+        verify=False,
+    )
+
+
+async def _group_role_index_patterns(ops_test: OpsTest) -> list[str]:
+    """Get the index patterns the role of the group entity grants permissions on."""
+    leader_ip = await get_leader_unit_ip(ops_test)
+    roles = await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_to_url(leader_ip)}:9200/_plugins/_security/api/roles/{GROUP_ENTITY_NAME}",
+        verify=False,
+    )
+    return [
+        pattern
+        for permission in roles[GROUP_ENTITY_NAME]["index_permissions"]
+        for pattern in permission["index_patterns"]
+    ]
+
+
+async def _wait_for_group_entity_conflict(ops_test: OpsTest) -> None:
+    """Wait for the charm to report the group entity requested by two relations."""
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME],
+        units_statuses={
+            OPENSEARCH_APP_NAME: [
+                EmptyActiveStatus,
+                ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT.value,
+            ]
+        },  # client relation statuses are only computed by the leader
+        idle_period=70,
+    )
+
+
+@pytest.mark.abort_on_fail
+async def test_group_entity_relation(ops_test: OpsTest, architecture: str):
+    """Test that a relation requesting a group entity is provided with it."""
+    await asyncio.gather(
+        ops_test.model.deploy(
+            DATA_INTEGRATOR_CHARM,
+            revision=DATA_INTEGRATOR_REVISIONS[architecture],
+            channel="latest/edge",
+            application_name=GROUP_CLIENT_APP_NAME,
+        ),
+        ops_test.model.deploy(
+            DATA_INTEGRATOR_CHARM,
+            revision=DATA_INTEGRATOR_REVISIONS[architecture],
+            channel="latest/edge",
+            application_name=CONFLICTING_CLIENT_APP_NAME,
+        ),
+    )
+    await ops_test.model.wait_for_idle(
+        apps=[GROUP_CLIENT_APP_NAME, CONFLICTING_CLIENT_APP_NAME], timeout=1800
+    )
+
+    # Both clients request the same group entity, each one with its own password.
+    group_secret = await ops_test.model.add_secret(
+        GROUP_ENTITY_SECRET_NAME, [f"{GROUP_ENTITY_NAME}={GROUP_ENTITY_PASSWORD}"]
+    )
+    conflicting_secret = await ops_test.model.add_secret(
+        CONFLICTING_ENTITY_SECRET_NAME, [f"{GROUP_ENTITY_NAME}={CONFLICTING_ENTITY_PASSWORD}"]
+    )
+    await asyncio.gather(
+        ops_test.model.grant_secret(GROUP_ENTITY_SECRET_NAME, GROUP_CLIENT_APP_NAME),
+        ops_test.model.grant_secret(CONFLICTING_ENTITY_SECRET_NAME, CONFLICTING_CLIENT_APP_NAME),
+    )
+    await asyncio.gather(
+        ops_test.model.applications[GROUP_CLIENT_APP_NAME].set_config(
+            GROUP_CLIENT_CONFIG | {"requested-entities-secret": group_secret}
+        ),
+        ops_test.model.applications[CONFLICTING_CLIENT_APP_NAME].set_config(
+            CONFLICTING_CLIENT_CONFIG | {"requested-entities-secret": conflicting_secret}
+        ),
+    )
+
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME)
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    # A group entity is a role which, without requested permissions, is scoped to its index...
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
+    # ...and never a user, even when requested along with a password.
+    assert await _group_entity_status(ops_test, "internalusers") == 404
+    assert await _entity_auth_status(ops_test, GROUP_ENTITY_PASSWORD) == 401
+
+
+@pytest.mark.abort_on_fail
+async def test_conflicting_group_entity_relation(ops_test: OpsTest):
+    """Test that a relation cannot take over the group entity owned by another relation."""
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME)
+    await _wait_for_group_entity_conflict(ops_test)
+
+    # The entity keeps the permissions of the relation owning it and never the ones of the
+    # relation requesting it afterwards.
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
+
+
+@pytest.mark.abort_on_fail
+async def test_conflicting_group_entity_relation_broken(ops_test: OpsTest):
+    """Test that removing the conflicting relation keeps the entity of the owning one."""
+    await ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
+        CLIENT_RELATION, CONFLICTING_CLIENT_APP_NAME, True
+    )
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, GROUP_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    assert await _group_role_index_patterns(ops_test) == [GROUP_CLIENT_CONFIG["index-name"]]
+
+
+@pytest.mark.abort_on_fail
+async def test_group_entity_provided_on_owning_relation_broken(ops_test: OpsTest):
+    """Test that the entity is provided to the conflicting relation once it is released."""
+    await wait_for_relation_removed_between(
+        ops_test, OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME
+    )
+    await ops_test.model.integrate(OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME)
+    await wait_for_relation_joined_between(
+        ops_test, OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME
+    )
+    await _wait_for_group_entity_conflict(ops_test)
+
+    await ops_test.model.applications[OPENSEARCH_APP_NAME].remove_relation(
+        CLIENT_RELATION, GROUP_CLIENT_APP_NAME, True
+    )
+    await wait_until(
+        ops_test,
+        apps=[OPENSEARCH_APP_NAME, CONFLICTING_CLIENT_APP_NAME],
+        idle_period=70,
+    )
+
+    assert await _group_role_index_patterns(ops_test) == [CONFLICTING_CLIENT_CONFIG["index-name"]]
+    assert await _group_entity_status(ops_test, "internalusers") == 404

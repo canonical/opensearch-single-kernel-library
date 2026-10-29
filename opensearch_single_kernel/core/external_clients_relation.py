@@ -5,20 +5,33 @@
 
 """State collection for external client relation."""
 
-from ops.model import Application, Relation
+import logging
 
+from ops import SecretNotFoundError
+from ops.model import Application, ModelError, Relation
+
+from opensearch_single_kernel.core.models import (
+    ExternalClientEntityPermissions,
+    ExternalClientRequestedEntity,
+)
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
 )
 
+logger = logging.getLogger(__name__)
+
+REQUESTED_ENTITY_SECRET = "requested-entity-secret"
+
 
 class ExternalOpenSearchClient(RelationState):
     """State collection for a single related external opensearch client."""
 
+    relation: Relation
+
     def __init__(
         self,
-        relation: Relation | None,
+        relation: Relation,
         data_interface: Data,
         component: Application,
         relation_name: str,
@@ -63,6 +76,16 @@ class ExternalOpenSearchClient(RelationState):
         self.update({"password": password})
 
     @property
+    def entity_name(self) -> str:
+        """Get the name of the entity provided to this relation."""
+        return self.relation_data.get("entity-name", "")
+
+    @entity_name.setter
+    def entity_name(self, entity_name: str) -> None:
+        """Set the name of the entity provided to this relation."""
+        self.update({"entity-name": entity_name})
+
+    @property
     def index(self) -> str:
         """Get the index this relation is using from relation databag."""
         return self.relation_data.get("index", "")
@@ -104,3 +127,90 @@ class ExternalOpenSearchClient(RelationState):
     def extra_user_roles(self, roles: str) -> None:
         """Set the extra user roles for this relation."""
         self.update({"extra-user-roles": roles})
+
+    @property
+    def extra_group_roles(self) -> list[str]:
+        """Get the extra group roles for this relation."""
+        return [
+            role.strip()
+            for role in self.relation_data.get("extra-group-roles", "").split(",")
+            if role.strip()
+        ]
+
+    @property
+    def entity_type(self) -> str:
+        """Get entity type of this relation."""
+        return self.relation_data.get("entity-type", "")
+
+    @property
+    def entity_permissions(self) -> dict[str, list[dict[str, list[str]]]] | None:
+        """Receive, validate and reformat entity permissions into OpenSearch role permissions.
+
+        If the permissions are absent then None is returned.
+
+        Raises:
+            ValidationError: if the requested permissions are invalid.
+        """
+        if not (raw := self.relation_data.get("entity-permissions")):
+            return None
+        return ExternalClientEntityPermissions.model_validate_json(raw).to_role_permissions()
+
+    def get_requested_entity(self) -> ExternalClientRequestedEntity | None:
+        """Retrieve and validate the entity requested on this relation.
+
+        The entity is never accepted in plain text: it is either read from the Juju secret shared
+        by the requirer or, in cross-model relations where requirer secrets cannot be shared,
+        from the content that was encrypted with the encryption key of this relation.
+
+        If content is invalid or absent the None is returned and error is logged.
+        """
+        if not (requested_entity := self.relation_data.get(REQUESTED_ENTITY_SECRET)):
+            logger.info(
+                "No requested entities secret provided for client relation %d",
+                self.relation.id,
+            )
+            return None
+
+        if requested_entity.startswith("secret:"):
+            try:
+                content = self.data_interface._model.get_secret(id=requested_entity).get_content(
+                    refresh=True
+                )
+            except (SecretNotFoundError, ModelError) as e:
+                logger.error(
+                    "Cannot read requested entities secret for client relation %d: %s",
+                    self.relation.id,
+                    e,
+                )
+                return None
+            if not (username := content.get("entity-name")):
+                logger.error(
+                    "Invalid requested entities secret content for client relation %d",
+                    self.relation.id,
+                )
+                return None
+            return ExternalClientRequestedEntity(
+                username=username, password=content.get("password") or None
+            )
+
+        raw_databag = self.relation.data.get(self.relation.app, {})
+        if requested_entity == raw_databag.get(REQUESTED_ENTITY_SECRET):
+            # Neither a secret nor decrypted by the data interface: sent in plain text
+            logger.error(
+                "Rejecting requested entity sent in plain text on client relation %d",
+                self.relation.id,
+            )
+            return None
+
+        requested_entity = requested_entity.split(":", maxsplit=1)
+        if len(requested_entity) != 2 or not requested_entity[0]:
+            logger.error(
+                "Invalid requested entities secret content for client relation %d",
+                self.relation.id,
+            )
+            return None
+        # The requirer serialises an absent password as the "None" literal.
+        return ExternalClientRequestedEntity(
+            username=requested_entity[0],
+            password=None if requested_entity[1] in ("", "None") else requested_entity[1],
+        )
