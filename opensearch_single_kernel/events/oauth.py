@@ -101,7 +101,7 @@ class OAuthEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()
@@ -134,7 +134,7 @@ class OAuthEventsHandler(Object):
         if not (admin_secrets := self.charm.state.application.admin_secrets):
             event.defer()
             return
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             event.defer()

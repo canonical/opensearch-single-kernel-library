@@ -7,7 +7,12 @@
 import logging
 from typing import TYPE_CHECKING
 
-from ops import Object, RelationBrokenEvent, RelationChangedEvent, RelationDepartedEvent
+from ops import (
+    Object,
+    RelationBrokenEvent,
+    RelationChangedEvent,
+    RelationDepartedEvent,
+)
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, OLD_CA_ALIAS
 from opensearch_single_kernel.common.exceptions import (
@@ -19,16 +24,23 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
 from opensearch_single_kernel.core.state import ExternalOpenSearchClient
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
+    ENTITY_GROUP,
+    ENTITY_USER,
+    IndexEntityPermissionsChangedEvent,
+    IndexEntityRequestedEvent,
     IndexRequestedEvent,
     OpenSearchProvides,
 )
-from opensearch_single_kernel.utils.helpers import validate_index_name
 from opensearch_single_kernel.utils.status import format_status
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
 
 logger = logging.getLogger(__name__)
+
+ClientRequestEvent = (
+    IndexRequestedEvent | IndexEntityRequestedEvent | IndexEntityPermissionsChangedEvent
+)
 
 
 class ExternalClientsEventsHandler(Object):
@@ -44,7 +56,14 @@ class ExternalClientsEventsHandler(Object):
         )
 
         self.framework.observe(
-            self.opensearch_provides.on.index_requested, self._on_index_requested
+            self.opensearch_provides.on.index_requested, self._on_client_requested
+        )
+        self.framework.observe(
+            self.opensearch_provides.on.index_entity_requested, self._on_client_requested
+        )
+        # The role of the client relation is updated with the new permissions.
+        self.framework.observe(
+            self.opensearch_provides.on.index_entity_permissions_changed, self._on_client_requested
         )
         self.framework.observe(
             charm.on[CLIENT_RELATION].relation_changed, self._on_relation_changed
@@ -54,59 +73,66 @@ class ExternalClientsEventsHandler(Object):
         )
         self.framework.observe(charm.on[CLIENT_RELATION].relation_broken, self._on_relation_broken)
 
-    def _on_index_requested(self, event: IndexRequestedEvent) -> None:  # noqa: C901
-        """Handle client index-requested event.
+    def _on_client_requested(self, event: ClientRequestEvent) -> None:
+        """Handle client index-requested, index-entity-requested & permissions-changed events.
 
         The read-only-endpoints field of DatabaseProvides is unused in this relation because this
         concept is irrelevant to OpenSearch. In this relation, the application charm should have
         control over node & index security policies, and therefore differentiating between types of
         network endpoints is unnecessary.
 
-        Raises:
-            OpenSearchIndexError if the index name is invalid
-            OpenSearchHttpError if we can't create the required index
         """
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Modifying relations during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
-            event.defer()
-            return
-
-        if not self.charm.unit.is_leader():
-            return
-
-        if (
-            not self.charm.cluster_manager.opensearch_client.is_node_up()
-            or not event.index
-            or not self.charm.state.application.is_security_index_initialised
-        ):
-            event.defer()
-            return
-
         if not (external_client := self.charm.state.external_client_by_relation(event.relation)):
             logger.error("No external client found for relation id %d", event.relation.id)
             return
 
-        if not validate_index_name(event.index):
-            logger.error(
-                "Invalid index name %s on client relation %s",
-                event.index,
-                event.relation.id,
-            )
+        if self._is_user_entity_requested(external_client):
             return
 
+        if not self._validate_client_request(event, external_client):
+            return
+
+        requested_entity = external_client.get_requested_entity()
+
         try:
-            if self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS):
-                logger.debug("CA rotation in progress. Deferring index requested event.")
-                event.defer()
-                return
-        except OpenSearchFileOperationError as e:
-            logger.error("Failed to read stored CA: %s", str(e))
+            # The index is created before the entity granted access to it: nothing is provided
+            # to the client if it fails.
+            self._provide_client_index(event, external_client)
+            self.charm.external_clients_manager.provide_client_entity(
+                external_client, requested_entity
+            )
+        except OpenSearchUserMgmtError as e:
+            logger.error("Failed to provide client or entity: %s", str(e))
             event.defer()
             return
 
+        try:
+            external_client.version = self.charm.workload.version
+        except OpenSearchCmdError as e:
+            logger.error("Failed to update relation version info: %s", str(e))
+            event.defer()
+            return
+
+        try:
+            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
+        except KeyError as e:
+            logger.error("Failed to update relation TLS info: missing key %s", str(e))
+            event.defer()
+            return
+
+        self.update_external_client_endpoints(external_client)
+        if external_client.entity_type != ENTITY_GROUP:
+            # A user was provided: the LDAP authorization has to skip it.
+            self.charm.reconcile_security_config(event)
+
+        logger.info("new index %s available", event.index)
+
+    def _provide_client_index(
+        self,
+        event: ClientRequestEvent,
+        external_client: ExternalOpenSearchClient,
+    ) -> None:
+        """Create the index requested by a client relation while reporting it in the status."""
         self.charm.status_handler.set_running_status(
             format_status(
                 ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
@@ -119,42 +145,87 @@ class ExternalClientsEventsHandler(Object):
             component_name=self.charm.external_clients_manager.name,
         )
 
-        try:
-            self.charm.external_clients_manager.opensearch_client.create_index(event.index)
-        except OpenSearchHttpError as e:
+        self.charm.external_clients_manager.provide_client_index(external_client)
+
+    def _is_user_entity_requested(self, external_client: ExternalOpenSearchClient) -> bool:
+        """Check whether a client relation requests a USER entity, which is not supported.
+
+        Nothing is provided to such a relation: the status of the app reports it.
+        """
+        if external_client.entity_type != ENTITY_USER:
+            return False
+
+        logger.error(
+            "Ignoring client relation %d: entity-type=USER is not supported.",
+            external_client.relation.id,
+        )
+        return True
+
+    def _validate_client_request(
+        self,
+        event: ClientRequestEvent,
+        external_client: ExternalOpenSearchClient,
+    ) -> bool:
+        """Validate client request and return whether we should process it.
+
+        Event deferring may also happen here from checks related on current charm state.
+        """
+        if self.charm.upgrades_manager.in_progress:
+            logger.warning(
+                "Modifying relations during an upgrade is not supported."
+                "The charm may be in a broken, unrecoverable state"
+            )
+            event.defer()
+            return False
+
+        if not self.charm.unit.is_leader():
+            return False
+
+        if (
+            not self.charm.cluster_manager.opensearch_client.is_node_up()
+            or not self.charm.state.application.is_security_index_initialised
+        ):
+            event.defer()
+            return False
+
+        # The node is up: the deployment description, hence the type of the app, is known.
+        if not self.charm.state.is_main_orchestrator:
             logger.error(
-                f"Failed to create index {event.index} for client relation {event.relation.id}: {e}"
+                "Client relation %s must be created with the main orchestrator.",
+                event.relation.id,
             )
-            event.defer()
-            return
+            return False
 
         try:
-            username, pwd = self.charm.external_clients_manager.create_opensearch_users(
-                external_client, event.index, extra_user_roles=event.extra_user_roles
+            if self.charm.tls_manager.read_stored_ca(alias=OLD_CA_ALIAS):
+                logger.debug("CA rotation in progress. Deferring index/entity requested event.")
+                event.defer()
+                return False
+        except OpenSearchFileOperationError as e:
+            logger.error("Failed to read stored CA: %s", str(e))
+            event.defer()
+            return False
+
+        try:
+            error = self.charm.external_clients_manager.get_request_error(external_client)
+        except OpenSearchHttpError as e:
+            logger.error("Failed to validate the request of client relation: %s", str(e))
+            event.defer()
+            return False
+
+        if error:
+            logger.error(
+                "Cannot serve the request of client relation %s: %s",
+                event.relation.id,
+                error.name,
             )
-        except OpenSearchUserMgmtError as err:
-            logger.error(err)
-            event.defer()
-            return
-        try:
-            external_client.version = self.charm.workload.version
-        except OpenSearchCmdError as e:
-            logger.error("Failed to update relation version info: %s", str(e))
-            event.defer()
-            return
-        external_client.username = username
-        external_client.password = pwd
-        external_client.index = event.index
-        try:
-            external_client.tls_ca = self.charm.state.application.admin_secrets["chain"]
-        except KeyError as e:
-            logger.error("Failed to update relation TLS info: missing key %s", str(e))
-            event.defer()
-            return
+            # A conflicting entity is released once the relation owning it, or the role
+            # holding its name, is removed.
+            if error is ExternalClientsStatuses.USER_ENTITY_GROUP_CONFLICT:
+                event.defer()
+            return False
 
-        self.update_external_client_endpoints(external_client)
-
-        logger.info("new index %s available", event.index)
+        return True
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         """Handle opensearch client relation-changed event."""
@@ -164,6 +235,8 @@ class ExternalClientsEventsHandler(Object):
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
+            return
+        if self._is_user_entity_requested(external_client):
             return
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.update_external_client_endpoints(external_client)
@@ -177,6 +250,8 @@ class ExternalClientsEventsHandler(Object):
         external_client = self.charm.state.external_client_by_relation(event.relation)
         if not external_client:
             logger.error("No external client found for relation id %d", event.relation.id)
+            return
+        if self._is_user_entity_requested(external_client):
             return
         # remove departing unit from endpoints available to requirer charm.
         if event.departing_unit and event.departing_unit.app == self.charm.app:
@@ -200,6 +275,8 @@ class ExternalClientsEventsHandler(Object):
                 "The charm may be in a broken, unrecoverable state"
             )
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
+        # The users which were removed are no longer to be skipped by the LDAP authorization.
+        self.charm.reconcile_security_config(event)
 
     def update_external_client_endpoints(
         self, external_client: ExternalOpenSearchClient, omit_endpoints: set | None = None
