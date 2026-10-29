@@ -277,10 +277,6 @@ async def get_secret_data(ops_test, secret_uri):
 @pytest.mark.abort_on_fail
 async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrate: str):
     """Test we can create relations with admin permissions."""
-    if architecture == "arm64":
-        pytest.skip(
-            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
-        )
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
     dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
@@ -321,10 +317,6 @@ async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrat
 @pytest.mark.abort_on_fail
 async def test_dashboard_relation_password_change(ops_test: OpsTest, architecture: str):
     """Test we can create relations with admin permissions."""
-    if architecture == "arm64":
-        pytest.skip(
-            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
-        )
     # Changing Opensearch kibanaserver password
     leader_id = await get_leader_unit_id(ops_test)
     result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})

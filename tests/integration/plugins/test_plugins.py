@@ -567,7 +567,6 @@ async def test_small_deployments_prometheus_exporter_cos_relation(
         assert relation_data["tls_config"]["ca"] == admin_secret["ca-cert"]
 
 
-# TODO add when LD is on k8s
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
@@ -864,11 +863,6 @@ async def test_reports_scheduler(
     ops_test: OpsTest, deploy_type: str, substrate, architecture: str
 ) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
-    # TODO: Make sure to remove these once OSD published on ARM
-    if substrate == "k8s":
-        pytest.skip("OpenSearch Dashboards is not yet available on k8s")
-    if architecture == "arm64":
-        pytest.skip("OpenSearch Dashboards is not yet available on arm64")
     # Deploy OpenSearch Dashboards
     await ops_test.model.deploy(
         DASHBOARDS_APP_NAME,
@@ -1850,9 +1844,6 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     - Email channel config
     - Email group config
     """
-    # There is no smtp-integrator charm for arm64, so skip this test on arm64.
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     # ensure OpenSearch is up
     await _wait_for_units(ops_test, deploy_type)
 
@@ -1989,8 +1980,6 @@ async def test_smtp_notification_statuses(
     - SMTP_CONFIGURATION_ERROR — unit tests (apply-path HTTP/keystore failure)
     - SMTP_COULD_NOT_READ_DATA — unit tests (unreadable password secret)
     """
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     await _ensure_opensearch_deployed(
         ops_test, deploy_type, charm, series, substrate, charm_resources
     )
@@ -2101,7 +2090,6 @@ async def test_smtp_notification_statuses(
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_smtp_relation_invalid_status_on_non_main(
     ops_test: OpsTest,
     deploy_type: str,
@@ -2111,8 +2099,6 @@ async def test_smtp_relation_invalid_status_on_non_main(
     architecture: str,
 ) -> None:
     """SMTP on a non-main orchestrator must block with SMTP_RELATION_INVALID."""
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     await _ensure_opensearch_deployed(ops_test, deploy_type, charm, series, substrate)
     await _ensure_smtp_integrator(ops_test)
     # In large deployments APP_NAME is the data cluster (not main orchestrator).
