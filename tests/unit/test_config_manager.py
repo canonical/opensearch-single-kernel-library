@@ -17,6 +17,7 @@ from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
     DeploymentState,
+    Node,
     PeerClusterConfig,
 )
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -371,3 +372,41 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
         stored = set([line.strip() for line in f])
         expected = {"20.20.20.20"}
         assert stored == expected
+
+
+@pytest.mark.real_fs
+def test_update_seeds_config(harness, mocker, substrate, tmp_config_path):
+    """Test the seed hosts are the published hosts of the cluster manager eligible nodes."""
+    local_app = App(model_uuid=harness.charm.model.uuid, name="opensearch")
+    main_app = App(model_uuid="main-model-uuid", name="main")
+
+    units = [
+        (local_app, ["cluster_manager", "data"]),
+        (local_app, ["data"]),
+        (main_app, ["cluster_manager"]),
+    ]
+    if substrate == "vm":
+        hosts = ["10.0.0.10", "10.0.0.11", "10.0.1.12"]
+    else:
+        hosts = [
+            "opensearch-0.opensearch-endpoints.opensearch-data.svc.cluster.local",
+            "opensearch-1.opensearch-endpoints.opensearch-data.svc.cluster.local",
+            "main-2.main-endpoints.opensearch.svc.cluster.local",
+        ]
+    nodes = [
+        Node(
+            name=f"{app.name}-{unit_idx}.abc", roles=roles, ip=host, app=app, unit_number=unit_idx
+        )
+        for unit_idx, ((app, roles), host) in enumerate(zip(units, hosts))
+    ]
+    seeds_file = tmp_config_path / seed_unicast_hosts
+    mocker.patch(
+        "opensearch_single_kernel.workload.base.Paths.seed_hosts",
+        return_value=seeds_file,
+        new_callable=PropertyMock,
+    )
+
+    assert harness.charm.config_manager.update_seeds_config(nodes)
+
+    # units 0 and 2 are cluster manager eligible
+    assert set(seeds_file.read_text().splitlines()) == {hosts[0], hosts[2]}

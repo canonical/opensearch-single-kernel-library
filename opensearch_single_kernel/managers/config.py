@@ -21,9 +21,6 @@ from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
-from opensearch_single_kernel.utils.helpers import (
-    k8s_fqdn,
-)
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -659,12 +656,7 @@ class ConfigManager(BaseManager):
         if nodes_config := self.state.application.nodes_config:
             nodes.extend(list(nodes_config.values()))
         try:
-            if self.state.substrate == Substrates.K8S:
-                self._update_seeds_file(
-                    [k8s_fqdn(node.name) for node in nodes if node.is_cm_eligible()]
-                )
-            else:
-                self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
+            self._update_seeds_file([node.ip for node in nodes if node.is_cm_eligible()])
         except OpenSearchFileOperationError as e:
             logger.error("An error occurred while updating seeds config: %s", e)
             return False
