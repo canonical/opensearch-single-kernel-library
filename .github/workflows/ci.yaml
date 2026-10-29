@@ -1,4 +1,4 @@
-name: Linting, and Unit Tests
+name: Tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -147,7 +147,7 @@ jobs:
       matrix:
         # One call per base keeps each matrix under GitHub's 256 jobs limit
         base: ${{ github.event_name == 'schedule' && fromJSON('["ubuntu22", "ubuntu24"]') || fromJSON('["ubuntu24"]') }}
-    name: Integration test charm | ${{ matrix.base }}
+    name: Integration | ${{ matrix.base }}
     uses: $/.github/workflows/integration_test.yaml
     needs:
       - build
