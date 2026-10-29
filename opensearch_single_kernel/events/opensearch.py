@@ -827,7 +827,9 @@ class OpenSearchEventsHandler(Object):
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
         """Start OpenSearch, with a generated or passed conf, if all resources configured."""
-        if not self.charm.state.application.deployment_desc:
+        if self.charm.is_unit_going_away(event):
+            # a deferred start may run while this unit or app is being removed
+            logger.debug("Unit is going away. Dropping deferred start_opensearch_event.")
             return
 
         # This will block unit to start if it is an upgrade
