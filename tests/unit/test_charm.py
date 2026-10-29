@@ -297,6 +297,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
     )
+    mocker.patch.object(harness.charm, "is_unit_going_away", return_value=False)
 
     # test when setup complete
     should_ignore_lock.return_value = False
@@ -364,6 +365,30 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config.assert_called()
 
 
+@pytest.mark.parametrize(
+    "deployment_desc",
+    [None, deployment_descriptions["ok"]],
+    ids=["peer-data-gone", "peer-data-exists"],
+)
+def test_start_dropped_when_unit_removed(harness, mocker, deployment_desc):
+    """A deferred start during removal is dropped."""
+    mocker.patch.object(harness.charm, "is_unit_going_away", return_value=True)
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_desc,
+    )
+    is_opensearch_started = mocker.patch.object(
+        type(harness.charm.cluster_manager), "is_opensearch_started", new_callable=PropertyMock
+    )
+    event = MagicMock()
+
+    harness.charm.opensearch_events._on_start_opensearch(event)
+
+    is_opensearch_started.assert_not_called()
+    event.defer.assert_not_called()
+
+
 @pytest.mark.parametrize("main_orchestrator", [False, True])
 @pytest.mark.parametrize("already_waiting_to_start", [False, True])
 def test_running_node_defers_with_startup_status(
@@ -383,6 +408,7 @@ def test_running_node_defers_with_startup_status(
         )
     mocker.patch.object(charm.state, "is_peer_cluster_consumer", return_value=False)
     mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=main_orchestrator)
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     for name in (
         "is_data_role_in_cluster_fleet_apps",
         "bootstrapped",
