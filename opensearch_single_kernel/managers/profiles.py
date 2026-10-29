@@ -15,8 +15,6 @@ from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
-    ProductionProfile,
-    TestingProfile,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -31,45 +29,57 @@ class ProfilesManager(BaseManager):
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "profiles_manager")
-        try:
-            if self.profile.type == PerformanceType.TESTING:
-                logger.warning(
-                    "Testing profile is used. This profile is not suitable for production use and should only be used for testing purposes."
-                )
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.state.config.get("profile"),
+        if self.state.server.profile and self.state.server.profile.type == PerformanceType.TESTING:
+            logger.warning(
+                "Testing profile is used. This profile is not suitable for production use and should only be used for testing purposes."
             )
 
-    def get_missing_requirements(self) -> list[str]:
-        """Get the profile missing requirements."""
+    def get_missing_requirements(self, profile: OpenSearchProfile) -> list[str]:
+        """Get the missing requirements of a profile, defaulting to the current profile."""
         missing_requirements: list[str] = []
 
         missing_requirements.extend(self.workload.check_missing_system_requirements())
-        missing_requirements.extend(self.check_memory_requirements(self.profile))
-        missing_requirements.extend(self.check_cluster_topology(self.profile))
+        missing_requirements.extend(self.check_memory_requirements(profile))
+        missing_requirements.extend(self.check_cluster_topology(profile))
         return missing_requirements
 
-    def check_profile_requirements(self) -> bool:
-        """Check all requirements of profile.
+    def check_profile_requirements(self, profile: OpenSearchProfile) -> bool:
+        """Check all requirements of the given profile.
+
+        Args:
+            profile (OpenSearchProfile): The profile to check requirements for.
+
+        Returns:
+            True if all requirements of the profile are met.
+        """
+        try:
+            return not self.get_missing_requirements(profile)
+        except OpenSearchCmdError as e:
+            logger.error("An error occurred while checking profile requirements: %s", str(e))
+            return False
+
+    def check_current_profile_requirements(self) -> bool:
+        """Check all requirements of the profile the unit runs with.
+
+        This is the profile applied on the unit. Until one is applied, it is the configured one,
+        as it is the one to be applied.
 
         Returns:
             True if the profile passed validation and all requirements.
         """
-        try:
-            self.get_config_profile()
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.state.config.get("profile"),
-            )
-            return False
-        try:
-            return not self.get_missing_requirements()
-        except OpenSearchCmdError as e:
-            logger.error("An error occurred while checking profile requirements: %s", str(e))
-            return False
+        profile = self.state.server.profile
+        if profile is None:
+            try:
+                # If no profile is applied, use the configured one.
+                profile = self.state.config_profile
+            except ValueError:
+                logger.error(
+                    "Invalid profile configuration. Value: %s",
+                    self.state.config.get("profile"),
+                )
+                return False
+
+        return self.check_profile_requirements(profile)
 
     def check_memory_requirements(self, profile: OpenSearchProfile) -> list[str]:
         """Checks memory requirements for the unit."""
@@ -128,19 +138,6 @@ class ProfilesManager(BaseManager):
         logger.error("Missing cluster topology requirements: %s", error_message)
         return [error_message]
 
-    @property
-    def profile(self) -> OpenSearchProfile:
-        """Get the current profile."""
-        return self.state.server.profile or self.get_config_profile()
-
-    def get_config_profile(self) -> OpenSearchProfile:
-        """Get the current config profile."""
-        return (
-            ProductionProfile()
-            if PerformanceType(self.state.config.get("profile")) == PerformanceType.PRODUCTION
-            else TestingProfile()
-        )
-
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
@@ -153,13 +150,13 @@ class ProfilesManager(BaseManager):
 
         if scope == "unit":
             try:
-                _ = self.get_config_profile()
+                config_profile = self.state.config_profile
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
                 return status_list
 
             try:
-                if missing_requirements := self.get_missing_requirements():
+                if missing_requirements := self.get_missing_requirements(config_profile):
                     status_list.append(
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
