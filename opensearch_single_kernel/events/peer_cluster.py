@@ -278,16 +278,20 @@ class PeerClusterEventsHandler(Object):
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")
+        orchestrators = self.charm.state.application.orchestrators
 
         # Reject conflicting main/failover claims before mutating state.
-        if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
-            trigger, event.relation.id
-        ):
-            logger.warning(
-                "Ignoring conflicting orchestrator relation %s for trigger %s",
-                event.relation.id,
-                trigger,
-            )
+        if trigger and orchestrators.check_relation_conflict(trigger, event.relation.id):
+            if trigger == "main" and event.relation.id == orchestrators.failover_rel_id:
+                # Promotion can arrive before this consumer sees the old main depart.
+                logger.debug("Deferring failover promotion until the registered main departs")
+                event.defer()
+            else:
+                logger.warning(
+                    "Ignoring conflicting orchestrator relation %s for trigger %s",
+                    event.relation.id,
+                    trigger,
+                )
             return
 
         # register in the 'main/failover'-CMs the number of planned units of the current app
@@ -431,7 +435,7 @@ class PeerClusterEventsHandler(Object):
         # recompute the deployment desc
         self._reconcile_deployment_desc_from_peer_cluster_data(data)
 
-    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):
+    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):  # noqa: C901
         """Handle when 'main/failover'-CMs leave the relation (app or relation removal)."""
         logger.debug("Peer cluster relation departed: %s", event)
         if not self.charm.unit.is_leader():
@@ -450,6 +454,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         orchestrators = self.charm.state.application.orchestrators
+        if event.relation.id not in [orchestrators.main_rel_id, orchestrators.failover_rel_id]:
+            return
+
         # check the departed cluster which triggered this hook
         event_src_cluster_type = (
             "main" if event.relation.id == orchestrators.main_rel_id else "failover"
@@ -467,11 +474,10 @@ class PeerClusterEventsHandler(Object):
                 )
             elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
+                self.charm.cluster_manager.promote_deployment_type()
                 self.charm.peer_cluster_orchestrator_manager.promote_failover()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
         # we leave in case not an orchestrator
         if (
