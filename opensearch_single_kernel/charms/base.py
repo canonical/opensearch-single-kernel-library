@@ -30,7 +30,9 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
+    OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchStopError,
 )
 from opensearch_single_kernel.common.pebble_observer import PebbleObserver
 from opensearch_single_kernel.common.statuses import GeneralStatuses
@@ -268,8 +270,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             except (OpenSearchHttpError, OpenSearchExclusionsException):
                 logger.error("Failed to get online nodes, voting and alloc exclusions not added")
 
-        # block until all primary shards are moved away from the unit that is stopping
-        self.health_manager.wait_for_shards_relocation()
+        # Let ongoing shard initialization and relocation finish before stopping.
+        try:
+            self.health_manager.wait_for_shards_relocation()
+        except OpenSearchHAError as e:
+            raise OpenSearchStopError(str(e)) from e
 
         # Stop the workload
         self.cluster_manager.stop_workload()

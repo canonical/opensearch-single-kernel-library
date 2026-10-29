@@ -159,19 +159,27 @@ class VMWorkload(BaseWorkload):
                     raise e
 
     @override
-    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
+    def run_script(
+        self,
+        script_name: str,
+        args: str = None,
+        stdin: str | None = None,
+        *,
+        timeout: int = 30,
+    ):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME.
 
         Args:
             script_name (str): The name of script file to execute.
             args (str): Arguments passed to the script.
             stdin (str): String input to be passed on the standard input of the subprocess.
+            timeout: Maximum execution time in seconds.
         """
         script_path = f"{self.paths.home}/{script_name}"
         if not os.access(script_path, os.X_OK):
             self.run_cmd(f"chmod a+x {script_path}")
 
-        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args)
+        self.run_cmd(f"snap run --shell opensearch.daemon -- {script_path}", args, timeout=timeout)
 
     @property
     @override
@@ -325,6 +333,8 @@ class VMWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run command.
 
@@ -333,6 +343,7 @@ class VMWorkload(BaseWorkload):
             args: command line arguments
             stdin: string input to be passed on the standard input of the subprocess
             use_errors_replace: replace errors with empty string
+            timeout: maximum execution time in seconds
 
         Returns the stdout
         """
@@ -350,7 +361,7 @@ class VMWorkload(BaseWorkload):
             shell=True,
             text=True,
             encoding="utf-8",
-            timeout=25,
+            timeout=timeout,
             env=os.environ,
         )
 

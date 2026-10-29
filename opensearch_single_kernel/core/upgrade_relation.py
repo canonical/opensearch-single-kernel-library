@@ -5,6 +5,7 @@
 
 """State collection for upgrade-version-a relation."""
 
+import json
 import time
 
 import poetry.core.constraints.version as poetry_version
@@ -46,7 +47,7 @@ class UpgradeAppState(RelationState):
 
         Reset to `False` after each `juju refresh`.
         """
-        return self.relation_data.get("upgrade_resumed", "").lower() == "true"
+        return json.loads(self.relation_data.get("upgrade-resumed", "false"))
 
     @upgrade_resumed.setter
     def upgrade_resumed(self, value: bool) -> None:
@@ -56,7 +57,7 @@ class UpgradeAppState(RelationState):
                 # Trigger peer relation_changed event even if value does not change
                 # (Needed when leader sets value to False during `ops.UpgradeCharmEvent`)
                 "-unused-timestamp-upgrade-resume-last-updated": str(time.time()),
-                "upgrade_resumed": str(value),
+                "upgrade-resumed": json.dumps(value),
             }
         )
 

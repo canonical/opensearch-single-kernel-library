@@ -157,6 +157,13 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Deployment description not yet computed.")
             return
 
+        if self.charm.substrate == Substrates.K8S:
+            self.charm.upgrade_events._reconcile_upgrade()
+
+        # Peer TLS readiness must reach consumers even while cluster health is pending.
+        if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+
         if (
             is_node_up := self.charm.cluster_manager.opensearch_client.is_node_up()
         ) and self.charm.apply_health(app=self.charm.unit.is_leader()) in [
@@ -175,11 +182,6 @@ class OpenSearchEventsHandler(Object):
             nodes = []
 
         if self.charm.unit.is_leader():
-            # we want to have the most up-to-date info broadcasted to related sub-clusters
-
-            if self.charm.state.is_peer_cluster_provider():
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-
             # update any orchestrators about planned units
             if self.charm.state.is_peer_cluster_consumer():
                 self.charm.peer_cluster_manager.refresh_requirer_relation_data()
@@ -388,6 +390,10 @@ class OpenSearchEventsHandler(Object):
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
+
+        if self.charm.substrate == Substrates.K8S:
+            self.charm.upgrade_events._reconcile_upgrade()
+
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
         except OpenSearchHttpError:
@@ -398,18 +404,15 @@ class OpenSearchEventsHandler(Object):
         self.charm.exclusions_manager.cleanup(
             Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
         )
-        if (
-            health := self.charm.apply_health(
-                wait_for_green_first=True, app=self.charm.unit.is_leader()
-            )
-        ) not in [
+
+        if (health := self.charm.apply_health(app=self.charm.unit.is_leader())) not in [
             HealthColors.GREEN,
             HealthColors.IGNORE,
         ]:
             logger.warning("Update status: exclusions updated and cluster health is %s.", health)
-
             if health == HealthColors.UNKNOWN:
                 return
+
         if self.charm.unit.is_leader():
             try:
                 nodes = self.charm.cluster_manager.get_nodes(use_localhost=True)
@@ -579,6 +582,11 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
+        if not self.charm.workload.workload_present:
+            logger.debug("Workload is not ready; deferring leader election.")
+            event.defer()
+            return
+
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
             if not self.charm.cluster_manager.opensearch_client.is_node_up():
@@ -667,6 +675,8 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
+            if self.charm.substrate == Substrates.K8S:
+                self.charm.upgrade_events._reconcile_upgrade()
             return
 
         # VM-specific: Handle host reboot scenario where service should be up but isn't
@@ -857,6 +867,12 @@ class OpenSearchEventsHandler(Object):
                     )
                     self.charm.state.add_status_if_not_present(
                         GeneralStatuses.SERVICE_START_ERROR.value,
+                        "unit",
+                        self.charm.cluster_manager.name,
+                    )
+                elif isinstance(e, OpenSearchNotFullyReadyError):
+                    self.charm.state.add_status_if_not_present(
+                        GeneralStatuses.WAITING_TO_START.value,
                         "unit",
                         self.charm.cluster_manager.name,
                     )
@@ -1156,6 +1172,8 @@ class OpenSearchEventsHandler(Object):
                 )
             self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             logger.debug("Set upgrade unit state to healthy")
+
+        if event.after_upgrade or self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()
 
         # update the peer cluster rel data with new IP in case of main cluster manager
