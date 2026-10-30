@@ -8,7 +8,6 @@ import re
 import time
 
 import pytest
-from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION
@@ -20,6 +19,7 @@ from tests.integration.conftest import (
     SERIES,
 )
 from tests.integration.helpers import (
+    DASHBOARDS_K8S_INGRESS_MISSING,
     EmptyActiveStatus,
     EmptyBlockedStatus,
     get_application_unit_ids,
@@ -44,11 +44,6 @@ CLIENT_APP_NAME = "application"
 SECONDARY_CLIENT_APP_NAME = "secondary-application"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
 K8S_DASHBOARDS_APP_NAME = "opensearch-dashboards-k8s"
-# OpenSearch Dashboards on K8s stays blocked until an ingress is related
-DASHBOARDS_K8S_INGRESS_MISSING = StatusObject(
-    status="blocked",
-    message="Ingress relation missing",
-)
 ALL_APPS = [
     OPENSEARCH_APP_NAME,
     TLS_CERTIFICATES_APP_NAME,

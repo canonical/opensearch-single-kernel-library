@@ -71,6 +71,11 @@ EmptyMaintenanceStatus = StatusObject(
     status="maintenance",
     message="",
 )
+# OpenSearch Dashboards on K8s stays blocked until an ingress is related
+DASHBOARDS_K8S_INGRESS_MISSING = StatusObject(
+    status="blocked",
+    message="Ingress relation missing",
+)
 
 
 def get_raw_application(ops_test: OpsTest, app: str) -> Dict[str, Any]:

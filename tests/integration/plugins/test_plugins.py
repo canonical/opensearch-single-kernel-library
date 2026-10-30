@@ -25,6 +25,7 @@ from tests.integration.ha.helpers_data import (
 )
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
+    DASHBOARDS_K8S_INGRESS_MISSING,
     CosBlockedStatus,
     EmptyBlockedStatus,
     app_name,
@@ -65,6 +66,7 @@ LOKI_CHANNEL = "2/stable"
 GRAFANA_APP = "grafana-k8s"
 GRAFANA_CHANNEL = "2/stable"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
+K8S_DASHBOARDS_APP_NAME = "opensearch-dashboards-k8s"
 MAIN_ORCHESTRATOR_NAME = "main"
 FAILOVER_ORCHESTRATOR_NAME = "failover"
 SMTP_INTEGRATOR_APP_NAME = "smtp-integrator"
@@ -860,25 +862,25 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_reports_scheduler(
-    ops_test: OpsTest, deploy_type: str, substrate, architecture: str
-) -> None:
+async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
-    # TODO: Make sure to remove these once OSD published on ARM
-    if substrate == "k8s":
-        pytest.skip("OpenSearch Dashboards is not yet available on k8s")
-    if architecture == "arm64":
-        pytest.skip("OpenSearch Dashboards is not yet available on arm64")
     # Deploy OpenSearch Dashboards
     await ops_test.model.deploy(
-        DASHBOARDS_APP_NAME,
+        DASHBOARDS_APP_NAME if substrate == "vm" else K8S_DASHBOARDS_APP_NAME,
+        application_name=DASHBOARDS_APP_NAME,
         channel="2/edge",
+        trust=substrate == "k8s",
     )
     await ops_test.model.integrate(DASHBOARDS_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.integrate(DASHBOARDS_APP_NAME, APP_NAME)
-    await ops_test.model.wait_for_idle(
+    dashboards_statuses = (
+        {DASHBOARDS_APP_NAME: [DASHBOARDS_K8S_INGRESS_MISSING]} if substrate == "k8s" else None
+    )
+    await wait_until(
+        ops_test,
         apps=[DASHBOARDS_APP_NAME, APP_NAME],
-        status="active",
+        apps_statuses=dashboards_statuses,
+        units_statuses=dashboards_statuses,
     )
     dashboards_leader_unit_ip = await get_leader_unit_ip(ops_test, app=DASHBOARDS_APP_NAME)
     dashboards_base_url = f"https://{dashboards_leader_unit_ip}:5601"
@@ -1842,7 +1844,7 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_notifications(
-    ops_test: OpsTest, deploy_type: str, architecture: str
+    ops_test: OpsTest, deploy_type: str
 ) -> None:
     """Ensure that relating smtp-integrator results in notifications email config objects:
 
@@ -1850,9 +1852,6 @@ async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_noti
     - Email channel config
     - Email group config
     """
-    # There is no smtp-integrator charm for arm64, so skip this test on arm64.
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     # ensure OpenSearch is up
     await _wait_for_units(ops_test, deploy_type)
 
@@ -1973,7 +1972,6 @@ async def test_smtp_notification_statuses(
     series,
     substrate,
     charm_resources,
-    architecture: str,
 ) -> None:
     """Validate notification statuses for the smtp relation on a main/small deploy.
 
@@ -1989,8 +1987,6 @@ async def test_smtp_notification_statuses(
     - SMTP_CONFIGURATION_ERROR — unit tests (apply-path HTTP/keystore failure)
     - SMTP_COULD_NOT_READ_DATA — unit tests (unreadable password secret)
     """
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     await _ensure_opensearch_deployed(
         ops_test, deploy_type, charm, series, substrate, charm_resources
     )
@@ -2101,18 +2097,14 @@ async def test_smtp_notification_statuses(
 
 @pytest.mark.parametrize("deploy_type", LARGE_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_substrate("k8s")
 async def test_smtp_relation_invalid_status_on_non_main(
     ops_test: OpsTest,
     deploy_type: str,
     charm,
     series,
     substrate,
-    architecture: str,
 ) -> None:
     """SMTP on a non-main orchestrator must block with SMTP_RELATION_INVALID."""
-    if architecture == "arm64":
-        pytest.skip("Skipping test on arm64 because smtp-integrator is not available for arm64.")
     await _ensure_opensearch_deployed(ops_test, deploy_type, charm, series, substrate)
     await _ensure_smtp_integrator(ops_test)
     # In large deployments APP_NAME is the data cluster (not main orchestrator).
