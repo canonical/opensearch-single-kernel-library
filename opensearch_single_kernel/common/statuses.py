@@ -91,6 +91,12 @@ class HealthStatuses(Enum):
         short_message="Waiting for local shards to build",
         check="Shards initializing/relocating.",
     )
+    WAITING_FOR_ANY_BUSY_SHARDS = StatusObject(
+        status="waiting",
+        message="Some shards in the cluster need to complete building",
+        short_message="Waiting for local shards to build",
+        check="Shards initializing/relocating.",
+    )
 
 
 class ProfileStatuses(Enum):
@@ -395,7 +401,7 @@ class PeerClusterErrorDataStatuses(Enum):
     )
     RELATED_TO_NON_MAIN_OR_FAILOVER = StatusObject(
         status="blocked",
-        message="Related to non 'main/failover'-orchestrator cluster",
+        message="Related to non 'main/failover'-orchestrator cluster.",
         short_message="Wrong orchestrator type",
         check="Remote cluster is main or failover orchestrator.",
         action="Relate only to main- or failover-orchestrator applications.",
@@ -505,6 +511,13 @@ class SnapshotsStatuses(Enum):
         short_message="Too many backup relations",
         check="At most one object-storage relation.",
         action="Remove extra s3/azure/gcs relations; keep only one.",
+    )
+    BACKUP_WAITING_FOR_CONNECTION_INFO = StatusObject(
+        status="waiting",
+        message="Waiting for settings from object storage integrator",
+        short_message="Waiting for object storage settings",
+        check="Object-storage relation data from the integrator.",
+        action="If this persists, ensure that the integrator is configured.",
     )
     BACKUP_RELATION_DATA_INCOMPLETE = StatusObject(
         status="blocked",

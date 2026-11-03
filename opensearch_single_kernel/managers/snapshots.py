@@ -12,6 +12,7 @@ from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
+from tenacity import Retrying, before_sleep_log, retry_if_exception_type, stop_after_attempt
 
 from opensearch_single_kernel.common.constants import (
     AZURE_CREDENTIALS,
@@ -35,6 +36,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchRestoreIndexConflictError,
     OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import (
@@ -461,31 +463,53 @@ class SnapshotsManager(BaseManager):
 
         try:
             self.opensearch_client.verify_snapshots_repository(object_storage_type, alt_hosts)
-            # close indices that were snapshotted if they still exist, so they can be restored
-            self.close_snapshot_indices(snapshot)
-            # start the restore
-            logger.info("Starting restore of snapshot %s.", snapshot_id)
-            non_restored_indices = self.opensearch_client.restore_snapshot(
-                object_storage_type=object_storage_type,
-                snapshot=snapshot,
-                alt_hosts=alt_hosts,
-            )
-            if not non_restored_indices:
-                return
-
-            logger.error(
-                "Failed to restore the following indices in snapshot %s: %s.",
-                snapshot_id,
-                non_restored_indices,
-            )
-            raise OpenSearchRestoreBackupError(
-                f"Failed to restore {len(non_restored_indices)} indices. Check logs for details."
-            )
         except OpenSearchHttpError as e:
             logger.error("Failed to restore snapshot %s. Error: %s.", snapshot_id, str(e))
             raise OpenSearchRestoreBackupError(
-                f"Failed to restore snapshot {snapshot_id}. Error: {str(e)}."
+                "Failed to verify the %s repository for the %s snapshot. Error: %s."
+                % (object_storage_type, snapshot_id, e)
             )
+
+        max_attempts = 3
+        try:
+            for attempt in Retrying(
+                retry=retry_if_exception_type(OpenSearchRestoreIndexConflictError),
+                stop=stop_after_attempt(max_attempts),
+                before_sleep=before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            ):
+                with attempt:
+                    # Close indices, and retry closure + restore in case a new index was created in between
+                    self.close_snapshot_indices(snapshot)
+
+                    # start the restore
+                    logger.info("Starting restore of snapshot %s.", snapshot_id)
+                    non_restored_indices = self.opensearch_client.restore_snapshot(
+                        object_storage_type=object_storage_type,
+                        snapshot=snapshot,
+                        alt_hosts=alt_hosts,
+                    )
+        except OpenSearchRestoreIndexConflictError as exc:
+            raise OpenSearchRestoreBackupError(
+                "Restore %s rejected after %d attempts. %s" % (snapshot_id, max_attempts, exc)
+            ) from exc
+        except OpenSearchHttpError as exc:
+            raise OpenSearchRestoreBackupError(
+                "Restore %s not confirmed. Check restore progress before retrying. %s"
+                % (snapshot_id, exc)
+            ) from exc
+
+        if not non_restored_indices:
+            return
+
+        logger.error(
+            "Failed to restore the following indices in snapshot %s: %s.",
+            snapshot_id,
+            non_restored_indices,
+        )
+        raise OpenSearchRestoreBackupError(
+            "Failed to restore %d indices. Check logs for details." % len(non_restored_indices)
+        )
 
     def close_snapshot_indices(self, snapshot: dict) -> None:
         """Close the given indices.
@@ -721,6 +745,10 @@ class SnapshotsManager(BaseManager):
                     object_storage_type
                 )
 
+                if not connection_info:
+                    status_list.append(SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value)
+                    return status_list
+
                 if not (
                     object_storage_config := (
                         storage_config_from_connection_info(object_storage_type, connection_info)
@@ -729,12 +757,26 @@ class SnapshotsManager(BaseManager):
                     status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                     return status_list
 
-                self.validate_storage_config(object_storage_config, object_storage_type)
+                if not recompute:
+                    if invalid_credentials := cached_non_running_statuses(
+                        self.state.statuses,
+                        scope,
+                        self.name,
+                        matches=[SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value],
+                    ):
+                        status_list.extend(invalid_credentials)
+                        return status_list
+                else:
+                    self.validate_storage_config(object_storage_config, object_storage_type)
             except OpenSearchInvalidStorageTypeError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                 return status_list
-            except OpenSearchObjectStorageConfigValidationError:
-                status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
+            except OpenSearchObjectStorageConfigValidationError as e:
+                status_list.append(
+                    SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value
+                    if e.missing_fields
+                    else SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value
+                )
                 return status_list
             except OpenSearchBackupRelationDataIncompleteError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)

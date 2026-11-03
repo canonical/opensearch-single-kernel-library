@@ -174,7 +174,12 @@ class OpenSearchSecrets(Object, RelationDataStore):
             return
 
         secret.remove_all_revisions()
-        self.cached_secrets.delete(scope, self.label(scope, key))
+        label = self.label(scope, key)
+        self.cached_secrets.delete(scope, label)
+        if scope == Scope.APP:
+            self.charm.state.application.update({label: ""})
+        else:
+            self.charm.state.server.update({label: ""})
 
     @override
     def has(self, scope: Scope, key: str) -> bool:

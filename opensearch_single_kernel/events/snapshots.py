@@ -27,12 +27,14 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
     OpenSearchBackupRelationDataIncompleteError,
+    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
@@ -154,8 +156,10 @@ class SnapshotsEventsHandler(Object):
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
+            self._set_credentials_incorrect_status(failed=True)
             return
 
+        self._set_credentials_incorrect_status(failed=False)
         # Update backup credentials
         # Catch file operation exceptions
         try:
@@ -234,6 +238,7 @@ class SnapshotsEventsHandler(Object):
 
         # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
+        self._set_credentials_incorrect_status(failed=False)
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
@@ -444,9 +449,14 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
-        info_to_save, object_storage_type_to_cleanup = (
-            self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
-        )
+        try:
+            info_to_save, object_storage_type_to_cleanup = (
+                self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
+            )
+        except OpenSearchSnapshotsPeerClusterDataConflictError:
+            logger.warning("Ignoring conflicting snapshots data received over peer-clusters.")
+            return None
+
         if info_to_save:
             for object_storage_type in object_storage_type_to_cleanup:
                 if not self.charm.keystore_manager.cleanup_storage_credentials(
@@ -459,6 +469,7 @@ class SnapshotsEventsHandler(Object):
                     self._set_credentials_cleanup_failed_status(True)
                     event.defer()
                     return None
+
             self._set_credentials_cleanup_failed_status(False)
 
             object_storage_credentials, tls_ca_chain = self._credentials_from_peer_cluster()
@@ -471,28 +482,43 @@ class SnapshotsEventsHandler(Object):
                 )
             except OpenSearchFileOperationError:
                 logger.error("Failed to update stored backup credentials.")
-                return
+                event.defer()
+                return None
 
             # Reload keystore
             self.charm.reload_keystore_event.emit()
             self.charm.snapshots_manager.set_credentials_saved(info_to_save)
-            return
+            return None
 
-        for object_storage_type in [
-            ObjectStorageType.S3,
-            ObjectStorageType.AZURE,
-            ObjectStorageType.GCS,
-        ]:
+        try:
+            stored_storage_types = self.charm.keystore_manager.stored_storage_types
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.warning("Could not read backup credentials from the keystore: %s", e)
+            self._set_credentials_cleanup_failed_status(True)
+            event.defer()
+            return None
+
+        # Clean the CA first so a failure leaves credentials in place for the next cleanup.
+        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
+            self.charm.snapshots_manager.remove_s3_ca()
+
+        cleanup_failed = False
+        for object_storage_type in stored_storage_types:
             if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
                 logger.warning(
                     "Failed to cleanup keystore credentials for %s.", object_storage_type
                 )
+                cleanup_failed = True
 
-        # clean S3 CA
-        if self.charm.snapshots_manager.is_custom_s3_ca_stored():
-            self.charm.snapshots_manager.remove_s3_ca()
+        if stored_storage_types:
+            # Reload after attempted cleanup, including any partial removal before a failure.
+            self.charm.reload_keystore_event.emit()
 
-        self.charm.reload_keystore_event.emit()
+        self._set_credentials_cleanup_failed_status(cleanup_failed)
+
+        if cleanup_failed:
+            event.defer()
+            return None
 
         self.charm.snapshots_manager.set_credentials_saved(None)
 
@@ -616,7 +642,12 @@ class SnapshotsEventsHandler(Object):
             except OpenSearchInvalidStorageTypeError as e:
                 logger.error(str(e))
                 return "Object storage credentials are invalid."
-            except OpenSearchObjectStorageConfigValidationError:
+            except OpenSearchObjectStorageConfigValidationError as e:
+                if e.missing_fields:
+                    return (
+                        "Object storage configuration missing fields: "
+                        f"{', '.join(e.missing_fields)}."
+                    )
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
@@ -639,6 +670,21 @@ class SnapshotsEventsHandler(Object):
             return f"Action failed with: {str(e)}."
 
         return None
+
+    def _set_credentials_incorrect_status(self, failed: bool) -> None:
+        """Cache or clear incorrect credentials status."""
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
 
     def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
         """Cache blocked status for repository registration failure (apply path only)."""

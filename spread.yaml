@@ -89,7 +89,7 @@ backends:
       sudo systemctl daemon-reload
       sudo systemctl start ssh
 
-      sudo passwd -d ubuntu
+      sudo passwd -d "$SPREAD_SYSTEM_USERNAME"
 
       ADDRESS localhost
     # HACK: spread does not pass environment variables set on runner
@@ -107,6 +107,10 @@ backends:
       DOCKERHUB_MIRROR: "$(HOST: echo $DOCKERHUB_MIRROR)"
       CONCIERGE_EXTRA_DEBS: pipx
     systems:
+      - ubuntu-24.04:
+          username: runner
+      - ubuntu-24.04-arm:
+          username: runner
       - self-hosted-linux-amd64-noble-medium:
           username: ubuntu
       - self-hosted-linux-amd64-noble-large:

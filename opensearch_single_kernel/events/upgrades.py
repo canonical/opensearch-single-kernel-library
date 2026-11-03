@@ -20,6 +20,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchNotFullyReadyError,
     OpenSearchReconcilePartitionError,
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
@@ -61,7 +62,8 @@ class UpgradesEventsHandler(Object):
             self._on_upgrade_peer_relation_created,
         )
         self.framework.observe(
-            self.charm.on[UPGRADE_RELATION].relation_changed, self._reconcile_upgrade
+            self.charm.on[UPGRADE_RELATION].relation_changed,
+            self._on_upgrade_peer_relation_changed,
         )
         self.framework.observe(
             self.charm.on.pre_upgrade_check_action, self._on_pre_upgrade_check_action
@@ -95,10 +97,11 @@ class UpgradesEventsHandler(Object):
 
         self.charm.upgrades_manager.save_upgrades_versions()
 
-    def _reconcile_upgrade(  # noqa: C901
-        self,
-        _: typing.Optional[ops.RelationChangedEvent] = None,
-    ) -> None:
+    def _on_upgrade_peer_relation_changed(self, _: ops.RelationChangedEvent) -> None:
+        """Reconcile peer progress without replacing local post-upgrade checks."""
+        self._reconcile_upgrade(during_upgrade=True)
+
+    def _reconcile_upgrade(self, *, during_upgrade: bool = False) -> None:  # noqa: C901
         """Handle upgrade events."""
         if not self.charm.state.upgrade_relation:
             logger.debug("Peer relation not available")
@@ -173,15 +176,30 @@ class UpgradesEventsHandler(Object):
 
         if self.charm.state.substrate == Substrates.K8S:
             if (
-                self.charm.state.application.deployment_desc
+                not during_upgrade
+                and self.charm.upgrades_manager.unit_state is not UnitUpgradesState.HEALTHY
+                and self.charm.state.application.deployment_desc
+                and self.charm.state.application.is_security_index_initialised
                 and self.charm.upgrades_manager.opensearch_client.is_node_up()
             ):
+                try:
+                    self.charm.cluster_manager.assert_current_node_joined_cluster()
+                except (OpenSearchNotFullyReadyError, OpenSearchHttpError):
+                    logger.debug("Waiting for the upgraded node to rejoin the cluster")
+                    return
                 try:
                     self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
                         alt_hosts=self.charm.cluster_manager.alt_hosts
                     )
                 except OpenSearchHttpError:
                     logger.exception("Failed to re-enable allocation after upgrade")
+                    return
+                # Preserve the post-upgrade health gate when recovery is retried by lifecycle hooks.
+                if self.charm.health_manager.get(local_app_only=False) not in (
+                    HealthColors.GREEN,
+                    HealthColors.YELLOW,
+                ):
+                    return
                 self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
             if self.charm.unit.is_leader():
                 self.charm.upgrades_manager.reconcile_partition()
@@ -206,6 +224,8 @@ class UpgradesEventsHandler(Object):
         )
         # TODO check backwards compatibility for profiles
         if self.charm.substrate == Substrates.VM:
+            # The stable (2.19.4) vm charm stored JWT/OIDC configuration only in YAML
+            self.charm.upgrades_manager.migrate_legacy_auth_configuration()
             self.machine_upgrade()
         else:
             self.kubernetes_upgrade(event)
