@@ -134,13 +134,10 @@ jobs:
       # continue-on-error: telemetry must never fail a 180-minute integration job.
       # The stop phase already cannot fail; the start phase runs under `set -e`.
       #
-      # Trial: points at canonical/flake0's feat/phase1-juju-logs branch, which adds
-      # Juju model logs and status (juju-debug-*.log, juju-status-*.ndjson) to the
-      # bundle. Pin to v0.2.0 once it is released.
       - name: Start telemetry
         timeout-minutes: 5
         continue-on-error: true
-        uses: canonical/flake0/.github/actions/collect@feat/phase1-juju-logs
+        uses: canonical/flake0/.github/actions/collect@redact-secrets
         with:
           phase: start
           extra-config: ${{ github.workspace }}/.github/collect-opensearch.conf
@@ -248,14 +245,14 @@ jobs:
         id: collect
         timeout-minutes: 5
         if: always()
-        uses: canonical/flake0/.github/actions/collect@feat/phase1-juju-logs
+        uses: canonical/flake0/.github/actions/collect@redact-secrets
         with:
           phase: stop
           artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}
       - name: Render telemetry dashboard
         timeout-minutes: 5
         if: always()
-        uses: canonical/flake0/.github/actions/plot@feat/phase1-juju-logs
+        uses: canonical/flake0/.github/actions/plot@redact-secrets
         with:
           bundle-path: ${{ steps.collect.outputs.bundle-path }}
           artifact-name: flake0-plot-${{ matrix.job.name_in_artifact }}
