@@ -149,6 +149,7 @@ def test_first_start_applies_profile_once_requirements_met(
     """With no applied profile, the start waits for the configured profile's requirements."""
     with harness.hooks_disabled():
         harness.update_config({"profile": "production"})
+    mocker.patch.object(harness.charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(
         type(harness.charm.cluster_manager),
         "is_opensearch_started",
