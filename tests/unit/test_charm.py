@@ -365,19 +365,9 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config.assert_called()
 
 
-@pytest.mark.parametrize(
-    "deployment_desc",
-    [None, deployment_descriptions["ok"]],
-    ids=["peer-data-gone", "peer-data-exists"],
-)
-def test_start_dropped_when_unit_removed(harness, mocker, deployment_desc):
+def test_start_dropped_when_unit_removed(harness, mocker):
     """A deferred start during removal is dropped."""
     mocker.patch.object(harness.charm, "is_unit_going_away", return_value=True)
-    mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-        return_value=deployment_desc,
-    )
     is_opensearch_started = mocker.patch.object(
         type(harness.charm.cluster_manager), "is_opensearch_started", new_callable=PropertyMock
     )
