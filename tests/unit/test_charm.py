@@ -13,8 +13,8 @@ from ops.pebble import APIError
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     COS_USER,
+    INTERNAL_USER_ENDPOINT,
     STATUS_PEERS_RELATION,
-    USER_ENDPOINT,
     DeploymentType,
     HealthColors,
     Scope,
@@ -746,6 +746,7 @@ def started_leader(harness, mocker):
     mocker.patch.object(charm.exclusions_manager, "delete_current")
     mocker.patch.object(charm.lock_manager, "release")
     mocker.patch.object(charm, "apply_health")
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
     return charm
 
@@ -756,7 +757,7 @@ def test_repeated_leader_start_preserves_monitor_password(started_leader, monkey
     live_user = {}
 
     def request(client, method, endpoint, payload=None, **kwargs):
-        assert endpoint == f"{USER_ENDPOINT}/monitor"
+        assert endpoint == f"{INTERNAL_USER_ENDPOINT}/monitor"
         if method == "PUT":
             live_user.update(payload)
             return {"status": "CREATED"}
@@ -788,7 +789,7 @@ def test_failed_monitor_creation_defers_startup(started_leader, monkeypatch, fai
     charm = started_leader
 
     def request(client, method, endpoint, payload=None, **kwargs):
-        assert endpoint == f"{USER_ENDPOINT}/monitor"
+        assert endpoint == f"{INTERNAL_USER_ENDPOINT}/monitor"
         if method == failure:
             raise OpenSearchHttpError("unavailable", 503)
         return {"status": "CREATED"}

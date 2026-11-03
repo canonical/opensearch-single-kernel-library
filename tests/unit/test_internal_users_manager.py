@@ -13,7 +13,7 @@ from ops.testing import ActionFailed
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     COS_USER,
-    USER_ENDPOINT,
+    INTERNAL_USER_ENDPOINT,
     DeploymentType,
     Scope,
     StartMode,
@@ -62,7 +62,7 @@ def test_monitor_password_updates_live_user_before_publishing_secret(
     monkeypatch.setattr(secrets, "put", put)
 
     def request(client, method, endpoint, payload=None, **kwargs):
-        assert endpoint == f"{USER_ENDPOINT}/monitor"
+        assert endpoint == f"{INTERNAL_USER_ENDPOINT}/monitor"
         if method == failure:
             raise OpenSearchHttpError("unavailable", 503)
         assert method == "PATCH"
