@@ -42,8 +42,10 @@ NO_CM_STATUS = StatusObject(
 )
 
 
-async def assert_restored_orchestrators(ops_test: OpsTest) -> None:
-    """Both data applications must associate each restored role with its actual provider."""
+async def assert_orchestrators(
+    ops_test: OpsTest, *, expected_main: str, expected_failover: str | None
+) -> None:
+    """Check that both data applications store the expected main, failover, and relation IDs."""
     for app_name in (DATA_APP, DATA_APP_TWO):
         unit = ops_test.model.applications[app_name].units[0]
         data = await get_application_relation_data(
@@ -51,12 +53,30 @@ async def assert_restored_orchestrators(ops_test: OpsTest) -> None:
         )
         assert data, f"No orchestrators found on {app_name}"
         orchestrators = PeerClusterOrchestrators.from_dict(json.loads(data))
-        assert orchestrators.main_app and orchestrators.main_app.name == MAIN_APP
-        assert orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP
-        for provider, relation_id in (
-            (MAIN_APP, orchestrators.main_rel_id),
-            (FAILOVER_APP, orchestrators.failover_rel_id),
+
+        for deployment_type, provider, registered_app, relation_id in (
+            ("main", expected_main, orchestrators.main_app, orchestrators.main_rel_id),
+            (
+                "failover",
+                expected_failover,
+                orchestrators.failover_app,
+                orchestrators.failover_rel_id,
+            ),
         ):
+            if not provider:
+                assert registered_app is None, (
+                    f"{app_name} still has a {deployment_type} orchestrator: {registered_app}"
+                )
+                assert relation_id == -1, (
+                    f"{app_name} still has a {deployment_type} relation ID: {relation_id}"
+                )
+                continue
+
+            assert registered_app and registered_app.name == provider, (
+                f"{app_name} expected {provider} as {deployment_type}, got {registered_app}"
+            )
+
+            # Check that the stored ID belongs to the relation between these two applications.
             assert any(
                 int(relation.entity_id) == relation_id
                 and relation.matches(
@@ -160,22 +180,7 @@ async def test_build_and_deploy(
 @pytest.mark.abort_on_fail
 async def test_check_orchestrators_in_rel_data(ops_test: OpsTest) -> None:
     """Test that the orchestrators are correctly set."""
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
-    orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
-        relation_name=PEER_RELATION,
-        key="orchestrators",
-    )
-    assert orchestrators, "No orchestrators found in relation data"
-    orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))
-    assert orchestrators.main_app and orchestrators.main_app.name == MAIN_APP, (
-        "Main orchestrator not set correctly"
-    )
-    assert orchestrators.failover_app and orchestrators.failover_app.name == FAILOVER_APP, (
-        "Failover orchestrator not set correctly"
-    )
+    await assert_orchestrators(ops_test, expected_main=MAIN_APP, expected_failover=FAILOVER_APP)
 
 
 @pytest.mark.abort_on_fail
@@ -196,22 +201,7 @@ async def test_demotion_through_relation_removal(ops_test: OpsTest) -> None:
     )
 
     # check that failover was promoted to main orchestrator
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
-    orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
-        relation_name=PEER_RELATION,
-        key="orchestrators",
-    )
-    assert orchestrators, "No orchestrators found in relation data"
-    orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))
-    assert orchestrators.main_app and orchestrators.main_app.name == FAILOVER_APP, (
-        "Failover was not promoted to main orchestrator"
-    )
-    assert orchestrators.failover_app is None, (
-        "Failover orchestrator should be None after promotion"
-    )
+    await assert_orchestrators(ops_test, expected_main=FAILOVER_APP, expected_failover=None)
 
 
 @pytest.mark.abort_on_fail
@@ -232,22 +222,7 @@ async def test_failover_election_after_restoring_integration(ops_test: OpsTest) 
     )
 
     # check that main app is now elected failover orchestrator
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
-    orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
-        relation_name=PEER_RELATION,
-        key="orchestrators",
-    )
-    assert orchestrators, "No orchestrators found in relation data"
-    orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))
-    assert orchestrators.main_app and orchestrators.main_app.name == FAILOVER_APP, (
-        "Failover is supposed to be the main orchestrator"
-    )
-    assert orchestrators.failover_app and orchestrators.failover_app.name == MAIN_APP, (
-        "Main app is supposed to be the failover orchestrator"
-    )
+    await assert_orchestrators(ops_test, expected_main=FAILOVER_APP, expected_failover=MAIN_APP)
 
 
 @pytest.mark.abort_on_fail
@@ -272,22 +247,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
     )
 
     # check that main app is now elected main orchestrator and that failover is None
-    data_app = ops_test.model.applications[DATA_APP]
-    assert data_app is not None
-    orchestrators = await get_application_relation_data(
-        ops_test,
-        unit_name=data_app.units[0].name,
-        relation_name=PEER_RELATION,
-        key="orchestrators",
-    )
-    assert orchestrators, "No orchestrators found in relation data"
-    orchestrators = PeerClusterOrchestrators.from_dict(json.loads(orchestrators))
-    assert orchestrators.main_app and orchestrators.main_app.name == MAIN_APP, (
-        "Main app is supposed to be the main orchestrator"
-    )
-    assert orchestrators.failover_app is None, (
-        "Failover app is supposed to be None since there is no failover orchestrator"
-    )
+    await assert_orchestrators(ops_test, expected_main=MAIN_APP, expected_failover=None)
 
     # scale back to 1 unit
     await failover_app.add_unit(attach_storage=failover_app_storages)
@@ -301,7 +261,7 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
             DATA_APP_TWO: [PeerClusterErrorDataStatuses.WAITING_FOR_PEER_RELATION_CREATED.value],
         },
     )
-    await assert_restored_orchestrators(ops_test)
+    await assert_orchestrators(ops_test, expected_main=MAIN_APP, expected_failover=FAILOVER_APP)
 
     await failover_app.remove_relation(
         f"{FAILOVER_APP}:peer-cluster-orchestrator",
@@ -319,4 +279,4 @@ async def test_scale_promoted_main_to_0_then_up(ops_test: OpsTest) -> None:
         wait_for_exact_units=1,
     )
 
-    await assert_restored_orchestrators(ops_test)
+    await assert_orchestrators(ops_test, expected_main=MAIN_APP, expected_failover=FAILOVER_APP)

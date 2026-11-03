@@ -119,10 +119,7 @@ class PeerClusterEventsHandler(Object):
             and self.charm.tls_manager.is_fully_configured()
             and self.charm.peer_cluster_manager.should_promote_failover_to_main()
         ):
-            self.charm.cluster_manager.promote_deployment_type()
-            self.charm.peer_cluster_orchestrator_manager.promote_failover()
-            # check if any credentials exist without relations
-            self.check_credentials_with_missing_relations()
+            self._promote_failover_to_main()
             if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                 event.relation.id
             ):
@@ -474,8 +471,7 @@ class PeerClusterEventsHandler(Object):
                 )
             elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
-                self.charm.cluster_manager.promote_deployment_type()
-                self.charm.peer_cluster_orchestrator_manager.promote_failover()
+                self._promote_failover_to_main()
                 self.charm.plugin_manager.remove_plugin_secret_ids()
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
@@ -492,6 +488,12 @@ class PeerClusterEventsHandler(Object):
             is_provider=True, must_have_units=False, remote=False
         ):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
+
+    def _promote_failover_to_main(self) -> None:
+        """Promote this application to main and check for missing plugin or backup relations."""
+        self.charm.cluster_manager.promote_deployment_type()
+        self.charm.peer_cluster_orchestrator_manager.promote_failover()
+        self.check_credentials_with_missing_relations()
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins/backups without a relation."""

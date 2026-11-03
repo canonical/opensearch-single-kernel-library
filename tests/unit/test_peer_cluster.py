@@ -8,9 +8,14 @@ import json
 import pytest
 
 from opensearch_single_kernel.common.constants import (
+    AZURE_CREDENTIALS,
+    GCS_CREDENTIALS,
     PEER_CLUSTER_ORCHESTRATOR_RELATION,
     PEER_CLUSTER_RELATION,
+    S3_CREDENTIALS,
+    SMTP_RELATION,
     DeploymentType,
+    Scope,
 )
 from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuses
 from opensearch_single_kernel.core.models import (
@@ -190,8 +195,14 @@ def test_promotion_retry_stops_when_announcement_is_withdrawn(
     event.defer.assert_not_called()
 
 
-def test_departure_promotion_publishes_main_role(harness, mocker, monkeypatch):
-    """Promotion must survive publication when the failover has one data consumer."""
+@pytest.mark.parametrize("promotion_event", ["departed", "changed"])
+@pytest.mark.parametrize(
+    "credentials", [None, "plugin", S3_CREDENTIALS, AZURE_CREDENTIALS, GCS_CREDENTIALS]
+)
+def test_promotion_publishes_main_role_and_tracks_missing_relations(
+    harness, mocker, monkeypatch, promotion_event, credentials
+):
+    """Both promotion paths announce the main deployment type and record missing relations."""
     monkeypatch.setenv("JUJU_VERSION", "3.6.0")
     harness.disable_hooks()
     harness.set_leader(True)
@@ -212,11 +223,29 @@ def test_departure_promotion_publishes_main_role(harness, mocker, monkeypatch):
     )
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.tls_manager, "is_fully_configured", return_value=True)
-    relation = harness.model.get_relation(PEER_CLUSTER_RELATION, main_id)
 
-    charm.peer_cluster_events._on_peer_cluster_relation_departed(
-        mocker.Mock(relation=relation, app=relation.app)
-    )
+    # Start with the wrong flag value to check that promotion updates it.
+    charm.state.application.missing_relations = credentials is None
+    if credentials == "plugin":
+        plugin_secret_id = harness.add_model_secret("main", {"password": "smtp-password"})
+        charm.plugin_manager.put_plugin_config(
+            Scope.APP, "smtp-config", secret_id=plugin_secret_id, relation_name=SMTP_RELATION
+        )
+    elif credentials:
+        charm.state.secrets.put(Scope.APP, credentials, "inherited-backup-credentials")
+
+    if promotion_event == "departed":
+        relation = harness.model.get_relation(PEER_CLUSTER_RELATION, main_id)
+        handler = charm.peer_cluster_events._on_peer_cluster_relation_departed
+    else:
+        # This application has already seen the main leave.
+        # The data application now reports that it has lost the main too.
+        charm.state.application.orchestrators = PeerClusterOrchestrators(failover_app=desc.app)
+        relation = harness.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, data_id)
+        handler = charm.peer_cluster_events._on_peer_cluster_orchestrator_relation_changed
+
+    event = mocker.Mock(relation=relation, app=relation.app)
+    handler(event)
 
     assert charm.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
     assert charm.state.application.deployment_desc.promotion_time is not None
@@ -224,6 +253,17 @@ def test_departure_promotion_publishes_main_role(harness, mocker, monkeypatch):
     published = harness.get_relation_data(data_id, charm.app.name)
     assert published["trigger"] == "main"
     assert json.loads(published["orchestrators"])["main_app"] == desc.app.to_dict()
+    assert charm.state.application.missing_relations is (credentials is not None)
+    if credentials == "plugin":
+        plugin = charm.state.application.plugin_config_info["smtp-config"]
+        assert plugin.relation_name == SMTP_RELATION
+        assert plugin.secret_id == (None if promotion_event == "departed" else plugin_secret_id)
+    elif credentials:
+        assert charm.state.secrets.get(Scope.APP, credentials) == "inherited-backup-credentials"
+
+    # Retry the relation update until the admin credentials are ready.
+    if promotion_event == "changed":
+        event.defer.assert_called_once()
 
 
 def test_unregistered_provider_departure_preserves_orchestrators(harness, consumer, mocker):
