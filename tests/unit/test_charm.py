@@ -158,6 +158,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config = mocker.patch(
         "opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config"
     )
+    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile")
     get_nodes = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
     can_service_start = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
@@ -350,11 +351,7 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
         return_value=False,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements",
-        return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile",
         return_value=False,
     )
     reconcile_security_config = mocker.patch.object(harness.charm, "reconcile_security_config")

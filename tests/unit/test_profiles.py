@@ -3,9 +3,12 @@
 
 """Unit tests for profile requirement checks and profile changes on config-changed."""
 
+from unittest.mock import PropertyMock
+
 import pytest
 
 from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.common.statuses import ProfileStatuses
 from opensearch_single_kernel.core.models import ProductionProfile, TestingProfile
 
 _8GB_IN_KB = 8 * 1024 * 1024
@@ -34,8 +37,10 @@ def production_topology_met(harness, mocker):
 
 @pytest.fixture
 def update_jvm_heap_size(harness, mocker):
-    mocker.patch.object(harness.charm.config_manager.workload, "memtotal", return_value=_8GB_IN_KB)
-    return mocker.patch.object(harness.charm.config_manager, "_update_jvm_heap_size")
+    mocker.patch.object(
+        harness.charm.profiles_manager.workload, "memtotal", return_value=_8GB_IN_KB
+    )
+    return mocker.patch.object(harness.charm.profiles_manager, "_update_jvm_heap_size")
 
 
 @pytest.fixture
@@ -54,7 +59,7 @@ def test_check_profile_requirements_uses_given_profile(harness, production_topol
         harness.update_config({"profile": "testing"})
     harness.charm.state.server.profile = ProductionProfile()
 
-    assert not harness.charm.profiles_manager.check_current_profile_requirements()
+    assert not harness.charm.profiles_manager.check_profile_requirements()
     assert harness.charm.profiles_manager.check_profile_requirements(TestingProfile())
 
 
@@ -71,10 +76,10 @@ def test_profile_change_applied_when_stored_profile_requirements_unmet(
     restart_opensearch.assert_called_once()
 
 
-def test_profile_change_deferred_until_requirements_met(
+def test_profile_change_applied_once_requirements_met(
     harness, production_topology_met, update_jvm_heap_size, restart_opensearch
 ):
-    """Switching testing -> production defers without any change, then applies on retry."""
+    """Switching testing -> production waits for the requirements, then applies with a restart."""
     harness.charm.state.server.profile = TestingProfile()
 
     harness.update_config({"profile": "production"})
@@ -83,21 +88,79 @@ def test_profile_change_deferred_until_requirements_met(
     update_jvm_heap_size.assert_not_called()
     restart_opensearch.assert_not_called()
 
+    # e.g. a peer cluster joined with the missing nodes
     production_topology_met["value"] = True
-    harness.framework.reemit()
+    harness.charm.apply_profile_and_restart()
 
     assert harness.charm.state.server.profile == ProductionProfile()
     update_jvm_heap_size.assert_called_once()
     restart_opensearch.assert_called_once()
 
 
-def test_first_profile_applied_once_requirements_met(
-    harness, production_topology_met, update_jvm_heap_size, restart_opensearch
+def test_profile_not_applied_during_upgrade(
+    harness, mocker, production_topology_met, update_jvm_heap_size, restart_opensearch
 ):
-    """With no stored profile, the heap is set once the configured profile's requirements are met."""
-    assert harness.charm.state.server.profile is None
+    """No restart is triggered for a profile while an upgrade is in progress."""
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+    harness.charm.state.server.profile = TestingProfile()
+    production_topology_met["value"] = True
+    mocker.patch.object(
+        type(harness.charm.upgrades_manager),
+        "in_progress",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
 
-    harness.update_config({"profile": "production"})
+    harness.charm.apply_profile_and_restart()
+
+    assert harness.charm.state.server.profile == TestingProfile()
+    update_jvm_heap_size.assert_not_called()
+    restart_opensearch.assert_not_called()
+
+
+@pytest.mark.parametrize("roles_changed", [False, True])
+def test_topology_change_restarts_once_for_profile(
+    harness,
+    mocker,
+    production_topology_met,
+    update_jvm_heap_size,
+    restart_opensearch,
+    roles_changed,
+):
+    """A peer relation change meeting the profile requirements restarts once, roles changed or not."""
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+    harness.charm.state.server.profile = TestingProfile()
+    production_topology_met["value"] = True
+    mocker.patch.object(
+        harness.charm.config_manager, "update_opensearch_config", return_value=roles_changed
+    )
+
+    assert harness.charm.opensearch_events._reconfigure_and_restart_if_needed()
+
+    assert harness.charm.state.server.profile == ProductionProfile()
+    restart_opensearch.assert_called_once()
+
+
+def test_first_start_applies_profile_once_requirements_met(
+    harness, mocker, production_topology_met, update_jvm_heap_size
+):
+    """With no applied profile, the start waits for the configured profile's requirements."""
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+    mocker.patch.object(
+        type(harness.charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    # stop the start right after the profile checks
+    mocker.patch.object(
+        harness.charm.opensearch_events, "unit_allowed_to_start", return_value=False
+    )
+
+    harness.charm.start_opensearch_event.emit()
 
     assert harness.charm.state.server.profile is None
     update_jvm_heap_size.assert_not_called()
@@ -120,7 +183,7 @@ def test_pending_profile_change_does_not_block_start(harness, production_topolog
         harness.update_config({"profile": "production"})
     harness.charm.state.server.profile = TestingProfile()
 
-    assert harness.charm.profiles_manager.check_current_profile_requirements()
+    assert harness.charm.profiles_manager.check_profile_requirements()
 
 
 def test_unmet_profile_does_not_hold_back_config_change(
@@ -131,7 +194,7 @@ def test_unmet_profile_does_not_hold_back_config_change(
     restart_opensearch,
     reconcile_security_config,
 ):
-    """The rest of the config is applied, and the event is deferred for the profile only."""
+    """The rest of the config is applied, and the profile is left to the events it waits for."""
     with harness.hooks_disabled():
         harness.update_config({"profile": "production"})
     harness.charm.state.server.profile = TestingProfile()
@@ -140,7 +203,7 @@ def test_unmet_profile_does_not_hold_back_config_change(
     harness.charm.opensearch_events._on_config_changed(event)
 
     reconcile_security_config.assert_called_once_with(event)
-    event.defer.assert_called_once()
+    event.defer.assert_not_called()
     assert harness.charm.state.server.profile == TestingProfile()
     update_jvm_heap_size.assert_not_called()
 
@@ -180,3 +243,29 @@ def test_profile_change_does_not_start_stopped_service(
     assert harness.charm.state.server.profile == TestingProfile()
     start_opensearch.assert_not_called()
     restart_opensearch.assert_not_called()
+
+
+def test_statuses_follow_configured_profile(harness, mocker, production_topology_met):
+    """The missing-requirements status follows the configured profile, not the stored one."""
+    mocker.patch.object(
+        type(harness.charm.state),
+        "current_peer_cluster_app",
+        new_callable=PropertyMock,
+        return_value=object(),
+    )
+    # Applied profile is valid (testing), but the user configured an unmet production profile.
+    harness.charm.state.server.profile = TestingProfile()
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+
+    statuses = harness.charm.profiles_manager.get_statuses("unit")
+
+    missing = ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value.short_message
+    assert any(status.short_message == missing for status in statuses)
+
+    # Switching back to a profile whose requirements are met clears the status.
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "testing"})
+
+    statuses = harness.charm.profiles_manager.get_statuses("unit")
+    assert not any(status.short_message == missing for status in statuses)

@@ -1138,11 +1138,7 @@ def test_role_mappings_reconciled_on_config_changed_by_main_orchestrator_only(
         return_value=False,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements",
-        return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile",
         return_value=False,
     )
     reconcile_role_mappings = mocker.patch(
