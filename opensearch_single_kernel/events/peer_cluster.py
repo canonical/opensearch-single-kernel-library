@@ -472,7 +472,6 @@ class PeerClusterEventsHandler(Object):
             elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
                 self._promote_failover_to_main()
-                self.charm.plugin_manager.remove_plugin_secret_ids()
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
 
         # we leave in case not an orchestrator
@@ -493,6 +492,7 @@ class PeerClusterEventsHandler(Object):
         """Promote this application to main and check for missing plugin or backup relations."""
         self.charm.cluster_manager.promote_deployment_type()
         self.charm.peer_cluster_orchestrator_manager.promote_failover()
+        self.charm.plugin_manager.remove_plugin_secret_ids()
         self.check_credentials_with_missing_relations()
 
     def check_credentials_with_missing_relations(self) -> None:

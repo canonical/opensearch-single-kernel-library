@@ -257,7 +257,7 @@ def test_promotion_publishes_main_role_and_tracks_missing_relations(
     if credentials == "plugin":
         plugin = charm.state.application.plugin_config_info["smtp-config"]
         assert plugin.relation_name == SMTP_RELATION
-        assert plugin.secret_id == (None if promotion_event == "departed" else plugin_secret_id)
+        assert plugin.secret_id is None
     elif credentials:
         assert charm.state.secrets.get(Scope.APP, credentials) == "inherited-backup-credentials"
 
