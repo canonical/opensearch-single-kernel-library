@@ -54,7 +54,7 @@ async def application_charm(architecture: str) -> str:
 
 
 @pytest.fixture(scope="module")
-async def k8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
+async def k8s_model(ops_test: OpsTest, substrate, architecture: str) -> AsyncGenerator[Model, Any]:
     """Create new Juju model on the connected k8s cloud.
 
     Automatically destroys that model unless keep models parameter is used.
@@ -73,6 +73,8 @@ async def k8s_model(ops_test: OpsTest, substrate) -> AsyncGenerator[Model, Any]:
         model = await controller.get_model(model_name)
     else:
         model = await controller.add_model(model_name, cloud_name=K8S_CLOUD_NAME)
+    # Without an arch constraint, charms are deployed for amd64 whatever the cluster runs on
+    await model.set_constraints({"arch": architecture})
 
     yield model
 

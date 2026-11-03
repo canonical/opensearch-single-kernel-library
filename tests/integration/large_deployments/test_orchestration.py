@@ -108,7 +108,7 @@ async def test_build_and_deploy(
         ),
     )
     for app in APP_UNITS:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     for app in [FAILOVER_APP, DATA_APP, DATA_APP_TWO]:
         await ops_test.model.integrate(

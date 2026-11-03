@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
 from hashlib import md5
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator, Literal, NamedTuple
 
 import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -27,6 +27,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from opensearch_single_kernel.common.constants import (
     _1GB_IN_KB,
@@ -48,6 +49,15 @@ from opensearch_single_kernel.common.statuses import PeerClusterErrorDataStatuse
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
 logger = logging.getLogger(__name__)
+
+
+def _missing_fields_error(missing: list[str]) -> PydanticCustomError:
+    """Return a validation error listing the missing object storage fields."""
+    return PydanticCustomError(
+        "missing_fields",
+        "Missing fields: {fields}",
+        {"fields": ", ".join(missing), "missing_fields": missing},
+    )
 
 
 class Model(ABC, BaseModel):
@@ -393,22 +403,20 @@ class S3RelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):
         """Validate the core fields of the S3 relation data."""
-        if (
-            not (self.credentials)
-            or not self.credentials.access_key
-            or not self.credentials.secret_key
-        ):
-            raise ValueError("Missing fields: access_key, secret_key")
+        missing = []
+        if not self.credentials or not self.credentials.access_key:
+            missing.append("access-key")
+        if not self.credentials or not self.credentials.secret_key:
+            missing.append("secret-key")
 
-        # NOTE: Both bucket and endpoint must be set. If none of them are set,
-        # but credentials were found, this likely means that we are validating for a
-        # non cluster_manager application, which only needs credentials.
-        if self.bucket and not self.endpoint:
-            raise ValueError("Missing field: endpoint")
-        if self.endpoint and not self.bucket:
-            raise ValueError("Missing field: bucket")
+        if not self.endpoint:
+            missing.append("endpoint")
+        if not self.bucket:
+            missing.append("bucket")
         if not self.region:
-            raise ValueError("Missing field: region")
+            missing.append("region")
+        if missing:
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -460,7 +468,7 @@ class S3RelData(Model):
     @staticmethod
     def get_endpoint_protocol(endpoint: str) -> str:
         """Returns the protocol based on the endpoint."""
-        if not endpoint:
+        if not isinstance(endpoint, str) or not endpoint:
             return "https"
 
         if endpoint.startswith("http://"):
@@ -512,12 +520,13 @@ class AzureRelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):  # noqa: N805
         """Validate the core fields of the azure relation data."""
-        if (
-            not (self.credentials)
-            or not self.credentials.storage_account
-            or not self.credentials.secret_key
-        ):
-            raise ValueError("Missing fields: storage_account, secret_key")
+        missing = []
+        if not self.credentials or not self.credentials.storage_account:
+            missing.append("storage-account")
+        if not self.credentials or not self.credentials.secret_key:
+            missing.append("secret-key")
+        if missing:
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -603,11 +612,13 @@ class GcsRelData(Model):
     @model_validator(mode="after")
     def validate_core_fields(self):
         """Validate the core fields of the gcs relation data."""
+        missing = []
         if not self.credentials or not self.credentials.secret_key:
-            raise ValueError("Missing fields: secret-key")
-
+            missing.append("secret-key")
         if not self.bucket:
-            raise ValueError("Missing field: bucket")
+            missing.append("bucket")
+        if missing:
+            raise _missing_fields_error(missing)
 
         # remove any duplicate, prefix or trailing "/" characters
         if base_path := self.base_path:
@@ -885,6 +896,47 @@ class SmtpConfig:
     group_id: str
     channel_id: str
     transport_security: SmtpTransportSecurity
+
+
+class ExternalClientRequestedEntity(NamedTuple):
+    """Model class for the entity credentials requested on a client relation.
+
+    Attributes:
+        username: name of the requested entity.
+        password: password of the requested entity or `None` if no password is requested.
+    """
+
+    username: str
+    password: str | None
+
+
+class ExternalClientEntityPermission(Model):
+    """Model class for a single permission entry requested on a client relation."""
+
+    resource_name: str
+    resource_type: Literal["index_permissions"]
+    privileges: list[str]
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return {
+            self.resource_type: [
+                {
+                    "index_patterns": [self.resource_name],
+                    "allowed_actions": self.privileges,
+                }
+            ]
+        }
+
+
+class ExternalClientEntityPermissions(RootModel[list[ExternalClientEntityPermission]]):
+    """Model class for the entity permissions requested on a client relation."""
+
+    root: list[ExternalClientEntityPermission] = Field(min_length=1, max_length=1)
+
+    def to_role_permissions(self) -> dict[str, list[dict[str, list[str]]]]:
+        """Reformat into OpenSearch role permissions."""
+        return self.root[0].to_role_permissions()
 
 
 class JWTAuthConfiguration(Model):

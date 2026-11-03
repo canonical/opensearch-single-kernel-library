@@ -101,10 +101,6 @@ class OpenSearchExclusionsException(OpenSearchError):
     """Exception class for all Voting/Allocation exclusions related exceptions."""
 
 
-class OpenSearchIndexError(OpenSearchError):
-    """Exception thrown when an opensearch index is invalid."""
-
-
 class OpenSearchFileOperationError(OpenSearchError):
     """Exception thrown when file operations related to OpenSearch fail."""
 
@@ -115,6 +111,12 @@ class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
     def __init__(self, error: ValidationError):
         super().__init__(str(error))
         self.error = error
+        self.missing_fields: list[str] = [
+            field
+            for err in error.errors()
+            if err["type"] == "missing_fields"
+            for field in err["ctx"]["missing_fields"]
+        ]
 
 
 class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):

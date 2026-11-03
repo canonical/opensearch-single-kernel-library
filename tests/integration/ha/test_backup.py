@@ -412,7 +412,7 @@ async def test_small_deployment_build_and_deploy(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
         status="active",
@@ -526,9 +526,9 @@ async def test_large_deployment_build_and_deploy(
     )
 
     # TLS setup
-    await ops_test.model.integrate("main", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate("failover", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate("main:certificates", TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate("failover:certificates", TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # Charms except the backup integrator should be active
     await wait_until(
@@ -911,7 +911,7 @@ async def test_restore_to_new_cluster(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, app],
         status="active",
@@ -1194,7 +1194,7 @@ async def test_build_deploy_and_test_status(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],

@@ -9,10 +9,14 @@ from typing import Any
 
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
+    OPENSEARCH_USERS,
     CertType,
     Substrates,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.core.models import Node, OpenSearchProfile
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -48,8 +52,8 @@ class ConfigManager(BaseManager):
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
-        Updates opensearch.yml & unicast_hosts.txt & opensearch-security/config.yml config files
-        and assures jvm.options is populated with right static options.
+        Updates opensearch.yml & unicast_hosts.txt config files and assures jvm.options is
+        populated with right static options.
 
         Args:
             roles: override node roles got from nodes_config.
@@ -78,8 +82,6 @@ class ConfigManager(BaseManager):
 
         self._update_static_jvm_options()
 
-        self.update_security_config()
-
         if cm_hosts:
             self._update_seeds_file(cm_hosts)
         else:
@@ -92,7 +94,8 @@ class ConfigManager(BaseManager):
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
 
-        Updates opensearch-security/config.yml config file.
+        Updates opensearch-security/config.yml config file. It has its own lifecycle: OpenSearch
+        only reads it from the security index, to which it must be applied once updated.
 
         Returns:
             whether the config was changed.
@@ -106,13 +109,89 @@ class ConfigManager(BaseManager):
                 "dynamic": {
                     "authc": self._security_authc_static_config()
                     | self._security_authc_jwt_config()
-                    | self._security_authc_oauth_config(),
-                    "authz": self._security_authz_static_config(),
+                    | self._security_authc_oauth_config()
+                    | self._security_authc_ldap_config(),
+                    "authz": self._security_authz_static_config()
+                    | self._security_authz_ldap_config(),
                 },
             },
         }
 
         return self.yaml_setter.rewrite(self.SECURITY_CONFIG_YML, config)
+
+    def reconcile_security_config(self, force: bool = False) -> bool:
+        """Update the security config and apply it to the security index if it changed.
+
+        The file only keeps what is applied: it is restored when its application fails, for the
+        change to be seen again by the next call.
+
+        Args:
+            force: whether to apply the security config even if it did not change.
+
+        Returns:
+            whether the security index holds the security config. If not, to call again later.
+        """
+        if not self.workload.can_connect or not self.workload.is_service_started():
+            logger.debug("Workload not running: the security config is not reconciled.")
+            return False
+
+        if not self.opensearch_client.is_node_up():
+            logger.debug("OpenSearch not ready: the security config is not reconciled.")
+            return False
+
+        if not (admin_secrets := self.state.application.admin_secrets):
+            logger.debug("Admin secrets absent: the security config is not reconciled.")
+            return False
+
+        path = self.workload.paths.conf / self.SECURITY_CONFIG_YML
+        applied_config = self.workload.read_text(path)
+        if not self.update_security_config() and not force:
+            logger.debug("Security config unchanged.")
+            return True
+
+        logger.debug("Updating security config")
+        applied = False
+        try:
+            applied = self.apply_security_config(admin_secrets, self.SECURITY_CONFIG_YML)
+        finally:
+            if not applied:
+                self.workload.write_text(applied_config, path)
+
+        return applied
+
+    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> bool:
+        """Run the security_admin script for specified config file, avoiding changes to others.
+
+        Returns:
+            True on success, False if the script failed.
+        """
+        if not file.startswith("opensearch-security"):
+            raise ValueError("security config is expected")
+
+        args = [
+            f"-f {self.workload.paths.conf}/{file}",
+            f"-cn {self.state.application.deployment_desc.config.cluster_name}",
+            f"-h {self.state.node_host}",
+            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
+            f"-tspass {admin_secrets['truststore-password']}",
+            "-tst PKCS12",
+            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
+            f"-kspass {admin_secrets['keystore-password']}",
+            "-kst PKCS12",
+        ]
+
+        admin_key_pwd = admin_secrets.get("key-password", None)
+        if admin_key_pwd is not None:
+            args.append(f"-keypass {admin_key_pwd}")
+
+        try:
+            self.workload.run_script(
+                "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+            )
+        except OpenSearchCmdError as e:
+            logger.debug("Error when updating the security index: %s", e.out)
+            return False
+        return True
 
     @staticmethod
     def _opensearch_static_config() -> dict[str, Any]:
@@ -324,31 +403,6 @@ class ConfigManager(BaseManager):
                 },
                 "authentication_backend": {"type": "noop"},
             },
-            "ldap": {
-                "description": "Authenticate via LDAP or Active Directory",
-                "http_enabled": False,
-                "transport_enabled": False,
-                "order": 5,
-                "http_authenticator": {
-                    "type": "basic",
-                    "challenge": False,
-                },
-                "authentication_backend": {
-                    "type": "ldap",
-                    "config": {
-                        "enable_ssl": False,
-                        "enable_start_tls": False,
-                        "enable_ssl_client_auth": False,
-                        "verify_hostnames": True,
-                        "hosts": ["localhost:8389"],
-                        "bind_dn": None,
-                        "password": None,
-                        "userbase": "ou=people,dc=example,dc=com",
-                        "usersearch": "(sAMAccountName={0})",
-                        "username_attribute": None,
-                    },
-                },
-            },
         }
 
     def _security_authc_jwt_config(self) -> dict[str, Any]:
@@ -428,6 +482,93 @@ class ConfigManager(BaseManager):
             else {}
         )
 
+    def _security_authc_ldap_config(self) -> dict[str, Any]:
+        """Get set of LDAP security config options for the Opensearch.
+
+        Intended for authc category in opensearch-security/config.yml config file.
+        """
+        return (
+            {
+                "ldap": {
+                    "http_enabled": True,
+                    "transport_enabled": False,
+                    # Authentik slowly responds causing is_node_up timeouts.
+                    "order": 5,
+                    "http_authenticator": {
+                        "type": "basic",
+                        "challenge": False,
+                    },
+                    "authentication_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": True,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "pemtrustedcas_filepath": self.workload.paths.ldap_chain.as_posix(),
+                            "hosts": [
+                                url.removeprefix("ldaps://") for url in ldap_data.ldaps_urls
+                            ],
+                            "bind_dn": ldap_data.bind_dn,
+                            "password": ldap_data.bind_password,
+                            "userbase": self.state.config.get("ldap_user_base", ""),
+                            "usersearch": self._ldap_authc_user_search(),
+                            "username_attribute": "cn",
+                        },
+                    },
+                }
+            }
+            if (ldap_data := self.state.ldap_data)
+            and ldap_data.ldaps_urls
+            and self.state.ldap_certificates
+            else {
+                "ldap": {
+                    "description": "Authenticate via LDAP or Active Directory",
+                    "http_enabled": False,
+                    "transport_enabled": False,
+                    # Authentik slowly responds causing is_node_up timeouts.
+                    "order": 5,
+                    "http_authenticator": {
+                        "type": "basic",
+                        "challenge": False,
+                    },
+                    "authentication_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": False,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "hosts": ["localhost:8389"],
+                            "bind_dn": None,
+                            "password": None,
+                            "userbase": "ou=people,dc=example,dc=com",
+                            "usersearch": "(sAMAccountName={0})",
+                            "username_attribute": None,
+                        },
+                    },
+                }
+            }
+        )
+
+    def _ldap_protected_users(self) -> list[str]:
+        """Get the users which no LDAP entry may authenticate as.
+
+        These are the internal users and the ones provided to the client relations.
+        """
+        return sorted(OPENSEARCH_USERS | set(self.state.application.client_users_dict.values()))
+
+    def _ldap_authc_user_search(self) -> str:
+        """Get the LDAP user search filter of the authentication, excluding protected users.
+
+        The authenticated user is named after the `cn` of its LDAP entry, and the roles are
+        mapped to users by name: an entry named after a protected user would get its roles.
+        The names of the protected users hold no LDAP filter special characters.
+        """
+        user_search = self.state.config.get("ldap_user_search", "")
+        exclusions = "".join(f"(!(cn={user}))" for user in self._ldap_protected_users())
+        return f"(&{user_search}{exclusions})"
+
     @staticmethod
     def _security_authz_static_config() -> dict[str, Any]:
         """Get set of static config options for the Opensearch security.
@@ -467,6 +608,46 @@ class ConfigManager(BaseManager):
                 "authorization_backend": {"type": "ldap"},
             },
         }
+
+    def _security_authz_ldap_config(self) -> dict[str, Any]:
+        """Get set of LDAP security config options for the Opensearch.
+
+        Intended for authz category in opensearch-security/config.yml config file.
+        """
+        return (
+            {
+                "ldap_roles": {
+                    "http_enabled": True,
+                    "transport_enabled": False,
+                    "authorization_backend": {
+                        "type": "ldap",
+                        "config": {
+                            "enable_ssl": True,
+                            "enable_start_tls": False,
+                            "enable_ssl_client_auth": False,
+                            "verify_hostnames": True,
+                            "pemtrustedcas_filepath": self.workload.paths.ldap_chain.as_posix(),
+                            "hosts": [
+                                url.removeprefix("ldaps://") for url in ldap_data.ldaps_urls
+                            ],
+                            "bind_dn": ldap_data.bind_dn,
+                            "password": ldap_data.bind_password,
+                            "userbase": self.state.config.get("ldap_user_base", ""),
+                            "usersearch": self.state.config.get("ldap_user_search", ""),
+                            "userrolename": self.state.config.get("ldap_user_rolename", ""),
+                            "rolename": self.state.config.get("ldap_role_name_attr", ""),
+                            "rolesearch_enabled": False,
+                            "resolve_nested_roles": False,
+                            "skip_users": self._ldap_protected_users(),
+                        },
+                    },
+                },
+            }
+            if (ldap_data := self.state.ldap_data)
+            and ldap_data.ldaps_urls
+            and self.state.ldap_certificates
+            else {}
+        )
 
     def update_seeds_config(self, nodes: list[Node] | None = None) -> bool:
         """Reconcile OpenSearch unicast_hosts.txt using values from nodes_config.

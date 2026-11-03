@@ -156,17 +156,25 @@ class UpgradesManagerBase(BaseManager):
 
         if not self.in_progress:
             return None
+
         if not self.is_compatible:
             logger.info(
                 "Upgrade incompatible. If you accept potential *data loss* and *downtime*, you can continue by running `force-upgrade` action on each remaining unit"
             )
             return UpgradesStatuses.UPGRADES_INCOMPATIBLE.value
-        if not self.state.application_upgrade.upgrade_resumed:
+
+        if not self.upgrade_resumed:
             # User confirmation needed to resume upgrade (i.e. upgrade second unit)
             # Statuses over 120 characters are truncated in `juju status` as of juju 3.1.6 and
             # 2.9.45
             return UpgradesStatuses.UPGRADES_WAITING_FOR_RESUME.value
+
         return UpgradesStatuses.UPGRADES_UPGRADING.value
+
+    @property
+    @abc.abstractmethod
+    def upgrade_resumed(self) -> bool:
+        """Whether the user has resumed the upgrade with the Juju action."""
 
     @abc.abstractmethod
     def reconcile_partition(

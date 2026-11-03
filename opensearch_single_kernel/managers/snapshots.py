@@ -466,7 +466,8 @@ class SnapshotsManager(BaseManager):
         except OpenSearchHttpError as e:
             logger.error("Failed to restore snapshot %s. Error: %s.", snapshot_id, str(e))
             raise OpenSearchRestoreBackupError(
-                "Failed to restore snapshot %s. Error: %s." % (snapshot_id, e)
+                "Failed to verify the %s repository for the %s snapshot. Error: %s."
+                % (object_storage_type, snapshot_id, e)
             )
 
         max_attempts = 3
@@ -744,6 +745,10 @@ class SnapshotsManager(BaseManager):
                     object_storage_type
                 )
 
+                if not connection_info:
+                    status_list.append(SnapshotsStatuses.BACKUP_WAITING_FOR_CONNECTION_INFO.value)
+                    return status_list
+
                 if not (
                     object_storage_config := (
                         storage_config_from_connection_info(object_storage_type, connection_info)
@@ -752,12 +757,26 @@ class SnapshotsManager(BaseManager):
                     status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                     return status_list
 
-                self.validate_storage_config(object_storage_config, object_storage_type)
+                if not recompute:
+                    if invalid_credentials := cached_non_running_statuses(
+                        self.state.statuses,
+                        scope,
+                        self.name,
+                        matches=[SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value],
+                    ):
+                        status_list.extend(invalid_credentials)
+                        return status_list
+                else:
+                    self.validate_storage_config(object_storage_config, object_storage_type)
             except OpenSearchInvalidStorageTypeError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)
                 return status_list
-            except OpenSearchObjectStorageConfigValidationError:
-                status_list.append(SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value)
+            except OpenSearchObjectStorageConfigValidationError as e:
+                status_list.append(
+                    SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value
+                    if e.missing_fields
+                    else SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value
+                )
                 return status_list
             except OpenSearchBackupRelationDataIncompleteError:
                 status_list.append(SnapshotsStatuses.BACKUP_RELATION_DATA_INCOMPLETE.value)

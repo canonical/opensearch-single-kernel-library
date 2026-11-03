@@ -185,7 +185,7 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP, INVALID_APP]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     await wait_until(
         ops_test,
