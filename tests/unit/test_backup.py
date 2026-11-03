@@ -1765,7 +1765,7 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
     blob.delete.assert_not_called()
 
 
-GCS_KEY = json.loads(DEFAULT_GCS_INFO["secret_key"])
+GCS_KEY = json.loads(DEFAULT_GCS_INFO["secret-key"])
 
 
 @pytest.mark.parametrize(
