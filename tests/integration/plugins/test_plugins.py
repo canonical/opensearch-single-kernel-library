@@ -1860,7 +1860,7 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_notifications(
-    ops_test: OpsTest, deploy_type: str, architecture: str
+    ops_test: OpsTest, deploy_type: str
 ) -> None:
     """Ensure that relating smtp-integrator results in notifications email config objects:
 
@@ -1988,7 +1988,6 @@ async def test_smtp_notification_statuses(
     series,
     substrate,
     charm_resources,
-    architecture: str,
 ) -> None:
     """Validate notification statuses for the smtp relation on a main/small deploy.
 
@@ -2120,7 +2119,6 @@ async def test_smtp_relation_invalid_status_on_non_main(
     charm,
     series,
     substrate,
-    architecture: str,
 ) -> None:
     """SMTP on a non-main orchestrator must block with SMTP_RELATION_INVALID."""
     await _ensure_opensearch_deployed(ops_test, deploy_type, charm, series, substrate)
