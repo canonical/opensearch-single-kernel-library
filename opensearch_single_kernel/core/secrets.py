@@ -78,8 +78,26 @@ class OpenSearchSecrets(Object, RelationDataStore):
         if cached_secret_meta:
             return cached_secret_meta
 
+        secret_id = None
+        if scope == Scope.APP and not self.charm.unit.is_leader():
+            if not (secret_id := self.get_secret_id(scope, key)):
+                logger.debug("App secret %s not ready yet", label)
+                try:
+                    self.charm.model.get_secret(label=label)
+                    result = "readable"
+                except SecretNotFoundError:
+                    result = "not created"
+                except ModelError as e:
+                    result = f"denied ({e})"
+                logger.warning("secret race: %s not ready, label-read result: %s", label, result)
+                return None
+
         try:
-            secret = self.charm.model.get_secret(label=label)
+            secret = (
+                self.charm.model.get_secret(id=secret_id)
+                if secret_id
+                else self.charm.model.get_secret(label=label)
+            )
         except SecretNotFoundError:
             return None
 
