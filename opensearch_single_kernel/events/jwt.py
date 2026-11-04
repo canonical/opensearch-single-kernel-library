@@ -130,7 +130,7 @@ class JWTEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.cluster_manager.apply_security_config(
+        if not self.charm.config_manager.apply_security_config(
             admin_secrets, self.charm.config_manager.SECURITY_CONFIG_YML
         ):
             # we need to come back in this case because there will not be a follow-up event

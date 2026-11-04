@@ -30,6 +30,11 @@ class UpgradesManagerVM(UpgradesManagerBase):
     """In-place upgrades on machines"""
 
     @property
+    def upgrade_resumed(self) -> bool:
+        """Whether the user has resumed the upgrade with the Juju action."""
+        return self.state.application_upgrade.upgrade_resumed
+
+    @property
     def unit_state(self) -> UnitUpgradesState | None:
         """Calculate the upgrade state of current unit."""
         if (

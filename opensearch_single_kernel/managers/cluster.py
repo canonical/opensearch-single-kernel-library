@@ -7,7 +7,6 @@
 import logging
 import time
 from datetime import datetime
-from typing import Any
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -36,7 +35,6 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import (
-    OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchNotFullyReadyError,
@@ -440,44 +438,10 @@ class ClusterManager(BaseManager):
             args.append(f"-keypass {admin_key_pwd}")
 
         self.workload.run_script(
-            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
+            "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args), timeout=60
         )
         logger.info("securityadmin.sh execution completed successfully")
         self.state.application.is_security_index_initialised = True
-
-    def apply_security_config(self, admin_secrets: dict[str, Any], file: str) -> bool:
-        """Run the security_admin script for specified config file, avoiding changes to others.
-
-        Returns:
-            True on success, False if the script failed.
-        """
-        if not file.startswith("opensearch-security"):
-            raise ValueError("security config is expected")
-
-        args = [
-            f"-f {self.workload.paths.conf}/{file}",
-            f"-cn {self.state.application.deployment_desc.config.cluster_name}",
-            f"-h {self.state.node_host}",
-            f"-ts {self.workload.paths.certs}/{CA_ALIAS}.p12",
-            f"-tspass {admin_secrets['truststore-password']}",
-            "-tst PKCS12",
-            f"-ks {self.workload.paths.certs}/{CertType.APP_ADMIN}.p12",
-            f"-kspass {admin_secrets['keystore-password']}",
-            "-kst PKCS12",
-        ]
-
-        admin_key_pwd = admin_secrets.get("key-password", None)
-        if admin_key_pwd is not None:
-            args.append(f"-keypass {admin_key_pwd}")
-
-        try:
-            self.workload.run_script(
-                "plugins/opensearch-security/tools/securityadmin.sh", " ".join(args)
-            )
-        except OpenSearchCmdError as e:
-            logger.debug("Error when updating the security index: %s", e.out)
-            return False
-        return True
 
     def wait_for_opensearch_up(self) -> None:
         """Wait for opensearch to be fully ready."""
@@ -973,7 +937,6 @@ class ClusterManager(BaseManager):
                 self.state.jwt.auth_configuration
             except ValidationError:
                 status_list.append(JwtStatuses.JWT_AUTH_CONFIG_INVALID.value)
-
 
         # Flag forbidden role removals against last applied roles.
         prev_roles = set(deployment_desc.config.roles or [])

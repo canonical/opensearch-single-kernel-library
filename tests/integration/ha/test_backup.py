@@ -255,6 +255,7 @@ async def _configure_s3_for_aws(
         "region": config.get("region", "") or "",
     }
     await ops_test.model.applications[S3_INTEGRATOR].set_config(base_cfg)
+
     s3_integrator_id = (await get_application_units(ops_test, S3_INTEGRATOR))[
         0
     ].id  # We redeploy s3-integrator once, so we may have anything >=0 as id
@@ -411,13 +412,18 @@ async def test_small_deployment_build_and_deploy(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],
         status="active",
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )
+    # The integrator may still be provisioning and blocked status expected before credentials.
+    await ops_test.model.wait_for_idle(
+        apps=[backup_integrator], wait_for_exact_units=1, timeout=TIMEOUT
+    )
+
     # Credentials not set yet, this will move the opensearch to blocked state
     # Credentials are set per test scenario
     await ops_test.model.integrate(APP_NAME, backup_integrator)
@@ -520,11 +526,11 @@ async def test_large_deployment_build_and_deploy(
     )
 
     # TLS setup
-    await ops_test.model.integrate("main", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate("failover", TLS_CERTIFICATES_APP_NAME)
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate("main:certificates", TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate("failover:certificates", TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
 
-    # Charms except s3-integrator should be active
+    # Charms except the backup integrator should be active
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, "main", "failover", APP_NAME],
@@ -536,6 +542,11 @@ async def test_large_deployment_build_and_deploy(
         },
         idle_period=IDLE_PERIOD,
         timeout=3600,
+    )
+
+    # The integrator may still be provisioning and blocked status expected before credentials.
+    await ops_test.model.wait_for_idle(
+        apps=[backup_integrator], wait_for_exact_units=1, timeout=TIMEOUT
     )
 
     # Credentials not set yet, this will move the opensearch to blocked state
@@ -900,13 +911,18 @@ async def test_restore_to_new_cluster(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.wait_for_idle(
         apps=[TLS_CERTIFICATES_APP_NAME, app],
         status="active",
         timeout=1400,
         idle_period=IDLE_PERIOD,
     )
+    # The integrator may still be provisioning and blocked status expected before credentials.
+    await ops_test.model.wait_for_idle(
+        apps=[backup_integrator], wait_for_exact_units=1, timeout=TIMEOUT
+    )
+
     # Credentials not set yet, this will move the opensearch to blocked state
     # Credentials are set per test scenario
     await ops_test.model.integrate(app, backup_integrator)
@@ -1178,7 +1194,7 @@ async def test_build_deploy_and_test_status(
     )
 
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[TLS_CERTIFICATES_APP_NAME, APP_NAME],

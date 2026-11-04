@@ -90,8 +90,11 @@ class NodesExclusionsManager(BaseManager):
     def cleanup(self, scope: Scope) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
+
         units_to_cleanup = self._units_to_cleanup(list(state.voting_exclusions_to_delete))
-        self._delete_voting(units_to_cleanup, scope)
+        if units_to_cleanup:
+            self._delete_voting(units_to_cleanup, scope)
+
         allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
         if allocations_to_cleanup and self._delete_allocations(
             self.api_or_state_node, allocations_to_cleanup

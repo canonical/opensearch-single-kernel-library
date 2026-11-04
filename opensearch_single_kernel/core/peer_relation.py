@@ -116,7 +116,7 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
-        return self.relation_data.get("started", "")
+        return self.relation.data[self.unit].get("started", "")
 
     @started.setter
     def started(self, value: str) -> None:
@@ -553,6 +553,21 @@ class OpenSearchApplication(RelationState):
     def client_users_dict(self, users_dict: dict[str, str]) -> None:
         """Set the client relation users dict in application databag."""
         self.put_object("client_relation_users", users_dict)
+
+    @property
+    def client_groups_dict(self) -> dict[str, str]:
+        """Get the client relation groups dict from application databag."""
+        return self.get_object("client_relation_groups") or {}
+
+    @client_groups_dict.setter
+    def client_groups_dict(self, groups_dict: dict[str, str]) -> None:
+        """Set the client relation groups dict in application databag."""
+        self.put_object("client_relation_groups", groups_dict)
+
+    @property
+    def client_entities_dict(self) -> dict[str, str]:
+        """Get the users and the groups provided to the client relations, by relation id."""
+        return self.client_users_dict | self.client_groups_dict
 
     @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
