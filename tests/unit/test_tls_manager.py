@@ -675,6 +675,28 @@ def test_on_certificate_available(harness, mocker):
     on_tls_conf_set.assert_called()
 
 
+def test_finalize_ca_certs_rotation_clears_rotation_flags(harness, mocker):
+    """Test the rotation flags are cleared after a completed rotation."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ca_and_certs_rotation_complete_in_cluster",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.remove_old_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle",
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.charm.state.server.tls_ca_renewing = True
+        harness.charm.state.server.tls_ca_renewed = True
+
+    assert harness.charm.tls_manager.finalize_ca_certs_rotation()
+
+    assert not harness.charm.state.server.tls_ca_renewing
+    assert not harness.charm.state.server.tls_ca_renewed
+
+
 def test_on_certificate_expiring(harness, mocker, substrate):
     """Test _on_certificate_expiring event."""
     request_certificate_creation = mocker.patch(
