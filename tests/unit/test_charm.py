@@ -12,9 +12,12 @@ from ops.pebble import APIError
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
+    ADMIN_USER,
     COS_USER,
     INTERNAL_USER_ENDPOINT,
+    NODE_LOCK_RELATION,
     STATUS_PEERS_RELATION,
+    CertType,
     DeploymentType,
     HealthColors,
     Scope,
@@ -826,7 +829,9 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
     initialise = mocker.patch.object(charm.cluster_manager, "initialise_security_index")
     request = mocker.patch.object(OpenSearchClient, "request")
-    publish = mocker.patch.object(charm.peer_cluster_orchestrator_manager, "refresh_relation_data")
+    publish = mocker.patch.object(
+        charm.peer_cluster_orchestrator_manager, "_refresh_relation_data", return_value=True
+    )
     get_secret = harness.model.get_secret
 
     def lookup(*args, **kwargs):
@@ -840,15 +845,16 @@ def test_start_retries_secret_failure_without_reinitialising_security(
         publish.side_effect = ModelError("Juju temporarily unavailable")
     event = MagicMock(after_upgrade=False)
     charm.opensearch_events._on_start_opensearch(event)
-    event.defer.assert_called_once()
-    assert "Juju temporarily unavailable" in caplog.text
+    event.defer.assert_called()
     request.assert_not_called()
     initialise.assert_not_called()
     if failure_stage == "monitor":
+        assert "Juju temporarily unavailable" in caplog.text
         publish.assert_not_called()
         assert not charm.unit.opened_ports()
         mocker.stop(failed)
     else:
+        publish.assert_called_once()
         publish.side_effect = None
 
     event.reset_mock()
@@ -902,3 +908,265 @@ def test_unit_name(harness, mocker):
 def test_unit_id(harness):
     """Test retrieving the integer id pf a unit."""
     assert harness.charm.state.server.unit_id == 0
+
+
+@pytest.mark.parametrize("publication_failed", [False, True])
+def test_post_start_publication_controls_continuation(started_leader, mocker, publication_failed):
+    """A failed relation update stops CA rotation and tells the caller to stop too."""
+    charm = started_leader
+    charm.state.secrets.put(Scope.APP, password_key(COS_USER), "existing-password")
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
+    mocker.patch.object(
+        charm.peer_cluster_orchestrator_manager,
+        "_refresh_relation_data",
+        return_value=False,
+        side_effect=ModelError("grant unavailable") if publication_failed else None,
+    )
+    event = MagicMock(after_upgrade=False)
+
+    can_continue = charm.opensearch_events._post_start_init(event)
+
+    assert can_continue == (not publication_failed)
+    if publication_failed:
+        charm.opensearch_events.post_start_ca_rotation.assert_not_called()
+        event.defer.assert_called_once()
+    else:
+        charm.opensearch_events.post_start_ca_rotation.assert_called_once()
+        event.defer.assert_not_called()
+
+
+@pytest.mark.parametrize("publication_failed", [False, True])
+@pytest.mark.parametrize("already_running", [False, True])
+def test_start_stops_after_security_index_publication_failure(
+    started_leader, mocker, publication_failed, already_running
+):
+    """Stop after a failed relation update, but allow another update if the cluster is waiting."""
+    charm = started_leader
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=already_running,
+    )
+    if not already_running:
+        mocker.patch.object(
+            charm.profiles_manager, "check_profile_requirements", return_value=True
+        )
+        mocker.patch.object(charm.opensearch_events, "unit_allowed_to_start", return_value=True)
+        mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+        mocker.patch.object(charm.config_manager, "update_opensearch_config")
+        mocker.patch.object(charm.cluster_manager, "start")
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
+    mocker.patch.object(
+        charm.cluster_manager, "should_initialise_security_index", return_value=True
+    )
+    mocker.patch.object(charm.config_manager, "update_security_config")
+    mocker.patch.object(charm.cluster_manager, "initialise_security_index")
+    publish = mocker.patch.object(
+        charm.peer_cluster_orchestrator_manager,
+        "_refresh_relation_data",
+        return_value=False,
+        side_effect=ModelError("publication unavailable") if publication_failed else None,
+    )
+    event = MagicMock(after_upgrade=False, ignore_lock=True)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert publish.call_count == (1 if publication_failed else 2)
+    charm.cluster_manager.wait_for_opensearch_up.assert_not_called()
+    charm.opensearch_events.post_start_ca_rotation.assert_not_called()
+    assert not charm.unit.opened_ports()
+
+
+@pytest.fixture
+def startup_with_peer_lock(started_leader, harness, mocker, monkeypatch):
+    """A startup attempt with a real peer lock and secret storage, without workload I/O."""
+    charm = started_leader
+    mocker.stop(charm.lock_manager.release)
+    mocker.patch.object(charm.status_handler, "_get_critical_statuses", return_value=[])
+    monkeypatch.setenv("JUJU_CONTEXT_ID", "startup-cleanup")
+    with harness.hooks_disabled():
+        harness.add_relation(NODE_LOCK_RELATION, charm.app.name)
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+        harness.set_planned_units(1)
+    charm.state.secrets.put(Scope.APP, password_key(ADMIN_USER), "admin-password")
+    charm.state.secrets.put(Scope.APP, password_key(COS_USER), "monitor-password")
+    charm.state.secrets.put_object(
+        Scope.APP,
+        CertType.APP_ADMIN.val,
+        {"truststore-password": "truststore", "keystore-password": "keystore"},
+    )
+    mocker.patch.object(OpenSearchClient, "is_node_up", return_value=False)
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
+    mocker.patch.object(charm.opensearch_events, "unit_allowed_to_start", return_value=True)
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.cluster_manager, "start")
+    mocker.patch.object(
+        charm.peer_cluster_orchestrator_manager, "_refresh_relation_data", return_value=True
+    )
+    assert charm.lock_manager.acquire()
+    assert charm.state.server_lock.lock_requested
+    assert charm.state.application_lock.unit_with_lock == charm.state.unit_name
+    return charm
+
+
+def test_start_configuration_secret_failure_releases_peer_lock(
+    startup_with_peer_lock, harness, mocker
+):
+    """A TLS read failure before service start must not leave other units locked out."""
+    charm = startup_with_peer_lock
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    label = charm.state.secrets.label(Scope.APP, CertType.APP_ADMIN.val)
+    charm.state.secrets.cached_secrets.delete(Scope.APP, label)
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("TLS secret unavailable")
+        return get_secret(*args, **kwargs)
+
+    mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert not charm.state.server_lock.lock_requested
+    assert charm.state.application_lock.unit_with_lock is None
+    charm.cluster_manager.start.assert_not_called()
+
+
+@pytest.mark.parametrize("already_running", [False, True])
+def test_post_start_secret_failure_releases_peer_lock_and_clears_progress(
+    startup_with_peer_lock, harness, mocker, already_running
+):
+    """If security index initialization fails, release the lock and clear its status."""
+    charm = startup_with_peer_lock
+    charm.state.application.is_security_index_initialised = False
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=already_running,
+    )
+    mocker.patch.object(charm.config_manager, "update_opensearch_config")
+    mocker.patch.object(charm.config_manager, "update_security_config")
+    label = charm.state.secrets.label(Scope.APP, CertType.APP_ADMIN.val)
+    charm.state.secrets.cached_secrets.delete(Scope.APP, label)
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("TLS secret unavailable")
+        return get_secret(*args, **kwargs)
+
+    mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert not charm.state.server_lock.lock_requested
+    assert charm.state.application_lock.unit_with_lock is None
+    statuses = charm.state.statuses.get("unit", charm.cluster_manager.name).root
+    assert GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value not in statuses
+    assert GeneralStatuses.SERVICE_START_ERROR.value not in statuses
+    assert not charm.state.application.is_security_index_initialised
+    charm.opensearch_events.post_start_ca_rotation.assert_not_called()
+
+
+@pytest.mark.parametrize("publication_failed", [False, True])
+@pytest.mark.parametrize("already_running", [False, True])
+def test_early_publication_failure_releases_lock_but_readiness_wait_retains_it(
+    startup_with_peer_lock, mocker, already_running, publication_failed
+):
+    """Release the lock if the relation update fails; keep it while waiting for the cluster."""
+    charm = startup_with_peer_lock
+    charm.state.application.is_security_index_initialised = False
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=already_running,
+    )
+    mocker.patch.object(charm.config_manager, "update_opensearch_config")
+    mocker.patch.object(charm.config_manager, "update_security_config")
+    # Keep initialize_security_index real, replacing only the external securityadmin script.
+    mocker.patch.object(type(charm.workload), "run_script")
+    publish = charm.peer_cluster_orchestrator_manager._refresh_relation_data
+    publish.return_value = False
+    publish.side_effect = ModelError("grant unavailable") if publication_failed else None
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert charm.state.application.is_security_index_initialised
+    assert charm.state.server_lock.lock_requested == (not publication_failed)
+    assert charm.state.application_lock.unit_with_lock == (
+        None if publication_failed else charm.state.unit_name
+    )
+    statuses = charm.state.statuses.get("unit", charm.cluster_manager.name).root
+    assert GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value not in statuses
+    assert GeneralStatuses.SERVICE_START_ERROR.value not in statuses
+    charm.opensearch_events.post_start_ca_rotation.assert_not_called()
+
+
+def test_bootstrap_config_cleanup_survives_secret_failure(startup_with_peer_lock, harness, mocker):
+    """Do not discard the cleanup marker before the initial cluster config is removed."""
+    charm = startup_with_peer_lock
+    charm.state.server.is_bootstrap_contributor = True
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(charm.config_manager, "_update_static_jvm_options")
+    mocker.patch.object(charm.config_manager, "update_seeds_config", return_value=True)
+    config_on_disk = {"cluster.initial_cluster_manager_nodes": [charm.state.unit_name]}
+
+    def rewrite(_setter, path, config):
+        assert path == "opensearch.yml"
+        config_on_disk.clear()
+        config_on_disk.update(config)
+        return True
+
+    mocker.patch(
+        "opensearch_single_kernel.utils.config.YamlConfigSetter.rewrite",
+        autospec=True,
+        side_effect=rewrite,
+    )
+    label = charm.state.secrets.label(Scope.APP, CertType.APP_ADMIN.val)
+    charm.state.secrets.cached_secrets.delete(Scope.APP, label)
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("TLS secret unavailable")
+        return get_secret(*args, **kwargs)
+
+    failed = mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" in config_on_disk
+    assert not charm.state.server_lock.lock_requested
+    mocker.stop(failed)
+    event.reset_mock()
+    charm.opensearch_events._on_start_opensearch(event)
+    event.defer.assert_not_called()
+    assert not charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" not in config_on_disk

@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     TLS_RELATION,
     CertType,
     DeploymentType,
+    PClusterRefreshRelDataRes,
     Scope,
     StoreType,
 )
@@ -141,11 +142,14 @@ class TLSEventsHandler(Object):
                     old_certificate_signing_request=old_csr.encode("utf-8"),
                     new_certificate_signing_request=csr,
                 )
-
         except ValueError as e:
-            event.fail(str(e))
+            logger.error(e)
+            event.fail(f"Private key not rotated due to:\n{str(e)}")
         except ModelError as e:
-            event.fail(f"Cannot access TLS credentials: {e}")
+            logger.error(e)
+            event.fail(
+                f"Private key not rotated due to credentials access error, please retry.\n{e}"
+            )
 
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
@@ -203,7 +207,10 @@ class TLSEventsHandler(Object):
                     )
                 self.certs.request_certificate_creation(certificate_signing_request=csr)
         except ModelError as e:
-            logger.warning("Cannot access Juju credentials; deferring TLS bootstrap: %s", e)
+            logger.warning(
+                "Failed to read or write TLS secrets, deferring TLS bootstrap: %s",
+                e,
+            )
             event.defer()
 
     def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:
@@ -359,7 +366,11 @@ class TLSEventsHandler(Object):
         # Publish secrets and readiness after updating tls_configured, including on
         # the failover: consumers need this before they can bootstrap the cluster.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
 
     def _on_certificate_expiring(
         self, event: CertificateExpiringEvent | CertificateInvalidatedEvent
@@ -568,8 +579,16 @@ class TLSEventsHandler(Object):
                 return
             label = password_key(user_name)
             event.set_results({label: password})
+
             # We know we are already running for MAIN_ORCH. and its leader unit
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.fail(
+                    f"Password updated for {user_name}, but peer-cluster synchronisation "
+                    "is incomplete. Check the unit logs."
+                )
         except (OpenSearchError, ModelError) as e:
             event.fail(f"Failed to complete password change for {user_name}: {e}")
 
@@ -596,7 +615,8 @@ class TLSEventsHandler(Object):
             password = self.charm.state.application.get_user_password(user_name)
             ca_chain = self.charm.state.application.admin_secrets["chain"]
         except ModelError as e:
-            event.fail(f"Cannot read credentials for {user_name}: {e}")
+            logger.error(e)
+            event.fail(f"Cannot read credentials for {user_name}, please retry:\n{e}")
             return
 
         event.set_results(

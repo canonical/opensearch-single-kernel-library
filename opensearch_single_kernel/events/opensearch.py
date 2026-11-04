@@ -44,6 +44,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
     HealthColors,
+    PClusterRefreshRelDataRes,
     Scope,
     StartMode,
     Substrates,
@@ -164,10 +165,10 @@ class OpenSearchEventsHandler(Object):
 
         # Peer TLS readiness must reach consumers even while cluster health is pending.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
-            try:
+            if (
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-            except ModelError as e:
-                logger.warning("Cannot publish peer-cluster credentials; deferring event: %s", e)
+                == PClusterRefreshRelDataRes.FAILED
+            ):
                 event.defer()
                 return
 
@@ -326,14 +327,17 @@ class OpenSearchEventsHandler(Object):
             )
             if planned_units == 0:
                 if self.charm.state.is_peer_cluster_provider():
-                    try:
+                    # Refresh relation data is on best effort when removing the last unit.
+                    if (
                         self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                             event.relation.id if hasattr(event, "relation") else None,
                         )
-                    except ModelError as e:
+                        == PClusterRefreshRelDataRes.FAILED
+                    ):
                         logger.warning(
-                            "Cannot publish peer-cluster credentials during removal: %s", e
+                            "Peer-cluster publication incomplete; continuing unit removal."
                         )
+
                     logger.debug("demoting main orchestrator")
                     self.charm.cluster_manager.demote_deployment_type()
                     del self.charm.state.application.orchestrators
@@ -619,6 +623,7 @@ class OpenSearchEventsHandler(Object):
             ]:
                 event.defer()
                 return
+
             nodes = self.charm.cluster_manager.get_nodes(True)
             # the previous leader may have left without dropping itself from the client endpoints
             self.charm.external_clients_manager.update_all_external_clients_relation_endpoints(
@@ -858,7 +863,7 @@ class OpenSearchEventsHandler(Object):
         try:
             self._start_opensearch(event)
         except ModelError as e:
-            logger.warning("Juju operation failed; deferring OpenSearch startup: %s", e)
+            logger.warning("Deferring OpenSearch startup: %s", e)
             event.defer()
 
     def _start_opensearch(self, event: StartOpenSearch) -> None:  # noqa: C901
@@ -885,7 +890,8 @@ class OpenSearchEventsHandler(Object):
             and not self.charm.workload.is_failed()
         ):
             try:
-                self._post_start_init(event)
+                if not self._post_start_init(event):
+                    return
             except (
                 OpenSearchHttpError,
                 OpenSearchNotFullyReadyError,
@@ -918,6 +924,11 @@ class OpenSearchEventsHandler(Object):
                         self.charm.cluster_manager.name,
                     )
                 event.defer()
+            except ModelError as e:
+                logger.warning("Juju operation failed during post-start initialization: %s", e)
+                self.charm.lock_manager.release()
+                event.defer()
+                return
             except OpenSearchUserMgmtError as e:
                 # Either generic start failure or cluster is not read
                 # to create the internal users
@@ -934,9 +945,13 @@ class OpenSearchEventsHandler(Object):
                 self.charm.state.is_peer_cluster_provider(typ="main")
                 and self.charm.unit.is_leader()
             ):
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
+                if (
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None
+                    )
+                    == PClusterRefreshRelDataRes.FAILED
+                ):
+                    event.defer()
             return
 
         if self.charm.state.server.started:
@@ -1007,8 +1022,8 @@ class OpenSearchEventsHandler(Object):
             )
 
             self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_hosts=cm_ips)
-        except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
-            logger.debug("Error getting the nodes: %s", e)
+        except (OpenSearchHttpError, OpenSearchFileOperationError, ModelError) as e:
+            logger.warning("Failed preparing OpenSearch startup: %s", e)
             self.charm.lock_manager.release()
             event.defer()
             return
@@ -1027,7 +1042,8 @@ class OpenSearchEventsHandler(Object):
                     or self.charm.state.application.is_security_index_initialised
                 )
             )
-            self._post_start_init(event)
+            if not self._post_start_init(event):
+                return
         except (
             OpenSearchHttpError,
             OpenSearchStartTimeoutError,
@@ -1052,17 +1068,31 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             logger.debug("Node started but not fully ready: %s", e)
             event.defer()
+        except ModelError as e:
+            logger.warning("Juju operation failed during OpenSearch startup: %s", e)
+            self.charm.lock_manager.release()
+            event.defer()
+            return
 
         # In large deployments with cluster-manager-only-nodes, the startup might fail
         # for the cluster-manager if a joining data node did not yet initialize the
         # security index. We still want to update and broadcast the latest relation data.
         if self.charm.state.is_peer_cluster_provider(typ="main") and self.charm.unit.is_leader():
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id if hasattr(event, "relation") else None
-            )
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
 
-    def _post_start_init(self, event: StartOpenSearch) -> None:  # noqa: C901
-        """Initialisation post OpenSearch start"""
+    def _post_start_init(self, event: StartOpenSearch) -> bool:  # noqa: C901
+        """Initialisation post OpenSearch start.
+
+        Return False if updating peer cluster relation data failed, so the caller
+        does not try the same update again. Otherwise return True, even if startup
+        is waiting for the cluster to be ready.
+        """
         # initialize the security index if needed (and certs written on disk etc.)
         # this happens only on the first data node to join the cluster
         if (
@@ -1080,7 +1110,7 @@ class OpenSearchEventsHandler(Object):
                     "Deferring event. No cluster manager is up. Cannot initialize security index."
                 )
                 event.defer()
-                return
+                return True
 
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
@@ -1088,27 +1118,34 @@ class OpenSearchEventsHandler(Object):
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
+
             # the security index is initialised with the content of the security config files
-            self.charm.config_manager.update_security_config()
-            self.charm.cluster_manager.initialise_security_index()
+            try:
+                self.charm.config_manager.update_security_config()
+                self.charm.cluster_manager.initialise_security_index()
+            finally:
+                # Clear the initialization status even if initialization failed.
+                self.charm.state.remove_status_if_present(
+                    GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
+                    "unit",
+                    self.charm.cluster_manager.name,
+                )
+
             if (
                 self.charm.state.application.deployment_desc.typ
                 == DeploymentType.MAIN_ORCHESTRATOR
             ):
-                if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                result = self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id if hasattr(event, "relation") else None
-                ):
+                )
+                if result != PClusterRefreshRelDataRes.COMPLETED:
+                    if result == PClusterRefreshRelDataRes.FAILED:
+                        self.charm.lock_manager.release()
                     event.defer()
-                    return
+                    return result != PClusterRefreshRelDataRes.FAILED
             else:
                 # notify the main orchestrator that the security index is initialized
                 self.charm.peer_cluster_manager.set_security_index_initialised()
-            # Drop the async status entry before we block on wait_for_opensearch_up().
-            self.charm.state.remove_status_if_present(
-                GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value,
-                "unit",
-                self.charm.cluster_manager.name,
-            )
 
         # Wait for opensearch to be fully ready or throw error
         self.charm.cluster_manager.wait_for_opensearch_up()
@@ -1117,11 +1154,12 @@ class OpenSearchEventsHandler(Object):
         self.charm.cluster_manager.assert_current_node_joined_cluster()
 
         if self.charm.state.server.is_bootstrap_contributor:
+            self.charm.config_manager.update_opensearch_config()
+
             # If the unit is leader we cleanup the application conf as well
             self.charm.cluster_manager.update_bootstrap_state(
                 cleanup_application=self.charm.unit.is_leader()
             )
-            self.charm.config_manager.update_opensearch_config()
 
         self.charm.exclusions_manager.delete_current(
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
@@ -1137,7 +1175,7 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchHttpError:
                 logger.exception("Failed to re-enable allocation after upgrade")
                 event.defer()
-                return
+                return True
 
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.started = str(time.time())
@@ -1159,7 +1197,7 @@ class OpenSearchEventsHandler(Object):
                 COS_USER, update=False
             ):
                 event.defer()
-                return
+                return True
 
         self.charm.unit.open_port("tcp", 9200)
 
@@ -1201,7 +1239,7 @@ class OpenSearchEventsHandler(Object):
             if health not in (HealthColors.GREEN, HealthColors.YELLOW):
                 logger.error("Cluster is not healthy after upgrade. Manual intervention required.")
                 event.defer()
-                return
+                return True
             elif health == HealthColors.YELLOW:
                 # TODO future improvement:
                 # https://github.com/canonical/opensearch-operator/issues/268
@@ -1218,10 +1256,17 @@ class OpenSearchEventsHandler(Object):
 
         # update the peer cluster rel data with new IP in case of main cluster manager
         if self.charm.state.is_peer_cluster_provider() and self.charm.unit.is_leader():
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id if hasattr(event, "relation") else None
-            )
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id if hasattr(event, "relation") else None
+                )
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
+                return False
+
         self.post_start_ca_rotation()
+        return True
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
@@ -1388,9 +1433,13 @@ class OpenSearchEventsHandler(Object):
                     self.charm.internal_users_manager.put_internal_user(sys_user, password)
 
             if is_leader and self.charm.state.is_peer_cluster_provider(typ="main"):
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
+                if (
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                        event.relation.id if hasattr(event, "relation") else None
+                    )
+                    == PClusterRefreshRelDataRes.FAILED
+                ):
+                    event.defer()
         except (OpenSearchFileOperationError, OpenSearchUserMgmtError, ModelError) as e:
             logger.warning("Cannot apply system credentials; deferring secret change: %s", e)
             event.defer()

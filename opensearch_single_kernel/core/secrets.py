@@ -72,7 +72,7 @@ class OpenSearchSecrets(Object, RelationDataStore):
         return SECRETS_LABEL_SEPARATOR.join(components)
 
     def _get_juju_secret(self, scope: Scope, key: str) -> Secret | None:
-        """Return None only for a missing secret; lookup failures must reach callers."""
+        """Return a juju secret or None if missing. Propagate ModelError if raised."""
         label = self.label(scope, key)
 
         cached_secret_meta = self.cached_secrets.get_meta(scope, label)
