@@ -471,12 +471,12 @@ class TLSEventsHandler(Object):
         The certificate expiry is only notified to the unit that requested it.
         """
         deployment_desc = self.charm.state.application.deployment_desc
-        if (
-            not self.charm.unit.is_leader()
-            or not self.charm.state.tls_relation
-            or not deployment_desc
-            or deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
-        ):
+        if not self.charm.unit.is_leader() or not self.charm.state.tls_relation:
+            return
+        if not deployment_desc:
+            event.defer()
+            return
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
         # Not requested yet, or already requested by this unit
