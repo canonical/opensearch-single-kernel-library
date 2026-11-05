@@ -332,13 +332,18 @@ class SnapshotsEventsHandler(Object):
             event.fail(error_message)
             return
 
-        if (
-            self.charm.state.storage_type
-            in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]
-            and not self.charm.keystore_manager.reload()
-        ):
-            event.fail("Failed to reload keystore.")
-            return
+        if self.charm.state.storage_type in [
+            ObjectStorageType.AZURE,
+            ObjectStorageType.AZURE_PCLUSTER,
+        ]:
+            try:
+                reloaded = self.charm.keystore_manager.reload()
+            except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+                logger.error("Failed to reload keystore: %s", e)
+                reloaded = False
+            if not reloaded:
+                event.fail("Failed to reload keystore.")
+                return
 
         self.charm.status_handler.set_running_status(
             SnapshotsStatuses.BACKUP_IN_PROGRESS.value,
@@ -403,13 +408,18 @@ class SnapshotsEventsHandler(Object):
             event.fail(error_message)
             return
 
-        if (
-            self.charm.state.storage_type
-            in [ObjectStorageType.AZURE, ObjectStorageType.AZURE_PCLUSTER]
-            and not self.charm.keystore_manager.reload()
-        ):
-            event.fail("Failed to reload keystore.")
-            return
+        if self.charm.state.storage_type in [
+            ObjectStorageType.AZURE,
+            ObjectStorageType.AZURE_PCLUSTER,
+        ]:
+            try:
+                reloaded = self.charm.keystore_manager.reload()
+            except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+                logger.error("Failed to reload keystore: %s", e)
+                reloaded = False
+            if not reloaded:
+                event.fail("Failed to reload keystore.")
+                return
 
         self.charm.status_handler.set_running_status(
             SnapshotsStatuses.RESTORE_IN_PROGRESS.value,

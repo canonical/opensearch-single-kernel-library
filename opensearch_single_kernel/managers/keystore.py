@@ -183,17 +183,19 @@ class KeystoreManager(BaseManager):
         """Reload the keystore.
 
         Returns:
-            whether a reload was successful.
-        """
-        try:
-            self._create_if_needed()
-            self.workload.run_cmd(self.keystore, "upgrade")
-        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
-            logger.error("Keystore operation failed: %s", e)
-            return False
+            whether a reload was successful. restart is
+            required when this is False
 
-        if not self.workload.is_service_started():
-            # service not running, settings will be picked up at startup
+        Raises:
+            OpenSearchCmdError: if a keystore bin command fails
+            OpenSearchFileOperationError: if a keystore file operation fails
+        """
+        self._create_if_needed()
+        self.workload.run_cmd(self.keystore, "upgrade")
+
+        # Secure settings are read from the keystore at OpenSearch startup,
+        # so there is nothing to reload and doing so may abort bootstrap
+        if not self.workload.is_service_started() or not self.opensearch_client.is_node_up():
             logger.debug("Opensearch not running. Keystore settings will be loaded at start time.")
             return True
 
