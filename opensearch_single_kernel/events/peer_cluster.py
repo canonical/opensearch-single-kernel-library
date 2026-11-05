@@ -131,11 +131,7 @@ class PeerClusterEventsHandler(Object):
             and self.charm.tls_manager.is_fully_configured()
             and self.charm.peer_cluster_manager.should_promote_failover_to_main()
         ):
-            self.charm.cluster_manager.promote_deployment_type()
-            self.charm.peer_cluster_orchestrator_manager.promote_failover()
-            self.charm.plugin_manager.remove_plugin_secret_ids()
-            # check if any credentials exist without relations
-            self.check_credentials_with_missing_relations()
+            self._promote_failover_to_main()
             if (
                 self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
                     event.relation.id
@@ -312,16 +308,20 @@ class PeerClusterEventsHandler(Object):
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")
+        orchestrators = self.charm.state.application.orchestrators
 
         # Reject conflicting main/failover claims before mutating state.
-        if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
-            trigger, event.relation.id
-        ):
-            logger.warning(
-                "Ignoring conflicting orchestrator relation %s for trigger %s",
-                event.relation.id,
-                trigger,
-            )
+        if trigger and orchestrators.check_relation_conflict(trigger, event.relation.id):
+            if trigger == "main" and event.relation.id == orchestrators.failover_rel_id:
+                # Promotion can arrive before this consumer sees the old main depart.
+                logger.debug("Deferring failover promotion until the registered main departs")
+                event.defer()
+            else:
+                logger.warning(
+                    "Ignoring conflicting orchestrator relation %s for trigger %s",
+                    event.relation.id,
+                    trigger,
+                )
             return
 
         # register in the 'main/failover'-CMs the number of planned units of the current app
@@ -493,6 +493,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         orchestrators = self.charm.state.application.orchestrators
+        if event.relation.id not in [orchestrators.main_rel_id, orchestrators.failover_rel_id]:
+            return
+
         # check the departed cluster which triggered this hook
         event_src_cluster_type = (
             "main" if event.relation.id == orchestrators.main_rel_id else "failover"
@@ -510,12 +513,9 @@ class PeerClusterEventsHandler(Object):
                 )
             elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
-                self.charm.peer_cluster_orchestrator_manager.promote_failover()
-                self.charm.plugin_manager.remove_plugin_secret_ids()
+                self._promote_failover_to_main()
                 if (
-                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                        event.relation.id if hasattr(event, "relation") else None
-                    )
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
                     == PClusterRefreshRelDataRes.FAILED
                 ):
                     event.defer()
@@ -534,6 +534,13 @@ class PeerClusterEventsHandler(Object):
             is_provider=True, must_have_units=False, remote=False
         ):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
+
+    def _promote_failover_to_main(self) -> None:
+        """Promote this application to main and check for missing plugin or backup relations."""
+        self.charm.cluster_manager.promote_deployment_type()
+        self.charm.peer_cluster_orchestrator_manager.promote_failover()
+        self.charm.plugin_manager.remove_plugin_secret_ids()
+        self.check_credentials_with_missing_relations()
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins/backups without a relation."""
