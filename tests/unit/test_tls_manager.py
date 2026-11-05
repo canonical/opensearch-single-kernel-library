@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
 import responses
-from ops import MaintenanceStatus
+from ops import MaintenanceStatus, ModelError
 
 from opensearch_single_kernel.common.constants import (
     CertType,
@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.constants import (
     Scope,
     StartMode,
     State,
+    StoreType,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import TlsStatuses
@@ -491,6 +492,85 @@ def test_on_relation_created_non_admin(harness, mocker):
     ]
 
 
+@pytest.fixture
+def bootstrap_admin_secret(harness, mocker, patch_deployment_desc):
+    """Provide an existing app secret through the real secret store, without a cached read."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.implements_secrets",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    secrets = harness.charm.state.secrets
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        secrets.put_object(
+            Scope.APP, CertType.APP_ADMIN.val, {"truststore-password": "existing-password"}
+        )
+        harness.set_leader(False)
+    secrets.cached_secrets.delete(Scope.APP, secrets.label(Scope.APP, CertType.APP_ADMIN.val))
+    return secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val)
+
+
+@pytest.mark.parametrize("role", ["follower", "secondary-leader", "main-leader"])
+@pytest.mark.parametrize(
+    "cert_type", [CertType.APP_ADMIN, CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
+)
+def test_tls_bootstrap_retries_failed_secret_read(
+    harness, mocker, bootstrap_admin_secret, role, cert_type, caplog
+):
+    """Wait without replacing credentials, then request unit certificates when readable."""
+    if role == "secondary-leader":
+        harness.charm.state.application.deployment_desc.typ = DeploymentType.OTHER
+    if role != "follower":
+        with harness.hooks_disabled():
+            harness.set_leader(True)
+
+    events = harness.charm.tls_events
+    secrets = harness.charm.state.secrets
+    scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
+    label = secrets.label(scope, cert_type.val)
+    if scope == Scope.UNIT:
+        secrets.put_object(scope, cert_type.val, {"keystore-password": "existing-unit-password"})
+        secrets.cached_secrets.delete(scope, label)
+    secret_id = secrets.get_secret_id(scope, cert_type.val)
+    get_secret = harness.model.get_secret
+
+    def deny_admin_read(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("ERROR permission denied")
+        return get_secret(*args, **kwargs)
+
+    denied = mocker.patch.object(harness.model, "get_secret", side_effect=deny_admin_read)
+    for _ in range(2):
+        event = MagicMock()
+        events._on_tls_relation_created(event)
+        event.defer.assert_called_once()
+    harness.evaluate_status()
+    assert "ERROR permission denied" in caplog.text
+    assert secrets.get_secret_id(scope, cert_type.val) == secret_id
+    assert not harness.model.get_secret(id=secret_id).get_content().get("csr")
+    assert secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val) == bootstrap_admin_secret
+
+    mocker.stop(denied)
+    event = MagicMock()
+    events._on_tls_relation_created(event)
+    event.defer.assert_not_called()
+    assert len(events.certs.get_certificate_signing_requests()) == (
+        3 if role == "main-leader" else 2
+    )
+    assert harness.charm.state.server.transport_secrets["csr"]
+    assert harness.charm.state.server.http_secrets["csr"]
+    assert (
+        harness.model.get_secret(id=bootstrap_admin_secret).get_content()["truststore-password"]
+        == "existing-password"
+    )
+    if scope == Scope.UNIT:
+        assert (
+            harness.model.get_secret(id=secret_id).get_content()["keystore-password"]
+            == "existing-unit-password"
+        )
+
+
 def test_on_set_tls_private_key(harness, mocker, substrate):
     """Test _on_set_tls private key event."""
     event_mock = MagicMock(params={"category": "app-admin"})
@@ -758,6 +838,60 @@ def test_truststore_password_secret(harness, mocker, substrate):
     harness.charm.tls_manager.store_new_ca(CertType.UNIT_HTTP, True)
 
     create_store_pwd_if_not_exists.assert_called_once()
+
+
+def test_failed_lookup_does_not_replace_truststore_password(harness, mocker):
+    """An unreadable existing password must not trigger password generation."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.implements_secrets",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    secrets = harness.charm.state.secrets
+    secrets.put_object(
+        Scope.APP, CertType.APP_ADMIN.val, {"truststore-password": "existing-password"}
+    )
+    secrets.cached_secrets.delete(Scope.APP, secrets.label(Scope.APP, CertType.APP_ADMIN.val))
+    lookup = harness.model.get_secret
+    unavailable = True
+
+    def fail_once(*args, **kwargs):
+        nonlocal unavailable
+        if unavailable:
+            unavailable = False
+            raise ModelError("permission denied")
+        return lookup(*args, **kwargs)
+
+    denied = mocker.patch.object(harness.model, "get_secret", side_effect=fail_once)
+
+    with pytest.raises(ModelError, match="permission denied"):
+        harness.charm.tls_manager.create_store_pwd_if_not_exists(
+            Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
+        )
+
+    mocker.stop(denied)
+    assert lookup(id=secrets.get_secret_id(Scope.APP, CertType.APP_ADMIN.val)).get_content() == {
+        "truststore-password": "existing-password"
+    }
+
+
+def test_store_new_ca_creates_truststore_password(harness, mocker, patch_deployment_desc):
+    """Creating a CA store supplies its missing password, rather than a keystore password."""
+    secrets = harness.charm.state.secrets
+    secrets.put_object(
+        Scope.APP, CertType.APP_ADMIN.val, {"ca-cert": "ca-certificate", "chain": "ca-chain"}
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.store_ca_chain", return_value=True)
+    mocker.patch.object(harness.charm.tls_manager, "update_request_ca_bundle", return_value=True)
+
+    assert harness.charm.tls_manager.store_new_ca(CertType.APP_ADMIN, create_store_pwd=True)
+
+    admin = harness.charm.state.application.admin_secrets
+    assert admin["truststore-password"]
+    assert admin["ca-cert"] == "ca-certificate"
+    assert "keystore-password" not in admin
 
 
 def test_store_new_ca_threads_keep_previous(harness, mocker):
@@ -1333,9 +1467,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.put_or_update_internal_user_leader"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.internal_users.InternalUsersManager.create_cos_user"
     )
     mocker.patch("socket.socket.connect")
     add_status = mocker.patch(
@@ -2043,3 +2174,69 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
 # TODO: Add final test of on_certificate_available and rotation ongoing on other unit
 # After we implement scale up scale down.
+
+
+@pytest.mark.parametrize("operation", ["available", "expiring", "reissue"])
+def test_certificate_events_retry_failed_secret_reads(
+    harness, mocker, bootstrap_admin_secret, operation
+):
+    """A read failure leaves the certificate pending; retry completes the same operation."""
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    charm = harness.charm
+    secrets = charm.state.secrets
+    events = charm.tls_events
+    cert_type = CertType.UNIT_TRANSPORT
+    secrets.put_object(Scope.UNIT, cert_type.val, {"csr": "unit-csr", "cert": "old-cert"})
+    label = secrets.label(Scope.UNIT, cert_type.val)
+    secret_id = secrets.get_secret_id(Scope.UNIT, cert_type.val)
+    secrets.cached_secrets.delete(Scope.UNIT, label)
+    mocker.patch.object(
+        charm.tls_manager, "read_stored_ca", side_effect=lambda alias=None: None if alias else "ca"
+    )
+    mocker.patch.object(charm.tls_manager, "store_new_tls_resources", return_value=True)
+    mocker.patch.object(charm.tls_manager, "update_request_ca_bundle", return_value=True)
+    configured = mocker.patch.object(events, "on_tls_conf_set")
+    revoke = mocker.patch.object(events.certs, "request_certificate_revocation")
+    request = mocker.patch.object(events.certs, "request_certificate_creation")
+    event = MagicMock(
+        certificate="old-cert", certificate_signing_request="unit-csr", ca="ca", chain=["ca"]
+    )
+    if operation == "reissue":
+        charm.state.server.certs_reissue_pending = {cert_type.val}
+        handler = events._on_tls_relation_changed
+    elif operation == "expiring":
+        handler = events._on_certificate_expiring
+    else:
+        event.certificate = "new-cert"
+        handler = events._on_certificate_available
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("Juju temporarily unavailable")
+        return get_secret(*args, **kwargs)
+
+    failed = mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    handler(event)
+    event.defer.assert_called_once()
+    configured.assert_not_called()
+    revoke.assert_not_called()
+    request.assert_not_called()
+    assert harness.model.get_secret(id=secret_id).get_content()["cert"] == "old-cert"
+    if operation == "reissue":
+        assert charm.state.server.certs_reissue_pending == {cert_type.val}
+
+    mocker.stop(failed)
+    event.reset_mock()
+    handler(event)
+    event.defer.assert_not_called()
+    if operation == "available":
+        configured.assert_called_once()
+        assert secrets.get_object(Scope.UNIT, cert_type.val)["cert"] == "new-cert"
+    elif operation == "expiring":
+        revoke.assert_called_once_with(b"unit-csr")
+        assert charm.state.server.certs_reissue_pending == {cert_type.val}
+    else:
+        request.assert_called_once_with(certificate_signing_request=b"unit-csr")
+        assert not charm.state.server.certs_reissue_pending
