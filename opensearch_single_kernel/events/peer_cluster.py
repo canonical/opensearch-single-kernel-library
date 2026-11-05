@@ -427,9 +427,7 @@ class PeerClusterEventsHandler(Object):
             self.charm.plugin_manager.remove_plugin_secrets()
 
             if (
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id
-                )
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
                 == PClusterRefreshRelDataRes.FAILED
             ):
                 event.defer()

@@ -211,7 +211,10 @@ def test_failover_provider_retries_tls_read_before_promotion(peer_provider, harn
     event.defer.assert_not_called()
 
 
-def test_consumer_retries_unreadable_provider_credentials(harness, mocker):
+@pytest.mark.parametrize(
+    "deployment_type", [DeploymentType.OTHER, DeploymentType.MAIN_ORCHESTRATOR]
+)
+def test_consumer_retries_unreadable_provider_credentials(harness, mocker, deployment_type):
     """A consumer waits for a grant instead of treating an unreadable credential as absent."""
     charm = harness.charm
     provider_app = App(name="main", model_uuid=harness.model.uuid)
@@ -222,7 +225,7 @@ def test_consumer_retries_unreadable_provider_credentials(harness, mocker):
             config=PeerClusterConfig(cluster_name="cluster", init_hold=True, roles=["data"]),
             start=StartMode.WITH_PROVIDED_ROLES,
             pending_directives=[],
-            typ=DeploymentType.OTHER,
+            typ=deployment_type,
         )
         charm.state.application.deployment_desc = desc
         rel_id = harness.add_relation(PEER_CLUSTER_RELATION, "main")
@@ -233,7 +236,9 @@ def test_consumer_retries_unreadable_provider_credentials(harness, mocker):
             "cluster_name": "cluster",
             "cm_nodes": [],
             "security_index_initialised": True,
-            "deployment_desc": None,
+            "deployment_desc": desc.model_copy(
+                update={"app": provider_app, "typ": DeploymentType.MAIN_ORCHESTRATOR}
+            ).to_dict(),
             "credentials": {
                 "admin_username": "admin",
                 "admin_password": secret_id.replace("secret:", "secret://"),
@@ -258,6 +263,10 @@ def test_consumer_retries_unreadable_provider_credentials(harness, mocker):
                 ).to_str(),
             },
         )
+        if deployment_type == DeploymentType.MAIN_ORCHESTRATOR:
+            data_id = harness.add_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, "data")
+            harness.add_relation_unit(data_id, "data/0")
+
     relation = harness.model.get_relation(PEER_CLUSTER_RELATION, rel_id)
     event = MagicMock(relation=relation, app=relation.app)
     # Workload writes happen only after credentials have been resolved.
@@ -286,6 +295,12 @@ def test_consumer_retries_unreadable_provider_credentials(harness, mocker):
     configure.assert_called_once()
     assert configure.call_args.args[0].credentials.admin_password == "provider-password"
     assert charm.state.application.is_security_index_initialised
+    if deployment_type == DeploymentType.MAIN_ORCHESTRATOR:
+        assert charm.state.application.deployment_desc.typ == DeploymentType.FAILOVER_ORCHESTRATOR
+        published = harness.get_relation_data(data_id, charm.app.name)
+        assert published["trigger"] == "failover"
+        assert json.loads(published["orchestrators"])["failover_app"] == desc.app.to_dict()
+        assert relation.data[charm.app]["is_candidate_failover_orchestrator"] == "True"
 
 
 @pytest.mark.parametrize("waiting_for_relation", [False, True])

@@ -63,6 +63,9 @@ class PeerClusterOrchestratorManager(BaseManager):
     ) -> PClusterRefreshRelDataRes:
         """Refresh the peer cluster rel data (new cm node, admin password change etc.).
 
+        Args:
+            event_rel_id: ID of the peer-cluster-orchestrator relation that triggered the event.
+
         Returns:
             COMPLETED if no retry is needed, WAITING if the cluster is not ready,
             or FAILED if an operation raised ModelError. On failure, some relation
