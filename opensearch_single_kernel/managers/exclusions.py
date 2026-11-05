@@ -183,18 +183,19 @@ class NodesExclusionsManager(BaseManager):
         except OpenSearchHttpError:
             return False
 
-    def _fetch_voting(self) -> set[str]:
+    def _fetch_voting(self) -> set[str] | None:
         """Fetch the registered voting exclusions.
 
         Returns:
-            A set of unit names that are currently in the voting exclusion list.
+            A set of unit names that are currently in the voting exclusion list
+            or None if the list could not be fetched.
         """
         try:
             return self.opensearch_client.fetch_voting_exclusions_config(alt_hosts=self.alt_hosts)
         except OpenSearchHttpError as e:
             logger.warning("Failed to fetch voting exclusions: %s", e)
-            # no voting exclusion set
-            return set()
+            # unknown voting exclusion set
+            return None
 
     def _delete_voting(self, exclusions: set[str], scope: Scope) -> bool:
         """Remove all voting exclusions and then re-adds the subset that should stay.
@@ -210,14 +211,15 @@ class NodesExclusionsManager(BaseManager):
         """
         current_excl = self._fetch_voting()
         logger.debug("Current voting exclusions: %s", current_excl)
-        if not current_excl:
-            to_stay = None
-        else:
-            to_stay = current_excl - exclusions
-        if current_excl == to_stay:
-            # Nothing to do
-            logger.debug("No voting exclusions to delete, current set is %s", to_stay)
+        if current_excl is None:
+            return False
+
+        if not current_excl & exclusions:
+            logger.debug("No voting exclusions to delete, current set is %s", current_excl)
+            self._remove_from_voting_cleanup(exclusions, scope)
             return True
+
+        to_stay = current_excl - exclusions
 
         # "wait_for_removal" is VERY important, it removes all voting configs immediately
         # and allows any node to return to the voting config in the future
@@ -236,19 +238,17 @@ class NodesExclusionsManager(BaseManager):
                     return False
 
             # Finally, we clean up the VOTING_TO_DELETE
-            if scope == Scope.APP:
-                self.state.application.voting_exclusions_to_delete = (
-                    self.state.application.voting_exclusions_to_delete - exclusions
-                )
-            else:
-                self.state.server.voting_exclusions_to_delete = (
-                    self.state.server.voting_exclusions_to_delete - exclusions
-                )
-
+            self._remove_from_voting_cleanup(exclusions, scope)
             return True
         except OpenSearchHttpError as e:
             logger.error("Failed to delete voting exclusions %s: %s", exclusions, e)
             return False
+
+    def _remove_from_voting_cleanup(self, units: set[str], scope: Scope) -> None:
+        """Remove the given unit names from the voting exclusions cleanup list."""
+        state = self.state.application if scope == Scope.APP else self.state.server
+        if pending := state.voting_exclusions_to_delete & units:
+            state.voting_exclusions_to_delete = state.voting_exclusions_to_delete - pending
 
     def _delete_allocations(self, node: Node, allocs: list[str] | None = None) -> bool:
         """This removes the allocation exclusions if needed.

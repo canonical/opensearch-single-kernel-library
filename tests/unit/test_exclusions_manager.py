@@ -9,6 +9,7 @@ import pytest
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import Scope
+from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
 from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.managers.exclusions import NodesExclusionsManager
 
@@ -120,3 +121,32 @@ def test_explicit_removal_still_clears_current_units_voting_exclusion(
 
     client.remove_voting_exclusions.assert_called_once_with(alt_hosts=[])
     assert cleanup_state.voting_exclusions_to_delete == set()
+
+
+@pytest.mark.parametrize(
+    "current_exclusions", [set(), {"other-node"}], ids=["none", "other-node-only"]
+)
+def test_delete_current_skips_clear_if_unit_not_excluded(
+    manager, client, cleanup_state, scope, current_exclusions
+):
+    current = manager.state.unit_name
+    cleanup_state.voting_exclusions_to_delete = {current}
+    client.fetch_voting_exclusions_config.return_value = current_exclusions
+
+    manager.delete_current(scope, allocation=False)
+
+    client.remove_voting_exclusions.assert_not_called()
+    assert cleanup_state.voting_exclusions_to_delete == set()
+
+
+def test_delete_current_skips_clear_if_exclusions_unknown(manager, client, cleanup_state, scope):
+    current = manager.state.unit_name
+    cleanup_state.voting_exclusions_to_delete = {current}
+    client.fetch_voting_exclusions_config.side_effect = OpenSearchHttpError(
+        response_text="read timed out"
+    )
+
+    manager.delete_current(scope, allocation=False)
+
+    client.remove_voting_exclusions.assert_not_called()
+    assert cleanup_state.voting_exclusions_to_delete == {current}
