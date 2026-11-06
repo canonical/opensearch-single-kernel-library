@@ -798,7 +798,7 @@ async def http_request(  # noqa: C901
         app: the name of the current application, and the one serving credentials.
         json_resp: return a json response or simply log
         target_app: Application serving the requested endpoint/url.
-            Defaults to 'app'. Credentials and CA are retrieved from 'app' 
+            Defaults to 'app'. Credentials and CA are retrieved from 'app'
 
     Returns:
         A json object.
