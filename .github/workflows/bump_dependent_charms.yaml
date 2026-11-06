@@ -129,8 +129,22 @@ jobs:
           done
       - name: Poetry update
         run: |
+          # Refresh the FULL dependency tree, not just "${DEP_NAME}".
+          #
+          # The charms only declare "${DEP_NAME}" directly; everything else
+          # (cryptography, urllib3, certifi, ...) is a transitive dependency of
+          # this library. A targeted "poetry update ${DEP_NAME}" does a minimal
+          # re-resolve and leaves those transitive pins untouched, so the charm
+          # lockfiles drift behind this library's own lock and Dependabot keeps
+          # opening PRs for them in the charm repos.
+          #
+          # A full "poetry update" re-resolves the whole tree to the latest
+          # versions allowed by this library's published constraints, making a
+          # single-kernel bump the single source of truth for the charms'
+          # runtime dependencies. "${DEP_NAME}" stays pinned to the exact
+          # version added above (it is pinned with "==" in pyproject.toml).
           for dir in . kubernetes machine; do
-            (cd "${dir}" && poetry update "${DEP_NAME}")
+            (cd "${dir}" && poetry update)
           done
 
       - name: Configure git signing
