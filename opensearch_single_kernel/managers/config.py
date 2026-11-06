@@ -49,6 +49,7 @@ class ConfigManager(BaseManager):
         roles: list[str] | None = None,
         cm_names: list[str] | None = None,
         cm_hosts: list[str] | None = None,
+        refresh_nodes_dn: bool = False,
     ) -> bool:
         """Reconcile whole Opensearch config using values from application state.
 
@@ -59,6 +60,8 @@ class ConfigManager(BaseManager):
             roles: override node roles got from nodes_config.
             cm_names: cluster manager nodes for bootstrapping.
             cm_hosts: override seed hosts got from nodes_config with IPs of CMs only.
+            refresh_nodes_dn: recompute the static `nodes_dn` allowlist instead of keeping the
+                one in use, to be set only when the node is about to (re)start.
 
         Raises:
             OpenSearchFileOperationError: if there is an error writing to any of the config files
@@ -75,6 +78,7 @@ class ConfigManager(BaseManager):
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
+            | self._opensearch_nodes_dn_config(refresh=refresh_nodes_dn)
             | self._opensearch_tls_config(CertType.UNIT_HTTP)
             | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
             | {"network.publish_host": self.state.node_host}
@@ -280,6 +284,50 @@ class ConfigManager(BaseManager):
             if (tls_subject := self.state.application.tls_subject)
             else {}
         )
+
+    def _opensearch_nodes_dn_config(self, refresh: bool) -> dict[str, Any]:
+        """Get the transport node DN allowlist config for the Opensearch security plugin.
+
+        OpenSearch recognises a peer as a cluster node either by the registeredID SAN
+        `NODE_CERT_OID` in its transport certificate, or by its DN in `nodes_dn`, static in this
+        file and dynamic in the security index. Each unit adds its own DN to the dynamic one
+        before starting (see `TlsManager.register_transport_dn`), so that the running nodes
+        accept it without a restart.
+
+        The static list is still needed, by a node to accept the cluster manager before it reads
+        the security index, and by all nodes before the security index exists. OpenSearch only
+        reads it at startup, so it is only refreshed when the node is about to (re)start.
+
+        Intended for opensearch.yml config file.
+        """
+        nodes_dn = self.known_nodes_dn() if refresh else self.configured_nodes_dn()
+        config: dict[str, Any] = {"plugins.security.nodes_dn_dynamic_config_enabled": True}
+        if nodes_dn:
+            config["plugins.security.nodes_dn"] = sorted(nodes_dn)
+        return config
+
+    def known_nodes_dn(self) -> set[str]:
+        """Get the static `nodes_dn` allowlist matching the transport certificates of known nodes.
+
+        Only needed when the issuer dropped `NODE_CERT_OID`, which holds for the whole fleet as
+        it shares the issuer. The issuer may also add subject attributes after the CN (e.g. the
+        organization of a Vault PKI role), hence the wildcard entries.
+        """
+        if not self.state.server.transport_dn:
+            return set()
+        return {dn for cn in self.state.known_nodes_cn for dn in (f"CN={cn}", f"CN={cn},*")}
+
+    def configured_nodes_dn(self) -> set[str]:
+        """Get the static `nodes_dn` allowlist from opensearch.yml."""
+        try:
+            config = self.yaml_setter.load(self.CONFIG_YML)
+        except FileNotFoundError:
+            return set()
+        return set(config.get("plugins.security.nodes_dn") or [])
+
+    def nodes_dn_outdated(self) -> bool:
+        """Whether some known nodes are missing from the static `nodes_dn` allowlist."""
+        return not self.known_nodes_dn() <= self.configured_nodes_dn()
 
     def _opensearch_tls_config(self, cert_type: CertType) -> dict[str, Any]:
         """Get set of TLS config options of provided cert_type for the Opensearch.

@@ -1155,6 +1155,35 @@ class OpenSearchClient:
             logger.error("Error reloading TLS certificates via API: %s", str(e))
             raise
 
+    def put_nodes_dn(
+        self,
+        name: str,
+        nodes_dn: list[str],
+        alt_hosts: list[str],
+        cert_files: tuple[str, str],
+    ) -> None:
+        """Set an entry of the dynamic `nodes_dn` config. Requires the admin certificate."""
+        self.request(
+            "PUT",
+            f"_plugins/_security/api/nodesdn/{name}",
+            payload={"nodes_dn": nodes_dn},
+            alt_hosts=alt_hosts,
+            cert_files=cert_files,
+            retries=3,
+        )
+
+    def delete_nodes_dn(
+        self, name: str, alt_hosts: list[str], cert_files: tuple[str, str]
+    ) -> None:
+        """Delete an entry of the dynamic `nodes_dn` config. Requires the admin certificate."""
+        self.request(
+            "DELETE",
+            f"_plugins/_security/api/nodesdn/{name}",
+            alt_hosts=alt_hosts,
+            cert_files=cert_files,
+            retries=3,
+        )
+
     def get_allocation_explain(
         self,
         host: str | None = None,

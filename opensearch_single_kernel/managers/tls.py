@@ -6,6 +6,8 @@
 
 import logging
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +20,7 @@ from overrides import override
 from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     CERTS_EXPIRATION_DATE_FORMAT,
+    NODE_CERT_OID,
     OLD_CA_ALIAS,
     CertType,
     DeploymentType,
@@ -103,12 +106,17 @@ class TlsManager(BaseManager):
         if not only_unit_resources:
             cert_types.append(CertType.APP_ADMIN)
 
-        # compare issuer of the cert with the issuer of the CA
-        # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
+        # A leaf certificate's issuer DN equals the *subject* DN of the CA that signed it.
+        # Comparing the leaf issuer against the stored CA's subject detects stale certificates
+        # after a CA rotation (the DN changes on rotation) while also supporting intermediate
+        # CAs such as Vault: an intermediate CA's own issuer points to its parent, so comparing
+        # against its issuer would never match the leaf certificates it signed.
         if not (current_ca := self.read_stored_ca()):
             return False
 
-        ca_issuer = self.get_cert_issuer(cert=current_ca)
+        ca_subject = self._distinguished_name(self.get_cert_subject(cert=current_ca))
+        if not ca_subject:
+            return False
 
         for cert_type in cert_types:
             cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
@@ -121,14 +129,16 @@ class TlsManager(BaseManager):
 
             secret = self.get_secrets_for_cert_type(cert_type)
 
-            cert_issuer = self.get_cert_issuer_from_path(
-                store_pwd=secret.get("keystore-password"),
-                store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+            cert_issuer = self._distinguished_name(
+                self.get_cert_issuer_from_path(
+                    store_pwd=secret.get("keystore-password"),
+                    store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
+                )
             )
             if not cert_issuer:
                 return False
 
-            if cert_issuer != ca_issuer:
+            if cert_issuer != ca_subject:
                 return False
         logger.debug("All TLS resources are stored on disk and valid.")
         return True
@@ -211,7 +221,7 @@ class TlsManager(BaseManager):
             A list representing the hostnames of the OpenSearch unit.
             or None if admin cert_type, because that cert is not tied to a specific host.
         """
-        sans = {"sans_oid": ["1.2.3.4.5.5"]}  # required for node discovery
+        sans = {"sans_oid": [NODE_CERT_OID]}  # required for node discovery
         if cert_type == CertType.APP_ADMIN:
             return sans
 
@@ -609,6 +619,28 @@ class TlsManager(BaseManager):
                 key_pwd=secrets.get("key-password"),
             )
 
+    @staticmethod
+    def _distinguished_name(openssl_name: str | None) -> str | None:
+        """Extract the distinguished name from `openssl x509 -subject`/`-issuer` output.
+
+        That output is prefixed with a `subject=`/`issuer=` label, which must be stripped so a
+        subject DN and an issuer DN can be compared directly.
+        """
+        if not openssl_name:
+            return None
+        return openssl_name.split("=", 1)[-1].strip()
+
+    def get_cert_subject(self, cert: str) -> str | None:
+        """Retrieve the certificate subject from a string certificate."""
+        try:
+            with self.workload.temp_file(
+                mode="w+t", data=cert, dir=self.workload.root / "/tmp"
+            ) as tmp_ca_file:
+                return self.workload.run_cmd(f"openssl x509 -in {tmp_ca_file} -noout -subject").out
+        except (OpenSearchCmdError, OpenSearchFileOperationError) as e:
+            logger.error("Error reading the subject of the certificate: %s", e)
+            return None
+
     def get_cert_issuer(self, cert: str) -> str | None:
         """Retrieve the certificate issuer from a string certificate."""
         # to make sure the content is processed correctly by openssl, temporary store it in a file
@@ -636,6 +668,28 @@ class TlsManager(BaseManager):
             logger.error("Error reading the current certificate: %s", e)
             return None
 
+    @contextmanager
+    def _admin_cert_files(self) -> Iterator[tuple[str, str]]:
+        """Write the app-admin cert and key to temporary files, for the APIs requiring them."""
+        admin_secret = self.state.application.admin_secrets
+        # the certs need to be created on the charm container filesystem
+        # because the OpenSearch client library expects file paths for the cert and key
+        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
+        with (
+            self.workload.temp_file(
+                mode="w+t",
+                data=admin_secret["cert"],
+                dir=charm_container_tmp_dir,
+            ) as tmp_cert,
+            self.workload.temp_file(
+                mode="w+t",
+                data=admin_secret["key"],
+                dir=charm_container_tmp_dir,
+            ) as tmp_key,
+        ):
+            yield tmp_cert.as_posix(), tmp_key.as_posix()
+
     def reload_tls_certificates(self) -> bool:
         """Reload transport and HTTP layer communication certificates via REST APIs.
 
@@ -643,31 +697,53 @@ class TlsManager(BaseManager):
             True on success, False if the API call failed.
         """
         # using the SSL API requires authentication with app-admin cert and key
-        admin_secret = self.state.application.admin_secrets
-        # the certs need to be created on the charm container filesystem
-        # because the OpenSearch client library expects file paths for the cert and key
-        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
-        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
         try:
-            with (
-                self.workload.temp_file(
-                    mode="w+t",
-                    data=admin_secret["cert"],
-                    dir=charm_container_tmp_dir,
-                ) as tmp_cert,
-                self.workload.temp_file(
-                    mode="w+t",
-                    data=admin_secret["key"],
-                    dir=charm_container_tmp_dir,
-                ) as tmp_key,
-            ):
-                self.opensearch_client.reload_tls_certificates(
-                    cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
-                )
+            with self._admin_cert_files() as cert_files:
+                self.opensearch_client.reload_tls_certificates(cert_files=cert_files)
         except OpenSearchHttpError as e:
             logger.error("Could not reload TLS certificates via API: %s", e)
             return False
         return True
+
+    def register_transport_dn(self) -> None:
+        """Add the DN of the unit's transport certificate to the dynamic nodes_dn config.
+
+        The running nodes read it from the security index, so it lets them accept this unit's
+        transport certificate without a restart. Each unit owns the entry named after it.
+        To be called before starting OpenSearch, or reloading a new transport certificate.
+
+        Raises:
+            OpenSearchHttpError: if no node of the cluster could store the entry.
+        """
+        if (
+            not (dn := self.state.server.transport_dn)
+            or not self.state.application.is_security_index_initialised
+        ):
+            return
+
+        alt_hosts = self.alt_hosts
+        if not alt_hosts and not self.opensearch_client.is_node_up():
+            logger.debug("No other node is online to accept the transport certificate DN.")
+            return
+
+        logger.info("Registering the transport certificate DN %s in nodes_dn", dn)
+        with self._admin_cert_files() as cert_files:
+            self.opensearch_client.put_nodes_dn(
+                self.state.unit_name, [dn], alt_hosts=alt_hosts, cert_files=cert_files
+            )
+
+    def deregister_transport_dn(self) -> None:
+        """Remove the unit's entry from the dynamic nodes_dn config, on a best effort basis."""
+        if not self.state.server.transport_dn or not (alt_hosts := self.alt_hosts):
+            return
+
+        try:
+            with self._admin_cert_files() as cert_files:
+                self.opensearch_client.delete_nodes_dn(
+                    self.state.unit_name, alt_hosts=alt_hosts, cert_files=cert_files
+                )
+        except OpenSearchHttpError as e:
+            logger.warning("Could not remove the unit from the dynamic nodes_dn config: %s", e)
 
     def finalize_ca_certs_rotation(self) -> bool:
         """Handle the completion of CA rotation.

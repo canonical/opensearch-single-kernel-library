@@ -800,6 +800,37 @@ class ClusterState(Object):
         return list(self.peer_relation.units.union({self.server.unit}))
 
     @property
+    def known_nodes_cn(self) -> set[str]:
+        """CNs of the transport certificates of the nodes known to the unit.
+
+        They follow the subject requested for transport certificates: the unit IP on VM, the
+        unit name on K8s. The nodes come from the same sources as the hosts used to reach the
+        cluster: the units of the app, the cluster topology, the cluster managers shared by the
+        main orchestrator. Orchestrators also know the units of the related apps, which may
+        start before the cluster topology lists them.
+        """
+        k8s = self.substrate == Substrates.K8S
+        app = self.application.deployment_desc.app
+        cns = {
+            format_unit_name(unit, app=app) if k8s else self.unit_ip(unit)
+            for unit in self.all_units
+        }
+
+        nodes = list((self.application.nodes_config or {}).values())
+        if main_orchestrator_data := self.get_rel_data_from_main_orchestrator():
+            nodes += main_orchestrator_data.cm_nodes
+        cns.update(node.name if k8s else node.ip for node in nodes)
+
+        if k8s:
+            for fleet_app in (self.application.cluster_fleet_apps or {}).values():
+                cns.update(fleet_app.units)
+        else:
+            for relation in self.peer_cluster_orchestrator_relations:
+                cns.update(relation.data[unit].get("private-address") for unit in relation.units)
+
+        return {cn for cn in cns if cn}
+
+    @property
     def all_unit_names(self) -> list[str]:
         """Fetch the list of unit names for the current app."""
         return [

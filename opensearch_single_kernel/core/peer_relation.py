@@ -15,6 +15,7 @@ from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_USER,
     KIBANA_SERVER_USER,
+    NODE_CERT_OID,
     PERFORMANCE_PROFILE,
     CertType,
     Scope,
@@ -37,7 +38,11 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
-from opensearch_single_kernel.utils.helpers import certificate_subject_dn, normalized_tls_subject
+from opensearch_single_kernel.utils.helpers import (
+    certificate_has_registered_id,
+    certificate_subject_dn,
+    normalized_tls_subject,
+)
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
 
 logger = logging.getLogger(__name__)
@@ -337,6 +342,17 @@ class OpenSearchServer(RelationState):
     def transport_secrets(self) -> dict[str, str]:
         """Get the Transport layer TLS secrets."""
         return self.secrets.get_object(Scope.UNIT, CertType.UNIT_TRANSPORT, peek=True) or {}
+
+    @property
+    def transport_dn(self) -> str | None:
+        """DN of the transport certificate, if the other nodes must list it in `nodes_dn`.
+
+        That is the case when the issuer dropped the `NODE_CERT_OID` SAN from the CSR.
+        """
+        cert = self.transport_secrets.get("cert")
+        if not cert or certificate_has_registered_id(cert, NODE_CERT_OID):
+            return None
+        return certificate_subject_dn(cert)
 
     @property
     def http_secrets(self) -> dict[str, str]:

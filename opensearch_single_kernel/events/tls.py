@@ -505,6 +505,8 @@ class TLSEventsHandler(Object):
             return
 
         if self.charm.state.server.started:
+            # the other nodes must accept the new certificate as soon as it is in use
+            self.charm.tls_manager.register_transport_dn()
             if not self.charm.tls_manager.reload_tls_certificates():
                 self.charm.restart_opensearch_event.emit()
                 return

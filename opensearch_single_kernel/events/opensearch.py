@@ -347,6 +347,7 @@ class OpenSearchEventsHandler(Object):
                 # There is enough peers available for us to try removing the unit
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
                 self.charm.exclusions_manager.delete_current(scope)
+                self.charm.tls_manager.deregister_transport_dn()
             # safeguards in case planned_units > 0
             if planned_units > 0:
                 # check cluster status
@@ -965,7 +966,11 @@ class OpenSearchEventsHandler(Object):
                 computed_roles, cm_names, cm_ips
             )
 
-            self.charm.config_manager.update_opensearch_config(cm_names=cm_names, cm_hosts=cm_ips)
+            # the running nodes must accept this node's transport certificate when it joins
+            self.charm.tls_manager.register_transport_dn()
+            self.charm.config_manager.update_opensearch_config(
+                cm_names=cm_names, cm_hosts=cm_ips, refresh_nodes_dn=True
+            )
         except (OpenSearchHttpError, OpenSearchFileOperationError) as e:
             logger.debug("Error getting the nodes: %s", e)
             self.charm.lock_manager.release()
@@ -1382,6 +1387,23 @@ class OpenSearchEventsHandler(Object):
                 )
             )
         return self.is_cluster_healthy_to_start()
+
+    def restart_if_bootstrap_nodes_dn_outdated(self) -> None:
+        """Restart the node to accept new nodes in nodes_dn, before the security index exists.
+
+        Until then, the static nodes_dn of opensearch.yml is the only allowlist, and OpenSearch
+        reads it at startup. This lets the cluster-manager only nodes of a large deployment
+        accept the first data node, which they may learn of after starting.
+        """
+        if (
+            self.charm.state.application.is_security_index_initialised
+            or not self.charm.cluster_manager.is_opensearch_started
+            or not self.charm.config_manager.nodes_dn_outdated()
+        ):
+            return
+
+        logger.info("Restarting OpenSearch to allow new nodes in nodes_dn.")
+        self.charm.restart_opensearch_event.emit()
 
     def trigger_peer_rel_changed(
         self,

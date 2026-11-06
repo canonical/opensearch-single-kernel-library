@@ -167,6 +167,7 @@ class PeerClusterEventsHandler(Object):
             p_cluster_app=related_peer_cluster_app,
             trigger_rel_id=event.relation.id,
         )
+        self.charm.opensearch_events.restart_if_bootstrap_nodes_dn_outdated()
 
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

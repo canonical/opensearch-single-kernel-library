@@ -161,6 +161,22 @@ def certificate_subject_dn(cert: str) -> str | None:
         return None
 
 
+def certificate_has_registered_id(cert: str, oid: str) -> bool:
+    """Return whether a PEM certificate carries `oid` as a registeredID SAN.
+
+    Some issuers (e.g. Vault PKI) drop the SAN types they do not support from the CSR.
+    """
+    try:
+        sans = (
+            x509.load_pem_x509_certificate(data=cert.encode())
+            .extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            .value
+        )
+    except (ValueError, x509.ExtensionNotFound):
+        return False
+    return x509.ObjectIdentifier(oid) in sans.get_values_for_type(x509.RegisteredID)
+
+
 def cert_expiration_remaining_hours(cert: str) -> int:
     """Returns the remaining hours for the cert to expire."""
     certificate_object = x509.load_pem_x509_certificate(data=cert.encode())

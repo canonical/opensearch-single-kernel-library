@@ -287,6 +287,8 @@ CA_TRUSTSTORE_P12 = "cacerts.p12"
 OLD_CA_ALIAS = f"old-{CA_ALIAS}"
 OLD_CA_PREFIX = "old-"
 CERTS_EXPIRATION_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+# registeredID SAN by which the security plugin recognises node certificates
+NODE_CERT_OID = "1.2.3.4.5.5"
 
 # OAuth
 OAUTH_CLIENT_AUDIENCE = ["opensearch"]
