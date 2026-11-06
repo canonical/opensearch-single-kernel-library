@@ -121,7 +121,7 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 226 # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 237 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
     steps:
@@ -133,6 +133,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # TRIAL, DO NOT MERGE: flake0 job log (job.log) on top of Phase 3
+      # from canonical/flake0#13.
+      - name: Start flake0 collect
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: canonical/flake0/.github/actions/collect@dpe-11872-github-steps-logs
+        with:
+          phase: start
+          markers: true
       - name: Set up environment
         timeout-minutes: 5
         run: sudo snap install charmcraft --classic
@@ -164,7 +173,9 @@ jobs:
         # TODO: replace with `charmcraft test` when
         # https://github.com/canonical/charmcraft/issues/2105 and
         # https://github.com/canonical/charmcraft/issues/2130 fixed
-        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}'
+        # bash sets pipefail, so tee keeps spread's exit code
+        shell: bash
+        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}' 2>&1 | tee "$RUNNER_TEMP/test.log"
         env:
           AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
           AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
@@ -226,3 +237,26 @@ jobs:
         timeout-minutes: 1
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
         run: df --human-readable
+      # GitHub masks secrets in the console only, so test.log needs them listed for flake0.
+      # Short lines (JSON braces of a multi-line key) would mask too much, so they are dropped.
+      - name: List secrets for flake0 redaction
+        timeout-minutes: 1
+        if: always()
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s\n' "$AWS_ACCESS_KEY" "$AWS_SECRET_KEY" "$AZURE_STORAGE_ACCOUNT" \
+            "$AZURE_SECRET_KEY" "$GCP_SERVICE_ACCOUNT" | awk 'length >= 8' > "$RUNNER_TEMP/flake0-secrets"
+      - name: Stop flake0 collect
+        timeout-minutes: 5
+        if: always()
+        uses: canonical/flake0/.github/actions/collect@dpe-11872-github-steps-logs
+        with:
+          phase: stop
+          test-log: ${{ runner.temp }}/test.log
+          redact-values: ${{ runner.temp }}/flake0-secrets
+          artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}
