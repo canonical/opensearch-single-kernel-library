@@ -513,7 +513,6 @@ class OpenSearchEventsHandler(Object):
             # This happens when the unit IP has changed
             self.on_unit_ip_changed(event)
 
-        config_restart_needed = False
         if self.charm.unit.is_leader():
             previous_deployment_desc = self.charm.state.application.deployment_desc
 
@@ -523,10 +522,9 @@ class OpenSearchEventsHandler(Object):
                     previous_deployment_desc
                     and previous_deployment_desc.config.roles != new_deployment_desc.config.roles
                 ):
-                    # trigger roles change on the leader, other units will have their
+                    # trigger roles change and restart on the leader, other units will have their
                     # peer-rel-changed event triggered
                     self.charm.trigger_peer_rel_changed(on_other_units=False, on_current_unit=True)
-                    config_restart_needed = True
                 self.apply_status_from_deployment_desc(new_deployment_desc)
 
             # This case is when the user change roles on runtime of init_hold / roles.
@@ -560,14 +558,8 @@ class OpenSearchEventsHandler(Object):
         # Some options are part of the security config, e.g. the ones of LDAP.
         self.charm.reconcile_security_config(event)
 
-        if self.charm.cluster_manager.workload.is_service_started() and (
-            profile_restart_needed or config_restart_needed
-        ):
-            logger.debug(
-                "Restarting opensearch due to config change: profile_restart_needed=%s, config_restart_needed=%s",
-                profile_restart_needed,
-                config_restart_needed,
-            )
+        if self.charm.cluster_manager.workload.is_service_started() and profile_restart_needed:
+            logger.debug("Restarting opensearch due to a profile change.")
             self.charm.restart_opensearch_event.emit()
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:  # noqa: C901
