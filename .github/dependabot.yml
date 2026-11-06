@@ -2,6 +2,11 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    # Raise the lower bound in pyproject.toml to match each bumped version so
+    # the published constraints track this library's lockfile. Consumers that
+    # bump this library are then forced onto the same minimums it was tested
+    # with, instead of being allowed to linger on the old floor.
+    versioning-strategy: "increase"
     commit-message:
       # Required by create-semantic-version-tag; must be breaking/compatible/patch
       prefix: "patch"
