@@ -783,7 +783,7 @@ async def http_request(  # noqa: C901
     json_resp: bool = True,
     extra_headers: Optional[Dict[str, any]] = None,
     timeout: float = 30.0,
-    endpoint_app: Optional[str] = None,
+    target_app: Optional[str] = None,
 ):
     """Makes an HTTP request.
 
@@ -795,16 +795,16 @@ async def http_request(  # noqa: C901
         resp_status_code: whether to only return the http response code.
         verify: whether verify certificate chain or not
         user_password: use alternative password than the admin one in the secrets.
-        app: the name of the current application.
+        app: the name of the current application, and the one serving credentials.
         json_resp: return a json response or simply log
-        endpoint_app: the application serving `endpoint`, when it is not `app`
-            (e.g. OpenSearch Dashboards). Credentials and CA are still taken from `app`.
+        target_app: Application serving the requested endpoint/url.
+            Defaults to 'app'. Credentials and CA are retrieved from 'app' 
 
     Returns:
         A json object.
     """
     admin_secrets = await get_secrets(ops_test, app=app)
-    served_by = endpoint_app or app
+    served_by = target_app or app
     if ops_test.request.config.option.substrate == "k8s":
         k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, served_by)
         if not k8s_unit:

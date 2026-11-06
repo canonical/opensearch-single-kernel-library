@@ -902,7 +902,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate)
         "POST",
         f"{dashboards_base_url}/api/sample_data/{sample_data}",
         extra_headers={"osd-xsrf": "true"},
-        endpoint_app=DASHBOARDS_APP_NAME,
+        target_app=DASHBOARDS_APP_NAME,
     )
     logger.info(f"Download response: {response}")
     assert response["opensearchIndicesCreated"], f"Sample data '{sample_data}' not downloaded"
@@ -912,7 +912,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate)
         ops_test,
         "GET",
         f"{dashboards_base_url}/api/saved_objects/_find?type=dashboard&search_fields=title&search={sample_data}",
-        endpoint_app=DASHBOARDS_APP_NAME,
+        target_app=DASHBOARDS_APP_NAME,
     )
     logger.info(f"Search fields response: {response}")
     dashboard_id = response["saved_objects"][0]["id"]
@@ -987,7 +987,7 @@ async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate)
         ops_test,
         "DELETE",
         f"{dashboards_base_url}/api/sample_data/{sample_data}",
-        endpoint_app=DASHBOARDS_APP_NAME,
+        target_app=DASHBOARDS_APP_NAME,
     )
 
     # remove dashboards application
