@@ -96,6 +96,11 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             side_effect=lambda: {"opensearch/0": "revision-0"},
         )
         mocker.patch(f"{k8s_client}.check_if_deployed_without_trust")
+        # Unit tests should not run sysctl in the workload container.
+        mocker.patch(
+            "opensearch_single_kernel.workload.k8s.K8sWorkload.check_missing_system_requirements",
+            return_value=[],
+        )
         mocker.patch(
             "opensearch_single_kernel.core.state.ClusterState.fqdn_resolvable",
             new_callable=PropertyMock,

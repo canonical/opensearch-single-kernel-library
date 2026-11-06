@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.core.models import Node, OpenSearchProfile
+from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -686,36 +686,3 @@ class ConfigManager(BaseManager):
             return
         lines = "\n".join(sorted(set(cm_hosts)))
         self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
-
-    def update_profile_configuration(self, profile: OpenSearchProfile) -> bool:
-        """Update JVM heap in jvm.options based on the performance profile.
-
-        Returns:
-            whether the configuration changed and restart required.
-        """
-        current_profile = self.state.server.profile
-        logger.debug("current profile: %s, config profile: %s", current_profile, profile)
-        if current_profile is None or current_profile != profile:
-            heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
-            logger.debug(
-                "Updating JVM heap size to %s KB based on profile requirements", heap_size
-            )
-            self._update_jvm_heap_size(heap_size)
-            self.state.server.profile = profile
-            return True
-        return False
-
-    def _update_jvm_heap_size(self, heap_size_in_kb: int) -> None:
-        """Update Opensearch JVM config file using the provided values."""
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{heap_size_in_kb}k",
-            regex=True,
-        )
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{heap_size_in_kb}k",
-            regex=True,
-        )
