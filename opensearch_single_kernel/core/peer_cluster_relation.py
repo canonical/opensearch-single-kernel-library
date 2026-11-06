@@ -118,11 +118,7 @@ class PeerCluster(RelationState):
 
     def data(self, peek_secrets: bool = False) -> PeerClusterRelData | None:
         """Get the relation data as a PeerClusterRelData object."""
-        if self.app not in self.relation.data:
-            logger.debug("Relation %s with app %s is gone.", self.relation.id, self.app)
-            return None
-
-        if not (content := self.relation.data[self.app].get("data")):
+        if not (content := self.relation.data.get(self.app, {}).get("data")):
             return None
         return PeerClusterRelData.peer_cluster_rel_data_from_str(
             self.secrets, content, peek_secrets=peek_secrets
