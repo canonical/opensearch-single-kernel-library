@@ -105,6 +105,9 @@ backends:
       AZURE_STORAGE_ACCOUNT: "$(HOST: echo $AZURE_STORAGE_ACCOUNT)"
       AZURE_SECRET_KEY: "$(HOST: echo $AZURE_SECRET_KEY)"
       DOCKERHUB_MIRROR: "$(HOST: echo $DOCKERHUB_MIRROR)"
+      FLAKE0_MARKERS: "$(HOST: echo $FLAKE0_MARKERS)"
+      PYTEST_PLUGINS: "$(HOST: echo $PYTEST_PLUGINS)"
+      PYTHONPATH: "$(HOST: echo $PYTHONPATH)"
       CONCIERGE_EXTRA_DEBS: pipx
     systems:
       - ubuntu-24.04:
