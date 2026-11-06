@@ -418,6 +418,10 @@ class PeerClusterEventsHandler(Object):
             logger.debug("Admin TLS credentials received from peer cluster relation data.")
             self._set_security_conf(data)
 
+            # only the main orchestrator shares backup credentials
+            if event.relation.id == orchestrators.main_rel_id:
+                self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
+
         # check if there are any security misconfigurations / violations
         tls_errors = self.charm.tls_manager.peer_cluster_error_from_tls(data)
         self.reconcile_peer_cluster_errors(label="error_from_tls", error=tls_errors)
@@ -560,8 +564,6 @@ class PeerClusterEventsHandler(Object):
         self.charm.internal_users_manager.put_internal_user(
             KIBANA_SERVER_USER, data.credentials.kibana_password_hash
         )
-
-        self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
 
     def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterRelData) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""

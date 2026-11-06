@@ -17,6 +17,7 @@ from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
     DeploymentState,
+    Node,
     PeerClusterConfig,
 )
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -371,3 +372,35 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
         stored = set([line.strip() for line in f])
         expected = {"20.20.20.20"}
         assert stored == expected
+
+
+def test_update_seeds_config(harness, mocker):
+    """Test the seed hosts are the published hosts of the cluster manager eligible nodes."""
+    local_app = App(model_uuid=harness.charm.model.uuid, name="opensearch")
+    main_app = App(model_uuid="main-model-uuid", name="main")
+    cm_node = Node(
+        name="opensearch-0.abc",
+        roles=["cluster_manager", "data"],
+        ip="data-0-ip",
+        app=local_app,
+        unit_number=0,
+    )
+    data_node = Node(
+        name="opensearch-1.abc",
+        roles=["data"],
+        ip="data-1-ip",
+        app=local_app,
+        unit_number=1,
+    )
+    main_cm_node = Node(
+        name="main-2.abc",
+        roles=["cluster_manager"],
+        ip="main-2-ip",
+        app=main_app,
+        unit_number=2,
+    )
+    update_seeds_file = mocker.patch.object(harness.charm.config_manager, "_update_seeds_file")
+
+    assert harness.charm.config_manager.update_seeds_config([cm_node, data_node, main_cm_node])
+
+    update_seeds_file.assert_called_once_with([cm_node.ip, main_cm_node.ip])

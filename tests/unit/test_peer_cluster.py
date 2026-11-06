@@ -1,9 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Orchestrator identity and role transitions across peer-cluster relations."""
+"""Unit tests for the peer-cluster relation."""
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,9 +23,18 @@ from opensearch_single_kernel.core.models import (
     App,
     PeerClusterApp,
     PeerClusterOrchestrators,
+    PeerClusterRelData,
     PeerClusterRelErrorData,
 )
+from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from tests.unit.helpers import deployment_descriptions
+
+
+def test_peer_cluster_data_when_relation_is_gone():
+    relation = MagicMock(data={})
+    peer_cluster = PeerCluster(relation, MagicMock(), MagicMock(), MagicMock())
+
+    assert peer_cluster.data() is None
 
 
 @pytest.fixture
@@ -308,3 +318,25 @@ def test_demoted_provider_clears_its_previous_main_role(harness, consumer, mocke
     )
 
     assert charm.state.application.orchestrators == original
+
+
+@pytest.mark.parametrize("provider", ["main", "failover"])
+def test_backup_credentials_set_only_from_main(harness, consumer, mocker, provider):
+    """Security settings come from either orchestrator, backup credentials only from main."""
+    charm = harness.charm
+    for relation in consumer.values():
+        harness.update_relation_data(relation.id, relation.app.name, {"data": "payload"})
+    mocker.patch.object(charm.peer_cluster_manager, "requirer_errors", return_value=None)
+    mocker.patch.object(PeerClusterRelData, "peer_cluster_rel_data_from_str")
+    set_security_conf = mocker.patch.object(charm.peer_cluster_events, "_set_security_conf")
+    update_backup_credentials = mocker.patch.object(
+        charm.snapshots_manager, "update_backup_credentials_from_peer_relation"
+    )
+
+    relation = consumer[provider]
+    charm.peer_cluster_events._on_peer_cluster_relation_changed(
+        mocker.Mock(relation=relation, app=relation.app)
+    )
+
+    set_security_conf.assert_called_once()
+    assert update_backup_credentials.called is (provider == "main")

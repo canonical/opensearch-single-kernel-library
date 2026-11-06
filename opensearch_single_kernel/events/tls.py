@@ -305,6 +305,9 @@ class TLSEventsHandler(Object):
             # while the old CA is still in the trust store the fleet has not reloaded the new
             # one yet: external clients only get it in finalize_ca_certs_rotation()
             for external_client in self.charm.state.external_clients:
+                # only refresh clients that already have a chain
+                if not external_client.tls_ca:
+                    continue
                 try:
                     external_client.tls_ca = self.charm.state.secrets.get_object(
                         Scope.APP, CertType.APP_ADMIN.val
