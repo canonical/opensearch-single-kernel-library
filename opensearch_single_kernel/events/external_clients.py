@@ -19,6 +19,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchUserMgmtError,
 )
 from opensearch_single_kernel.common.statuses import ExternalClientsStatuses
@@ -161,7 +162,7 @@ class ExternalClientsEventsHandler(Object):
         )
         return True
 
-    def _validate_client_request(
+    def _validate_client_request(  # noqa: C901
         self,
         event: ClientRequestEvent,
         external_client: ExternalOpenSearchClient,
@@ -170,10 +171,17 @@ class ExternalClientsEventsHandler(Object):
 
         Event deferring may also happen here from checks related on current charm state.
         """
-        if self.charm.upgrades_manager.in_progress:
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Modifying relations during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+                event.defer()
+                return False
+        except OpenSearchK8sError as e:
             logger.warning(
-                "Modifying relations during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
+                "Cannot check upgrade state before processing the client request: %s", e
             )
             event.defer()
             return False
@@ -267,13 +275,19 @@ class ExternalClientsEventsHandler(Object):
                 "Unit is going away, keeping the user of client relation %d.", event.relation.id
             )
             return
+
         if not self.charm.unit.is_leader():
             return
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Modifying relations during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Modifying relations during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+
         self.charm.external_clients_manager.remove_lingering_relation_users_and_roles()
         # The users which were removed are no longer to be skipped by the LDAP authorization.
         self.charm.reconcile_security_config(event)

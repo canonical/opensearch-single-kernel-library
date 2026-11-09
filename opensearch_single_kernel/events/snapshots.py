@@ -31,6 +31,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
+    OpenSearchK8sError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
@@ -601,8 +602,12 @@ class SnapshotsEventsHandler(Object):
         if not self.charm.state.application.deployment_desc:
             return "Deployment not ready."
 
-        if self.charm.upgrades_manager.in_progress:
-            return "Backup/Restore operations not supported while upgrade in-progress."
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                return "Backup/Restore operations not supported while upgrade in-progress."
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            return "Cannot check upgrade state. See logs."
 
         if object_storage_type == ObjectStorageType.CONFLICT:
             return "Conflict: more than one object storage integrators integrated."

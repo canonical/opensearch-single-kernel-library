@@ -12,20 +12,21 @@ from typing import Any
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusObject
-from lightkube.core.exceptions import ApiError
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchK8sDeployedWithoutTrustError,
+    OpenSearchK8sError,
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.core.models import UnitUpgradesState
-from opensearch_single_kernel.core.state import ClusterState, UpgradeServerState
+from opensearch_single_kernel.core.state import UpgradeServerState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
-from opensearch_single_kernel.workload.base import BaseWorkload
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +35,6 @@ FORCE_ACTION_NAME = "force-upgrade"
 
 class UpgradesManagerK8s(UpgradesManagerBase):
     """In-place upgrades on kubernetes"""
-
-    def __init__(
-        self,
-        state: ClusterState,
-        workload: BaseWorkload,
-    ) -> None:
-        super().__init__(state, workload)
-        try:
-            self.k8s_client.get_partition()
-        except ApiError as err:
-            if err.status.code == 403:
-                raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.state.application.name)
-            raise
 
     @property
     def partition(self) -> int:
@@ -192,22 +180,32 @@ class UpgradesManagerK8s(UpgradesManagerBase):
                 message = f"Upgrade resumed. Unit {partition} is upgrading next."
         return message
 
-    def prepare_for_shutdown(self) -> None:  # pragma: nocover
+    def prepare_for_shutdown(self) -> None:
         """Handler for the stop event.
 
-        K8S Only, VM has nothing to do on this step.
+        K8S only. VM has nothing to do at this step.
         On K8S:
-         * First: Raise partition to prevent other units from restarting if an
+         * First: If the upgrade relation exists, set the unit state to RESTARTING before
+         querying Kubernetes, so an API failure cannot leave the replacement pod with
+         the old pod's HEALTHY state.
+         * Second: Raise partition to prevent other units from restarting if an
          upgrade is in progress. If an upgrade is not in progress, the leader
          unit will reset the partition to 0.
-         * Second: Sets the unit state to RESTARTING and step down from replicaset.
+         * Third: Disable shard allocation and flush the translog during an upgrade.
 
-        Note that with how Juju currently operates, we only have at most 30
-        seconds until SIGTERM command, so we are by no means guaranteed to have
-        stepped down before the pod is removed.
-        Upon restart, the upgrade will still resume because all hooks run the
-        `_reconcile_upgrade` handler.
+        Note that with how Juju currently operates, we have at most 30 seconds before
+        SIGTERM, so these operations are not guaranteed to finish before the pod is removed.
+        Upon restart, start, peer-relation and update-status hooks can run
+        `_reconcile_upgrade` to check readiness and resume the upgrade.
         """
+        # Record RESTARTING before any API call so a failure cannot leave the old HEALTHY
+        # state in the peer relation. The replacement pod must pass its own health checks.
+        if self.state.upgrade_relation:
+            self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
+
+        if not self.in_progress:
+            return
+
         # Raise partition to prevent other units from restarting if an upgrade is in progress.
         # If an upgrade is not in progress, the leader unit will reset the partition to 0.
         current_unit_number = self.state.server_upgrade.unit_number
@@ -227,9 +225,6 @@ class UpgradesManagerK8s(UpgradesManagerBase):
             self.opensearch_client.flush_translog(alt_hosts=self.alt_hosts)
         except OpenSearchHttpError as e:
             logger.debug("Failed to flush before upgrade", exc_info=e)
-
-        # We update the state to set up the unit as restarting
-        self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
 
     def _determine_partition(
         self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
@@ -283,3 +278,25 @@ class UpgradesManagerK8s(UpgradesManagerBase):
     def _app_workload_container_version(self) -> str:
         """App's Kubernetes controller revision hash"""
         return self.k8s_client.get_revision()
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Return upgrade statuses, or explain why Kubernetes could not be checked.
+
+        Check trust before reading upgrade state. Report missing trust as blocked and other
+        API failures as waiting. Each call checks again, so the failure status clears when
+        access is restored.
+        """
+        try:
+            self.k8s_client.check_if_deployed_without_trust()
+            return super().get_statuses(scope, recompute)
+        except OpenSearchK8sDeployedWithoutTrustError as e:
+            status = format_status(
+                UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
+                {"charm_app": e.app_name},
+            )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check Kubernetes upgrade status: %s", e)
+            status = UpgradesStatuses.K8S_API_UNAVAILABLE.value
+        return [*running_statuses(self.state.statuses, scope, self.name), status]

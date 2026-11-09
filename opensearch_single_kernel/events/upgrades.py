@@ -20,6 +20,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchNotFullyReadyError,
     OpenSearchReconcilePartitionError,
     OpenSearchStopError,
@@ -80,7 +81,7 @@ class UpgradesEventsHandler(Object):
             self._on_refresh_force_start_action,
         )
 
-    def _on_upgrade_peer_relation_created(self, _) -> None:
+    def _on_upgrade_peer_relation_created(self, event: ops.RelationCreatedEvent) -> None:
         """Handle relation created events."""
         if self.charm.substrate == Substrates.VM:
             self.charm.state.server_upgrade.snap_revision = pinned_snap_revision()
@@ -91,15 +92,25 @@ class UpgradesEventsHandler(Object):
             logger.debug("Skipping upgrade relation created because unit is not leader")
             return
 
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug("Skipping upgrade relation created because upgrade in progress")
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.debug("Skipping upgrade relation created because upgrade in progress")
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+            event.defer()
             return
 
         self.charm.upgrades_manager.save_upgrades_versions()
 
-    def _on_upgrade_peer_relation_changed(self, _: ops.RelationChangedEvent) -> None:
+    def _on_upgrade_peer_relation_changed(self, event: ops.RelationChangedEvent) -> None:
         """Reconcile peer progress without replacing local post-upgrade checks."""
-        self._reconcile_upgrade(during_upgrade=True)
+        try:
+            self._reconcile_upgrade(during_upgrade=True)
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+            event.defer()
+            return
 
     def _reconcile_upgrade(self, *, during_upgrade: bool = False) -> None:  # noqa: C901
         """Handle upgrade events."""
@@ -238,10 +249,15 @@ class UpgradesEventsHandler(Object):
             event.fail(message)
             return
 
-        if not self.charm.state.upgrade_relation or self.charm.upgrades_manager.in_progress:
-            message = "Upgrade already in progress"
-            logger.debug(f"Pre-upgrade check event failed: {message}")
-            event.fail(message)
+        try:
+            if not self.charm.state.upgrade_relation or self.charm.upgrades_manager.in_progress:
+                message = "Upgrade already in progress"
+                logger.debug(f"Pre-upgrade check event failed: {message}")
+                event.fail(message)
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            event.fail("Cannot check upgrade state. See logs.")
             return
 
         try:
@@ -264,11 +280,21 @@ class UpgradesEventsHandler(Object):
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
-        if not self.charm.state.upgrade_relation or not self.charm.upgrades_manager.in_progress:
-            message = "No upgrade in progress"
-            logger.debug(f"Resume upgrade event failed: {message}")
-            event.fail(message)
+
+        try:
+            if (
+                not self.charm.state.upgrade_relation
+                or not self.charm.upgrades_manager.in_progress
+            ):
+                message = "No upgrade in progress"
+                logger.debug(f"Resume upgrade event failed: {message}")
+                event.fail(message)
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            event.fail(str(e))
             return
+
         force = False
         if self.charm.substrate == Substrates.K8S:
             # Get force parameter
@@ -281,6 +307,10 @@ class UpgradesEventsHandler(Object):
         except OpenSearchReconcilePartitionError as e:
             logger.debug(f"Resume upgrade event failed: {e}")
             event.fail(e.message)
+            return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot reconcile the Kubernetes partition: %s", e)
+            event.fail(str(e))
             return
 
     def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
@@ -410,9 +440,14 @@ class UpgradesEventsHandler(Object):
 
     def _on_refresh_force_start_action(self, event: ops.ActionEvent) -> None:
         """Handle force-refresh-start action for rollback scenario."""
-        if not self.charm.upgrades_manager.is_rollback:
-            logger.debug("For refresh start event failed: No rollback in progress")
-            event.fail("No rollback in progress")
+        try:
+            if not self.charm.upgrades_manager.is_rollback:
+                logger.debug("For refresh start event failed: No rollback in progress")
+                event.fail("No rollback in progress")
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check rollback state: %s", e)
+            event.fail(str(e))
             return
 
         if (
@@ -443,7 +478,7 @@ class UpgradesEventsHandler(Object):
                 self.charm.start_opensearch_event.emit(after_upgrade=True)
                 event.set_results(
                     {
-                        "result": f"Reconciled partition and forcefully upgraded {self.charm.unit.name}"
+                        "result": f"Requested startup of {self.charm.unit.name}. Check unit status for progress."
                     }
                 )
             except OpenSearchCmdError as e:
@@ -534,19 +569,24 @@ class UpgradesEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.upgrades_manager.in_progress:
-            logger.debug("Upgrade not in progress. OpenSearch version unchanged")
-            return
+        try:
+            if not self.charm.upgrades_manager.in_progress:
+                logger.debug("Upgrade not in progress. OpenSearch version unchanged")
+                return
 
-        if not self.charm.upgrades_manager.is_compatible:
-            logger.error("Refresh is incompatible")
-            return
+            if not self.charm.upgrades_manager.is_compatible:
+                logger.error("Refresh is incompatible")
+                return
 
-        if self.charm.upgrades_manager.is_rollback:
-            logger.warning("Rollback detected")
-            logger.warning(
-                "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
-            )
+            if self.charm.upgrades_manager.is_rollback:
+                logger.warning("Rollback detected")
+                logger.warning(
+                    "Rollback incompatible. Run 'juju run <unit> force-refresh-start' with `check-compatibility` set to false to override node version and attempt startup procedure"
+                )
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot prepare Kubernetes upgrade: %s", e)
             event.defer()
             return
 

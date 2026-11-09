@@ -7,13 +7,18 @@ from types import SimpleNamespace
 from unittest.mock import PropertyMock
 
 import pytest
+from ops.testing import ActionFailed
 
-from opensearch_single_kernel.common.constants import UPGRADE_RELATION, HealthColors
+from opensearch_single_kernel.common.constants import UPGRADE_RELATION, HealthColors, Substrates
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchNotFullyReadyError,
 )
+from opensearch_single_kernel.common.k8s import K8sClient
 from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
+from opensearch_single_kernel.core.upgrade_relation import UpgradeServerState
+from opensearch_single_kernel.managers.upgrades_k8s import UpgradesManagerK8s
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -191,3 +196,223 @@ def test_periodic_reconciliation_preserves_pause_and_advances_ready_units(
     charm.opensearch_events._on_update_status(mocker.Mock())
 
     assert current_partition[0] == expected
+
+
+@pytest.mark.parametrize("in_progress", [False, True])
+def test_shutdown_without_upgrade_relation_preserves_partition_protection(mocker, in_progress):
+    """Protect the partition before skipping work that needs the upgrade relation."""
+    state = SimpleNamespace(
+        substrate=Substrates.K8S,
+        pod_name="opensearch-2",
+        namespace="testing",
+        upgrade_relation=None,
+        server_upgrade=UpgradeServerState(
+            None, mocker.Mock(), SimpleNamespace(name="opensearch/2")
+        ),
+    )
+    manager = UpgradesManagerK8s(state, mocker.Mock())
+    mocker.patch.object(K8sClient, "get_revision", return_value="new")
+    mocker.patch.object(
+        K8sClient, "list_revisions", return_value={"opensearch/2": "old" if in_progress else "new"}
+    )
+    mocker.patch.object(K8sClient, "get_partition", return_value=0)
+    partition = mocker.patch.object(K8sClient, "set_partition")
+    client = mocker.patch.object(
+        UpgradesManagerK8s, "opensearch_client", new_callable=PropertyMock
+    )
+
+    manager.prepare_for_shutdown()
+
+    if in_progress:
+        partition.assert_called_once_with(value=2)
+    else:
+        partition.assert_not_called()
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("in_progress", [False, True])
+def test_shutdown_preserves_upgrade_preparation(recovering_upgrade, mocker, in_progress):
+    """Only an upgrade needs partition protection, allocation changes and a flush."""
+    charm = recovering_upgrade.charm
+    charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+    mocker.patch.object(
+        UpgradesManagerK8s, "in_progress", new_callable=PropertyMock, return_value=in_progress
+    )
+    mocker.patch.object(
+        UpgradeServerState, "unit_number", new_callable=PropertyMock, return_value=2
+    )
+    mocker.patch.object(K8sClient, "get_partition", return_value=0)
+    mocker.patch.object(
+        UpgradesManagerK8s, "alt_hosts", new_callable=PropertyMock, return_value=[]
+    )
+    operations = mocker.Mock()
+    operations.attach_mock(mocker.patch.object(K8sClient, "set_partition"), "partition")
+    operations.attach_mock(
+        mocker.patch(
+            "opensearch_single_kernel.common.client.OpenSearchClient.disable_shard_allocation"
+        ),
+        "allocation",
+    )
+    operations.attach_mock(
+        mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.flush_translog"),
+        "flush",
+    )
+    operations.attach_mock(mocker.patch.object(charm.pebble_observer, "stop"), "observer")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_stop(event)
+
+    assert charm.state.server_upgrade.unit_state == UnitUpgradesState.RESTARTING
+    expected = (
+        [
+            mocker.call.partition(value=2),
+            mocker.call.allocation(alt_hosts=[]),
+            mocker.call.flush(alt_hosts=[]),
+        ]
+        if in_progress
+        else []
+    )
+    assert operations.mock_calls == [*expected, mocker.call.observer()]
+    event.defer.assert_not_called()
+
+
+@pytest.mark.parametrize("failure_stage", ["upgrade-state", "partition", "write", "write-applied"])
+def test_failed_shutdown_invalidates_readiness_before_replacement(
+    recovering_upgrade, harness, mocker, failure_stage
+):
+    """A new pod revision must not inherit the old pod's HEALTHY state after an API failure."""
+    charm = recovering_upgrade.charm
+    charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+    stop = mocker.patch.object(charm.pebble_observer, "stop")
+    unit_number = mocker.patch.object(
+        UpgradeServerState, "unit_number", new_callable=PropertyMock, return_value=2
+    )
+    error = OpenSearchK8sError("Kubernetes is unavailable during shutdown")
+    if failure_stage == "upgrade-state":
+        failed = mocker.patch.object(
+            type(charm.upgrades_manager),
+            "in_progress",
+            new_callable=PropertyMock,
+            side_effect=error,
+        )
+    elif failure_stage == "partition":
+        failed = mocker.patch.object(K8sClient, "get_partition", side_effect=error)
+    else:
+        partition_before_shutdown = [0]
+        mocker.patch.object(
+            K8sClient, "get_partition", side_effect=lambda: partition_before_shutdown[0]
+        )
+
+        def fail_partition_write(value):
+            assert charm.state.server_upgrade.unit_state == UnitUpgradesState.RESTARTING
+            if failure_stage == "write-applied":
+                partition_before_shutdown[0] = value
+            raise error
+
+        failed = mocker.patch.object(K8sClient, "set_partition", side_effect=fail_partition_write)
+
+    charm.opensearch_events._on_stop(mocker.Mock())
+
+    stopped_state = charm.state.server_upgrade.unit_state
+    assert stopped_state == UnitUpgradesState.RESTARTING
+    stop.assert_called_once_with()
+    if failure_stage in ("write", "write-applied"):
+        failed.assert_called_once_with(value=2)
+        assert partition_before_shutdown[0] == (2 if failure_stage == "write-applied" else 0)
+    mocker.stop(failed)
+    mocker.stop(unit_number)
+
+    # The leader receives this state from a stopped peer, whose new pod is not ready yet.
+    relation = harness.model.get_relation(UPGRADE_RELATION)
+    app = charm.app.name
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+        for unit, state in [(2, UnitUpgradesState.HEALTHY), (1, stopped_state)]:
+            harness.add_relation_unit(relation.id, f"{app}/{unit}")
+            harness.update_relation_data(relation.id, f"{app}/{unit}", {"state": state.value})
+    mocker.patch.object(K8sClient, "get_revision", return_value="new")
+    mocker.patch.object(
+        K8sClient,
+        "list_revisions",
+        return_value={
+            f"{app}/0": "old",
+            f"{app}/1": "new",
+            f"{app}/2": "new",
+        },
+    )
+    partition = [1]
+    mocker.patch.object(K8sClient, "get_partition", side_effect=lambda: partition[0])
+    mocker.patch.object(
+        K8sClient, "set_partition", side_effect=lambda value: partition.__setitem__(0, value)
+    )
+
+    charm.upgrades_manager.reconcile_partition()
+    assert partition[0] == 1
+
+    # Continue the upgrade only after the peer passes its post-start health checks.
+    with harness.hooks_disabled():
+        harness.update_relation_data(relation.id, f"{app}/1", {"state": "healthy"})
+    charm.upgrades_manager.reconcile_partition()
+    assert partition[0] == 0
+
+
+@pytest.mark.parametrize("patch_applied", [False, True])
+def test_lost_partition_response_preserves_resume_decision(
+    recovering_upgrade, harness, mocker, patch_applied
+):
+    """A timeout must not resume a paused upgrade or undo a resume that succeeded."""
+    charm = recovering_upgrade.charm
+    relation = harness.model.get_relation(UPGRADE_RELATION)
+    app = charm.app.name
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        for unit in (1, 2):
+            harness.add_relation_unit(relation.id, f"{app}/{unit}")
+            harness.update_relation_data(relation.id, f"{app}/{unit}", {"state": "healthy"})
+    mocker.patch.object(K8sClient, "get_revision", return_value="new")
+    mocker.patch.object(
+        K8sClient,
+        "list_revisions",
+        return_value={
+            f"{app}/0": "old",
+            f"{app}/1": "old",
+            f"{app}/2": "new",
+        },
+    )
+    partition = [2]
+    mocker.patch.object(K8sClient, "get_partition", side_effect=lambda: partition[0])
+
+    def patch_then_lose_response(value):
+        if patch_applied:
+            partition[0] = value
+        raise OpenSearchK8sError("Partition response timed out")
+
+    patch = mocker.patch.object(K8sClient, "set_partition", side_effect=patch_then_lose_response)
+    with pytest.raises(ActionFailed, match="Partition response timed out"):
+        harness.run_action("resume-upgrade")
+
+    # Read the partition from Kubernetes again without repeating the resume action.
+    charm.upgrades_manager.reconcile_partition()
+    assert partition[0] == (1 if patch_applied else 2)
+    patch.assert_called_once_with(1)
+
+
+def test_ready_state_survives_failed_partition_reconciliation(recovering_upgrade, harness, mocker):
+    """Keep HEALTHY after health checks pass, even if the next Kubernetes request fails."""
+    charm = recovering_upgrade.charm
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    mocker.patch.object(K8sClient, "list_revisions", return_value={charm.unit.name: "revision-0"})
+    partition = mocker.patch.object(
+        K8sClient, "get_partition", side_effect=OpenSearchK8sError("Cannot read partition")
+    )
+    event = mocker.Mock()
+    charm.opensearch_events._on_peer_relation_changed(event)
+    event.defer.assert_called_once_with()
+    assert charm.state.server_upgrade.unit_state == UnitUpgradesState.HEALTHY
+
+    partition.side_effect = None
+    partition.return_value = 0
+    charm.upgrade_events._reconcile_upgrade()
+    assert charm.state.server_upgrade.unit_state == UnitUpgradesState.HEALTHY

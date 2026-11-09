@@ -173,7 +173,11 @@ class OpenSearchUpgradePrecheckError(OpenSearchError):
     """App is not ready to upgrade"""
 
 
-class OpenSearchK8sDeployedWithoutTrustError(OpenSearchError):
+class OpenSearchK8sError(OpenSearchError):
+    """A Kubernetes API operation failed."""
+
+
+class OpenSearchK8sDeployedWithoutTrustError(OpenSearchK8sError):
     """Exception thrown when the charm is deployed on k8s without the --trust flag."""
 
     def __init__(self, *, app_name: str):

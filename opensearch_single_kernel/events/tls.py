@@ -27,6 +27,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchError,
     OpenSearchFileOperationError,
+    OpenSearchK8sError,
 )
 from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates import (
     CertificateAvailableEvent,
@@ -75,13 +76,19 @@ class TLSEventsHandler(Object):
         self.framework.observe(self.charm.on.set_password_action, self._on_set_password_action)
         self.framework.observe(self.charm.on.get_password_action, self._on_get_password_action)
 
-    def _on_set_private_key(self, event: ActionEvent) -> None:
+    def _on_set_private_key(self, event: ActionEvent) -> None:  # noqa: C901
         """Set the TLS private key, which will be used for requesting the certificate."""
         if not self.charm.state.application.deployment_desc:
             event.fail("The action can only be run once the deployment is complete.")
             return
-        if self.charm.upgrades_manager.in_progress:
-            event.fail("Setting private key not supported while upgrade in-progress")
+
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                event.fail("Setting private key not supported while upgrade in-progress")
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            event.fail("Cannot check upgrade state. See logs.")
             return
 
         if not self.charm.state.tls_relation:
@@ -151,11 +158,16 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Modifying relations during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Modifying relations during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
             event.defer()
             return
 
@@ -455,13 +467,16 @@ class TLSEventsHandler(Object):
         else:
             del self.charm.state.server.certs_reissue_pending
 
-    def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
+    def _on_tls_relation_broken(self, _: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Modifying relations during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Modifying relations during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
 
     def on_tls_conf_set(
         self,
@@ -530,8 +545,13 @@ class TLSEventsHandler(Object):
         if not self.charm.unit.is_leader():
             event.fail("The action can only be run on leader unit.")
             return
-        if self.charm.upgrades_manager.in_progress:
-            event.fail("Setting password not supported while upgrade in-progress")
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                event.fail("Setting password not supported while upgrade in-progress")
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            event.fail("Cannot check upgrade state. See logs.")
             return
 
         user_name = event.params.get("username")
