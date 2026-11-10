@@ -192,6 +192,7 @@ class TLSEventsHandler(Object):
                 event.defer()
                 return
 
+            requested = {request.csr.strip() for request in self.certs.get_requirer_csrs()}
             for cert_type in cert_types:
                 scope = Scope.APP if cert_type == CertType.APP_ADMIN else Scope.UNIT
                 self.charm.tls_manager.create_store_pwd_if_not_exists(
@@ -199,7 +200,8 @@ class TLSEventsHandler(Object):
                 )
                 # Reuse the saved request when a previous bootstrap attempt was deferred.
                 secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
-                if csr := secrets.get("csr"):
+                csr = secrets.get("csr")
+                if csr and csr.strip() in requested:
                     csr = csr.encode("utf-8")
                 else:
                     csr = self.charm.tls_manager.create_certificate_signing_request(

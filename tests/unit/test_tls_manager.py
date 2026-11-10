@@ -2240,3 +2240,35 @@ def test_certificate_events_retry_failed_secret_reads(
     else:
         request.assert_called_once_with(certificate_signing_request=b"unit-csr")
         assert not charm.state.server.certs_reissue_pending
+
+
+@pytest.mark.parametrize(
+    "requested, expected",
+    [(["old-csr"], b"old-csr"), ([], b"new-csr")],
+    ids=["same-relation", "new-relation"],
+)
+def test_on_relation_created_csr_reuse(harness, mocker, requested, expected):
+    """A deferred retry resends the stored CSR; a new TLS relation gets a new one."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    ).return_value = deployment_descriptions["ok"]
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.get_secrets_for_cert_type",
+        return_value={"csr": "old-csr"},
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request",
+        return_value=b"new-csr",
+    )
+    certs = harness.charm.tls_events.certs
+    mocker.patch.object(
+        certs, "get_requirer_csrs", return_value=[MagicMock(csr=csr) for csr in requested]
+    )
+    request = mocker.patch.object(certs, "request_certificate_creation")
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+
+    harness.charm.tls_events._on_tls_relation_created(MagicMock())
+
+    request.assert_called_with(certificate_signing_request=expected)
