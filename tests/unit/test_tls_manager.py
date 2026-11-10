@@ -2050,20 +2050,17 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 def clients(harness):
     with harness.hooks_disabled():
         harness.set_leader(True)
-        client_with_ca = harness.add_relation(CLIENT_RELATION, "client-with-ca")
-        harness.update_relation_data(client_with_ca, "client-with-ca", {"index": "logs"})
-        harness.update_relation_data(
-            client_with_ca, harness.charm.app.name, {"tls-ca": "old-chain"}
-        )
-        new_client = harness.add_relation(CLIENT_RELATION, "client-without-ca")
-    return [harness.model.get_relation(CLIENT_RELATION, id) for id in (client_with_ca, new_client)]
+        client = harness.add_relation(CLIENT_RELATION, "client")
+        harness.update_relation_data(client, "client", {"index": "logs"})
+        new_client = harness.add_relation(CLIENT_RELATION, "new-client")
+    return [harness.model.get_relation(CLIENT_RELATION, id) for id in (client, new_client)]
 
 
 def tls_ca(harness, relation) -> str:
     return harness.charm.state.external_client_by_relation(relation).tls_ca
 
 
-def test_finalize_ca_certs_rotation_updates_clients_with_a_ca(harness, mocker, clients):
+def test_finalize_rotation_skips_uninitialized_clients(harness, mocker, clients):
     tls_manager = harness.charm.tls_manager
     mocker.patch.object(tls_manager, "remove_old_ca")
     mocker.patch.object(tls_manager, "update_request_ca_bundle", return_value=True)
@@ -2076,7 +2073,7 @@ def test_finalize_ca_certs_rotation_updates_clients_with_a_ca(harness, mocker, c
     assert [tls_ca(harness, relation) for relation in clients] == ["new-chain", ""]
 
 
-def test_on_certificate_available_updates_clients_with_a_ca(
+def test_cert_available_skips_uninitialized_clients(
     harness, mocker, patch_deployment_desc, clients
 ):
     tls_manager = harness.charm.tls_manager
