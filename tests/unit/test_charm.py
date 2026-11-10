@@ -597,6 +597,37 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
     reconcile_security_config.assert_called_once_with(event)
 
 
+@pytest.mark.parametrize("is_leader", [True, False], ids=["leader", "non-leader"])
+def test_roles_change_emits_restart(harness, mocker, is_leader):
+    """A role change restarts each unit."""
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader)
+        harness.charm.state.server.started = "True"
+    deployment_desc = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+
+    def apply_new_roles():
+        deployment_desc.return_value = deployment_descriptions["cm-only"]
+        return True
+
+    charm = harness.charm
+    mocker.patch.object(
+        charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
+    )
+    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
+    mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
+    charm.restart_opensearch_event = MagicMock()
+
+    charm.opensearch_events._on_config_changed(MagicMock())
+    if not is_leader:
+        charm.opensearch_events._on_peer_relation_changed(MagicMock())
+
+    charm.restart_opensearch_event.emit.assert_called_once()
+
+
 def test_security_config_applied_by_new_leader(harness, mocker):
     """The security config file of a unit tells nothing about what the former leader applied."""
     with harness.hooks_disabled():
