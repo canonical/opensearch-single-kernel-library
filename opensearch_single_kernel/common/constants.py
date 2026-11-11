@@ -141,7 +141,6 @@ class OpenSearchPaths(BaseStrEnum):
     CONF = "etc/opensearch"
     DATA = "var/lib/opensearch"
     LOGS = "var/log/opensearch"
-    JDK = "usr/lib/jvm/java-21-openjdk-amd64"
     TMP = "usr/share/tmp"
     BIN = "usr/share/opensearch/bin"
 
@@ -196,7 +195,10 @@ _1GB_IN_KB = 1024 * 1024  # 1GB in KB
 MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
-OPENSEARCH_SNAP_REVISION = "193"  # Keep in sync with `workload_version` file
+OPENSEARCH_SNAP_REVISIONS = {
+    "x86_64": "193",
+    "aarch64": "192",
+}
 
 # OpenSearch Users and roles
 ADMIN_USER = "admin"
@@ -208,6 +210,69 @@ OPENSEARCH_SYSTEM_USERS = {ADMIN_USER, KIBANA_SERVER_USER}
 OPENSEARCH_USERS = OPENSEARCH_SYSTEM_USERS | {COS_USER}
 
 GENERATED_ROLES = ["cluster_manager", "data", "ingest", "ml"]
+
+# Built-in roles whose mappings are managed by charm.
+MANAGED_ROLES = [
+    "alerting_ack_alerts",
+    "alerting_full_access",
+    "alerting_read_access",
+    "all_access",
+    "anomaly_full_access",
+    "anomaly_read_access",
+    "asynchronous_search_full_access",
+    "asynchronous_search_read_access",
+    "cross_cluster_replication_follower_full_access",
+    "cross_cluster_replication_leader_full_access",
+    "cross_cluster_search_remote_full_access",
+    "flow_framework_full_access",
+    "flow_framework_read_access",
+    "index_management_full_access",
+    "ip2geo_datasource_full_access",
+    "ip2geo_datasource_read_access",
+    "kibana_read_only",
+    "kibana_user",
+    "knn_full_access",
+    "knn_read_access",
+    "logstash",
+    "ltr_full_access",
+    "ltr_read_access",
+    "manage_snapshots",
+    "ml_full_access",
+    "ml_read_access",
+    "notebooks_full_access",
+    "notebooks_read_access",
+    "notifications_full_access",
+    "notifications_read_access",
+    "observability_full_access",
+    "observability_read_access",
+    "point_in_time_full_access",
+    "ppl_full_access",
+    "query_assistant_access",
+    "query_insights_full_access",
+    "readall",
+    "readall_and_monitor",
+    "reports_full_access",
+    "reports_instances_read_access",
+    "reports_read_access",
+    "security_analytics_ack_alerts",
+    "security_analytics_full_access",
+    "security_analytics_read_access",
+    "security_rest_api_access",
+    "snapshot_management_full_access",
+    "snapshot_management_read_access",
+]
+
+# Backend roles mapped by default to the built-in roles, as shipped in `roles_mapping.yml`.
+DEFAULT_BACKEND_ROLES_MAPPING = {
+    "manage_snapshots": ["snapshotrestore"],
+    "logstash": ["logstash"],
+    "kibana_user": ["kibanauser"],
+    "all_access": ["admin"],
+    "readall": ["readall"],
+}
+
+# Names that client relations cannot request for their entities.
+RESERVED_ENTITY_NAMES = OPENSEARCH_USERS | set(MANAGED_ROLES) | {KIBANA_SERVER_ROLE}
 
 # OpenSearch indices
 OPENSEARCH_NODE_LOCK_INDEX = ".charm_node_lock"
@@ -273,6 +338,8 @@ PROMETHEUS_K8S_RELATION = "metrics-endpoint"
 LOKI_K8S_RELATION = "logging"
 GRAFANA_K8S_RELATION = "grafana-dashboard"
 COS_RELATION = "cos-agent"
+LDAP_RELATION = "ldap"
+LDAP_CERTIFICATE_TRANSFER_RELATION = "ldap-certificate-transfer"
 
 
 # Paths
@@ -331,9 +398,9 @@ DATA_ROLE_REMOVAL_FORBIDDEN = (
     "Removal of data role from current deployment not allowed - the data cannot be reallocated."
 )
 # Endpoints
-USER_ENDPOINT = "/_plugins/_security/api/internalusers"
-USER_ROLE_ENDPOINT = "/_plugins/_security/api/roles"
-USER_ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
+INTERNAL_USER_ENDPOINT = "/_plugins/_security/api/internalusers"
+ROLE_ENDPOINT = "/_plugins/_security/api/roles"
+ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 
 
 # Root group id (gid 0). Used when we want root to have group-level access.

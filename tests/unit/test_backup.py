@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import json
+import re
+from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock
+from urllib.parse import urlsplit
 
 import pytest
+import requests
+import responses
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 from botocore.exceptions import ClientError
 from google.api_core.exceptions import Conflict, Forbidden
@@ -14,14 +19,224 @@ from ops import testing
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
+    DeploymentType,
     HealthColors,
     ObjectStorageType,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+    OpenSearchHttpError,
+)
+from opensearch_single_kernel.core.models import PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+
+@pytest.fixture
+def peer_snapshot_cleanup(harness, mocker):
+    charm = harness.charm
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch.object(
+        charm.snapshots_manager, "read_snapshots_data_from_peer_cluster", return_value=(None, [])
+    )
+    mocker.patch.object(charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False)
+    mocker.patch.object(charm.snapshots_manager, "remove_s3_ca")
+    mocker.patch.object(charm.snapshots_manager, "set_credentials_saved")
+    mocker.patch("ops.framework.BoundEvent.emit")
+    mocker.patch.object(type(charm.workload), "exists", return_value=True)
+    mocker.patch.object(
+        type(charm.workload), "run_cmd", return_value=SimpleNamespace(out="keystore.seed\n")
+    )
+    return charm
+
+
+def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.remove_s3_ca.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+def test_peer_snapshot_cleanup_removes_existing_credentials_and_reloads(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    commands = [args.args[1] for args in charm.workload.run_cmd.call_args_list]
+    assert commands == ["list", "list", "remove s3.client.default.access_key"]
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    event.defer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OpenSearchCmdError("list", err="unavailable"), OpenSearchFileOperationError("unavailable")],
+)
+def test_peer_snapshot_cleanup_read_failure_defers(peer_snapshot_cleanup, error):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.side_effect = error
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    event.defer.assert_called_once_with()
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+def test_peer_snapshot_ca_failure_preserves_credentials_for_retry(peer_snapshot_cleanup):
+    charm = peer_snapshot_cleanup
+    charm.workload.run_cmd.return_value.out += "s3.client.default.access_key\n"
+    charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    charm.snapshots_manager.remove_s3_ca.side_effect = OpenSearchCmdError("keytool", err="busy")
+
+    with pytest.raises(OpenSearchCmdError):
+        charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
+
+    charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
+    charm.reload_keystore_event.emit.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+@pytest.mark.parametrize("failed_attempts", [1, 3])
+def test_peer_snapshot_cleanup_retries_partial_removal(peer_snapshot_cleanup, failed_attempts):
+    charm = peer_snapshot_cleanup
+    entries = {"keystore.seed", "s3.client.default.access_key", "s3.client.default.secret_key"}
+    failures = 0
+
+    def run_cmd(command, args):
+        nonlocal failures
+        if args == "list":
+            return SimpleNamespace(out="\n".join(sorted(entries)))
+        key = args.removeprefix("remove ")
+        if key == "s3.client.default.secret_key" and failures < failed_attempts:
+            failures += 1
+            raise OpenSearchCmdError(command, err="temporarily unavailable")
+        entries.remove(key)
+
+    charm.workload.run_cmd.side_effect = run_cmd
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    # Even after a partial failure, removed settings must be unloaded from OpenSearch.
+    charm.reload_keystore_event.emit.assert_called_once_with()
+    if failed_attempts == 1:
+        assert entries == {"keystore.seed"}
+        event.defer.assert_not_called()
+        charm.snapshots_manager.set_credentials_saved.assert_called_once_with(None)
+    else:
+        assert entries == {"keystore.seed", "s3.client.default.secret_key"}
+        event.defer.assert_called_once_with()
+        charm.snapshots_manager.set_credentials_saved.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "deployment_type", [DeploymentType.OTHER, DeploymentType.FAILOVER_ORCHESTRATOR]
+)
+@pytest.mark.parametrize(
+    "storage_credentials, expected_type",
+    [
+        ({}, None),
+        ({"s3": {}, "azure": {}, "gcs": {}}, None),
+        ({"s3": None, "azure": None, "gcs": None}, None),
+        ({"s3": {"access-key": "access"}}, None),
+        ({"azure": {"storage-account": "account"}}, None),
+        ({"gcs": {"secret-key": ""}}, None),
+        (
+            {"s3": {"access-key": "access", "secret-key": "secret"}},
+            ObjectStorageType.S3_PCLUSTER,
+        ),
+        (
+            {"azure": {"storage-account": "account", "secret-key": "secret"}},
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        (
+            {
+                "s3": None,
+                "azure": {"storage-account": "account", "secret-key": "secret"},
+                "gcs": None,
+            },
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        ({"gcs": {"secret-key": '{"project_id": "test"}'}}, ObjectStorageType.GCS_PCLUSTER),
+        (
+            {
+                "s3": {"access-key": "access"},
+                "azure": {"storage-account": "account", "secret-key": "secret"},
+            },
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        (
+            {
+                "azure": {"storage-account": "account"},
+                "gcs": {"secret-key": '{"project_id": "test"}'},
+            },
+            ObjectStorageType.GCS_PCLUSTER,
+        ),
+    ],
+)
+def test_peer_storage_type_matches_populated_credentials(
+    harness, mocker, deployment_type, storage_credentials, expected_type
+):
+    """Unconfigured peer backends must remain absent when selecting credentials."""
+    data = PeerClusterRelData.peer_cluster_rel_data_from_str(
+        harness.charm.state.secrets,
+        json.dumps(
+            {
+                "cluster_name": "test",
+                "cm_nodes": [],
+                "deployment_desc": None,
+                "credentials": {
+                    "admin_username": "admin",
+                    "admin_password": "password",
+                    "admin_password_hash": "hash",
+                    "kibana_password": "password",
+                    "kibana_password_hash": "hash",
+                    **storage_credentials,
+                },
+            }
+        ),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["data-only"].model_copy(
+            update={"typ": deployment_type}
+        ),
+    )
+    mocker.patch.object(
+        harness.charm.state, "get_rel_data_from_main_orchestrator", return_value=data
+    )
+
+    backend = expected_type.value.removesuffix("-pcluster") if expected_type else None
+    for name in ("s3", "azure", "gcs"):
+        if name != backend:
+            assert getattr(data.credentials, name) is None
+
+    assert harness.charm.state.storage_type == expected_type
+    credentials, _ = harness.charm.snapshots_events._credentials_from_peer_cluster()
+    if expected_type is None:
+        assert credentials is None
+    else:
+        assert credentials == getattr(data.credentials, backend)
 
 
 def _mock_backup(
@@ -68,7 +283,7 @@ def _mock_backup(
 
 
 def test_create_backup_when_manager_raises_http_error_then_action_fails(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     create_snapshot = mocker.patch(
@@ -84,7 +299,7 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
     _mock_backup(mocker)
 
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     # When
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -95,7 +310,7 @@ def test_create_backup_when_manager_raises_http_error_then_action_fails(
 
 
 def test_create_backup_when_all_ok_then_success_result_is_returned(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -112,7 +327,7 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     # When
     context.run(context.on.action("create-backup"), st)
 
@@ -123,8 +338,178 @@ def test_create_backup_when_all_ok_then_success_result_is_returned(
     }
 
 
+def _snapshot_put_response(state, snapshot_id):
+    """Simulate whether a failed request reached snapshot creation on the server."""
+    if state["snapshot"]:
+        return 400, {"error": {"type": "invalid_snapshot_name_exception"}}
+    failure = state["failure"]
+    if failure in ("connect-timeout", "busy") and len(state["puts"]) > 1:
+        failure = None
+    if failure in ("busy", "busy-unavailable"):
+        return 429, {"error": {"type": "rejected_execution_exception"}}
+    if failure == "auth":
+        return 403, {"error": {"type": "security_exception"}}
+    if failure not in ("connect-timeout", "connect-unavailable", "unconfirmed"):
+        state["snapshot"] = {"snapshot": snapshot_id, "state": state["snapshot_state"]}
+    errors = {
+        "connect-timeout": requests.ConnectTimeout("connection establishment timed out"),
+        "connect-unavailable": requests.ConnectTimeout("connection establishment timed out"),
+        "read-timeout": requests.ReadTimeout("snapshot response timed out"),
+        "unconfirmed": requests.ReadTimeout("snapshot response timed out"),
+        "connection-lost": requests.ConnectionError("connection lost after submission"),
+    }
+    if error := errors.get(failure):
+        raise error
+    if failure == "server-error":
+        return 503, {"error": {"type": "server_exception"}}
+    return 200, {"accepted": True}
+
+
+@pytest.fixture
+def snapshot_submission(harness, mocker, backend_setup):
+    """Exercise the action and HTTP client against a snapshot accepted before a timeout."""
+    _mock_backup(mocker)
+    backend, relations = backend_setup
+    mocker.patch.object(OpenSearchClient, "is_snapshots_repository_created", return_value=True)
+    state = {
+        "failure": "read-timeout",
+        "snapshot": None,
+        "snapshot_state": "IN_PROGRESS",
+        "puts": [],
+        "gets": [],
+        "missing_reads": 0,
+        "failed_reads": 0,
+    }
+
+    def respond(request):
+        path = urlsplit(request.url).path
+        assert path.startswith(f"/_snapshot/{backend}-repository/")
+        snapshot_id = path.rsplit("/", 1)[1]
+        status = 200
+        if request.method == "PUT":
+            state["puts"].append(snapshot_id)
+            status, body = _snapshot_put_response(state, snapshot_id)
+        else:
+            assert request.method == "GET"
+            state["gets"].append(snapshot_id)
+            if state["failed_reads"]:
+                state["failed_reads"] -= 1
+                raise requests.ReadTimeout("snapshot lookup timed out")
+            if state["missing_reads"] or state["snapshot"] is None:
+                state["missing_reads"] = max(0, state["missing_reads"] - 1)
+                status, body = 404, {"error": {"type": "snapshot_missing_exception"}}
+            else:
+                body = {"snapshots": [state["snapshot"]]}
+        return status, {"Content-Type": "application/json"}, json.dumps(body)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for method in (responses.GET, responses.PUT):
+            http.add_callback(method, re.compile(r"https://[^/]+/.*"), callback=respond)
+        yield state, relations
+
+
+@pytest.mark.parametrize("failure", ["read-timeout", "connection-lost", "server-error"])
+@pytest.mark.parametrize("snapshot_state", ["IN_PROGRESS", "SUCCESS", "FAILED"])
+def test_create_backup_reconciles_ambiguous_submission(
+    context, containers, snapshot_submission, failure, snapshot_state
+):
+    """A lost response must not resubmit the PUT or misreport the snapshot's state."""
+    state, relations = snapshot_submission
+    state.update(failure=failure, snapshot_state=snapshot_state)
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert set(state["gets"]) == {state["puts"][0]}
+    assert context.action_results == {
+        "backup-id": state["puts"][0],
+        "status": snapshot_state.lower(),
+    }
+
+
+@pytest.mark.parametrize("failure", ["connect-timeout", "busy"])
+def test_create_backup_retries_when_submission_was_rejected(
+    context, containers, snapshot_submission, failure
+):
+    """A transient failure before acceptance permits another PUT using the same ID."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 2
+    assert len(set(state["puts"])) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize("read_problem", ["missing_reads", "failed_reads"])
+def test_create_backup_retries_confirmation_reads(
+    context, containers, snapshot_submission, read_problem
+):
+    """Temporary absence or a failed confirmation read must not repeat creation."""
+    state, relations = snapshot_submission
+    state[read_problem] = 2
+    context.run(
+        context.on.action("create-backup"),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert len(state["puts"]) == 1
+    assert context.action_results == {"backup-id": state["puts"][0], "status": "in_progress"}
+
+
+@pytest.mark.parametrize(
+    "failure, put_attempts, message",
+    [
+        ("unconfirmed", 1, "not confirmed"),
+        ("connect-unavailable", 3, "connection establishment timed out"),
+        ("busy-unavailable", 3, "rejected_execution_exception"),
+        ("auth", 1, "security_exception"),
+    ],
+)
+def test_create_backup_reports_failure_without_blind_retries(
+    context, containers, snapshot_submission, failure, put_attempts, message
+):
+    """Unknown outcomes remain explicit; definite rejection does not become success."""
+    state, relations = snapshot_submission
+    state["failure"] = failure
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert message in error.value.message
+    assert len(state["puts"]) == put_attempts
+    if failure == "unconfirmed":
+        assert state["puts"][0] in error.value.message
+        assert "snapshot response timed out" in error.value.message
+        assert len(state["gets"]) == 3
+    else:
+        assert state["gets"] == []
+
+
+def test_create_backup_reports_unknown_outcome_when_confirmation_fails(
+    context, containers, snapshot_submission, caplog
+):
+    """An unreadable snapshot must not hide the submission error or trigger another PUT."""
+    state, relations = snapshot_submission
+    state["failed_reads"] = 3
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("create-backup"),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert len(state["puts"]) == 1
+    assert len(state["gets"]) == 3
+    assert state["puts"][0] in error.value.message
+    assert "not confirmed" in error.value.message
+    assert "snapshot response timed out" in error.value.message
+    assert "snapshot lookup timed out" in caplog.text
+
+
 def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository_missing_error(
-    mocker, harness, backend_setup, context
+    mocker, harness, backend_setup, context, containers
 ):
     # Given
     _mock_backup(mocker)
@@ -141,6 +526,7 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
 
     # When
     st = testing.State(
+        containers=containers,
         leader=True,
         relations={s3_relation()},
     )
@@ -152,7 +538,9 @@ def test_create_backup_when_s3_repo_missing_and_ca_present_then_raise_repository
     patch_create_snapshot.assert_not_called()
 
 
-def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, harness, context):
+def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(
+    mocker, harness, context, containers
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.create_snapshot",
@@ -169,7 +557,7 @@ def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, h
     _mock_backup(mocker)
     s3_no_ca = {k: v for k, v in S3_CONN_INFO_WITH_CA.items() if k != "tls_ca_chain"}
     use_s3(mocker=mocker, info=s3_no_ca)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     # When
     context.run(context.on.action("create-backup"), st)
@@ -182,7 +570,7 @@ def test_create_backup_when_s3_has_no_ca_then_operations_still_succeed(mocker, h
 
 
 def test_list_backups_when_json_requested_then_json_is_returned(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -192,7 +580,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     snapshots = {
         "2025-01-01T10:00:00Z": {"state": "success", "indices": []},
         "2025-01-01T09:00:00Z": {"state": "failed", "indices": []},
@@ -211,7 +599,7 @@ def test_list_backups_when_json_requested_then_json_is_returned(
 
 
 def test_list_backups_when_table_requested_then_table_is_returned(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -220,7 +608,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
     )
     _mock_backup(mocker)
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     snapshots = {
         "2025-01-01T10:00:00Z": {"state": "success", "indices": []},
         "2025-01-01T09:00:00Z": {"state": "in_progress", "indices": []},
@@ -242,7 +630,7 @@ def test_list_backups_when_table_requested_then_table_is_returned(
 
 
 def test_list_backups_when_manager_raises_http_error_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -255,7 +643,7 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
         return_value={"snapshot": "2025-01-01T10:00:00Z", "state": "SUCCESS"},
     )
     backend, rels = backend_setup
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     get_snapshot.side_effect = None
     original = OpenSearchClient.list_snapshots
@@ -277,25 +665,8 @@ def test_list_backups_when_manager_raises_http_error_then_action_fails(
     assert "server error" in msg or "503" in msg
 
 
-def test_list_backups_when_not_leader_then_action_fails(harness, mocker, backend_setup, context):
-    # Given
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
-        return_value=True,
-    )
-    _mock_backup(mocker)
-    backend, rels = backend_setup
-
-    st = testing.State(leader=False, relations=rels)
-    # When
-    with pytest.raises(testing.ActionFailed) as err:
-        context.run(context.on.action("list-backups", params={"output": "json"}), st)
-    # Assert
-    assert "leader" in err.value.message.lower()
-
-
-def test_restore_when_prereqs_missing_then_action_fails(
-    harness, mocker, backend_setup, monkeypatch, context
+def test_list_backups_when_not_leader_then_action_fails(
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -305,7 +676,26 @@ def test_restore_when_prereqs_missing_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
+    # When
+    with pytest.raises(testing.ActionFailed) as err:
+        context.run(context.on.action("list-backups", params={"output": "json"}), st)
+    # Assert
+    assert "leader" in err.value.message.lower()
+
+
+def test_restore_when_prereqs_missing_then_action_fails(
+    harness, mocker, backend_setup, monkeypatch, context, containers
+):
+    # Given
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
+        return_value=True,
+    )
+    _mock_backup(mocker)
+    backend, rels = backend_setup
+
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     mocker.patch(
         "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler._action_missing_pre_requisites",
@@ -322,7 +712,7 @@ def test_restore_when_prereqs_missing_then_action_fails(
 
 
 def test_restore_when_snapshot_not_found_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -332,7 +722,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
         return_value=None,
@@ -345,7 +735,7 @@ def test_restore_when_snapshot_not_found_then_action_fails(
 
 
 def test_restore_when_get_snapshot_http_error_then_action_fails(
-    harness, mocker, backend_setup, context
+    harness, mocker, backend_setup, context, containers
 ):
     # Given
     mocker.patch(
@@ -355,7 +745,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -379,6 +769,7 @@ def test_restore_when_get_snapshot_http_error_then_action_fails(
 )
 def test_restore_when_closing_indices_varies_then_paths_are_handled(
     context,
+    containers,
     harness,
     mocker,
     backend_setup,
@@ -395,7 +786,7 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -427,8 +818,149 @@ def test_restore_when_closing_indices_varies_then_paths_are_handled(
         )
 
 
+def _restore_response(state, snapshot, conflict):
+    """Simulate restore submission, including a writer racing with index closure."""
+    state["restore_requests"] += 1
+    if state["failure"] == "timeout":
+        # The restore was accepted, but its response never reached the charm.
+        state["restored"] = list(snapshot["indices"])
+        raise requests.Timeout("restore response timed out")
+    if state["failure"] in ("shards", "auth"):
+        status = 500 if state["failure"] == "shards" else 403
+        return status, {
+            "error": {
+                "type": "snapshot_restore_exception" if status == 500 else "security_exception",
+                "reason": "shard count mismatch" if status == 500 else "access denied",
+            },
+            "status": status,
+        }
+    # A background writer creates a snapshot target after the inventory.
+    if state["restore_requests"] == 1 or state["failure"] == "conflict":
+        state["indices"]["top_queries"] = "open"
+    if any(state["indices"].get(name) == "open" for name in snapshot["indices"]):
+        return 500, conflict
+    state["restored"] = list(snapshot["indices"])
+    return 200, {"snapshot": {"snapshot": "S"}}
+
+
+@pytest.fixture
+def restore_race(harness, mocker, backend_setup):
+    """Simulate OpenSearch HTTP responses while exercising the real restore flow."""
+    _mock_backup(mocker)
+    backend, relations = backend_setup
+    snapshot = {"snapshot": "S", "state": "SUCCESS", "indices": ["user-index", "top_queries"]}
+    mocker.patch.object(OpenSearchClient, "get_snapshot", return_value=snapshot)
+    mocker.patch.object(OpenSearchClient, "is_snapshots_repository_created", return_value=True)
+    state = {
+        "failure": None,
+        "indices": {"user-index": "open", "unrelated-index": "open"},
+        "closes": [],
+        "restore_requests": 0,
+        "restored": [],
+    }
+    conflict = {
+        "error": {
+            "type": "snapshot_restore_exception",
+            "reason": "[repo:S/id] cannot restore index [top_queries] because an open index "
+            "with same name already exists in the cluster. Either close or delete the "
+            "existing index or restore the index under a different name by providing "
+            "a rename pattern and replacement name",
+        },
+        "status": 500,
+    }
+
+    def respond(request):
+        path = urlsplit(request.url).path
+        status = 200
+        if path == "/_cluster/state":
+            body = {
+                "metadata": {
+                    "indices": {name: {"state": value} for name, value in state["indices"].items()}
+                }
+            }
+        elif path == "/_cluster/health":
+            body = {"indices": {name: {"status": "green"} for name in state["indices"]}}
+        elif path.endswith("/_close"):
+            names = path.removeprefix("/").removesuffix("/_close").split(",")
+            state["closes"].append(names)
+            for name in names:
+                state["indices"][name] = "close"
+            body = {"acknowledged": True, "shards_acknowledged": True}
+        elif path.endswith("/_restore"):
+            status, body = _restore_response(state, snapshot, conflict)
+        elif path == "/_cat/recovery":
+            if state["failure"] == "recovery":
+                # Even this error shape must not restart an accepted restore.
+                status, body = 500, conflict
+            else:
+                body = [
+                    {
+                        "type": "snapshot",
+                        "repository": f"{backend}-repository",
+                        "snapshot": "S",
+                        "index": name,
+                        "stage": "done",
+                    }
+                    for name in state["restored"]
+                ]
+        else:
+            raise AssertionError(
+                "Unexpected restore request: %s %s" % (request.method, request.url)
+            )
+        return status, {"Content-Type": "application/json"}, json.dumps(body)
+
+    with responses.RequestsMock() as http:
+        for method in (responses.GET, responses.POST):
+            http.add_callback(method, re.compile(r"https://[^/]+/.*"), callback=respond)
+        yield state, relations
+
+
+def test_restore_rechecks_indices_after_conflict(context, containers, restore_race):
+    """A target created after inventory is closed before resubmitting restore."""
+    state, relations = restore_race
+    context.run(
+        context.on.action("restore", params={"backup-id": "S"}),
+        testing.State(containers=containers, leader=True, relations=relations),
+    )
+    assert context.action_results == {"restored-backup-id": "S", "status": "success"}
+    assert state["restored"] == ["user-index", "top_queries"]
+    assert state["closes"] == [["user-index"], ["top_queries"]]
+    assert state["indices"]["unrelated-index"] == "open"
+    assert state["restore_requests"] == 2
+
+
+@pytest.mark.parametrize(
+    "failure, expected_requests, expected_closes, message",
+    [
+        ("conflict", 3, 3, "rejected after 3 attempts"),
+        ("timeout", 1, 1, "Check restore progress before retrying"),
+        ("shards", 1, 1, "shard count mismatch"),
+        ("auth", 1, 1, "access denied"),
+        ("recovery", 2, 2, "Check restore progress before retrying"),
+    ],
+)
+def test_restore_failure_does_not_restart_unknown_or_accepted_restore(
+    context, containers, restore_race, failure, expected_requests, expected_closes, message
+):
+    """Only explicit POST conflicts retry; other failures reach the action result."""
+    state, relations = restore_race
+    state["failure"] = failure
+    with pytest.raises(testing.ActionFailed) as error:
+        context.run(
+            context.on.action("restore", params={"backup-id": "S"}),
+            testing.State(containers=containers, leader=True, relations=relations),
+        )
+    assert message in error.value.message
+    assert state["restore_requests"] == expected_requests
+    assert len(state["closes"]) == expected_closes
+    if failure == "conflict":
+        assert "cannot restore index [top_queries]" in error.value.message
+    if failure in ("timeout", "recovery"):
+        assert state["restored"] == ["user-index", "top_queries"]
+
+
 def test_restore_when_start_fails_then_action_fails_with_message(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -438,7 +970,7 @@ def test_restore_when_start_fails_then_action_fails_with_message(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -469,7 +1001,7 @@ def test_restore_when_start_fails_then_action_fails_with_message(
 
 
 def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -483,7 +1015,7 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     monkeypatch.setattr(
         "opensearch_single_kernel.common.client.OpenSearchClient.close_snapshot_indices_open_in_cluster",
@@ -503,7 +1035,7 @@ def test_restore_when_non_restored_indices_exist_then_action_fails_with_count(
 
 
 def test_restore_when_http_error_on_close_indices_then_action_fails(
-    context, harness, mocker, backend_setup, monkeypatch
+    context, containers, harness, mocker, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -513,7 +1045,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
@@ -539,7 +1071,7 @@ def test_restore_when_http_error_on_close_indices_then_action_fails(
 
 
 def test_restore_when_all_ok_then_health_apply_is_called(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -552,7 +1084,7 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     get_snapshot = mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_snapshot",
     )
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
     get_snapshot.return_value = {
         "snapshot": "2025-01-01T10:00:00Z",
         "state": "SUCCESS",
@@ -583,7 +1115,9 @@ def test_restore_when_all_ok_then_health_apply_is_called(
     assert called["ok"]
 
 
-def test_restore_when_not_leader_then_action_fails(mocker, context, harness, backend_setup):
+def test_restore_when_not_leader_then_action_fails(
+    mocker, context, containers, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -592,7 +1126,7 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=False, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -604,7 +1138,9 @@ def test_restore_when_not_leader_then_action_fails(mocker, context, harness, bac
     assert "leader" in err.value.message.lower()
 
 
-def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, backend_setup):
+def test_prereq_when_not_leader_then_action_fails(
+    context, containers, mocker, harness, backend_setup
+):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -613,7 +1149,7 @@ def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, back
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=False, relations=rels)
+    st = testing.State(containers=containers, leader=False, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -624,7 +1160,7 @@ def test_prereq_when_not_leader_then_action_fails(context, mocker, harness, back
 
 
 def test_prereq_when_deployment_not_ready_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -647,7 +1183,7 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
         return_value=object_storage_type,
     )
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -656,23 +1192,34 @@ def test_prereq_when_deployment_not_ready_then_action_fails(
     assert "deployment not ready" in err.value.message.lower()
 
 
-# TODO: Re-enable this test when upgrade is implemented
-@pytest.mark.skip(reason="Upgrade not implemented yet")
-def test_prereq_when_upgrade_in_progress_then_action_fails(self, monkeypatch):
-    st = testing.State(leader=True)
-    monkeypatch.setattr(
-        "src.charm.OpenSearchOperatorCharm.upgrade_in_progress",
-        property(lambda _self: True),
+def test_prereq_when_upgrade_in_progress_then_action_fails(
+    context, containers, mocker, harness, backend_setup
+):
+    # Given
+    _mock_backup(mocker)
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.in_progress",
+        new_callable=PropertyMock,
+        return_value=True,
     )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_base.UpgradesManagerBase.is_compatible",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    backend, rels = backend_setup
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
+    # When
     with pytest.raises(testing.ActionFailed) as err:
-        self.ctx.run(self.ctx.on.action("create-backup"), st)
+        context.run(context.on.action("create-backup"), st)
 
+    # Assert
     assert "upgrade in-progress" in err.value.message.lower()
 
 
 def test_prereq_when_storage_relation_missing_then_action_fails(
-    context, mocker, harness, monkeypatch
+    context, containers, mocker, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -680,7 +1227,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
         return_value=True,
     )
     _mock_backup(mocker)
-    st = testing.State(leader=True)
+    st = testing.State(containers=containers, leader=True)
 
     # When
     with pytest.raises(testing.ActionFailed) as err:
@@ -690,7 +1237,7 @@ def test_prereq_when_storage_relation_missing_then_action_fails(
 
 
 def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
-    mocker, context, harness, monkeypatch
+    mocker, context, containers, harness, monkeypatch
 ):
     # Given
     mocker.patch(
@@ -698,7 +1245,9 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
         return_value=True,
     )
     _mock_backup(mocker)
-    st = testing.State(leader=True, relations={s3_relation(), azure_relation()})
+    st = testing.State(
+        containers=containers, leader=True, relations={s3_relation(), azure_relation()}
+    )
     # When
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -707,7 +1256,7 @@ def test_prereq_when_conflict_detected_from_two_relations_then_action_fails(
 
 
 def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     is_repository_created = mocker.patch(
@@ -717,7 +1266,7 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     is_repository_created.side_effect = [False, False]
     monkeypatch.setattr(
@@ -732,13 +1281,13 @@ def test_prereq_when_repo_missing_and_cannot_create_then_action_fails(
 
 
 def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
-    context, mocker, harness, backend_setup, monkeypatch
+    context, containers, mocker, harness, backend_setup, monkeypatch
 ):
     # Given
     _mock_backup(mocker)
     backend, rels = backend_setup
 
-    st = testing.State(leader=True, relations=rels)
+    st = testing.State(containers=containers, leader=True, relations=rels)
 
     def return_error(*_a, **_k):
         raise OpenSearchHttpError(response_text="precheck-failed", response_code=500)
@@ -758,7 +1307,7 @@ def test_prereq_when_http_error_during_repo_check_then_error_message_displayed(
     "color", [HealthColors.RED, HealthColors.YELLOW_TEMP, HealthColors.UNKNOWN]
 )
 def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
-    context, harness, mocker, color
+    context, containers, harness, mocker, color
 ):
     # Given
     mocker.patch(
@@ -767,7 +1316,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
     )
     _mock_backup(mocker)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
     mocker.patch(
         "opensearch_single_kernel.managers.health.HealthManager.get",
         return_value=color,
@@ -781,7 +1330,7 @@ def test_prereq_when_health_not_green_then_action_fails_with_specific_message(
     assert any(k in msg for k in ["red", "relocating", "unknown"])
 
 
-def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness):
+def test_prereq_when_snapshot_running_then_action_fails(context, containers, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -793,14 +1342,14 @@ def test_prereq_when_snapshot_running_then_action_fails(context, mocker, harness
     )
     _mock_backup(mocker, backup_running_return_value=True)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
     assert "operation in progress" in err.value.message.lower()
 
 
-def test_prereq_when_restore_running_then_action_fails(context, mocker, harness):
+def test_prereq_when_restore_running_then_action_fails(context, containers, mocker, harness):
     # Given
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.is_snapshots_repository_created",
@@ -815,7 +1364,7 @@ def test_prereq_when_restore_running_then_action_fails(context, mocker, harness)
     )
     _mock_backup(mocker, restore_running_return_value=True)
     use_s3(mocker=mocker)
-    st = testing.State(leader=True, relations={s3_relation()})
+    st = testing.State(containers=containers, leader=True, relations={s3_relation()})
 
     with pytest.raises(testing.ActionFailed) as err:
         context.run(context.on.action("create-backup"), st)
@@ -1213,3 +1762,104 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
 
     assert object_storage.verify_gcs_credentials(cfg) is False
     blob.delete.assert_not_called()
+
+
+def _keytool(mocker, *aliases):
+    def run_cmd(cmd, *args, **kwargs):
+        if "-list" in cmd and "-alias s3-snapshots-gateway " in cmd:
+            raise OpenSearchCmdError(
+                cmd,
+                out="keytool error: java.lang.Exception: "
+                "Alias <s3-snapshots-gateway> does not exist\n",
+            )
+        if "-v -list" in cmd:
+            return mocker.Mock(out="".join(f"Alias name: {alias}\n" for alias in aliases))
+        return mocker.Mock(out="")
+
+    return run_cmd
+
+
+def _deleted_aliases(run_cmd):
+    commands = [call.args[0] for call in run_cmd.call_args_list]
+    return [cmd.split("-alias ")[1].split()[0] for cmd in commands if "-delete" in cmd]
+
+
+def test_remove_s3_ca_deletes_s3_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "ca-0", "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+
+    harness.charm.snapshots_manager.remove_s3_ca()
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+
+
+def test_store_s3_ca_deletes_old_chain(harness, mocker):
+    workload = harness.charm.snapshots_manager.workload
+    mocker.patch.object(workload, "exists", return_value=True)
+    run_cmd = mocker.patch.object(
+        workload,
+        "run_cmd",
+        side_effect=_keytool(mocker, "s3-snapshots-gateway-0", "s3-snapshots-gateway-1"),
+    )
+    mocker.patch.object(
+        harness.charm.snapshots_manager, "is_custom_s3_ca_stored", return_value=False
+    )
+    store_ca_chain = mocker.patch("opensearch_single_kernel.managers.snapshots.store_ca_chain")
+
+    harness.charm.snapshots_manager.store_s3_ca(S3_CONN_INFO_WITH_CA["tls_ca_chain"])
+
+    assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
+    store_ca_chain.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "storage_credentials,expected",
+    [
+        ({"s3": {"access-key": "access", "secret-key": "secret"}}, ObjectStorageType.S3_PCLUSTER),
+        (
+            {"azure": {"storage-account": "account", "secret-key": "secret"}},
+            ObjectStorageType.AZURE_PCLUSTER,
+        ),
+        ({"gcs": {"secret-key": '{"type": "service_account"}'}}, ObjectStorageType.GCS_PCLUSTER),
+        ({}, None),
+    ],
+    ids=["s3", "azure", "gcs", "none"],
+)
+def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
+    harness, mocker, storage_credentials, expected
+):
+    secrets = Mock()
+    secrets.resolve_credential.side_effect = lambda credential, **_: credential
+    peer_cluster_data = PeerClusterRelData.peer_cluster_rel_data_from_str(
+        secrets,
+        json.dumps(
+            {
+                "cluster_name": "cluster",
+                "cm_nodes": [],
+                "deployment_desc": None,
+                "credentials": {
+                    "admin_username": "admin",
+                    "admin_password": "password",
+                    "admin_password_hash": "hash",
+                    "kibana_password": "password",
+                    "kibana_password_hash": "hash",
+                    **storage_credentials,
+                },
+            }
+        ),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=Mock(typ=DeploymentType.OTHER),
+    )
+    mocker.patch.object(
+        harness.charm.state, "get_rel_data_from_main_orchestrator", return_value=peer_cluster_data
+    )
+
+    assert harness.charm.state.storage_type == expected

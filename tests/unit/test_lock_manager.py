@@ -54,8 +54,8 @@ def test_node_lock_has_online_hosts_init_leader(
 ):
     """Initially no one has the lock if there is a leader."""
     mocker.patch("socket.create_connection")
-    mock_response_root(harness.charm.state.unit_name, harness.charm.state.host_ip)
-    mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.host_ip)
+    mock_response_root(harness.charm.state.unit_name, harness.charm.state.node_host)
+    mock_response_nodes(harness.charm.state.unit_name, harness.charm.state.node_host)
 
     harness.set_leader(is_leader=True)
 
@@ -102,7 +102,7 @@ def test_node_lock_has_online_nodes_leader_acquire_lock_via_document(
         return_value=True,
     )
 
-    host = harness.charm.state.host_ip
+    host = harness.charm.state.node_host
     unit_name = harness.charm.state.unit_name
     mock_response_root(unit_name, host)
     mock_response_nodes(unit_name, host)
@@ -157,7 +157,7 @@ def test_node_lock_has_online_nodes_departing_node_doesnt_break(
         return_value=True,
     )
 
-    host = harness.charm.state.host_ip
+    host = harness.charm.state.node_host
     unit_name = harness.charm.state.unit_name
     mock_response_root(unit_name, host)
     mock_response_nodes(unit_name, host)

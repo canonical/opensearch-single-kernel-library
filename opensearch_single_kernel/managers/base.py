@@ -51,9 +51,9 @@ class BaseManager(ManagerStatusProtocol):
         return K8sClient(self.state.pod_name, self.state.namespace)
 
     @property
-    def alt_hosts(self) -> list[str] | None:
-        """Return an alternative host (of another node)in case the current is offline."""
-        all_hosts = self.state.peer_unit_hosts
+    def peer_hosts(self) -> list[str]:
+        """Return known peer addresses without probing their availability."""
+        all_hosts = set(self.state.peer_unit_hosts)
 
         if nodes_conf := self.state.application.nodes_config:
             all_hosts.update([node.ip for node in nodes_conf.values()])
@@ -62,13 +62,19 @@ class BaseManager(ManagerStatusProtocol):
             all_hosts.update([node.ip for node in peer_cm_rel_data.cm_nodes])
 
         if not all_hosts:
-            return None
+            return []
+
+        return list(all_hosts - {self.state.node_host})
+
+    @property
+    def alt_hosts(self) -> list[str]:
+        """Return reachable peers to use when the current node is offline."""
+        if not (hosts := self.peer_hosts):
+            return []
 
         client = self.opensearch_client
 
-        active_hosts = [
-            host for host in all_hosts if host != self.state.node_host and client.is_node_up(host)
-        ]
+        active_hosts = [host for host in hosts if client.is_node_up(host)]
 
         random.shuffle(active_hosts)
 

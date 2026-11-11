@@ -47,7 +47,7 @@ APP_UNITS = {MAIN_APP: 1, FAILOVER_APP: 1, DATA_APP: 3}
 
 @pytest.mark.abort_on_fail
 async def test_deploy_small_cluster(
-    charm, series, ops_test: OpsTest, charm_resources, substrate
+    charm, series, ops_test: OpsTest, charm_resources, substrate, architecture
 ) -> None:
     """Deploy OpenSearch and JWT integrator, configure and integrate them."""
     await ops_test.model.set_config(MODEL_CONFIG)
@@ -67,7 +67,7 @@ async def test_deploy_small_cluster(
         TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=config
     )
     # Relate it to OpenSearch to set up TLS.
-    await ops_test.model.integrate(APP_NAME, TLS_CERTIFICATES_APP_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME)
     await wait_until(
         ops_test,
         apps=[APP_NAME],
@@ -80,11 +80,12 @@ async def test_deploy_small_cluster(
         apps=[JWT_APP_NAME],
         apps_statuses={JWT_APP_NAME: [EmptyBlockedStatus]},
         units_statuses={JWT_APP_NAME: [EmptyBlockedStatus]},
+        wait_for_exact_units=1,
     )
 
 
 @pytest.mark.abort_on_fail
-async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
+async def test_configure_and_use_jwt(ops_test: OpsTest, architecture: str) -> None:
     """Configure JWT authentication and access the cluster with the token."""
     global generated_jwt
     generated_jwt = generate_json_web_token()
@@ -158,7 +159,7 @@ async def test_configure_and_use_jwt(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 async def test_configure_and_use_jwt_large_cluster(
-    charm, series, ops_test: OpsTest, substrate, charm_resources
+    charm, series, ops_test: OpsTest, substrate, charm_resources, architecture
 ) -> None:
     """Create a large deployment of OpenSearch."""
     logger.info("Create large deployment cluster of Opensearch")
@@ -200,7 +201,7 @@ async def test_configure_and_use_jwt_large_cluster(
 
     # integrate TLS to all applications
     for app in [MAIN_APP, FAILOVER_APP, DATA_APP]:
-        await ops_test.model.integrate(app, TLS_CERTIFICATES_APP_NAME)
+        await ops_test.model.integrate(f"{app}:certificates", TLS_CERTIFICATES_APP_NAME)
 
     # integrate large deployment cluster
     await ops_test.model.integrate(f"{DATA_APP}:{REL_PEER}", f"{MAIN_APP}:{REL_ORCHESTRATOR}")
@@ -254,19 +255,33 @@ async def test_configure_and_use_jwt_large_cluster(
         f"{JWT_APP_NAME}:{JWT_CONFIG_RELATION}",
         f"{MAIN_APP}:{JWT_CONFIG_RELATION}",
     )
+
     await wait_until(
         ops_test,
         apps=[MAIN_APP, DATA_APP, FAILOVER_APP],
         wait_for_exact_units={app: units for app, units in APP_UNITS.items()},
+        idle_period=60,
     )
 
-    logger.info("Test access to `/_cat/nodes` with JWT")
     ip_address = await get_leader_unit_ip(ops_test, app=MAIN_APP)
+    security_config = await http_request(
+        ops_test,
+        "GET",
+        f"https://{ip_address}:9200/_plugins/_security/api/securityconfig",
+        app=MAIN_APP,
+    )
+    jwt_domain = security_config["config"]["dynamic"]["authc"]["jwt_auth_domain"]
+    assert jwt_domain["http_enabled"], "JWT authentication is not enabled"
+
+    logger.info("Test access to `/_cat/nodes` with JWT")
     url = f"https://{ip_address}:9200/_cat/nodes"
     result = requests.get(
-        url, headers={"Authorization": f"Bearer {generated_jwt['token']}"}, verify=False
+        url,
+        headers={"Authorization": f"Bearer {generated_jwt['token']}"},
+        verify=False,
+        timeout=10,
     )
-    assert result.status_code == 200, "Request failed"
+    assert result.status_code == 200, f"JWT request failed: HTTP {result.status_code}"
     logger.info("Access with JWT successful")
 
 

@@ -66,6 +66,14 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """Sets the partition number."""
         self.k8s_client.set_partition(value)
 
+    @property
+    def upgrade_resumed(self) -> bool:
+        """Whether the partition allows units beyond the first to upgrade."""
+        if not (units := self.state.sorted_upgrades_units):
+            return False
+        highest_unit = units[0]
+        return self.partition < highest_unit.unit_number
+
     def save_upgrades_versions(self) -> None:
         """Save revision on first install"""
         # Save versions on initial start

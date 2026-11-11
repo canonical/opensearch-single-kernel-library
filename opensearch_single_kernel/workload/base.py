@@ -9,6 +9,7 @@ import socket
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
+from platform import machine
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -109,7 +110,10 @@ class Paths:
     @property
     def jdk(self) -> PathProtocol:
         """Get path to the jdk directory."""
-        return self.snap / OpenSearchPaths.JDK.val
+        if machine() == "aarch64":
+            return self.snap / "usr/lib/jvm/java-21-openjdk-arm64"
+        else:
+            return self.snap / "usr/lib/jvm/java-21-openjdk-amd64"
 
     @property
     def tmp(self) -> PathProtocol:
@@ -166,6 +170,11 @@ class Paths:
         """Get path to grafana dashboard file."""
         return self.charm_root / "src/grafana_dashboards/opensearch.json"
 
+    @property
+    def ldap_chain(self) -> PathProtocol:
+        """Get path to ldap ca certificates file."""
+        return self.certs / "ldap.pem"
+
 
 # --- Base Workload
 class BaseWorkload(ABC):
@@ -220,10 +229,12 @@ class BaseWorkload(ABC):
             LookupError,
             NotADirectoryError,
             PermissionError,
+            PebbleError,
+            ModelError,
             pathops.PebbleConnectionError,
             ValueError,
         ) as e:
-            raise OpenSearchFileOperationError(e)
+            raise OpenSearchFileOperationError(e) from e
 
     def read_text(self, path: pathops.PathProtocol) -> str:
         """Read content from a file on disk.
@@ -244,7 +255,7 @@ class BaseWorkload(ABC):
             ModelError,
             pathops.PebbleConnectionError,
         ) as e:
-            raise OpenSearchFileOperationError(e)
+            raise OpenSearchFileOperationError(e) from e
 
     def mkdir(
         self,
@@ -274,7 +285,7 @@ class BaseWorkload(ABC):
             pathops.PebbleConnectionError,
             ValueError,
         ) as e:
-            raise OpenSearchFileOperationError(e)
+            raise OpenSearchFileOperationError(e) from e
 
     def exists(self, path: pathops.PathProtocol) -> bool:
         """Check if a file or directory exists on disk.
@@ -290,8 +301,8 @@ class BaseWorkload(ABC):
         """
         try:
             return path.exists()
-        except (PermissionError, pathops.PebbleConnectionError) as e:
-            raise OpenSearchFileOperationError(e)
+        except (PermissionError, PebbleError, ModelError, pathops.PebbleConnectionError) as e:
+            raise OpenSearchFileOperationError(e) from e
 
     def unlink(self, path: pathops.PathProtocol, missing_ok: bool = False) -> None:
         """Remove a file from disk.
@@ -306,9 +317,11 @@ class BaseWorkload(ABC):
             FileNotFoundError,
             IsADirectoryError,
             PermissionError,
+            PebbleError,
+            ModelError,
             pathops.PebbleConnectionError,
         ) as e:
-            raise OpenSearchFileOperationError(e)
+            raise OpenSearchFileOperationError(e) from e
 
     @contextmanager
     @abstractmethod
@@ -357,7 +370,14 @@ class BaseWorkload(ABC):
             return False
 
     @abstractmethod
-    def run_script(self, script_name: str, args: str = None, stdin: str | None = None):
+    def run_script(
+        self,
+        script_name: str,
+        args: str = None,
+        stdin: str | None = None,
+        *,
+        timeout: int = 30,
+    ):
         """Run script provided by Opensearch in another directory, relative to OPENSEARCH_HOME."""
         pass
 
@@ -368,6 +388,8 @@ class BaseWorkload(ABC):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
+        *,
+        timeout: int = 30,
     ) -> SimpleNamespace:
         """Run Command in CLI"""
         pass

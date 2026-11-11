@@ -16,6 +16,9 @@ import urllib3
 from tenacity import (
     RetryCallState,
     Retrying,
+    before_sleep_log,
+    retry,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -24,16 +27,21 @@ from tenacity import (
 from tenacity.wait import WaitBaseT
 
 from opensearch_single_kernel.common.constants import (
+    INTERNAL_USER_ENDPOINT,
     OPENSEARCH_BACKUP_ID_FORMAT,
     OPENSEARCH_NODE_LOCK_INDEX,
+    ROLE_ENDPOINT,
+    ROLESMAPPING_ENDPOINT,
     SYSTEM_INDICES,
-    USER_ENDPOINT,
-    USER_ROLE_ENDPOINT,
-    USER_ROLESMAPPING_ENDPOINT,
     ObjectStorageType,
     Substrates,
 )
-from opensearch_single_kernel.common.exceptions import OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHttpConnectTimeoutError,
+    OpenSearchHttpError,
+    OpenSearchHttpNoResponseError,
+    OpenSearchRestoreIndexConflictError,
+)
 from opensearch_single_kernel.core.models import App, Node, ObjectStorageConfig
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
@@ -42,6 +50,18 @@ from opensearch_single_kernel.utils.object_storage import (
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def _can_retry_snapshot_submission(error: BaseException) -> bool:
+    """Retry only failures that establish the snapshot request was not accepted."""
+    if isinstance(error, OpenSearchHttpConnectTimeoutError):
+        return True
+    if not isinstance(error, OpenSearchHttpError):
+        return False
+    return (
+        error.response_code == 429
+        and error.response_body.get("error", {}).get("type") == "rejected_execution_exception"
+    )
 
 
 class OpenSearchClient:
@@ -162,6 +182,7 @@ class OpenSearchClient:
                 "GET",
                 f"_snapshot/{repo_name}/{snapshot_id}",
                 alt_hosts=alt_hosts,
+                timeout=30,
                 retries=3,
                 wait_strategy=wait_fixed(3),
             )
@@ -303,12 +324,46 @@ class OpenSearchClient:
         Returns:
             snapshot_id: Snapshot ID
         """
-        repo_name = repository_name(object_storage_type)
         snapshot_id = datetime.now().strftime(OPENSEARCH_BACKUP_ID_FORMAT).lower()
+        try:
+            self._submit_snapshot(object_storage_type, snapshot_id, alt_hosts)
+        except OpenSearchHttpError as error:
+            server_error = error.response_code and error.response_code >= 500
+            if not (isinstance(error, OpenSearchHttpNoResponseError) or server_error):
+                raise
+
+            logger.warning(
+                "Snapshot %s submission had no confirmation; checking its state: %s",
+                snapshot_id,
+                error,
+            )
+            if not self._confirm_snapshot_creation(object_storage_type, snapshot_id, alt_hosts):
+                raise OpenSearchHttpError(
+                    f"Snapshot {snapshot_id} creation not confirmed. "
+                    f"Check list-backups before retrying. Submission error: {error}"
+                ) from error
+
+        logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
+        return snapshot_id
+
+    @retry(
+        retry=retry_if_exception(_can_retry_snapshot_submission),
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(3),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    def _submit_snapshot(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot_id: str,
+        alt_hosts: list[str] | None,
+    ) -> None:
+        """Submit the same snapshot ID, retrying only when the request was not accepted."""
+        repo_name = repository_name(object_storage_type)
         ignore = [f"-{idx}" for idx in SYSTEM_INDICES]
         indices_clause = ",".join(["*"] + ignore)
-        logger.info("indices_clause: %s", indices_clause)
-        # create snapshot
+        logger.info("Submitting snapshot %s for indices: %s", snapshot_id, indices_clause)
         response = self.request(
             "PUT",
             f"_snapshot/{repo_name}/{snapshot_id}?wait_for_completion=false",
@@ -319,17 +374,21 @@ class OpenSearchClient:
             },
             alt_hosts=alt_hosts,
             timeout=30,
-            retries=3,
-            wait_strategy=wait_fixed(3),
         )
-
-        logger.info("Snapshot request submitted with backup-id: %s", snapshot_id)
-        logger.debug("Create snapshot request with id: %s - response: %s", snapshot_id, response)
-
-        # This should always pass and is set for documentation purposes
         assert response.get("accepted") is True
 
-        return snapshot_id
+    def _confirm_snapshot_creation(
+        self,
+        object_storage_type: ObjectStorageType,
+        snapshot_id: str,
+        alt_hosts: list[str] | None,
+    ) -> bool:
+        """Return whether snapshot creation can be confirmed through the existing GET retries."""
+        try:
+            return bool(self.get_snapshot(object_storage_type, snapshot_id, alt_hosts))
+        except OpenSearchHttpError as error:
+            logger.warning("Cannot read snapshot %s after submission: %s", snapshot_id, error)
+            return False
 
     def restore_snapshot(
         self,
@@ -357,15 +416,24 @@ class OpenSearchClient:
             "include_global_state": False,
         }
 
-        restore_resp = self.request(
-            "POST",
-            f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
-            payload=payload,
-            alt_hosts=alt_hosts,
-            timeout=10 * 60,
-            retries=3,
-            wait_strategy=wait_fixed(3),
-        )
+        try:
+            restore_resp = self.request(
+                "POST",
+                f"_snapshot/{repo_name}/{snapshot_id}/_restore?wait_for_completion=true",
+                payload=payload,
+                alt_hosts=alt_hosts,
+                timeout=10 * 60,
+            )
+        except OpenSearchHttpError as exc:
+            # This conflict is rejected before the restore starts.
+            match exc.response_body:
+                case {"error": {"type": "snapshot_restore_exception", "reason": str(reason)}} if (
+                    "because an open index with same name already exists in the cluster." in reason
+                ):
+                    raise OpenSearchRestoreIndexConflictError(
+                        response_text=exc.response_text, response_code=exc.response_code
+                    ) from exc
+            raise
         logger.info("Restore of snapshot '%s' response: %s", snapshot_id, restore_resp)
 
         # this only serves as documentation and should always be true if no previous HTTP error
@@ -514,21 +582,21 @@ class OpenSearchClient:
             else:
                 raise e
 
-    def create_user_role(
+    def create_role(
         self,
         role_name: str,
-        permissions: dict[str, str] | None = None,
-        action_groups: dict[str, str] | None = None,
+        cluster_permissions: list[str] | None = None,
+        index_permissions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Creates a role with the given permissions.
 
-        This method assumes the dicts provided are valid opensearch config. If not, raises
+        This method assumes the permissions provided are valid opensearch config. If not, raises
         OpenSearchHttpError
 
         Args:
             role_name: name of the role
-            permissions: A valid dict of existing opensearch permissions.
-            action_groups: A valid dict of existing opensearch action groups.
+            cluster_permissions: list of cluster permissions to be applied to the role.
+            index_permissions: list of index permissions to be applied to the role.
 
         Raises:
             OpenSearchHttpError: If the role creation request fails.
@@ -536,10 +604,14 @@ class OpenSearchClient:
         Returns:
             HTTP response to opensearch API request.
         """
+        payload: dict[str, Any] = {"index_permissions": index_permissions or []}
+        if cluster_permissions:
+            payload["cluster_permissions"] = cluster_permissions
+
         resp = self.request(
             "PUT",
-            f"{USER_ROLE_ENDPOINT}/{role_name}",
-            payload={**(permissions or {}), **(action_groups or {})},
+            f"{ROLE_ENDPOINT}/{role_name}",
+            payload=payload,
         )
 
         if resp.get("status") != "CREATED" and not (
@@ -550,20 +622,39 @@ class OpenSearchClient:
 
         return resp
 
-    def remove_user_role(self, role_name: str) -> dict[str, Any]:
-        """Remove the given role from opensearch distribution.
+    def get_role(self, role_name: str) -> dict[str, Any] | None:
+        """Get the given role from opensearch API.
+
+        Args:
+            role_name: name of the role to get.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+
+        Returns:
+            The definition of the role, None if it does not exist.
+        """
+        try:
+            return self.request("GET", f"{ROLE_ENDPOINT}/{role_name}")
+        except OpenSearchHttpError as e:
+            if e.response_code == 404:
+                return None
+            raise e
+
+    def remove_role(self, role_name: str) -> dict[str, Any]:
+        """Remove the given role from opensearch API.
 
         Args:
             role_name: name of the role to be removed.
 
         Raises:
-            OpenSearchUserMgmtError: If the request fails, or if role_name is empty
+            OpenSearchHttpError: If the request fails
 
         Returns:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("DELETE", f"{USER_ROLE_ENDPOINT}/{role_name}")
+            resp = self.request("DELETE", f"{ROLE_ENDPOINT}/{role_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -599,7 +690,7 @@ class OpenSearchClient:
 
         resp = self.request(
             "PUT",
-            f"{USER_ENDPOINT}/{user_name}",
+            f"{INTERNAL_USER_ENDPOINT}/{user_name}",
             payload=payload,
         )
 
@@ -623,7 +714,7 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("GET", f"{USER_ENDPOINT}/{user_name}")
+            resp = self.request("GET", f"{INTERNAL_USER_ENDPOINT}/{user_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return None
@@ -645,7 +736,7 @@ class OpenSearchClient:
             HTTP response to opensearch API request.
         """
         try:
-            resp = self.request("DELETE", f"{USER_ENDPOINT}/{user_name}")
+            resp = self.request("DELETE", f"{INTERNAL_USER_ENDPOINT}/{user_name}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 return {
@@ -675,7 +766,7 @@ class OpenSearchClient:
         try:
             resp = self.request(
                 "PATCH",
-                f"{USER_ENDPOINT}/{user_name}",
+                f"{INTERNAL_USER_ENDPOINT}/{user_name}",
                 payload=patches,
             )
         except OpenSearchHttpError as e:
@@ -686,21 +777,37 @@ class OpenSearchClient:
 
         return resp
 
-    def create_user_role_mapping(self, role: str, mapped_users: list[str]) -> None:
+    def get_role_mappings(self) -> dict[str, dict[str, Any]]:
+        """Get all of the existing role mappings.
+
+        Raises:
+            OpenSearchHttpError: If the request fails.
+
+        Returns:
+            Mapping of role name to its role mapping definition.
+        """
+        return self.request("GET", ROLESMAPPING_ENDPOINT)
+
+    def put_role_mapping(self, role: str, users: list[str], backend_roles: list[str]) -> None:
         """Creates or replaces role mapping for selected role with all of its users mapped to it.
 
         Args:
             role: name of the role for users being mapped to.
-            mapped_users: all the users, that should be mapped to the specified role.
+            users: all the users that should be mapped to the specified role.
+            backend_roles: all the backend roles in use of specified role.
 
         Raises:
             OpenSearchHttpError: If the request fails.
         """
+        if not users and not backend_roles:
+            # Nothing is expected to be mapped to the role: its mapping is removed.
+            self.remove_role_mapping(role)
+            return
         try:
             resp = self.request(
                 "PUT",
-                f"{USER_ROLESMAPPING_ENDPOINT}/{role}",
-                payload={"users": mapped_users, "backend_roles": [role]},
+                f"{ROLESMAPPING_ENDPOINT}/{role}",
+                payload={"users": users, "backend_roles": backend_roles},
             )
         except OpenSearchHttpError as e:
             logger.error("Couldn't create role mapping: %s", str(e))
@@ -711,7 +818,7 @@ class OpenSearchClient:
         ):
             raise OpenSearchHttpError(f"creating role mapping {role} failed")
 
-    def remove_user_role_mapping(self, role: str) -> None:
+    def remove_role_mapping(self, role: str) -> None:
         """Remove the given role mapping if it exists.
 
         Args:
@@ -721,7 +828,7 @@ class OpenSearchClient:
             OpenSearchHttpError: If the request fails, or if role is empty
         """
         try:
-            resp = self.request("DELETE", f"{USER_ROLESMAPPING_ENDPOINT}/{role}")
+            resp = self.request("DELETE", f"{ROLESMAPPING_ENDPOINT}/{role}")
         except OpenSearchHttpError as e:
             if e.response_code == 404:
                 resp = {
@@ -738,7 +845,7 @@ class OpenSearchClient:
         """Change user hashed password."""
         resp = self.request(
             "PATCH",
-            f"{USER_ENDPOINT}/{username}",
+            f"{INTERNAL_USER_ENDPOINT}/{username}",
             [{"op": "replace", "path": "/hash", "value": hashed_pwd}],
         )
         if resp.get("status") != "OK":
@@ -1072,7 +1179,7 @@ class OpenSearchClient:
         timeout = 5
         if wait_for_green:
             endpoint = f"{endpoint}?wait_for_status=green&timeout=1m"
-            timeout = 61
+            timeout = 65
 
         try:
             return self.request(
@@ -1082,9 +1189,12 @@ class OpenSearchClient:
                 alt_hosts=alt_hosts,
                 timeout=timeout,
                 retries=3,
-                wait_strategy=wait_exponential(min=2),
+                ignore_retry_on=[408] if wait_for_green else None,
             )
         except OpenSearchHttpError as e:
+            if wait_for_green and e.response_code == 408 and e.response_body.get("timed_out"):
+                # The wait expired, but OpenSearch still returns the current health
+                return e.response_body
             logger.error("HTTP error when checking cluster health: %s", e)
             return None
 
@@ -1364,9 +1474,13 @@ class OpenSearchClient:
             if resp_status_code:
                 return e.response_code
             raise
+        except requests.ConnectTimeout as e:
+            raise OpenSearchHttpConnectTimeoutError(response_text=str(e)) from e
+        except (requests.Timeout, requests.ConnectionError) as e:
+            raise OpenSearchHttpNoResponseError(response_text=str(e)) from e
         except (requests.RequestException, urllib3.exceptions.HTTPError) as e:
             if not isinstance(e, requests.RequestException) or e.response is None:
-                raise OpenSearchHttpError(response_text=str(e))
+                raise OpenSearchHttpError(response_text=str(e)) from e
 
             if resp_status_code:
                 return e.response.status_code
