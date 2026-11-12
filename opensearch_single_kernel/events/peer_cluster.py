@@ -414,13 +414,10 @@ class PeerClusterEventsHandler(Object):
         # let the charm know this is an already bootstrapped cluster
         self.charm.state.application.bootstrapped = True
         # store the security related settings in secrets, peer_data, disk
-        if data.credentials.admin_tls:
+        main_data = self.charm.state.get_rel_data_from_main_orchestrator()
+        if main_data and main_data.credentials.admin_tls:
             logger.debug("Admin TLS credentials received from peer cluster relation data.")
-            self._set_security_conf(data)
-
-            # only the main orchestrator shares backup credentials
-            if event.relation.id == orchestrators.main_rel_id:
-                self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
+            self._set_security_conf(main_data)
 
         # check if there are any security misconfigurations / violations
         tls_errors = self.charm.tls_manager.peer_cluster_error_from_tls(data)
@@ -564,6 +561,8 @@ class PeerClusterEventsHandler(Object):
         self.charm.internal_users_manager.put_internal_user(
             KIBANA_SERVER_USER, data.credentials.kibana_password_hash
         )
+
+        self.charm.snapshots_manager.update_backup_credentials_from_peer_relation(data)
 
     def _reconcile_deployment_desc_from_peer_cluster_data(self, data: PeerClusterRelData) -> None:
         """Reconcile the deployment desc from the peer cluster relation data."""
