@@ -848,6 +848,20 @@ def test_on_certificate_expiring_ignored(harness, mocker, is_leader, certificate
     assert harness.charm.state.server.tls_configured
 
 
+def test_on_tls_relation_changed_admin_reissue_skipped_on_non_leader(harness, mocker):
+    """An ex-leader does not re-request the pending admin certificate; it leaves it to the leader."""
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    mocker.patch(f"{TLS_REQUIRES}.get_provider_certificates", return_value=[])
+    _set_admin_secrets(harness, {"csr": ADMIN_CSR, "cert": "admin_cert"})
+    harness.set_leader(is_leader=False)
+    harness.charm.state.server.certs_reissue_pending = {CertType.APP_ADMIN.val}
+
+    harness.charm.tls_events._on_tls_relation_changed(MagicMock())
+
+    request_certificate_creation.assert_not_called()
+    assert not harness.charm.state.server.certs_reissue_pending
+
+
 # Testing store_new_ca() function
 def test_truststore_password_secret(harness, mocker, substrate):
     deployment_desc = mocker.patch(

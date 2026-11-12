@@ -438,6 +438,10 @@ class TLSEventsHandler(Object):
                 logger.warning("Unknown cert type %s flagged for reissue.", cert_type_val)
                 continue
 
+            # Only leader should request admin certificate
+            if cert_type == CertType.APP_ADMIN and not self.charm.unit.is_leader():
+                continue
+
             secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
             # If we have already dropped the CSR from our secrets, we cannot re-request it anymore.
             if not (csr := secrets["csr"]):
@@ -470,12 +474,13 @@ class TLSEventsHandler(Object):
 
         The certificate expiry is only notified to the unit that requested it.
         """
-        deployment_desc = self.charm.state.application.deployment_desc
         if not self.charm.unit.is_leader() or not self.charm.state.tls_relation:
             return
-        if not deployment_desc:
+
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
             event.defer()
             return
+
         if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
