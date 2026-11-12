@@ -519,12 +519,7 @@ class PeerClusterEventsHandler(Object):
         if self.charm.state.server.started:
             return
 
-        try:
-            config_profile = self.charm.state.config_profile
-        except ValueError:
-            return
-
-        if not self.charm.profiles_manager.check_profile_requirements(config_profile):
+        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         # the profile is applied on start

@@ -541,7 +541,6 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchUserMgmtError as e:
                 logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()
-                return
 
         # Some options are part of the security config, e.g. the ones of LDAP.
         self.charm.reconcile_security_config(event)
