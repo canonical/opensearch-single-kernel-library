@@ -231,13 +231,6 @@ class ExternalClientsStatuses(Enum):
         check="Client relation requested index creation.",
         running="blocking",
     )
-    INDEX_CREATION_FAILED = StatusObject(
-        status="blocked",
-        message="Failed to create {index} index on client relation {id} - see the logs...",
-        short_message="Index creation failed",
-        check="Index existence after client relation handling.",
-        action="Check unit logs and OpenSearch health, then re-relate the client.",
-    )
     INVALID_INDEX_NAME = StatusObject(
         status="blocked",
         message="Invalid index name on client relation {id}: {index}",
@@ -258,6 +251,13 @@ class ExternalClientsStatuses(Enum):
         short_message="Client entity create failed",
         check="OpenSearch user or role for client relation.",
         action="Check unit logs and retry the client relation.",
+    )
+    INDEX_MISSING = StatusObject(
+        status="blocked",
+        message="Index {index} for client relation {id} no longer exists",
+        short_message="Client index missing",
+        check="Existence of client relation index in OpenSearch.",
+        action="Remove and re-relate the client.",
     )
     ENTITY_TYPE_UNSUPPORTED = StatusObject(
         status="blocked",

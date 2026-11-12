@@ -530,6 +530,10 @@ class ExternalClientsManager(BaseManager):
             status_list.append(format_status(error.value, {"id": relation.id, "index": index}))
             return
 
+        # only check for missing index if we have already provisioned it
+        if not relation.data[self.state.model.app].get("index"):
+            return
+
         try:
             if not self.opensearch_client.is_node_up():
                 return
@@ -537,7 +541,7 @@ class ExternalClientsManager(BaseManager):
             if index not in self.opensearch_client.indices():
                 status_list.append(
                     format_status(
-                        ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                        ExternalClientsStatuses.INDEX_MISSING.value,
                         {"id": relation.id, "index": index},
                     )
                 )
