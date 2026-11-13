@@ -7,7 +7,7 @@
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import Object
+from ops import ModelError, Object
 
 from opensearch_single_kernel.common.constants import (
     COS_PORT,
@@ -91,14 +91,20 @@ class CosEventsHandler(Object):
 
     def scrape_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config."""
-        if (
-            # deployment_desc is used to get unit name which is needed for prometheus labels
-            not self.charm.state.application.deployment_desc
-            or not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
-            or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
-        ):
-            # Not yet ready, waiting for certain values to be set
+        # deployment_desc is used to get unit name which is needed for prometheus labels
+        if not self.charm.state.application.deployment_desc:
+            return []
+
+        try:
+            if (
+                not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
+                or not (pwd := self.charm.state.application.cos_password)
+                or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
+            ):
+                # Not yet ready, waiting for certain values to be set
+                return []
+        except ModelError as e:
+            logger.warning("Failed to read COS credentials: %s", e)
             return []
 
         if self.charm.substrate == Substrates.K8S:
