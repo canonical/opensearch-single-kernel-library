@@ -811,6 +811,137 @@ def test_on_certificate_invalidated(harness, mocker, substrate):
     assert not harness.charm.state.server.tls_configured
 
 
+ADMIN_CSR = "admin_csr_12345"
+
+
+def _set_admin_secrets(harness, admin_secrets: dict[str, str]) -> None:
+    """Store the admin TLS secrets."""
+    harness.charm.state.secrets.put_object(Scope.APP, CertType.APP_ADMIN.val, admin_secrets)
+
+
+def _mock_leader_elected_prerequisites(mocker, requested_csrs: list[str], deployment: str = "ok"):
+    """Mock the TLS relation, deployment description and the CSRs requested by this unit."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.tls_relation",
+        new_callable=PropertyMock,
+        return_value=MagicMock(),
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions[deployment],
+    )
+    mocker.patch(
+        f"{TLS_REQUIRES}.get_requirer_csrs",
+        return_value=[MagicMock(csr=f"{csr}\n") for csr in requested_csrs],
+    )
+
+
+def test_on_leader_elected_requests_new_admin_certificate(harness, mocker):
+    """A new leader requests its own admin certificate to receive its expiry notifications."""
+    harness.set_leader(is_leader=True)
+    _mock_leader_elected_prerequisites(mocker, requested_csrs=[])
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    create_csr = mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request",
+        return_value=b"new_admin_csr",
+    )
+    _set_admin_secrets(harness, {"csr": ADMIN_CSR, "cert": "admin_cert"})
+    event_mock = MagicMock()
+
+    harness.charm.tls_events._on_leader_elected(event_mock)
+
+    # a new key is used: the provider would not issue a cert for the previous leader's CSR
+    create_csr.assert_called_once_with(Scope.APP, CertType.APP_ADMIN)
+    request_certificate_creation.assert_called_once_with(
+        certificate_signing_request=b"new_admin_csr"
+    )
+    event_mock.defer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "is_leader,deployment,admin_secrets,requested_csrs",
+    [
+        (False, "ok", {"csr": ADMIN_CSR}, []),
+        (True, "ko", {"csr": ADMIN_CSR}, []),
+        (True, "ok", {"truststore-password": "pwd"}, []),
+        (True, "ok", {"csr": ADMIN_CSR}, [ADMIN_CSR]),
+    ],
+    ids=["non-leader", "not-main-orchestrator", "admin-csr-missing", "already-requested"],
+)
+def test_on_leader_elected_no_admin_certificate_request(
+    harness, mocker, is_leader, deployment, admin_secrets, requested_csrs
+):
+    """No new admin certificate is requested when this unit doesn't need to take it over."""
+    harness.set_leader(is_leader=is_leader)
+    _mock_leader_elected_prerequisites(mocker, requested_csrs, deployment)
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    create_csr = mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.create_certificate_signing_request"
+    )
+    _set_admin_secrets(harness, admin_secrets)
+    event_mock = MagicMock()
+
+    harness.charm.tls_events._on_leader_elected(event_mock)
+
+    create_csr.assert_not_called()
+    request_certificate_creation.assert_not_called()
+    event_mock.defer.assert_not_called()
+
+
+def test_on_leader_elected_defers_during_upgrade(harness, mocker):
+    """The admin certificate is not requested while an upgrade is in progress."""
+    harness.set_leader(is_leader=True)
+    _mock_leader_elected_prerequisites(mocker, requested_csrs=[])
+    mocker.patch.object(
+        type(harness.charm.upgrades_manager),
+        "in_progress",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    _set_admin_secrets(harness, {"csr": ADMIN_CSR})
+    event_mock = MagicMock()
+
+    harness.charm.tls_events._on_leader_elected(event_mock)
+
+    request_certificate_creation.assert_not_called()
+    event_mock.defer.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "is_leader,certificate",
+    [(False, "admin_cert"), (True, "old_admin_cert")],
+    ids=["admin-cert-on-non-leader", "unknown-cert"],
+)
+def test_on_certificate_expiring_ignored(harness, mocker, is_leader, certificate):
+    """Expiry of a certificate this unit doesn't renew leaves the TLS configuration untouched."""
+    request_certificate_revocation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_revocation")
+    _set_admin_secrets(harness, {"csr": ADMIN_CSR, "cert": "admin_cert"})
+    harness.charm.state.server.tls_configured = True
+    harness.set_leader(is_leader=is_leader)
+
+    harness.charm.tls_events._on_certificate_expiring(MagicMock(certificate=certificate))
+
+    request_certificate_revocation.assert_not_called()
+    assert not harness.charm.state.server.certs_reissue_pending
+    assert harness.charm.state.server.tls_configured
+
+
+def test_on_tls_relation_changed_admin_reissue_skipped_on_non_leader(harness, mocker):
+    """An ex-leader does not re-request the pending admin certificate; it leaves it to the leader."""
+    request_certificate_creation = mocker.patch(f"{TLS_REQUIRES}.request_certificate_creation")
+    mocker.patch(f"{TLS_REQUIRES}.get_provider_certificates", return_value=[])
+    _set_admin_secrets(harness, {"csr": ADMIN_CSR, "cert": "admin_cert"})
+    harness.set_leader(is_leader=False)
+    harness.charm.state.server.certs_reissue_pending = {CertType.APP_ADMIN.val}
+
+    harness.charm.tls_events._on_tls_relation_changed(MagicMock())
+
+    request_certificate_creation.assert_not_called()
+    assert not harness.charm.state.server.certs_reissue_pending
+
+
 # Testing store_new_ca() function
 def test_truststore_password_secret(harness, mocker, substrate):
     deployment_desc = mocker.patch(
@@ -1021,6 +1152,8 @@ def test_on_certificate_available_leader_app_cert_full_workflow(
         state=DeploymentState(value=State.ACTIVE),
     )
 
+    # this unit already requested the admin certificate, no takeover on leader election
+    mocker.patch(f"{TLS_REQUIRES}.get_requirer_csrs", return_value=[MagicMock(csr=csr)])
     harness.set_leader(is_leader=True)
 
     original_status_app = harness.model.app.status
@@ -1293,6 +1426,8 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     harness.charm.restart_opensearch_event = MagicMock()
 
+    # this unit already requested the admin certificate, no takeover on leader election
+    mocker.patch(f"{TLS_REQUIRES}.get_requirer_csrs", return_value=[MagicMock(csr=old_csr)])
     harness.set_leader(is_leader=True)
 
     split_ca_chain.return_value = ["new_ca"]
@@ -2136,6 +2271,8 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         certificate_signing_request=csr, chain=chain, certificate=cert, ca=ca
     )
 
+    # this unit already requested the admin certificate, no takeover on leader election
+    mocker.patch(f"{TLS_REQUIRES}.get_requirer_csrs", return_value=[MagicMock(csr=csr)])
     harness.set_leader(is_leader=leader)
 
     # This unit is within the process of certificate renewal

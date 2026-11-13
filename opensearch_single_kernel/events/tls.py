@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
+    LeaderElectedEvent,
     ModelError,
     Object,
     RelationBrokenEvent,
@@ -65,6 +66,7 @@ class TLSEventsHandler(Object):
         self.framework.observe(
             self.charm.on[TLS_RELATION].relation_broken, self._on_tls_relation_broken
         )
+        self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
 
         self.framework.observe(self.certs.on.certificate_available, self._on_certificate_available)
         self.framework.observe(self.certs.on.certificate_expiring, self._on_certificate_expiring)
@@ -380,11 +382,6 @@ class TLSEventsHandler(Object):
         """Request the new certificate when old certificate is expiring."""
         logger.info("Received event type %s", type(event).__name__)
 
-        del self.charm.state.server.tls_configured
-
-        peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
-        for peer_cluster_server in peer_clusters_servers:
-            del peer_cluster_server.tls_configured
         try:
             scope, cert_type, secrets = self.charm.tls_manager.find_secret(
                 event.certificate, "cert"
@@ -397,6 +394,19 @@ class TLSEventsHandler(Object):
             logger.warning("Cannot read TLS credentials; deferring certificate renewal: %s", e)
             event.defer()
             return
+
+        # In case old leader is back and receive certificate expiring
+        if scope == Scope.APP and not self.charm.unit.is_leader():
+            # this unit was the leader that requested the admin certificate, the current
+            # leader requested its own on election and is in charge of renewing it
+            logger.info("Admin certificate expiring on a non-leader unit, leaving it to leader.")
+            return
+
+        del self.charm.state.server.tls_configured
+
+        peer_clusters_servers = self.charm.state.all_peer_clusters_servers(remote=False)
+        for peer_cluster_server in peer_clusters_servers:
+            del peer_cluster_server.tls_configured
 
         old_csr = secrets["csr"]
 
@@ -456,6 +466,10 @@ class TLSEventsHandler(Object):
                 logger.warning("Unknown cert type %s flagged for reissue.", cert_type_val)
                 continue
 
+            # Only the leader should renew the admin cert, non-leader units should drop any pending
+            # admin renewal and continue processing renewals for their own unit-level certificates
+            if cert_type == CertType.APP_ADMIN and not self.charm.unit.is_leader():
+                continue
             try:
                 secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
             except ModelError as e:
@@ -487,6 +501,38 @@ class TLSEventsHandler(Object):
             self.charm.state.server.certs_reissue_pending = still_pending
         else:
             del self.charm.state.server.certs_reissue_pending
+
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+        """Request the admin certificate from the new leader.
+
+        The certificate expiry is only notified to the unit that requested it.
+        """
+        if not self.charm.unit.is_leader() or not self.charm.state.tls_relation:
+            return
+
+        if not (deployment_desc := self.charm.state.application.deployment_desc):
+            event.defer()
+            return
+
+        if deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        # Not requested yet, or already requested by this unit
+        admin_csr = self.charm.state.application.admin_secrets.get("csr")
+        requested_csrs = {req.csr.strip() for req in self.certs.get_requirer_csrs()}
+        if not admin_csr or admin_csr.strip() in requested_csrs:
+            return
+
+        if self.charm.upgrades_manager.in_progress:
+            event.defer()
+            return
+
+        # New key: the provider ignores a CSR it already issued a certificate for
+        logger.info("Requesting a new admin certificate after leader election.")
+        csr = self.charm.tls_manager.create_certificate_signing_request(
+            Scope.APP, CertType.APP_ADMIN
+        )
+        self.certs.request_certificate_creation(certificate_signing_request=csr)
 
     def _on_tls_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm that the relation is broken."""
