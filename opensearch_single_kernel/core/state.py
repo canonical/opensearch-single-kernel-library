@@ -65,9 +65,13 @@ from opensearch_single_kernel.core.models import (
     GcsRelDataCredentials,
     Node,
     ObjectStorageConfig,
+    OpenSearchProfile,
     PeerClusterApp,
     PeerClusterRelData,
+    PerformanceType,
+    ProductionProfile,
     S3RelDataCredentials,
+    TestingProfile,
 )
 from opensearch_single_kernel.core.peer_cluster_relation import (
     PeerCluster,
@@ -312,6 +316,8 @@ class ClusterState(Object):
             else []
         )
 
+    # -- Kubernetes properties
+
     @property
     def pod_name(self) -> str:
         """K8S only: The pod name."""
@@ -321,6 +327,17 @@ class ClusterState(Object):
     def namespace(self) -> str:
         """K8S only: The namespace."""
         return self.model.name
+
+    # -- Charm config
+
+    @property
+    def config_profile(self) -> OpenSearchProfile:
+        """Get the current config profile."""
+        return (
+            ProductionProfile()
+            if PerformanceType(self.config.get("profile")) == PerformanceType.PRODUCTION
+            else TestingProfile()
+        )
 
     # -- Peer Cluster / Peer Cluster Orchestrator
 

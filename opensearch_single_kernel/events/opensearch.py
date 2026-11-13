@@ -390,23 +390,22 @@ class OpenSearchEventsHandler(Object):
         """On update status event.
 
         We want to periodically check for the following:
-        1- The profile requirements are still met
-        2- Do we have users that need to be deleted, and if so we need to delete them.
-        3- every 6 hours check if certs are expiring soon (in 7 days),
+        1- Do we have users that need to be deleted, and if so we need to delete them.
+        2- every 6 hours check if certs are expiring soon (in 7 days),
             as a safeguard in case relation broken. As there will be data loss
             without the user noticing in case the cert of the unit transport layer expires.
             So we want to stop opensearch in that case, since it cannot be recovered from.
+        3- The configured profile can be applied, e.g. after the system requirements are fixed.
         """
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             logger.debug("Deployment description not yet computed")
-            return
-        if not self.charm.profiles_manager.check_profile_requirements():
             return
 
         # if node already shutdown - leave
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
+        self.charm.apply_profile_and_restart()
         if self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()
 
@@ -548,22 +547,9 @@ class OpenSearchEventsHandler(Object):
             # This case is when the user change roles on runtime of init_hold / roles.
             self._handle_change_to_main_orchestrator_if_needed(event, previous_deployment_desc)
 
-        try:
-            config_profile = self.charm.profiles_manager.get_config_profile()
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.charm.state.config.get("profile"),
-            )
-            return
+        # An unmet profile is applied later, by the events changing what it requires.
+        profile_restart_needed = self.charm.profiles_manager.apply_profile()
 
-        if not self.charm.profiles_manager.check_profile_requirements():
-            event.defer()
-            return
-
-        profile_restart_needed = self.charm.config_manager.update_profile_configuration(
-            config_profile
-        )
         # The roles mappings are shared by the whole cluster: only its main orchestrator owns them.
         if self.charm.unit.is_leader() and self.charm.state.is_main_orchestrator:
             try:
@@ -571,7 +557,6 @@ class OpenSearchEventsHandler(Object):
             except OpenSearchUserMgmtError as e:
                 logger.warning("Failed to update relations roles mapping: %s", e)
                 event.defer()
-                return
 
         # Some options are part of the security config, e.g. the ones of LDAP.
         self.charm.reconcile_security_config(event)
@@ -614,6 +599,11 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
             if not self.charm.cluster_manager.opensearch_client.is_node_up():
+                event.defer()
+                return
+
+            # We need profile requirements to be met before restarting
+            if not self.charm.profiles_manager.check_profile_requirements():
                 event.defer()
                 return
 
@@ -956,6 +946,9 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.state.server.started:
             del self.charm.state.server.started
+
+        # We configure the node with current profile on start
+        self.charm.profiles_manager.apply_profile()
 
         # Check if we can start. This means we will check
         # - profiles requirements
@@ -1647,13 +1640,19 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchFileOperationError as e:
             logger.error("An error occurred while updating opensearch config: %s", e)
             return False
-        if changed:
+        # The cluster topology may now meet the requirements of the configured profile.
+        profile_applied = self.charm.profiles_manager.apply_profile()
+        if changed or profile_applied:
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.WAITING_TO_START.value,
                 "unit",
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
-            logger.debug("Restarting opensearch due to reconfiguring node roles")
+            logger.debug(
+                "Restarting opensearch: node roles changed=%s, profile applied=%s",
+                changed,
+                profile_applied,
+            )
             self.charm.restart_opensearch_event.emit()
         return True

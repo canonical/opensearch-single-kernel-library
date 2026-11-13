@@ -230,6 +230,20 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             logger.debug("Security config not reconciled. Deferring event.")
             event.defer()
 
+    def apply_profile_and_restart(self) -> None:
+        """Apply the configured profile once its requirements are met, and restart OpenSearch.
+
+        The requirements can be met by any change in the cluster, e.g. a peer cluster joining.
+        """
+        if self.upgrades_manager.in_progress:
+            return
+
+        if (
+            self.profiles_manager.apply_profile()
+            and self.cluster_manager.workload.is_service_started()
+        ):
+            self.restart_opensearch_event.emit()
+
     def is_unit_going_away(self, event: ops.EventBase | None = None) -> bool:
         """Whether this unit, or the whole application, is being removed.
 
