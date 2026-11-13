@@ -264,6 +264,7 @@ class ClusterManager(BaseManager):
         directives = list(prev_deployment_desc.pending_directives)
         deployment_state = prev_deployment_desc.state
         roles = config.roles
+        data_temp = config.data_temperature
         try:
             self._pre_validate_roles_change(
                 new_roles=config.roles, prev_roles=prev_deployment_desc.config.roles
@@ -279,28 +280,28 @@ class ClusterManager(BaseManager):
                 value=State.BLOCKED_CANNOT_APPLY_NEW_ROLES, message=str(e)
             )
             roles = prev_deployment_desc.config.roles
+            data_temp = prev_deployment_desc.config.data_temperature
 
-        start_mode = (
-            StartMode.WITH_PROVIDED_ROLES if config.roles else StartMode.WITH_GENERATED_ROLES
-        )
+        start_mode = StartMode.WITH_PROVIDED_ROLES if roles else StartMode.WITH_GENERATED_ROLES
         if (
             not config.init_hold
             and prev_deployment_desc.state.value == State.BLOCKED_CANNOT_START_WITH_ROLES
-            and (start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in config.roles)
+            and (start_mode == StartMode.WITH_GENERATED_ROLES or "cluster_manager" in roles)
         ):
             deployment_state = DeploymentState(value=State.ACTIVE, message="")
             directives.append(Directive.SHOW_STATUS)
             directives.remove(Directive.WAIT_FOR_PEER_CLUSTER_RELATION)
 
-        dep_type = deployment_type(config, start_mode, prev_deployment_desc.typ)
+        applied_config = PeerClusterConfig(
+            cluster_name=prev_deployment_desc.config.cluster_name,
+            init_hold=prev_deployment_desc.config.init_hold,
+            roles=roles,
+            data_temperature=data_temp,
+        )
+        dep_type = deployment_type(applied_config, start_mode, prev_deployment_desc.typ)
         return DeploymentDescription(
             app=prev_deployment_desc.app,
-            config=PeerClusterConfig(
-                cluster_name=prev_deployment_desc.config.cluster_name,
-                init_hold=prev_deployment_desc.config.init_hold,
-                roles=roles,
-                data_temperature=config.data_temperature,
-            ),
+            config=applied_config,
             start=start_mode,
             state=deployment_state,
             typ=dep_type,
