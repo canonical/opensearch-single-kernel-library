@@ -688,6 +688,9 @@ class TlsManager(BaseManager):
             ca_chain := self.state.application.admin_secrets.get("chain")
         ):
             for external_client in self.state.external_clients:
+                # skip clients that haven't requested an index yet
+                if not external_client.index:
+                    continue
                 external_client.tls_ca = ca_chain
         try:
             return self.update_request_ca_bundle()
