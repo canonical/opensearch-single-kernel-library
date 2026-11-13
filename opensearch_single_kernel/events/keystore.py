@@ -9,7 +9,7 @@ This module manages OpenSearch keystore access and lifecycle.
 import logging
 from typing import TYPE_CHECKING
 
-from ops import Object
+from ops import ModelError, Object
 
 from opensearch_single_kernel.events.custom_events import ReloadKeystoreEvent
 
@@ -34,6 +34,10 @@ class KeystoreEventsHandler(Object):
 
     def _on_reload(self, event: ReloadKeystoreEvent) -> None:
         """Handle keystore reload event."""
-        if not self.charm.keystore_manager.reload():
-            logger.error("Keystore reload failed.")
+        try:
+            if not self.charm.keystore_manager.reload():
+                logger.error("Keystore reload failed.")
+                event.defer()
+        except ModelError as e:
+            logger.warning("Cannot access keystore reload credentials; deferring reload: %s", e)
             event.defer()

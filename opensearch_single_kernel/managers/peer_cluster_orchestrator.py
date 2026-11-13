@@ -6,6 +6,8 @@
 
 import logging
 
+from ops import ModelError
+
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
     COS_USER,
@@ -15,6 +17,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     Directive,
     ObjectStorageType,
+    PClusterRefreshRelDataRes,
     Scope,
     StartMode,
 )
@@ -54,15 +57,30 @@ class PeerClusterOrchestratorManager(BaseManager):
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "peer_cluster_orchestrator_manager")
 
-    def refresh_relation_data(  # noqa: C901
+    def refresh_relation_data(
         self,
         event_rel_id: int | None = None,
-    ) -> bool:
+    ) -> PClusterRefreshRelDataRes:
         """Refresh the peer cluster rel data (new cm node, admin password change etc.).
 
+        Args:
+            event_rel_id: ID of the peer-cluster-orchestrator relation that triggered the event.
+
         Returns:
-            whether the operation was completed. In case of negative result retry is preferred.
+            COMPLETED if no retry is needed, WAITING if the cluster is not ready,
+            or FAILED if an operation raised ModelError. On failure, some relation
+            data may already have been updated.
         """
+        try:
+            if self._refresh_relation_data(event_rel_id):
+                return PClusterRefreshRelDataRes.COMPLETED
+            return PClusterRefreshRelDataRes.WAITING
+        except ModelError as e:
+            logger.warning("Cannot refresh peer-cluster relation data: %s", e)
+            return PClusterRefreshRelDataRes.FAILED
+
+    def _refresh_relation_data(self, event_rel_id: int | None) -> bool:  # noqa: C901
+        """Update peer cluster relation data. Return False if the cluster needs more time."""
         # get deployment descriptor of current app
         deployment_desc = self.state.application.deployment_desc
 
