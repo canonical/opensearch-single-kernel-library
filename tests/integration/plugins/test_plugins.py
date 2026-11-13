@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from pytest_operator.plugin import OpsTest
 
 from opensearch_single_kernel.common.statuses import NotificationsStatuses
@@ -26,6 +27,7 @@ from tests.integration.ha.helpers_data import (
 from tests.integration.ha.test_horizontal_scaling import IDLE_PERIOD
 from tests.integration.helpers import (
     CosBlockedStatus,
+    EmptyActiveStatus,
     EmptyBlockedStatus,
     app_name,
     get_application_unit_ids_ips,
@@ -65,6 +67,12 @@ LOKI_CHANNEL = "2/stable"
 GRAFANA_APP = "grafana-k8s"
 GRAFANA_CHANNEL = "2/stable"
 DASHBOARDS_APP_NAME = "opensearch-dashboards"
+K8S_DASHBOARDS_APP_NAME = "opensearch-dashboards-k8s"
+# OpenSearch Dashboards on K8s stays blocked until an ingress is related
+DASHBOARDS_K8S_INGRESS_MISSING = StatusObject(
+    status="blocked",
+    message="Ingress relation missing",
+)
 MAIN_ORCHESTRATOR_NAME = "main"
 FAILOVER_ORCHESTRATOR_NAME = "failover"
 SMTP_INTEGRATOR_APP_NAME = "smtp-integrator"
@@ -859,20 +867,29 @@ async def test_knn_training_search(ops_test: OpsTest, deploy_type: str, substrat
 
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
-async def test_reports_scheduler(
-    ops_test: OpsTest, deploy_type: str, substrate, architecture: str
-) -> None:
+async def test_reports_scheduler(ops_test: OpsTest, deploy_type: str, substrate) -> None:
     """Test that the reports scheduler plugin is enabled and functional."""
     # Deploy OpenSearch Dashboards
     await ops_test.model.deploy(
-        DASHBOARDS_APP_NAME,
+        DASHBOARDS_APP_NAME if substrate == "vm" else K8S_DASHBOARDS_APP_NAME,
+        application_name=DASHBOARDS_APP_NAME,
         channel="2/edge",
+        trust=substrate == "k8s",
     )
     await ops_test.model.integrate(DASHBOARDS_APP_NAME, TLS_CERTIFICATES_APP_NAME)
     await ops_test.model.integrate(DASHBOARDS_APP_NAME, APP_NAME)
-    await ops_test.model.wait_for_idle(
+    # On K8s the dashboards server runs and is reachable in-cluster, but the charm stays
+    # blocked until an ingress is related, which this test does not need.
+    dashboards_statuses = (
+        {DASHBOARDS_APP_NAME: [EmptyActiveStatus, DASHBOARDS_K8S_INGRESS_MISSING]}
+        if substrate == "k8s"
+        else None
+    )
+    await wait_until(
+        ops_test,
         apps=[DASHBOARDS_APP_NAME, APP_NAME],
-        status="active",
+        apps_statuses=dashboards_statuses,
+        units_statuses=dashboards_statuses,
     )
     dashboards_leader_unit_ip = await get_leader_unit_ip(ops_test, app=DASHBOARDS_APP_NAME)
     dashboards_base_url = f"https://{dashboards_leader_unit_ip}:5601"
@@ -885,6 +902,7 @@ async def test_reports_scheduler(
         "POST",
         f"{dashboards_base_url}/api/sample_data/{sample_data}",
         extra_headers={"osd-xsrf": "true"},
+        target_app=DASHBOARDS_APP_NAME,
     )
     logger.info(f"Download response: {response}")
     assert response["opensearchIndicesCreated"], f"Sample data '{sample_data}' not downloaded"
@@ -894,6 +912,7 @@ async def test_reports_scheduler(
         ops_test,
         "GET",
         f"{dashboards_base_url}/api/saved_objects/_find?type=dashboard&search_fields=title&search={sample_data}",
+        target_app=DASHBOARDS_APP_NAME,
     )
     logger.info(f"Search fields response: {response}")
     dashboard_id = response["saved_objects"][0]["id"]
@@ -964,7 +983,12 @@ async def test_reports_scheduler(
     await http_request(ops_test, "DELETE", f"{endpoint}/definition/{report_definition_id}")
 
     # delete sample data
-    await http_request(ops_test, "DELETE", f"{dashboards_base_url}/api/sample_data/{sample_data}")
+    await http_request(
+        ops_test,
+        "DELETE",
+        f"{dashboards_base_url}/api/sample_data/{sample_data}",
+        target_app=DASHBOARDS_APP_NAME,
+    )
 
     # remove dashboards application
     await ops_test.model.remove_application(DASHBOARDS_APP_NAME, block_until_done=True)
@@ -1836,7 +1860,7 @@ async def test_skills_plugin(ops_test: OpsTest, deploy_type: str) -> None:
 @pytest.mark.parametrize("deploy_type", SMALL_DEPLOYMENTS)
 @pytest.mark.abort_on_fail
 async def test_smtp_relation_when_related_with_smtp_integrator_then_creates_notifications(
-    ops_test: OpsTest, deploy_type: str, architecture: str
+    ops_test: OpsTest, deploy_type: str
 ) -> None:
     """Ensure that relating smtp-integrator results in notifications email config objects:
 
@@ -1964,7 +1988,6 @@ async def test_smtp_notification_statuses(
     series,
     substrate,
     charm_resources,
-    architecture: str,
 ) -> None:
     """Validate notification statuses for the smtp relation on a main/small deploy.
 
@@ -2096,7 +2119,6 @@ async def test_smtp_relation_invalid_status_on_non_main(
     charm,
     series,
     substrate,
-    architecture: str,
 ) -> None:
     """SMTP on a non-main orchestrator must block with SMTP_RELATION_INVALID."""
     await _ensure_opensearch_deployed(ops_test, deploy_type, charm, series, substrate)

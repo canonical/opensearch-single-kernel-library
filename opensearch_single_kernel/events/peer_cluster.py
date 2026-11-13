@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ops import (
+    ModelError,
     Object,
     RelationChangedEvent,
     RelationDepartedEvent,
@@ -22,6 +23,7 @@ from opensearch_single_kernel.common.constants import (
     CertType,
     DeploymentType,
     Directive,
+    PClusterRefreshRelDataRes,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchPeerClusterRelationDataIncompleteError,
@@ -82,13 +84,23 @@ class PeerClusterEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-            event.relation.id if hasattr(event, "relation") else None
-        )
+        if (
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+            == PClusterRefreshRelDataRes.FAILED
+        ):
+            event.defer()
 
-    def _on_peer_cluster_orchestrator_relation_changed(  # noqa: C901
-        self, event: RelationChangedEvent
-    ):
+    def _on_peer_cluster_orchestrator_relation_changed(self, event: RelationChangedEvent):
+        """Reconcile the provider, retrying failed Juju credential operations."""
+        try:
+            self._reconcile_provider(event)
+        except ModelError as e:
+            logger.warning(
+                "Cannot access peer-cluster credentials; deferring provider reconciliation: %s", e
+            )
+            event.defer()
+
+    def _reconcile_provider(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster orchestrator relation changed event."""
         logger.debug("Peer cluster orchestrator relation changed: %s", event)
 
@@ -119,12 +131,12 @@ class PeerClusterEventsHandler(Object):
             and self.charm.tls_manager.is_fully_configured()
             and self.charm.peer_cluster_manager.should_promote_failover_to_main()
         ):
-            self.charm.cluster_manager.promote_deployment_type()
-            self.charm.peer_cluster_orchestrator_manager.promote_failover()
-            # check if any credentials exist without relations
-            self.check_credentials_with_missing_relations()
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id
+            self._promote_failover_to_main()
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id
+                )
+                != PClusterRefreshRelDataRes.COMPLETED
             ):
                 event.defer()
             return
@@ -132,14 +144,16 @@ class PeerClusterEventsHandler(Object):
         is_waiting_for_peer_relation = (
             Directive.WAIT_FOR_PEER_CLUSTER_RELATION in deployment_desc.pending_directives
         )
+        result = self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+            event.relation.id
+        )
+        if result == PClusterRefreshRelDataRes.FAILED:
+            event.defer()
+            return
+
         # Do not defer the event if we are waiting for a peer cluster relation
         # Once the relation is established and the cluster starts we will re-process the event
-        if (
-            not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id
-            )
-            and not is_waiting_for_peer_relation
-        ):
+        if result == PClusterRefreshRelDataRes.WAITING and not is_waiting_for_peer_relation:
             event.defer()
 
         if is_waiting_for_peer_relation:
@@ -178,8 +192,11 @@ class PeerClusterEventsHandler(Object):
             self.handle_joining_data_node()
 
         if data.get("is_candidate_failover_orchestrator", "").lower() != "true":
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id
+                )
+                != PClusterRefreshRelDataRes.COMPLETED
             ):
                 event.defer()
             return
@@ -192,8 +209,11 @@ class PeerClusterEventsHandler(Object):
         target_relation_ids = self.charm.state.peer_clusters_relations_ids(is_provider=True)
         if orchestrators.failover_app and orchestrators.failover_rel_id in target_relation_ids:
             logger.info("A failover cluster orchestrator is already registered.")
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                event.relation.id
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
+                    event.relation.id
+                )
+                != PClusterRefreshRelDataRes.COMPLETED
             ):
                 event.defer()
             return
@@ -252,7 +272,17 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.application.orchestrators = orchestrators
 
     # ---- PEER CLUSTER RELATION EVENTS ----
-    def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):  # noqa: C901
+    def _on_peer_cluster_relation_changed(self, event: RelationChangedEvent):
+        """Reconcile the consumer, retrying failed Juju credential operations."""
+        try:
+            self._reconcile_consumer(event)
+        except ModelError as e:
+            logger.warning(
+                "Cannot access peer-cluster credentials; deferring consumer reconciliation: %s", e
+            )
+            event.defer()
+
+    def _reconcile_consumer(self, event: RelationChangedEvent):  # noqa: C901
         """Handle peer cluster relation changed event."""
         logger.debug("Peer cluster relation changed: %s", event)
 
@@ -278,16 +308,20 @@ class PeerClusterEventsHandler(Object):
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")
+        orchestrators = self.charm.state.application.orchestrators
 
         # Reject conflicting main/failover claims before mutating state.
-        if trigger and self.charm.state.application.orchestrators.check_relation_conflict(
-            trigger, event.relation.id
-        ):
-            logger.warning(
-                "Ignoring conflicting orchestrator relation %s for trigger %s",
-                event.relation.id,
-                trigger,
-            )
+        if trigger and orchestrators.check_relation_conflict(trigger, event.relation.id):
+            if trigger == "main" and event.relation.id == orchestrators.failover_rel_id:
+                # Promotion can arrive before this consumer sees the old main depart.
+                logger.debug("Deferring failover promotion until the registered main departs")
+                event.defer()
+            else:
+                logger.warning(
+                    "Ignoring conflicting orchestrator relation %s for trigger %s",
+                    event.relation.id,
+                    trigger,
+                )
             return
 
         # register in the 'main/failover'-CMs the number of planned units of the current app
@@ -388,9 +422,16 @@ class PeerClusterEventsHandler(Object):
             self.charm.cluster_manager.demote_deployment_type()
             self.charm.peer_cluster_orchestrator_manager.clean_all_provider_relation_data()
             deployment_desc = self.charm.state.application.deployment_desc
+
             # demoted main orchestrator should remove secrets it created for plugins
             self.charm.plugin_manager.remove_plugin_secrets()
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(event.relation.id)
+
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
+                return
 
         # we need to differentiate between plugins being None and {}
         # when an empty dict, plugins have been removed from the main orchestrator
@@ -431,7 +472,7 @@ class PeerClusterEventsHandler(Object):
         # recompute the deployment desc
         self._reconcile_deployment_desc_from_peer_cluster_data(data)
 
-    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):
+    def _on_peer_cluster_relation_departed(self, event: RelationDepartedEvent):  # noqa: C901
         """Handle when 'main/failover'-CMs leave the relation (app or relation removal)."""
         logger.debug("Peer cluster relation departed: %s", event)
         if not self.charm.unit.is_leader():
@@ -450,6 +491,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         orchestrators = self.charm.state.application.orchestrators
+        if event.relation.id not in [orchestrators.main_rel_id, orchestrators.failover_rel_id]:
+            return
+
         # check the departed cluster which triggered this hook
         event_src_cluster_type = (
             "main" if event.relation.id == orchestrators.main_rel_id else "failover"
@@ -467,11 +511,13 @@ class PeerClusterEventsHandler(Object):
                 )
             elif self.charm.peer_cluster_manager.should_promote_failover_to_main():
                 logger.info("Promoting failover orchestrator to main orchestrator")
-                self.charm.peer_cluster_orchestrator_manager.promote_failover()
-                self.charm.plugin_manager.remove_plugin_secret_ids()
-                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data(
-                    event.relation.id if hasattr(event, "relation") else None
-                )
+                self._promote_failover_to_main()
+                if (
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                    == PClusterRefreshRelDataRes.FAILED
+                ):
+                    event.defer()
+                    return
 
         # we leave in case not an orchestrator
         if (
@@ -486,6 +532,13 @@ class PeerClusterEventsHandler(Object):
             is_provider=True, must_have_units=False, remote=False
         ):
             local_peer_cluster.cluster_fleet_apps = self.charm.state.application.cluster_fleet_apps
+
+    def _promote_failover_to_main(self) -> None:
+        """Promote this application to main and check for missing plugin or backup relations."""
+        self.charm.cluster_manager.promote_deployment_type()
+        self.charm.peer_cluster_orchestrator_manager.promote_failover()
+        self.charm.plugin_manager.remove_plugin_secret_ids()
+        self.check_credentials_with_missing_relations()
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins/backups without a relation."""

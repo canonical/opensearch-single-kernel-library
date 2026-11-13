@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     HealthColors,
     ObjectStorageType,
+    PClusterRefreshRelDataRes,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -34,6 +35,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
+    OpenSearchSnapshotsPeerClusterDataConflictError,
 )
 from opensearch_single_kernel.common.statuses import SnapshotsStatuses
 from opensearch_single_kernel.core.models import (
@@ -155,8 +157,10 @@ class SnapshotsEventsHandler(Object):
             return
         except OpenSearchBackupCredentialsIncorrectError:
             logger.warning("%s object storage credentials not verified.", object_storage_type)
+            self._set_credentials_incorrect_status(failed=True)
             return
 
+        self._set_credentials_incorrect_status(failed=False)
         # Update backup credentials
         # Catch file operation exceptions
         try:
@@ -202,7 +206,11 @@ class SnapshotsEventsHandler(Object):
 
         self._clear_repository_misconfigured_status()
         # Refresh peer relations
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+        if (
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            == PClusterRefreshRelDataRes.FAILED
+        ):
+            event.defer()
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: StorageConnectionInfoGoneEvent
@@ -235,6 +243,7 @@ class SnapshotsEventsHandler(Object):
 
         # Clear the misconfigured flag now that credentials are gone.
         self._clear_repository_misconfigured_status()
+        self._set_credentials_incorrect_status(failed=False)
 
         if not self.charm.keystore_manager.cleanup_storage_credentials(object_storage_type):
             logger.warning("Cleanup for %s credentials are failed.", object_storage_type)
@@ -259,13 +268,17 @@ class SnapshotsEventsHandler(Object):
         ):
             self.charm.snapshots_manager.remove_s3_ca()
 
+        # Reload the keystore even if updating peer cluster relation data fails.
+        self._set_credentials_cleanup_failed_status(False)
+        self.charm.reload_keystore_event.emit()
+
         if self.charm.unit.is_leader():
             # Refresh peer relations
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-
-        self._set_credentials_cleanup_failed_status(False)
-
-        self.charm.reload_keystore_event.emit()
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
 
     def _on_verify_snapshots_credentials(  # noqa C901
         self, event: VerifySnapshotsCredentialsEvent
@@ -445,9 +458,14 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
-        info_to_save, object_storage_type_to_cleanup = (
-            self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
-        )
+        try:
+            info_to_save, object_storage_type_to_cleanup = (
+                self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
+            )
+        except OpenSearchSnapshotsPeerClusterDataConflictError:
+            logger.warning("Ignoring conflicting snapshots data received over peer-clusters.")
+            return None
+
         if info_to_save:
             for object_storage_type in object_storage_type_to_cleanup:
                 if not self.charm.keystore_manager.cleanup_storage_credentials(
@@ -633,7 +651,12 @@ class SnapshotsEventsHandler(Object):
             except OpenSearchInvalidStorageTypeError as e:
                 logger.error(str(e))
                 return "Object storage credentials are invalid."
-            except OpenSearchObjectStorageConfigValidationError:
+            except OpenSearchObjectStorageConfigValidationError as e:
+                if e.missing_fields:
+                    return (
+                        "Object storage configuration missing fields: "
+                        f"{', '.join(e.missing_fields)}."
+                    )
                 return "Object storage credentials are invalid."
             except OpenSearchHttpError as e:
                 return f"Action failed with: {str(e)}."
@@ -656,6 +679,21 @@ class SnapshotsEventsHandler(Object):
             return f"Action failed with: {str(e)}."
 
         return None
+
+    def _set_credentials_incorrect_status(self, failed: bool) -> None:
+        """Cache or clear incorrect credentials status."""
+        if failed:
+            self.charm.state.add_status_if_not_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
+        else:
+            self.charm.state.remove_status_if_present(
+                SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value,
+                "app",
+                self.charm.snapshots_manager.name,
+            )
 
     def _set_repository_misconfigured_status(self, object_storage_type: ObjectStorageType) -> None:
         """Cache blocked status for repository registration failure (apply path only)."""

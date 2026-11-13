@@ -655,6 +655,12 @@ def k8s_unit_fqdn(ops_test: OpsTest, app: str, short_name: str) -> str:
     return f"{short_name}.{app}-endpoints.{_model_name(ops_test)}.svc.cluster.local"
 
 
+def _k8s_unit_base_url(ops_test: OpsTest, app: str, short_name: str, endpoint: str) -> str:
+    """Return the in-cluster base URL serving `endpoint` for a K8s unit short name."""
+    port = urlparse(endpoint).port or 9200
+    return f"https://{k8s_unit_fqdn(ops_test, app, short_name)}:{port}"
+
+
 def _http_request_headers(
     json_resp: bool,
     extra_headers: Optional[Dict[str, Any]] = None,
@@ -777,6 +783,7 @@ async def http_request(  # noqa: C901
     json_resp: bool = True,
     extra_headers: Optional[Dict[str, any]] = None,
     timeout: float = 30.0,
+    target_app: Optional[str] = None,
 ):
     """Makes an HTTP request.
 
@@ -788,28 +795,32 @@ async def http_request(  # noqa: C901
         resp_status_code: whether to only return the http response code.
         verify: whether verify certificate chain or not
         user_password: use alternative password than the admin one in the secrets.
-        app: the name of the current application.
+        app: the name of the current application, and the one serving credentials.
         json_resp: return a json response or simply log
+        target_app: Application serving the requested endpoint/url.
+            Defaults to 'app'. Credentials and CA are retrieved from 'app'
 
     Returns:
         A json object.
     """
     admin_secrets = await get_secrets(ops_test, app=app)
+    served_by = target_app or app
     if ops_test.request.config.option.substrate == "k8s":
-        k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, app)
+        k8s_unit = await _find_k8s_unit_for_endpoint(ops_test, endpoint, served_by)
         if not k8s_unit:
             raise RuntimeError(
                 f"No unit found for endpoint {endpoint}. Cannot make request from {CLIENT_CHARM}."
             )
         # K8s requests that start from a pod IP are executed from inside the
         # cluster so they can use the stable unit service DNS name with strict TLS.
+        base_url = _k8s_unit_base_url(ops_test, served_by, k8s_unit.short_name, endpoint)
         logger.info(
-            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {k8s_unit_fqdn(ops_test, app, k8s_unit.short_name)} route: {_request_path(endpoint)}"
+            f"Calling through {CLIENT_CHARM} for {k8s_unit.name}: {method} - {base_url} route: {_request_path(endpoint)}"
         )
         params: dict[str, Any] = {
             "method": method,
             "route": _request_path(endpoint),
-            "host": k8s_unit_fqdn(ops_test, app, k8s_unit.short_name),
+            "host": base_url,
             "ca_cert": base64.b64encode(admin_secrets["ca-chain"].encode()).decode(),
             "timeout": int(timeout),
         }
@@ -876,7 +887,7 @@ async def http_request(  # noqa: C901
         request_kwargs["verify"] = chain.name if verify else False
         resp = session.request(**request_kwargs)
 
-        if resp.status_code == 503:
+        if resp.status_code == 503 and served_by == app:
             logger.debug("\n\n\n\n -- Error 503 -- \n")
             await debug_failed_unit(ops_test, app, endpoint)
 
