@@ -257,6 +257,15 @@ class TLSEventsHandler(Object):
         if not self.charm.unit.is_leader() and scope == Scope.APP:
             return
 
+        # skip a deferred event if the provider has issued another cert for same csr
+        if any(
+            provider_cert.csr.strip() == event.certificate_signing_request.strip()
+            and provider_cert.certificate.strip() != event.certificate.strip()
+            for provider_cert in self.certs.get_provider_certificates()
+        ):
+            logger.debug("Ignoring a replaced %s certificate.", cert_type.val)
+            return
+
         old_cert = secrets.get("cert", None)
         ca_chain = "\n".join(event.chain[::-1])
 

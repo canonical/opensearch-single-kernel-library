@@ -682,6 +682,8 @@ class TlsManager(BaseManager):
             logger.error("Error removing old CA during rotation finalization: %s", e)
             return False
 
+        self.state.reset_ca_rotation_state()
+
         # the whole fleet reloaded the new CA and dropped the old one, it is now safe
         # to expose the new CA to the external clients
         if self.state.server.is_app_leader and (

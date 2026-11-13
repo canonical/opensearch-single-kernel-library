@@ -755,6 +755,28 @@ def test_on_certificate_available(harness, mocker):
     on_tls_conf_set.assert_called()
 
 
+def test_finalize_ca_certs_rotation_clears_rotation_flags(harness, mocker):
+    """Test the rotation flags are cleared after a completed rotation."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ca_and_certs_rotation_complete_in_cluster",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.remove_old_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle",
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.charm.state.server.tls_ca_renewing = True
+        harness.charm.state.server.tls_ca_renewed = True
+
+    assert harness.charm.tls_manager.finalize_ca_certs_rotation()
+
+    assert not harness.charm.state.server.tls_ca_renewing
+    assert not harness.charm.state.server.tls_ca_renewed
+
+
 def test_on_certificate_expiring(harness, mocker, substrate):
     """Test _on_certificate_expiring event."""
     request_certificate_creation = mocker.patch(
@@ -1443,16 +1465,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
-    request_certificate_renewal = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_renewal"
-    )
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
     request_certificate_revocation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
-    )
-    request_certificate_creation = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
@@ -1554,30 +1570,16 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     assert generate_csr.call_count == 3
 
     # new unit certs
-    assert request_certificate_revocation.call_count == 2
-    request_certificate_revocation.assert_has_calls([call(b"csr-http"), call(b"csr-transport")])
-
-    assert request_certificate_renewal.call_count == 2
-    request_certificate_renewal.assert_has_calls(
-        [
-            call(
-                old_certificate_signing_request=b"csr-http",
-                new_certificate_signing_request=generate_csr(),
-            ),
-            call(
-                old_certificate_signing_request=b"csr-transport",
-                new_certificate_signing_request=generate_csr(),
-            ),
-        ]
+    assert request_certificate_revocation.call_count == 3
+    request_certificate_revocation.assert_has_calls(
+        [call(b"csr-http"), call(b"csr-transport"), call(b"old_csr")]
     )
 
-    # new admin cert
-    assert request_certificate_creation.call_count == 1
-    # we store the decoded csr in the secret but pass it as bytes to the function
-    assert (
-        request_certificate_creation.call_args.kwargs["certificate_signing_request"].decode()
-        == new_app_admin_secret["csr"]
-    )
+    assert harness.charm.state.server.certs_reissue_pending == {
+        CertType.UNIT_HTTP.val,
+        CertType.UNIT_TRANSPORT.val,
+        CertType.APP_ADMIN.val,
+    }
 
     add_status.assert_not_called()
 
@@ -1614,9 +1616,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
-    request_certificate_renewal = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_renewal"
-    )
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
@@ -1625,9 +1624,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     )
     request_certificate_revocation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
@@ -1726,19 +1722,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         [call(csr_http_old.encode()), call(csr_transport_old.encode())]
     )
 
-    assert request_certificate_renewal.call_count == 2
-    request_certificate_renewal.assert_has_calls(
-        [
-            call(
-                old_certificate_signing_request=csr_http_old.encode(),
-                new_certificate_signing_request=generate_csr(),
-            ),
-            call(
-                old_certificate_signing_request=csr_transport_old.encode(),
-                new_certificate_signing_request=generate_csr(),
-            ),
-        ]
-    )
+    assert harness.charm.state.server.certs_reissue_pending == {
+        CertType.UNIT_HTTP.val,
+        CertType.UNIT_TRANSPORT.val,
+    }
 
     assert (
         harness.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val)["csr"]
