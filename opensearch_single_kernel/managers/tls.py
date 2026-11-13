@@ -776,7 +776,9 @@ class TlsManager(BaseManager):
         Returns True on success, False if a filesystem error occurred.
         """
         if create_store_pwd:
-            self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
+            self.create_store_pwd_if_not_exists(
+                Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
+            )
 
         admin_secrets = self.state.application.admin_secrets
         cert_secrets = self.get_secrets_for_cert_type(cert_type)

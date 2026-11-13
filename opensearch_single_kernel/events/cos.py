@@ -7,7 +7,7 @@
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ops import Object
+from ops import ModelError, Object
 
 from opensearch_single_kernel.common.constants import (
     COS_PORT,
@@ -90,15 +90,23 @@ class CosEventsHandler(Object):
 
     def scrape_vm_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config for VM platform."""
-        if (
-            # deployment_desc is used to get unit name which is needed for prometheus labels
-            not self.charm.state.application.deployment_desc
-            or not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
-            or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
-        ):
-            # Not yet ready, waiting for certain values to be set
+        # deployment_desc is used to get unit name which is needed for prometheus labels
+        if not self.charm.state.application.deployment_desc:
             return []
+
+        try:
+            if (
+                not (ca := self.charm.state.application.admin_secrets.get("ca-cert"))
+                or not (pwd := self.charm.state.application.cos_password)
+                or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
+            ):
+                # Not yet ready, waiting for certain values to be set
+                return []
+            tls_enabled = self.charm.tls_manager.all_tls_resources_stored()
+        except ModelError as e:
+            logger.warning("Failed to read COS credentials: %s", e)
+            return []
+
         return [
             {
                 "metrics_path": "/_prometheus/metrics",
@@ -109,25 +117,28 @@ class CosEventsHandler(Object):
                     }
                 ],
                 "tls_config": {"ca": ca},
-                "scheme": (
-                    "https" if self.charm.tls_manager.all_tls_resources_stored() else "http"
-                ),
+                "scheme": "https" if tls_enabled else "http",
                 "basic_auth": {"username": f"{COS_USER}", "password": f"{pwd}"},
             }
         ]
 
     def scrape_k8s_config(self) -> list[dict[str, Any]]:
         """Generate the scrape config for K8s platform."""
-        if (
-            # deployment_desc is used to get unit name which is needed for prometheus labels
-            not self.charm.state.application.deployment_desc
-            or not (pwd := self.charm.state.application.cos_password)
-            or not (prometheus_labels := self.charm.cluster_manager.get_prometheus_labels())
-        ):
-            # Not yet ready, waiting for certain values to be set
+        # deployment_desc is used to get unit name which is needed for prometheus labels
+        if not self.charm.state.application.deployment_desc:
             return []
 
-        tls_enabled = self.charm.tls_manager.all_tls_resources_stored()
+        try:
+            if not (pwd := self.charm.state.application.cos_password) or not (
+                prometheus_labels := self.charm.cluster_manager.get_prometheus_labels()
+            ):
+                # Not yet ready, waiting for certain values to be set
+                return []
+            tls_enabled = self.charm.tls_manager.all_tls_resources_stored()
+        except ModelError as e:
+            logger.warning("Failed to read COS credentials: %s", e)
+            return []
+
         config: dict[str, Any] = {
             "metrics_path": "/_prometheus/metrics",
             "static_configs": [

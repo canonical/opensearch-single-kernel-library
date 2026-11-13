@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
-from ops import SecretNotFoundError
+from ops import ModelError, SecretNotFoundError
+from ops.charm import CharmBase
+from ops.testing import Harness
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, KIBANA_SERVER_USER
@@ -18,9 +20,11 @@ from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
 from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
+from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
     ENTITY_USER,
+    OpenSearchProvidesData,
 )
 from opensearch_single_kernel.managers.external_clients import ExternalClientsManager
 from opensearch_single_kernel.utils.helpers import validate_entity_name
@@ -1204,3 +1208,131 @@ def test_role_mappings_reconciled_on_config_changed_by_main_orchestrator_only(
     harness.charm.opensearch_events._on_config_changed(MagicMock())
 
     assert reconcile_role_mappings.called is is_main_orchestrator
+
+
+class DashboardProviderCharm(CharmBase):
+    """Minimal provider to exercise real secret-backed client relation writes."""
+
+
+@pytest.fixture
+def dashboard_credentials(monkeypatch):
+    monkeypatch.setenv("JUJU_VERSION", "3.6.0")
+    harness = Harness(
+        DashboardProviderCharm,
+        meta="name: opensearch\nprovides:\n  opensearch-client:\n    interface: opensearch_client\n",
+    )
+    harness.set_leader(True)
+    harness.begin()
+    relation_id = harness.add_relation("opensearch-client", "dashboards")
+    harness.add_relation_unit(relation_id, "dashboards/0")
+    harness.update_relation_data(
+        relation_id,
+        "dashboards",
+        {
+            "index": "example",
+            "requested-secrets": '["username", "password"]',
+            "extra-user-roles": "kibana_server",
+        },
+    )
+    interface = OpenSearchProvidesData(harness.model, "opensearch-client")
+    interface.set_credentials(relation_id, "kibanaserver", "original-password")
+    client = ExternalOpenSearchClient(
+        harness.model.get_relation("opensearch-client", relation_id),
+        interface,
+        harness.model.get_app("dashboards"),
+        "opensearch-client",
+    )
+    state = SimpleNamespace(
+        application=SimpleNamespace(kibana_server_password=None),
+        dashboards_clients=[client],
+        is_peer_cluster_provider=lambda **kwargs: False,
+    )
+    manager = ExternalClientsManager(state, MagicMock())
+    yield manager, client, interface, relation_id
+    harness.cleanup()
+
+
+@pytest.mark.parametrize("cached_password", [None, "stale-password"])
+def test_dashboard_secret_change_publishes_refreshed_content(
+    dashboard_credentials, cached_password
+):
+    manager, _, interface, relation_id = dashboard_credentials
+    manager.state.application.kibana_server_password = cached_password
+    charm = SimpleNamespace(
+        state=manager.state,
+        unit=SimpleNamespace(is_leader=lambda: True),
+        app=SimpleNamespace(name="opensearch"),
+        external_clients_manager=manager,
+    )
+    event = MagicMock()
+    event.secret.label = "opensearch:app:kibanaserver-password"
+    event.secret.get_content.return_value = {"kibanaserver-password": "replacement-password"}
+
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "replacement-password"
+    )
+    event.defer.assert_not_called()
+
+
+def test_dashboard_creation_waits_for_its_password(dashboard_credentials):
+    manager, client, interface, relation_id = dashboard_credentials
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        manager.provide_client_entity(client, None)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "original-password"
+    )
+
+
+def test_dashboard_index_request_defers_until_password_available(
+    harness, mocker, client_request_ready, provide_client_index
+):
+    dashboards_client = make_client(extra_user_roles="kibana_server", password="original-password")
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
+        return_value=dashboards_client,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.kibana_server_password",
+        new_callable=PropertyMock,
+        return_value=None,
+    )
+
+    event = MagicMock(index="example", relation=dashboards_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    assert dashboards_client.password == "original-password"
+    event.defer.assert_called_once_with()
+
+
+def test_dashboard_secret_change_read_failure_does_not_publish(dashboard_credentials):
+    manager, _, interface, relation_id = dashboard_credentials
+    charm = SimpleNamespace(
+        state=manager.state,
+        unit=SimpleNamespace(is_leader=lambda: True),
+        app=SimpleNamespace(name="opensearch"),
+        external_clients_manager=manager,
+    )
+    event = MagicMock()
+    event.secret.label = "opensearch:app:kibanaserver-password"
+    manager.state.application.kibana_server_password = "stale-available-password"
+    event.secret.get_content.side_effect = ModelError("secret temporarily unavailable")
+
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "original-password"
+    )
+    event.defer.assert_called_once()
+
+    event.reset_mock()
+    event.secret.get_content.side_effect = None
+    event.secret.get_content.return_value = {"kibanaserver-password": "replacement-password"}
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "replacement-password"
+    )
+    event.defer.assert_not_called()
