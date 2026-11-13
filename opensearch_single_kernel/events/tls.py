@@ -466,6 +466,10 @@ class TLSEventsHandler(Object):
                 logger.warning("Unknown cert type %s flagged for reissue.", cert_type_val)
                 continue
 
+            # Only the leader should renew the admin cert, non-leader units should drop any pending
+            # admin renewal and continue processing renewals for their own unit-level certificates
+            if cert_type == CertType.APP_ADMIN and not self.charm.unit.is_leader():
+                continue
             try:
                 secrets = self.charm.tls_manager.get_secrets_for_cert_type(cert_type)
             except ModelError as e:
