@@ -21,6 +21,7 @@ from opensearch_single_kernel.core.models import (
     Node,
     PeerClusterConfig,
 )
+from tests.unit.helpers import deployment_descriptions
 
 
 class PatchedUnit:
@@ -193,3 +194,35 @@ def test_pre_validate_roles_change(harness, mocker):
         harness.charm.cluster_manager._pre_validate_roles_change(
             new_roles=["ml"], prev_roles=["data", "ml"]
         )
+
+
+@pytest.mark.parametrize("new_roles", [["foo"], ["data.warm"]], ids=["foo", "data.warm"])
+def test_existing_cluster_setup_rejected_roles(harness, new_roles):
+    """Test that a roles change dropping cluster_manager keeps the previous deployment."""
+    prev_deployment_desc = deployment_descriptions["ok"]
+
+    deployment_desc = harness.charm.cluster_manager._existing_cluster_setup(
+        PeerClusterConfig(cluster_name="", init_hold=False, roles=new_roles),
+        prev_deployment_desc,
+    )
+
+    assert deployment_desc.state.value == State.BLOCKED_CANNOT_APPLY_NEW_ROLES
+    assert deployment_desc.config == prev_deployment_desc.config
+    assert deployment_desc.start == prev_deployment_desc.start
+    assert deployment_desc.typ == prev_deployment_desc.typ
+    assert deployment_desc.promotion_time == prev_deployment_desc.promotion_time
+
+
+def test_existing_cluster_setup_applies_new_roles(harness):
+    """Test that a valid roles change is applied."""
+    prev_deployment_desc = deployment_descriptions["ok"]
+
+    deployment_desc = harness.charm.cluster_manager._existing_cluster_setup(
+        user_configs["roles_ok"], prev_deployment_desc
+    )
+
+    assert deployment_desc.state.value == State.ACTIVE
+    assert deployment_desc.config.roles == ["cluster_manager", "data"]
+    assert deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
+    assert deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+    assert deployment_desc.promotion_time == prev_deployment_desc.promotion_time
