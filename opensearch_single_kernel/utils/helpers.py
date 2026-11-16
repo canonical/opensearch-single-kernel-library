@@ -149,10 +149,13 @@ def normalized_tls_subject(subject: str) -> str:
 
 
 def certificate_subject_dn(cert: str) -> str | None:
-    """Return the subject DN of a PEM certificate, in the RFC 2253 form OpenSearch compares.
+    """Get the subject DN of a certificate.
 
-    The issuer is free to rewrite the subject of a CSR (e.g. Vault PKI drops the organization),
-    so the DN of the issued certificate is the only reliable source for `admin_dn`.
+    Args:
+        cert: the certificate, in PEM format.
+
+    Returns:
+        The subject DN in RFC 4514 form, or None if the certificate cannot be read.
     """
     try:
         return x509.load_pem_x509_certificate(data=cert.encode()).subject.rfc4514_string()

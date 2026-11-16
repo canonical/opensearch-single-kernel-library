@@ -600,10 +600,11 @@ class OpenSearchApplication(RelationState):
 
     @property
     def tls_subject(self) -> str | None:
-        """Get the subject DN of the admin certificate from the TLS admin_secrets.
+        """Get the subject DN of the admin certificate.
 
-        The subject of the issued certificate takes precedence over the requested one, as
-        the TLS provider may issue the certificate with a different subject than the CSR.
+        Returns:
+            The subject DN of the issued admin certificate, else the requested subject,
+            or None if there are no admin secrets.
         """
         if not (admin_secrets := self.admin_secrets):
             return None

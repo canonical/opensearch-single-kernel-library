@@ -108,7 +108,14 @@ def create_utf8_encoded_private_key() -> str:
 
 
 def create_certificate_with_subject(subject: x509.Name) -> str:
-    """Creates a self-signed certificate with the given subject."""
+    """Create a self-signed certificate.
+
+    Args:
+        subject: the subject (and issuer) of the certificate.
+
+    Returns:
+        The certificate, in PEM format.
+    """
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = datetime.now(timezone.utc)
     return (
