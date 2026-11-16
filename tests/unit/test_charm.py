@@ -629,7 +629,9 @@ def test_roles_change_emits_restart(harness, mocker, is_leader):
     mocker.patch.object(
         charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
     )
-    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
+    mocker.patch.object(charm.profiles_manager, "apply_profile", return_value=False)
+    # an unmet profile no longer holds back the rest of config-changed
+    mocker.patch.object(charm, "reconcile_security_config")
     mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
     charm.restart_opensearch_event = MagicMock()
 
@@ -779,6 +781,8 @@ def started_leader(harness, mocker):
     mocker.patch.object(charm, "apply_health")
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     return charm
 
 

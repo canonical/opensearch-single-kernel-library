@@ -3,13 +3,19 @@
 
 """Unit tests for profile requirement checks and profile changes on config-changed."""
 
-from unittest.mock import PropertyMock
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.common.client import OpenSearchClient
+from opensearch_single_kernel.common.constants import HealthColors, PerformanceType
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.common.statuses import ProfileStatuses
 from opensearch_single_kernel.core.models import ProductionProfile, TestingProfile
+from tests.unit.helpers import deployment_descriptions
 
 _8GB_IN_KB = 8 * 1024 * 1024
 
@@ -270,3 +276,149 @@ def test_statuses_follow_configured_profile(harness, mocker, production_topology
 
     statuses = harness.charm.profiles_manager.get_statuses("unit")
     assert not any(status.short_message == missing for status in statuses)
+
+
+@pytest.fixture
+def start_gate(harness, mocker):
+    """Run the start of OpenSearch up to the checks following the profile ones."""
+    mocker.patch.object(harness.charm, "is_unit_going_away", return_value=False)
+    mocker.patch.object(
+        type(harness.charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    return mocker.patch.object(
+        harness.charm.opensearch_events, "unit_allowed_to_start", return_value=False
+    )
+
+
+def test_start_writes_heap_before_starting(
+    harness, production_topology_met, update_jvm_heap_size, start_gate
+):
+    """The node only starts once the heap of the profile it runs with is written."""
+    write_failed = OpenSearchFileOperationError("read-only file system")
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "testing"})
+
+    # first start: the heap of the profile to apply cannot be written
+    update_jvm_heap_size.side_effect = write_failed
+    event = MagicMock()
+    harness.charm.opensearch_events._start_opensearch(event)
+
+    event.defer.assert_called_once()
+    start_gate.assert_not_called()
+    assert harness.charm.state.server.profile is None
+
+    # restart, e.g. of a K8s pod which reset jvm.options: the applied heap is written again
+    harness.charm.state.server.profile = TestingProfile()
+    update_jvm_heap_size.side_effect = None
+    harness.charm.opensearch_events._start_opensearch(MagicMock())
+
+    update_jvm_heap_size.assert_called_with(TestingProfile().get_jvm_heap_size(_8GB_IN_KB))
+    start_gate.assert_called_once()
+
+    # if it cannot be, the node does not start
+    update_jvm_heap_size.side_effect = write_failed
+    event = MagicMock()
+    harness.charm.opensearch_events._start_opensearch(event)
+
+    event.defer.assert_called_once()
+    start_gate.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OpenSearchFileOperationError("read-only file system"),
+        FileNotFoundError("jvm.options not found"),
+        OpenSearchCmdError("cannot read memory"),
+    ],
+)
+def test_heap_write_failure_retried_by_next_events(
+    harness,
+    mocker,
+    production_topology_met,
+    update_jvm_heap_size,
+    restart_opensearch,
+    reconcile_security_config,
+    error,
+):
+    """A profile whose heap cannot be written is left unapplied, for the next events to retry."""
+    harness.charm.state.server.profile = ProductionProfile()
+    update_jvm_heap_size.side_effect = error
+
+    # config-changed applies the rest of the config, without deferring nor restarting
+    event = MagicMock()
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "testing"})
+    harness.charm.opensearch_events._on_config_changed(event)
+
+    reconcile_security_config.assert_called_once_with(event)
+    event.defer.assert_not_called()
+    restart_opensearch.assert_not_called()
+
+    # a roles change still restarts the node, which a retry would not see again
+    update_config = mocker.patch.object(
+        harness.charm.config_manager, "update_opensearch_config", return_value=True
+    )
+    assert harness.charm.opensearch_events._reconfigure_and_restart_if_needed()
+    restart_opensearch.assert_called_once()
+    assert harness.charm.state.server.profile == ProductionProfile()
+
+    # update-status retries the profile, without skipping its other checks
+    update_config.return_value = False
+    restart_opensearch.reset_mock()
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        return_value=deployment_descriptions["ok"],
+        new_callable=PropertyMock,
+    )
+    mocker.patch.object(OpenSearchClient, "is_node_up", return_value=True)
+    mocker.patch.object(harness.charm.upgrade_events, "_reconcile_upgrade")
+    next_check = mocker.patch.object(
+        harness.charm.cluster_manager, "get_nodes", side_effect=StopIteration
+    )
+    for heap_written in (False, True):
+        update_jvm_heap_size.side_effect = None if heap_written else error
+        with pytest.raises(StopIteration):
+            harness.charm.opensearch_events._on_update_status(MagicMock())
+
+        assert harness.charm.state.server.profile == (
+            TestingProfile() if heap_written else ProductionProfile()
+        )
+        assert restart_opensearch.call_count == int(heap_written)
+    assert next_check.call_count == 2
+
+
+def test_leader_election_not_blocked_by_unmet_profile(
+    harness, mocker, production_topology_met, reconcile_security_config
+):
+    """A new leader takes over even if the applied profile lost its topology, e.g. scale down."""
+    harness.charm.state.server.profile = ProductionProfile()
+    harness.set_leader(True)
+    harness.charm.state.application.is_security_index_initialised = True
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        return_value=deployment_descriptions["ok"],
+        new_callable=PropertyMock,
+    )
+    mocker.patch.object(
+        type(harness.charm.workload), "workload_present", new_callable=PropertyMock
+    ).return_value = True
+    mocker.patch.object(OpenSearchClient, "is_node_up", return_value=True)
+    mocker.patch.object(harness.charm, "apply_health", return_value=HealthColors.GREEN)
+    mocker.patch.object(harness.charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(
+        harness.charm.cluster_manager, "compute_and_broadcast_updated_topology", return_value=False
+    )
+    update_endpoints = mocker.patch.object(
+        harness.charm.external_clients_manager, "update_all_external_clients_relation_endpoints"
+    )
+
+    event = MagicMock()
+    harness.charm.opensearch_events._initialize_leader(event)
+
+    update_endpoints.assert_called_once_with([])
+    reconcile_security_config.assert_called_once_with(event, force=True)
+    event.defer.assert_not_called()

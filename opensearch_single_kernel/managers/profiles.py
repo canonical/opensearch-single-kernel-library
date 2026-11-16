@@ -11,7 +11,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 
 from opensearch_single_kernel.common.constants import PerformanceType
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
@@ -147,6 +150,8 @@ class ProfilesManager(BaseManager):
 
         Returns:
             True if a new profile was applied: OpenSearch must restart for it to take effect.
+            False otherwise, including when its JVM heap cannot be written: the profile is then
+            not applied, so the next call retries it.
         """
         try:
             profile = self.state.config_profile
@@ -163,10 +168,28 @@ class ProfilesManager(BaseManager):
         if not self.check_profile_requirements(profile):
             return False
 
-        heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
-        logger.debug("Updating JVM heap size to %s KB based on profile requirements", heap_size)
-        self._update_jvm_heap_size(heap_size)
+        if not self.write_jvm_heap_size(profile):
+            return False
+
         self.state.server.profile = profile
+        return True
+
+    def write_jvm_heap_size(self, profile: OpenSearchProfile) -> bool:
+        """Write the JVM heap of the given profile.
+
+        Returns:
+            True if written. False if the memory of the unit cannot be read, or jvm.options
+            cannot be read or written.
+        """
+        try:
+            heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
+            logger.debug(
+                "Updating JVM heap size to %s KB based on profile requirements", heap_size
+            )
+            self._update_jvm_heap_size(heap_size)
+        except (OpenSearchCmdError, OpenSearchFileOperationError, FileNotFoundError) as e:
+            logger.error("Failed to write the JVM heap: %s", e)
+            return False
         return True
 
     def _update_jvm_heap_size(self, heap_size_in_kb: int) -> None:

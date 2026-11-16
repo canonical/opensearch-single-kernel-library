@@ -85,6 +85,8 @@ def peer_provider(harness, mocker):
     mocker.patch.object(manager, "fetch_current_app_cm_nodes", return_value=[])
     mocker.patch.object(manager, "build_peer_cluster_rel_err_data", return_value=None)
     mocker.patch.object(charm.tls_manager, "is_fully_configured", return_value=False)
+    # a peer cluster joining may complete the profile's topology, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     assert manager.refresh_relation_data(relation_id) == PClusterRefreshRelDataRes.COMPLETED
     return charm, harness.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
 
@@ -456,7 +458,7 @@ def test_provider_publication_failure_stops_startup_and_failover_registration(
     charm.tls_manager.is_fully_configured.return_value = True
     mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
     mocker.patch.object(type(charm.workload), "memtotal", return_value=8 * 1024**3)
-    mocker.patch.object(charm.config_manager, "_update_jvm_heap_size")
+    mocker.patch.object(charm.profiles_manager, "_update_jvm_heap_size")
     # Observe start requests without executing the workload lifecycle.
     emit = mocker.patch.object(BoundEvent, "emit")
     previous_data = relation.data[charm.app]["data"]

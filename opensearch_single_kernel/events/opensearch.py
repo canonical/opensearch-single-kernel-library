@@ -405,7 +405,9 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
+        # In case system requirements changes
         self.charm.apply_profile_and_restart()
+
         if self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()
 
@@ -591,11 +593,6 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.application.is_security_index_initialised:
             # Leader election event happening after a previous leader got killed
             if not self.charm.cluster_manager.opensearch_client.is_node_up():
-                event.defer()
-                return
-
-            # We need profile requirements to be met before restarting
-            if not self.charm.profiles_manager.check_profile_requirements():
                 event.defer()
                 return
 
@@ -939,8 +936,14 @@ class OpenSearchEventsHandler(Object):
         if self.charm.state.server.started:
             del self.charm.state.server.started
 
-        # We configure the node with current profile on start
-        self.charm.profiles_manager.apply_profile()
+        # We configure the profile on start
+        # If we can't apply the profile we at least reconcile the JVM options
+        # This is needed for when K8s pod is restarted
+        if not self.charm.profiles_manager.apply_profile():
+            if not (profile:= self.charm.state.server.profile) or not self.charm.profiles_manager.write_jvm_heap_size(profile):
+                logger.info("Profile not configured, will retry starting.")
+                event.defer()
+                return
 
         # Check if we can start. This means we will check
         # - profiles requirements
