@@ -1153,6 +1153,64 @@ class OpenSearchClient:
             logger.error("Error reloading TLS certificates via API: %s", str(e))
             raise
 
+    def get_nodes_dn(
+        self, name: str, alt_hosts: list[str], cert_files: tuple[str, str]
+    ) -> list[str] | None:
+        """Get an entry of the dynamic `nodes_dn` config.
+
+        Args:
+            name: the name of the entry.
+            alt_hosts: the hosts to query.
+            cert_files: the admin certificate and key files, required by this API.
+
+        Returns:
+            The DN patterns of the entry, empty if it does not exist. None if the nodes don't
+            serve the dynamic config (not enabled).
+
+        Raises:
+            OpenSearchHttpError: if the request failed.
+        """
+        try:
+            response = self.request(
+                "GET",
+                f"_plugins/_security/api/nodesdn/{name}",
+                alt_hosts=alt_hosts,
+                cert_files=cert_files,
+                retries=3,
+                ignore_retry_on=[400, 404],
+            )
+        except OpenSearchHttpError as e:
+            if e.response_code == 400 and "no handler found" in (e.response_text or ""):
+                return None
+            if e.response_code == 404:
+                return []
+            raise
+        return response.get(name, {}).get("nodes_dn", [])
+
+    def put_nodes_dn(
+        self, name: str, nodes_dn: list[str], alt_hosts: list[str], cert_files: tuple[str, str]
+    ) -> None:
+        """Create or replace an entry of the dynamic `nodes_dn` config.
+
+        Args:
+            name: the name of the entry.
+            nodes_dn: the DN patterns of the entry.
+            alt_hosts: the hosts to query.
+            cert_files: the admin certificate and key files, required by this API.
+
+        Raises:
+            OpenSearchHttpError: if the request failed.
+        """
+        self.request(
+            "PUT",
+            f"_plugins/_security/api/nodesdn/{name}",
+            payload={"nodes_dn": nodes_dn},
+            alt_hosts=alt_hosts,
+            cert_files=cert_files,
+            retries=3,
+            ignore_retry_on=[400],
+        )
+
     def get_allocation_explain(
         self,
         host: str | None = None,

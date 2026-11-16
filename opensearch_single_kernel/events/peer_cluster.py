@@ -181,6 +181,9 @@ class PeerClusterEventsHandler(Object):
             p_cluster_app=related_peer_cluster_app,
             trigger_rel_id=event.relation.id,
         )
+        # the apps of the fleet changed, and with them the nodes_dn list
+        if self.charm.state.server.started:
+            self.charm.opensearch_events._reconfigure_and_restart_if_needed()
 
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
@@ -255,6 +258,9 @@ class PeerClusterEventsHandler(Object):
             p_cluster_app=trigger_app,
             trigger_rel_id=event.relation.id,
         )
+        # the apps of the fleet changed, and with them the nodes_dn list
+        if self.charm.state.server.started:
+            self.charm.opensearch_events._reconfigure_and_restart_if_needed()
         # if the trigger app is the failover orchestrator and there are no planned units, delete it
         # So if it has at least one unit we skip
         if len(event.relation.units) > 0:
@@ -330,6 +336,9 @@ class PeerClusterEventsHandler(Object):
             deployment_desc=deployment_desc,
             is_provider=False,
         )
+        # the apps of the fleet changed, and with them the nodes_dn list
+        if self.charm.state.server.started:
+            self.charm.opensearch_events._reconfigure_and_restart_if_needed()
         # set the main orchestrator registered flag for this relation
         if (
             self.charm.state.application.is_admin_user_initialized

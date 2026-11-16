@@ -1076,6 +1076,30 @@ def test_start_configuration_secret_failure_releases_peer_lock(
     charm.cluster_manager.start.assert_not_called()
 
 
+@pytest.mark.parametrize("listed", [True, False], ids=["listed", "not-listed"])
+def test_start_waits_until_listed_in_nodes_dn(startup_with_peer_lock, harness, mocker, listed):
+    """The running nodes only accept a node listed in the dynamic nodes_dn list."""
+    charm = startup_with_peer_lock
+    charm.state.application.is_security_index_initialised = True
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch.object(charm.tls_manager, "is_listed_in_nodes_dn", return_value=listed)
+    update_config = mocker.patch.object(charm.config_manager, "update_opensearch_config")
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    assert update_config.called is listed
+    if not listed:
+        event.defer.assert_called_once()
+        assert not charm.state.server_lock.lock_requested
+        charm.cluster_manager.start.assert_not_called()
+
+
 @pytest.mark.parametrize("already_running", [False, True])
 def test_post_start_secret_failure_releases_peer_lock_and_clears_progress(
     startup_with_peer_lock, harness, mocker, already_running
@@ -1166,7 +1190,7 @@ def test_bootstrap_config_cleanup_survives_secret_failure(startup_with_peer_lock
     mocker.patch.object(charm.config_manager, "update_seeds_config", return_value=True)
     config_on_disk = {"cluster.initial_cluster_manager_nodes": [charm.state.unit_name]}
 
-    def rewrite(_setter, path, config):
+    def rewrite(_setter, path, config, **_kwargs):
         assert path == "opensearch.yml"
         config_on_disk.clear()
         config_on_disk.update(config)

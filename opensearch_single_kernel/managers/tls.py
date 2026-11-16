@@ -6,6 +6,8 @@
 
 import logging
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -189,20 +191,18 @@ class TlsManager(BaseManager):
             )
 
     def _get_certificate_subject(self, cert_type: CertType) -> str:
-        """Get subject of the certificate.
+        """Get the CN of the certificate.
 
-        For K8s, prefer canonical service DNS over pod IP to keep CN stable.
+        Args:
+            cert_type: the type of the certificate.
+
+        Returns:
+            "admin" for the admin certificate, else the unit name, as listed in `nodes_dn`.
         """
         if cert_type == CertType.APP_ADMIN:
             return "admin"
 
-        if self.state.substrate == Substrates.K8S:
-            # X.509 common names are limited to 64 characters. Use the unit_name
-            # as CN and keep the full service FQDN in SANs for TLS hostname checks.
-            return self.state.unit_name
-
-        # VM: use unit IP from peer binding.
-        return str(self.state.host_ip)
+        return self.state.unit_name
 
     def _get_sans(self, cert_type: CertType) -> dict[str, list[str]]:
         """Create a list of OID/IP/DNS names for an OpenSearch unit.
@@ -636,6 +636,28 @@ class TlsManager(BaseManager):
             logger.error("Error reading the current certificate: %s", e)
             return None
 
+    @contextmanager
+    def _admin_cert_files(self) -> Iterator[tuple[str, str]]:
+        """Write the app-admin cert and key to temporary files, for the APIs requiring them."""
+        admin_secret = self.state.application.admin_secrets
+        # the certs need to be created on the charm container filesystem
+        # because the OpenSearch client library expects file paths for the cert and key
+        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
+        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
+        with (
+            self.workload.temp_file(
+                mode="w+t",
+                data=admin_secret["cert"],
+                dir=charm_container_tmp_dir,
+            ) as tmp_cert,
+            self.workload.temp_file(
+                mode="w+t",
+                data=admin_secret["key"],
+                dir=charm_container_tmp_dir,
+            ) as tmp_key,
+        ):
+            yield tmp_cert.as_posix(), tmp_key.as_posix()
+
     def reload_tls_certificates(self) -> bool:
         """Reload transport and HTTP layer communication certificates via REST APIs.
 
@@ -643,31 +665,66 @@ class TlsManager(BaseManager):
             True on success, False if the API call failed.
         """
         # using the SSL API requires authentication with app-admin cert and key
-        admin_secret = self.state.application.admin_secrets
-        # the certs need to be created on the charm container filesystem
-        # because the OpenSearch client library expects file paths for the cert and key
-        charm_container_tmp_dir = pathops.LocalPath("/tmp") / "opensearch-certs"
-        self.workload.mkdir(charm_container_tmp_dir, parents=True, exist_ok=True)
         try:
-            with (
-                self.workload.temp_file(
-                    mode="w+t",
-                    data=admin_secret["cert"],
-                    dir=charm_container_tmp_dir,
-                ) as tmp_cert,
-                self.workload.temp_file(
-                    mode="w+t",
-                    data=admin_secret["key"],
-                    dir=charm_container_tmp_dir,
-                ) as tmp_key,
-            ):
-                self.opensearch_client.reload_tls_certificates(
-                    cert_files=(tmp_cert.as_posix(), tmp_key.as_posix())
-                )
+            with self._admin_cert_files() as cert_files:
+                self.opensearch_client.reload_tls_certificates(cert_files=cert_files)
         except OpenSearchHttpError as e:
             logger.error("Could not reload TLS certificates via API: %s", e)
             return False
         return True
+
+    def is_listed_in_nodes_dn(self) -> bool:
+        """Check whether the running nodes list the unit in the dynamic `nodes_dn` list.
+
+        Returns:
+            whether the unit is listed. True too when no other node is online, or when the
+            running nodes have no list yet (dynamic config not enabled or entry not written,
+            e.g. during an upgrade). False without the admin certificate to check it.
+
+        Raises:
+            OpenSearchHttpError: if the list could not be read.
+        """
+        if not (alt_hosts := self.alt_hosts):
+            return True
+        if not self._has_admin_cert():
+            return False
+
+        cluster_name = self.state.application.deployment_desc.config.cluster_name
+        with self._admin_cert_files() as cert_files:
+            served = self.opensearch_client.get_nodes_dn(cluster_name, alt_hosts, cert_files)
+        return not served or f"CN={self.state.unit_name}" in served
+
+    def apply_nodes_dn(self, nodes_dn: list[str]) -> None:
+        """Have the current node serve a dynamic `nodes_dn` list, if it doesn't already.
+
+        Best effort: failures are logged, for a later call to retry.
+
+        Args:
+            nodes_dn: the sorted DN patterns, stored in one entry named after the cluster.
+        """
+        if not self._has_admin_cert():
+            return
+
+        cluster_name = self.state.application.deployment_desc.config.cluster_name
+        try:
+            with self._admin_cert_files() as cert_files:
+                served = self.opensearch_client.get_nodes_dn(cluster_name, [], cert_files)
+                if served is None or sorted(served) == nodes_dn:
+                    return
+
+                logger.info("Applying the dynamic nodes_dn list: %s", nodes_dn)
+                self.opensearch_client.put_nodes_dn(cluster_name, nodes_dn, [], cert_files)
+        except OpenSearchHttpError as e:
+            logger.warning("Could not apply the dynamic nodes_dn list: %s", e)
+
+    def _has_admin_cert(self) -> bool:
+        """Check whether the admin certificate and key, required by the security APIs, exist.
+
+        Returns:
+            whether both are in the admin secrets.
+        """
+        admin_secrets = self.state.application.admin_secrets
+        return bool(admin_secrets.get("cert") and admin_secrets.get("key"))
 
     def finalize_ca_certs_rotation(self) -> bool:
         """Handle the completion of CA rotation.

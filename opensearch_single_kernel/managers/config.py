@@ -34,6 +34,7 @@ class ConfigManager(BaseManager):
 
     CONFIG_YML = "opensearch.yml"
     SECURITY_CONFIG_YML = "opensearch-security/config.yml"
+    NODES_DN_KEY = "plugins.security.nodes_dn"
     JVM_OPTIONS = "jvm.options"
 
     def __init__(self, state: ClusterState, workload: BaseWorkload):
@@ -64,7 +65,8 @@ class ConfigManager(BaseManager):
             OpenSearchFileOperationError: if there is an error writing to any of the config files
 
         Returns:
-            whether the config was changed.
+            whether the config was changed. Once the security index exists, a change of the
+            static `nodes_dn` list does not count: the running nodes serve it dynamically.
         """
         if roles is None:
             roles = self._opensearch_roles
@@ -75,6 +77,7 @@ class ConfigManager(BaseManager):
             | self._opensearch_temperature_config()
             | self._opensearch_cluster_manager_config(roles=roles, cm_names=cm_names)
             | self._opensearch_admin_tls_config()
+            | self._opensearch_nodes_dn_config()
             | self._opensearch_tls_config(CertType.UNIT_HTTP)
             | self._opensearch_tls_config(CertType.UNIT_TRANSPORT)
             | {"network.publish_host": self.state.node_host}
@@ -88,8 +91,11 @@ class ConfigManager(BaseManager):
             self.update_seeds_config()
 
         self.state.server.last_host_ip = self.state.host_ip
-        # rewrite() returns whether the on-disk YAML text changed after the update.
-        return self.yaml_setter.rewrite(self.CONFIG_YML, config)
+
+        ignored_keys = (
+            (self.NODES_DN_KEY,) if self.state.application.is_security_index_initialised else ()
+        )
+        return self.yaml_setter.rewrite(self.CONFIG_YML, config, ignored_keys=ignored_keys)
 
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
@@ -118,6 +124,22 @@ class ConfigManager(BaseManager):
         }
 
         return self.yaml_setter.rewrite(self.SECURITY_CONFIG_YML, config)
+
+    def nodes_dn(self) -> list[str]:
+        """Get the `nodes_dn` list matching the certificates of the units of the fleet.
+
+        Returns:
+            The sorted DN patterns of each unit name as CN, alone or with other attributes
+            before or after it (e.g. `O=<cluster>,CN=<unit>`), empty before the deployment is
+            set up.
+        """
+        if not self.state.application.deployment_desc:
+            return []
+        return sorted(
+            dn
+            for name in self.state.fleet_unit_names
+            for dn in (f"CN={name}", f"CN={name},*", f"*,CN={name}", f"*,CN={name},*")
+        )
 
     def reconcile_security_config(self, force: bool = False) -> bool:
         """Update the security config and apply it to the security index if it changed.
@@ -280,6 +302,17 @@ class ConfigManager(BaseManager):
             if (tls_subject := self.state.application.tls_subject)
             else {}
         )
+
+    def _opensearch_nodes_dn_config(self) -> dict[str, Any]:
+        """Get the static `nodes_dn` config, with the dynamic one enabled.
+
+        Returns:
+            The opensearch.yml config options.
+        """
+        config: dict[str, Any] = {"plugins.security.nodes_dn_dynamic_config_enabled": True}
+        if nodes_dn := self.nodes_dn():
+            config[self.NODES_DN_KEY] = nodes_dn
+        return config
 
     def _opensearch_tls_config(self, cert_type: CertType) -> dict[str, Any]:
         """Get set of TLS config options of provided cert_type for the Opensearch.

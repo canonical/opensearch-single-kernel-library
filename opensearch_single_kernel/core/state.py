@@ -808,6 +808,20 @@ class ClusterState(Object):
         ]
 
     @property
+    def fleet_unit_names(self) -> set[str]:
+        """Get the names of the units of all the apps of the cluster fleet.
+
+        Returns:
+            The unit names of the current app and of every app in the cluster fleet.
+        """
+        current_app = self.application.deployment_desc.app.id
+        names = set(self.all_unit_names)
+        for app_id, app in (self.application.cluster_fleet_apps or {}).items():
+            if app_id != current_app:
+                names.update(app.units)
+        return names
+
+    @property
     def implements_secrets(self):
         """Property to cache results from a Juju call."""
         return JujuVersion.from_environ().has_secrets

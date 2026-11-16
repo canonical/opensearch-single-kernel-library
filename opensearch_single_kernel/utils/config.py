@@ -4,12 +4,14 @@
 
 """Utilities for editing yaml config files at any depth level and maintaining comments."""
 
+import copy
+import json
 import logging
 import re
 import sys
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from enum import Enum
 from io import StringIO
 from typing import Any
@@ -91,15 +93,18 @@ class ConfigSetter(ABC):
         pass
 
     @abstractmethod
-    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+    def rewrite(
+        self, config_file: str, val: dict[str, Any], ignored_keys: Collection[str] = ()
+    ) -> bool:
         """Rewrite a config file with new configuration while preserving formatting and comments.
 
         Args:
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
+            ignored_keys: top-level keys whose changes are not reported.
 
         Returns:
-            whether config file was changed.
+            whether config file was changed, not counting the ignored keys.
         """
         ...
 
@@ -253,25 +258,39 @@ class YamlConfigSetter(ConfigSetter):
         return data
 
     @override
-    def rewrite(self, config_file: str, val: dict[str, Any]) -> bool:
+    def rewrite(
+        self, config_file: str, val: dict[str, Any], ignored_keys: Collection[str] = ()
+    ) -> bool:
         """Rewrite a config file with new configuration while preserving formatting and comments.
 
         Args:
             config_file: path to the targeted config while relative to the base path.
             val: new configuration dictionary.
+            ignored_keys: top-level keys whose changes are not reported.
 
         Raises:
             FileNotFoundError: If file doesn't exist
             OpenSearchFileOperationError: If file cannot be read or written due to other reasons
 
         Returns:
-            whether config file was changed.
+            whether config file was changed, not counting the ignored keys.
         """
         target = self.load(config_file)
+        previous = (
+            {k: copy.deepcopy(v) for k, v in target.items() if k not in ignored_keys}
+            if ignored_keys
+            else {}
+        )
         YamlConfigSetter.__deep_rewrite_update(target, val)
         path = self.base_path / config_file
         old_content = self.workload.read_text(path).strip()
         self.__dump(target, OutputType.file, config_file)
+
+        if ignored_keys:
+            current = {k: v for k, v in target.items() if k not in ignored_keys}
+            return json.dumps(previous, sort_keys=True, default=str) != json.dumps(
+                current, sort_keys=True, default=str
+            )
 
         new_content = path.read_text().strip()
         return old_content != new_content

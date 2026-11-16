@@ -457,6 +457,8 @@ class OpenSearchEventsHandler(Object):
                 # The LDAP exclusions follow the client users: drop the removed ones.
                 self.charm.reconcile_security_config(event)
 
+        self._apply_nodes_dn()
+
         # If the unit reloads its certs but the other units are not ready yet
         # we need to wait for them all to be ready before deleting the old CA
         if (
@@ -991,6 +993,16 @@ class OpenSearchEventsHandler(Object):
             return
 
         try:
+            # the running nodes only accept this node once the dynamic nodes_dn list holds it
+            if (
+                self.charm.state.application.is_security_index_initialised
+                and not self.charm.tls_manager.is_listed_in_nodes_dn()
+            ):
+                logger.info("Waiting for the unit to be listed in nodes_dn before starting.")
+                self.charm.lock_manager.release()
+                event.defer()
+                return
+
             # Set the configuration of the node
             # Retrieve the nodes of the cluster, needed to configure this node
             nodes = self.charm.cluster_manager.get_nodes(False)
@@ -1122,6 +1134,9 @@ class OpenSearchEventsHandler(Object):
                     "unit",
                     self.charm.cluster_manager.name,
                 )
+
+            # the units waiting to start get listed as soon as the security index exists
+            self._apply_nodes_dn()
 
             if (
                 self.charm.state.application.deployment_desc.typ
@@ -1648,4 +1663,19 @@ class OpenSearchEventsHandler(Object):
             )
             logger.debug("Restarting opensearch due to reconfiguring node roles")
             self.charm.restart_opensearch_event.emit()
+
+        self._apply_nodes_dn()
         return True
+
+    def _apply_nodes_dn(self) -> None:
+        """Have the running nodes serve the nodes_dn list of opensearch.yml.
+
+        The list is shared by the whole fleet: only the leader of the main orchestrator applies
+        it, once the security index exists. Best effort: update-status retries it.
+        """
+        if (
+            self.charm.unit.is_leader()
+            and self.charm.state.is_main_orchestrator
+            and self.charm.state.application.is_security_index_initialised
+        ):
+            self.charm.tls_manager.apply_nodes_dn(self.charm.config_manager.nodes_dn())

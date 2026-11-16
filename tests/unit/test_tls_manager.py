@@ -322,11 +322,8 @@ def test_get_sans(harness, mocker, substrate):
     )
 
 
-def test_get_certificate_subject_uses_short_unit_identity_on_k8s(harness, mocker, substrate):
-    """K8s CSR common name should stay within X.509 limits."""
-    if substrate == "vm":
-        pytest.skip("K8s-only certificate subject behavior")
-
+def test_get_certificate_subject_uses_short_unit_identity(harness, mocker):
+    """The CSR common name should stay within X.509 limits."""
     mocker.patch(
         "opensearch_single_kernel.core.state.ClusterState.unit_name",
         new_callable=PropertyMock,
