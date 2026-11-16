@@ -90,7 +90,7 @@ PROTECTED_INDICES = [
 
 @pytest.mark.abort_on_fail
 async def test_create_relation(
-    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate, architecture
+    ops_test: OpsTest, application_charm, charm, series, charm_resources, substrate
 ):
     """Test basic functionality of relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
@@ -119,15 +119,13 @@ async def test_create_relation(
             trust=substrate == "k8s",
         ),
     )
-    # TODO: Remove this once we have OSD on arm64
-    if architecture != "arm64":
-        await ops_test.model.deploy(
-            DASHBOARDS_APP_NAME if substrate == "vm" else K8S_DASHBOARDS_APP_NAME,
-            application_name=DASHBOARDS_APP_NAME,
-            channel="2/edge",
-            series=SERIES,
-            trust=substrate == "k8s",
-        )
+    await ops_test.model.deploy(
+        DASHBOARDS_APP_NAME if substrate == "vm" else K8S_DASHBOARDS_APP_NAME,
+        application_name=DASHBOARDS_APP_NAME,
+        channel="2/edge",
+        series=SERIES,
+        trust=substrate == "k8s",
+    )
     await ops_test.model.integrate(
         f"{OPENSEARCH_APP_NAME}:certificates", TLS_CERTIFICATES_APP_NAME
     )
@@ -149,11 +147,10 @@ async def test_create_relation(
         timeout=1600,
         status="active",
     )
-    if architecture != "arm64":
-        await ops_test.model.wait_for_idle(
-            apps=[DASHBOARDS_APP_NAME],
-            timeout=1600,
-        )
+    await ops_test.model.wait_for_idle(
+        apps=[DASHBOARDS_APP_NAME],
+        timeout=1600,
+    )
 
 
 def _get_client_relation(ops_test, endpoint_name: str = FIRST_RELATION_NAME):
@@ -275,12 +272,8 @@ async def get_secret_data(ops_test, secret_uri):
 
 
 @pytest.mark.abort_on_fail
-async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrate: str):
+async def test_dashboard_relation(ops_test: OpsTest, substrate: str):
     """Test we can create relations with admin permissions."""
-    if architecture == "arm64":
-        pytest.skip(
-            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
-        )
     # Add a dashboard relation and wait for them to exchange data
     global dashboards_relation
     dashboards_relation = await ops_test.model.integrate(OPENSEARCH_APP_NAME, DASHBOARDS_APP_NAME)
@@ -319,12 +312,8 @@ async def test_dashboard_relation(ops_test: OpsTest, architecture: str, substrat
 
 
 @pytest.mark.abort_on_fail
-async def test_dashboard_relation_password_change(ops_test: OpsTest, architecture: str):
+async def test_dashboard_relation_password_change(ops_test: OpsTest):
     """Test we can create relations with admin permissions."""
-    if architecture == "arm64":
-        pytest.skip(
-            "Skipping test on arm64 architecture since opensearch-dashboards is not available for arm64"
-        )
     # Changing Opensearch kibanaserver password
     leader_id = await get_leader_unit_id(ops_test)
     result = await run_action(ops_test, leader_id, "get-password", {"username": "kibanaserver"})

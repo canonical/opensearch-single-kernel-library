@@ -21,6 +21,7 @@ from ops.framework import Object
 from opensearch_single_kernel.common.constants import (
     SMTP_SECRET_LABEL,
     DeploymentType,
+    PClusterRefreshRelDataRes,
     Scope,
     Substrates,
 )
@@ -155,6 +156,7 @@ class NotificationsEvents(Object):
 
         if not self.charm.unit.is_leader():
             return
+
         # create recipient group and email channel if recipients are provided
         if smtp_data.recipients:
             try:
@@ -185,8 +187,11 @@ class NotificationsEvents(Object):
         )
 
         # propagate to subclusters if this is the main provider
-        if self.charm.state.is_peer_cluster_provider():
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+        if self.charm.state.is_peer_cluster_provider(typ="main"):
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                != PClusterRefreshRelDataRes.COMPLETED
+            ):
                 event.defer()
 
     def _on_smtp_credentials_gone(self, event: RelationBrokenEvent) -> None:  # noqa: C901
@@ -215,12 +220,17 @@ class NotificationsEvents(Object):
 
         # No smtp_account_id; nothing to clean in keystore or notifications
         if not smtp_account_id:
-            self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
             if self.charm.unit.is_leader():
                 self.charm.plugin_manager.remove_plugin_secret(label)
                 if self.charm.state.is_peer_cluster_provider():
-                    if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
+                    if (
+                        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                        != PClusterRefreshRelDataRes.COMPLETED
+                    ):
                         event.defer()
+                        return
+
+            self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
             return
 
         # Delete notification configs first so we never have configs that reference
@@ -243,16 +253,18 @@ class NotificationsEvents(Object):
             else:
                 logger.error("Failed to remove SMTP credentials from keystore.")
 
+        if self.charm.unit.is_leader():
+            self.charm.plugin_manager.remove_plugin_secret(label)
+            if self.charm.state.is_peer_cluster_provider():
+                if (
+                    self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                    != PClusterRefreshRelDataRes.COMPLETED
+                ):
+                    event.defer()
+                    return
+
+        # Keep the SMTP cleanup data until the peer cluster update succeeds, so we can retry.
         self.charm.plugin_manager.remove_plugin_config(scope=Scope.UNIT, label=label)
-
-        if not self.charm.unit.is_leader():
-            return
-
-        self.charm.plugin_manager.remove_plugin_secret(label)
-
-        if self.charm.state.is_peer_cluster_provider():
-            if not self.charm.peer_cluster_orchestrator_manager.refresh_relation_data():
-                event.defer()
 
     def restore_keystore_credentials(self) -> None:
         """Restore the SMTP keystore entries lost with the K8s container filesystem."""

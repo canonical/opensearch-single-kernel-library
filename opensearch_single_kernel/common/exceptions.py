@@ -63,10 +63,6 @@ class OpenSearchHttpNoResponseError(OpenSearchHttpError):
     """A timeout or connection failure left the OpenSearch request's outcome unknown."""
 
 
-class OpenSearchRestoreIndexConflictError(OpenSearchHttpError):
-    """Restore was rejected because a target index is open."""
-
-
 class OpenSearchHAError(OpenSearchError):
     """Exception thrown when the HA of the OpenSearch charm is violated."""
 
@@ -111,6 +107,12 @@ class OpenSearchObjectStorageConfigValidationError(OpenSearchError):
     def __init__(self, error: ValidationError):
         super().__init__(str(error))
         self.error = error
+        self.missing_fields: list[str] = [
+            field
+            for err in error.errors()
+            if err["type"] == "missing_fields"
+            for field in err["ctx"]["missing_fields"]
+        ]
 
 
 class OpenSearchBackupRelationDataIncompleteError(OpenSearchError):
@@ -123,6 +125,10 @@ class OpenSearchBackupCredentialsIncorrectError(OpenSearchError):
 
 class OpenSearchRestoreBackupError(OpenSearchError):
     """Exception thrown when restoring a backup fails."""
+
+
+class OpenSearchRestoreIndexConflictError(OpenSearchRestoreBackupError):
+    """Exception thrown when a restore was rejected because a target index is open."""
 
 
 class OpenSearchPeerClusterRelationDataIncompleteError(OpenSearchError):

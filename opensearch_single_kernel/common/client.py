@@ -430,9 +430,7 @@ class OpenSearchClient:
                 case {"error": {"type": "snapshot_restore_exception", "reason": str(reason)}} if (
                     "because an open index with same name already exists in the cluster." in reason
                 ):
-                    raise OpenSearchRestoreIndexConflictError(
-                        response_text=exc.response_text, response_code=exc.response_code
-                    ) from exc
+                    raise OpenSearchRestoreIndexConflictError(str(exc)) from exc
             raise
         logger.info("Restore of snapshot '%s' response: %s", snapshot_id, restore_resp)
 
