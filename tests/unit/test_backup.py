@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from types import SimpleNamespace
@@ -28,10 +29,10 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
 )
-from opensearch_single_kernel.core.models import PeerClusterRelData
+from opensearch_single_kernel.core.models import GcsRelDataCredentials, PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
-from tests.unit.constants import S3_CONN_INFO_WITH_CA
+from tests.unit.constants import DEFAULT_GCS_INFO, S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
 
 
@@ -1762,6 +1763,24 @@ def test_create_gcs_bucket_when_probe_upload_forbidden_then_return_false(monkeyp
 
     assert object_storage.verify_gcs_credentials(cfg) is False
     blob.delete.assert_not_called()
+
+
+GCS_KEY = json.loads(DEFAULT_GCS_INFO["secret-key"])
+
+
+@pytest.mark.parametrize(
+    "secret_key",
+    [
+        GCS_KEY,
+        json.dumps(GCS_KEY),
+        base64.b64encode(json.dumps(GCS_KEY).encode()).decode(),
+    ],
+    ids=["dict", "json", "base64"],
+)
+def test_gcs_secret_key_is_stored_as_json(secret_key):
+    credentials = GcsRelDataCredentials(secret_key=secret_key)
+
+    assert json.loads(credentials.secret_key) == GCS_KEY
 
 
 def _keytool(mocker, *aliases):
