@@ -940,7 +940,9 @@ class OpenSearchEventsHandler(Object):
         # If we can't apply the profile we at least reconcile the JVM options
         # This is needed for when K8s pod is restarted
         if not self.charm.profiles_manager.apply_profile():
-            if not (profile:= self.charm.state.server.profile) or not self.charm.profiles_manager.write_jvm_heap_size(profile):
+            if not (
+                profile := self.charm.state.server.profile
+            ) or not self.charm.profiles_manager.write_jvm_heap_size(profile):
                 logger.info("Profile not configured, will retry starting.")
                 event.defer()
                 return
