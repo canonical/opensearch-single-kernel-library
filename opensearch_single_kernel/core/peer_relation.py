@@ -567,6 +567,20 @@ class OpenSearchApplication(RelationState):
         return self.client_users_dict | self.client_groups_dict
 
     @property
+    def client_index_failures(self) -> dict[str, str]:
+        """Get the indexes which failed to be created for the client relations, by relation id."""
+        return self.get_object("client_index_failures") or {}
+
+    @client_index_failures.setter
+    def client_index_failures(self, failures: dict[str, str]) -> None:
+        """Set the indexes which failed to be created for the client relations in app databag."""
+        if not failures:
+            self.relation.data[self.app].pop("client_index_failures", None)
+            return
+
+        self.put_object("client_index_failures", failures)
+
+    @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
         """Returns configuration information for plugins this app is managing"""
         plugin_config_info = self.get_object("plugin_config_info") or {}

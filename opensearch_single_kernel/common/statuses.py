@@ -231,6 +231,13 @@ class ExternalClientsStatuses(Enum):
         check="Client relation requested index creation.",
         running="blocking",
     )
+    INDEX_CREATION_FAILED = StatusObject(
+        status="blocked",
+        message="Failed to create {index} index on client relation {id} - see the logs...",
+        short_message="Index creation failed",
+        check="Index existence after client relation handling.",
+        action="Check unit logs and OpenSearch health, then re-relate the client.",
+    )
     INVALID_INDEX_NAME = StatusObject(
         status="blocked",
         message="Invalid index name on client relation {id}: {index}",

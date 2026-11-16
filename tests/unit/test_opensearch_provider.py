@@ -1179,6 +1179,48 @@ def test_get_status_invalid_index_name(opensearch_client):
     ]
 
 
+def test_index_creation_failure_stored(opensearch_client):
+    """Tests failed index creation is stored."""
+    state = make_state()
+    state.application.client_index_failures = {}
+    opensearch_client.create_index.side_effect = OpenSearchHttpError()
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"1": "logs"}
+
+
+def test_index_creation_failure_cleared_on_success(opensearch_client):
+    """Tests successful index creation clears the stored failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs", "2": "other"}
+
+    ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"2": "other"}
+
+
+def test_get_status_index_creation_failure(opensearch_client):
+    """Tests failed status displayed for stored index creation failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs"}
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value, {"id": 1, "index": "logs"}
+        )
+    ]
+
+
 @pytest.mark.parametrize("is_main_orchestrator", [True, False], ids=["main", "non-main"])
 def test_role_mappings_reconciled_on_config_changed_by_main_orchestrator_only(
     harness, mocker, client_request_ready, is_main_orchestrator
