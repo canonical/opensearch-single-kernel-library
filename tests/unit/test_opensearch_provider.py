@@ -1046,8 +1046,9 @@ def test_entity_client_statuses(
     client_groups,
     expected_statuses,
 ):
+    state = make_state(client_groups=client_groups)
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client(entity_type=entity_type)
     external_client.get_requested_entity.return_value = requested_entity
     if not permissions_valid:
@@ -1055,7 +1056,6 @@ def test_entity_client_statuses(
             side_effect=ValidationError.from_exception_data("entity-permissions", [])
         )
 
-    state = make_state(client_groups=client_groups)
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.is_node_up.return_value = False
@@ -1085,11 +1085,11 @@ def test_entity_client_statuses(
 def test_group_client_status_for_existing_role(
     opensearch_client, client_groups, existing_role, expected_statuses
 ):
+    state = make_state(client_groups=client_groups)
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client(entity_type=ENTITY_GROUP)
     external_client.get_requested_entity.return_value = GROUP_ENTITY
-    state = make_state(client_groups=client_groups)
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.indices.return_value = ["logs"]
@@ -1101,11 +1101,11 @@ def test_group_client_status_for_existing_role(
 
 
 def test_client_entity_not_reported_as_failed_while_node_is_down(opensearch_client):
+    state = make_state()
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client()
     external_client.get_requested_entity.return_value = None
-    state = make_state()
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.is_node_up.return_value = False
@@ -1126,6 +1126,99 @@ def test_client_status_outside_main_orchestrator(opensearch_client):
     statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
 
     assert statuses == [format_status(ExternalClientsStatuses.RELATION_INVALID.value, {"id": 1})]
+
+
+def test_get_status_idle_before_index_created(opensearch_client):
+    """Tests no failed status displayed if index requested but not yet provisioned."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    opensearch_client.indices.assert_not_called()
+
+
+def test_get_status_index_missing(opensearch_client):
+    """Tests failed status displayed when provisioned index is missing."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+    opensearch_client.indices.return_value = {}
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(ExternalClientsStatuses.INDEX_MISSING.value, {"id": 1, "index": "logs"})
+    ]
+
+
+def test_get_status_invalid_index_name(opensearch_client):
+    """Tests failed status displayed when requested index name invalid."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "INVALID"}, state.model.app: {}}
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = make_client(index="INVALID")
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(
+            ExternalClientsStatuses.INVALID_INDEX_NAME.value, {"id": 1, "index": "INVALID"}
+        )
+    ]
+
+
+def test_index_creation_failure_stored(opensearch_client):
+    """Tests failed index creation is stored."""
+    state = make_state()
+    state.application.client_index_failures = {}
+    opensearch_client.create_index.side_effect = OpenSearchHttpError()
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"1": "logs"}
+
+
+def test_index_creation_failure_cleared_on_success(opensearch_client):
+    """Tests successful index creation clears the stored failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs", "2": "other"}
+
+    ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"2": "other"}
+
+
+def test_get_status_index_creation_failure(opensearch_client):
+    """Tests failed status displayed for stored index creation failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs"}
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value, {"id": 1, "index": "logs"}
+        )
+    ]
 
 
 @pytest.mark.parametrize("is_main_orchestrator", [True, False], ids=["main", "non-main"])
