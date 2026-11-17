@@ -87,19 +87,26 @@ class NodesExclusionsManager(BaseManager):
                 if raise_error:
                     raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
 
-    def cleanup(self, scope: Scope) -> None:
+    def cleanup(self, scope: Scope, nodes: list[Node]) -> None:
         """Delete all exclusions that failed to be deleted."""
         state = self.state.application if scope == Scope.APP else self.state.server
 
-        units_to_cleanup = self._units_to_cleanup(list(state.voting_exclusions_to_delete))
-        if units_to_cleanup:
-            self._delete_voting(units_to_cleanup, scope)
+        node_names = {node.name for node in nodes}
+        voting_exclusions_to_cleanup = self._units_to_cleanup(
+            state.voting_exclusions_to_delete, node_names
+        )
+        if voting_exclusions_to_cleanup:
+            self._delete_voting(voting_exclusions_to_cleanup, scope)
 
-        allocations_to_cleanup = list(state.allocation_exclusions_to_delete)
+        allocations_to_cleanup = self._units_to_cleanup(
+            state.allocation_exclusions_to_delete, node_names
+        )
         if allocations_to_cleanup and self._delete_allocations(
-            self.api_or_state_node, allocations_to_cleanup
+            self.api_or_state_node, list(allocations_to_cleanup)
         ):
-            state.update({"allocation-exclusions-to-delete": ""})
+            state.allocation_exclusions_to_delete = (
+                state.allocation_exclusions_to_delete - allocations_to_cleanup
+            )
 
     def add_to_cleanup_list(self, unit_name: str, scope: Scope) -> None:
         """Add Voting and alloc exclusions for a target unit.
@@ -114,42 +121,30 @@ class NodesExclusionsManager(BaseManager):
         )
         state.voting_exclusions_to_delete = state.voting_exclusions_to_delete.union({unit_name})
 
-    def _units_to_cleanup(self, removable: list[str]) -> set[str] | None:
-        """Deletes all units that have left the cluster via Juju.
+    def _units_to_cleanup(self, removable: set[str], node_names: set[str]) -> set[str]:
+        """Returns all units that have left the cluster via Juju.
 
         This method ensures we keep a small list of voting exclusions at all times.
 
         Args:
-            removable: the list of unit names that are marked as removable.
+            removable: the set of unit names that are marked as removable.
+            node_names: the names of the nodes currently in the cluster.
 
         Returns:
-            A set of unit names that should be removed from the voting exclusion list, or None
-            if there are no units to remove.
+            A set of unit names that should be removed from the voting exclusion list.
         """
-        if not (deployment_desc := self.state.application.deployment_desc) or not removable:
+        if (
+            not (deployment_desc := self.state.application.deployment_desc)
+            or not removable
+            or not node_names
+        ):
             return set()
-
-        # if self._charm.opensearch_peer_cm.is_provider(typ="main") and (
-        #    apps_in_fleet := self.state.application.cluster_fleet_apps
-        # ):
-        #    apps_in_fleet = [PeerClusterApp.from_dict(app) for app in apps_in_fleet.values()]
-        #    units = {
-        #        format_unit_name(u, p_cluster_app.app)
-        #        for p_cluster_app in apps_in_fleet
-        #        for u in p_cluster_app.units
-        #    }
-        # else:
 
         units = {format_unit_name(u, deployment_desc.app) for u in self.state.all_units}
 
         # Now, we need to remove the units that were marked for deletion and are not in the
         # cluster anymore.
-        to_remove = []
-        for node in removable:
-            if node not in units:
-                # Unit still exists
-                to_remove.append(node)
-        return set(to_remove)
+        return removable - units - node_names
 
     def _add_voting(self, scope: Scope, node: Node, exclusions: set[str] | None = None) -> bool:
         """Include the current node in the CMs voting exclusions list of nodes.

@@ -233,7 +233,7 @@ class OpenSearchEventsHandler(Object):
             return
 
         self.charm.exclusions_manager.cleanup(
-            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
+            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT, nodes
         )
 
         if not (unit_data := event.relation.data.get(event.unit)):
@@ -418,7 +418,7 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.config_manager.update_seeds_config(nodes)
         self.charm.exclusions_manager.cleanup(
-            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
+            Scope.APP if self.charm.unit.is_leader() else Scope.UNIT, nodes
         )
 
         if (health := self.charm.apply_health(app=self.charm.unit.is_leader())) not in [

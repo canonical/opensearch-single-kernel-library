@@ -52,14 +52,29 @@ def cleanup_state(manager, scope):
     return manager.state.application if scope == Scope.APP else manager.state.server
 
 
+def make_node(manager, name):
+    return Node(
+        name=name,
+        roles=["cluster_manager", "data"],
+        ip="10.0.0.1",
+        app=manager.state.application.deployment_desc.app,
+        unit_number=1,
+    )
+
+
+@pytest.fixture
+def nodes(client):
+    return [client.get_current_node.return_value]
+
+
 @pytest.mark.parametrize("pending_current_unit", [False, True])
 def test_cleanup_without_departed_units_makes_no_requests(
-    manager, client, cleanup_state, scope, pending_current_unit
+    manager, client, cleanup_state, scope, nodes, pending_current_unit
 ):
     pending = {manager.state.unit_name} if pending_current_unit else set()
     cleanup_state.voting_exclusions_to_delete = pending
 
-    manager.cleanup(scope)
+    manager.cleanup(scope, nodes)
 
     assert client.mock_calls == []
     assert cleanup_state.voting_exclusions_to_delete == pending
@@ -67,13 +82,13 @@ def test_cleanup_without_departed_units_makes_no_requests(
 
 @pytest.mark.parametrize("succeeds", [False, True])
 def test_allocation_cleanup_runs_without_voting_cleanup(
-    manager, client, cleanup_state, scope, succeeds
+    manager, client, cleanup_state, scope, nodes, succeeds
 ):
     cleanup_state.allocation_exclusions_to_delete = {"departed-node"}
     client.fetch_allocation_exclusions.return_value = {"departed-node", "other-node"}
     client.add_allocation_exclusions.return_value = succeeds
 
-    manager.cleanup(scope)
+    manager.cleanup(scope, nodes)
 
     client.fetch_voting_exclusions_config.assert_not_called()
     client.remove_voting_exclusions.assert_not_called()
@@ -90,7 +105,7 @@ def test_allocation_cleanup_runs_without_voting_cleanup(
 
 @pytest.mark.parametrize("succeeds", [False, True])
 def test_voting_cleanup_removes_departed_units_and_keeps_pending_work_on_failure(
-    manager, client, cleanup_state, scope, succeeds
+    manager, client, cleanup_state, scope, nodes, succeeds
 ):
     current = manager.state.unit_name
     cleanup_state.voting_exclusions_to_delete = {"departed-node", current}
@@ -98,7 +113,7 @@ def test_voting_cleanup_removes_departed_units_and_keeps_pending_work_on_failure
     client.remove_voting_exclusions.return_value = succeeds
     client.add_voting_exclusions.return_value = True
 
-    manager.cleanup(scope)
+    manager.cleanup(scope, nodes)
 
     client.remove_voting_exclusions.assert_called_once_with(alt_hosts=[])
     if succeeds:
@@ -106,6 +121,56 @@ def test_voting_cleanup_removes_departed_units_and_keeps_pending_work_on_failure
     else:
         client.add_voting_exclusions.assert_not_called()
     assert cleanup_state.voting_exclusions_to_delete == (
+        {current} if succeeds else {"departed-node", current}
+    )
+
+
+@pytest.mark.parametrize("in_cluster", [True, False], ids=["node-in-cluster", "nodes-unknown"])
+def test_voting_cleanup_keeps_departing_unit_until_its_node_leaves(
+    manager, client, cleanup_state, scope, nodes, in_cluster
+):
+    cleanup_state.voting_exclusions_to_delete = {"departing-node"}
+    client.fetch_voting_exclusions_config.return_value = {"departing-node"}
+    cluster_nodes = [*nodes, make_node(manager, "departing-node")] if in_cluster else []
+
+    manager.cleanup(scope, cluster_nodes)
+
+    client.remove_voting_exclusions.assert_not_called()
+    assert cleanup_state.voting_exclusions_to_delete == {"departing-node"}
+
+
+@pytest.mark.parametrize("in_cluster", [True, False], ids=["node-in-cluster", "nodes-unknown"])
+def test_allocation_cleanup_keeps_departing_unit_until_its_node_leaves(
+    manager, client, cleanup_state, scope, nodes, in_cluster
+):
+    cleanup_state.allocation_exclusions_to_delete = {"departing-node"}
+    client.fetch_allocation_exclusions.return_value = {"departing-node"}
+    cluster_nodes = [*nodes, make_node(manager, "departing-node")] if in_cluster else []
+
+    manager.cleanup(scope, cluster_nodes)
+
+    client.add_allocation_exclusions.assert_not_called()
+    assert cleanup_state.allocation_exclusions_to_delete == {"departing-node"}
+
+
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_allocation_cleanup_removes_departed_units_and_keeps_pending_work_on_failure(
+    manager, client, cleanup_state, scope, nodes, succeeds
+):
+    current = manager.state.unit_name
+    cleanup_state.allocation_exclusions_to_delete = {"departed-node", current}
+    client.fetch_allocation_exclusions.return_value = {"departed-node", current}
+    client.add_allocation_exclusions.return_value = succeeds
+
+    manager.cleanup(scope, nodes)
+
+    client.add_allocation_exclusions.assert_called_once_with(
+        client.get_current_node.return_value,
+        allocations={current},
+        override=True,
+        alt_hosts=[],
+    )
+    assert cleanup_state.allocation_exclusions_to_delete == (
         {current} if succeeds else {"departed-node", current}
     )
 
