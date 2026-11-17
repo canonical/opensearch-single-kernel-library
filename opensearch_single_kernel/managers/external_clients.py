@@ -210,6 +210,8 @@ class ExternalClientsManager(BaseManager):
             OpenSearchUserMgmtError: if the index could not be created.
         """
         index = external_client.index
+        relation_id = str(external_client.relation.id)
+        failures = self.state.application.client_index_failures
 
         try:
             self.opensearch_client.create_index(index)
@@ -217,7 +219,13 @@ class ExternalClientsManager(BaseManager):
             logger.error(
                 f"Failed to create index {index} for client relation {external_client.relation.id}: {e}"
             )
+            failures[relation_id] = index
+            self.state.application.client_index_failures = failures
             raise OpenSearchUserMgmtError(e)
+
+        if relation_id in failures:
+            del failures[relation_id]
+            self.state.application.client_index_failures = failures
 
         external_client.index = index
 
@@ -502,7 +510,7 @@ class ExternalClientsManager(BaseManager):
             and self.opensearch_client.get_user(name) is not None
         )
 
-    def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:
+    def _add_relation_statuses(self, status_list: list[StatusObject], relation: Relation) -> None:  # noqa: C901
         """Compute the manager's app statuses for relation and append them to list."""
         if (
             not self.state.server.is_app_leader
@@ -528,6 +536,19 @@ class ExternalClientsManager(BaseManager):
             status_list.append(format_status(error.value, {"id": relation.id, "index": index}))
             return
 
+        if str(relation.id) in self.state.application.client_index_failures:
+            status_list.append(
+                format_status(
+                    ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                    {"id": relation.id, "index": index},
+                )
+            )
+            return
+
+        # only check for missing index if we have already provisioned it
+        if not relation.data[self.state.model.app].get("index"):
+            return
+
         try:
             if not self.opensearch_client.is_node_up():
                 return
@@ -535,7 +556,7 @@ class ExternalClientsManager(BaseManager):
             if index not in self.opensearch_client.indices():
                 status_list.append(
                     format_status(
-                        ExternalClientsStatuses.INDEX_CREATION_FAILED.value,
+                        ExternalClientsStatuses.INDEX_MISSING.value,
                         {"id": relation.id, "index": index},
                     )
                 )

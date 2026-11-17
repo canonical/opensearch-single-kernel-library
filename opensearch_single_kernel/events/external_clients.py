@@ -133,17 +133,19 @@ class ExternalClientsEventsHandler(Object):
         external_client: ExternalOpenSearchClient,
     ) -> None:
         """Create the index requested by a client relation while reporting it in the status."""
-        self.charm.status_handler.set_running_status(
-            format_status(
-                ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
-                {
-                    "index": event.index,
-                    "id": event.relation.id,
-                },
-            ),
-            "unit",
-            component_name=self.charm.external_clients_manager.name,
-        )
+        failures = self.charm.state.application.client_index_failures
+        if str(event.relation.id) not in failures:
+            self.charm.status_handler.set_running_status(
+                format_status(
+                    ExternalClientsStatuses.NEW_INDEX_REQUESTED.value,
+                    {
+                        "index": event.index,
+                        "id": event.relation.id,
+                    },
+                ),
+                "unit",
+                component_name=self.charm.external_clients_manager.name,
+            )
 
         self.charm.external_clients_manager.provide_client_index(external_client)
 
@@ -269,6 +271,11 @@ class ExternalClientsEventsHandler(Object):
             return
         if not self.charm.unit.is_leader():
             return
+        failures = self.charm.state.application.client_index_failures
+        relation_id = str(event.relation.id)
+        if relation_id in failures:
+            del failures[relation_id]
+            self.charm.state.application.client_index_failures = failures
         if self.charm.upgrades_manager.in_progress:
             logger.warning(
                 "Modifying relations during an upgrade is not supported."
