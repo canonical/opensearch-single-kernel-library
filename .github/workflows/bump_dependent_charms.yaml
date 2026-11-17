@@ -68,6 +68,9 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
+          git show "${VERSION}:pyproject.toml" > "${RUNNER_TEMP}/single-kernel-pyproject.toml"
+          git show "${VERSION}:poetry.lock" > "${RUNNER_TEMP}/single-kernel-poetry.lock"
+
       - name: Get reviewers
         id: get-reviewers
         run: |
@@ -101,15 +104,41 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y build-essential python3-dev libldap-dev libsasl2-dev
+          python -m pip install tomlkit
 
       - name: Update dependency version in pyproject.toml
         run: |
+          python - <<'PY'
+          import os
+          from copy import deepcopy
+          from pathlib import Path
+
+          import tomlkit
+
+          source = Path(os.environ["RUNNER_TEMP"]) / "single-kernel-pyproject.toml"
+          groups = tomlkit.parse(source.read_text())["tool"]["poetry"]["group"]
+
+          for directory in (".", "kubernetes", "machine"):
+              path = Path(directory) / "pyproject.toml"
+              project = tomlkit.parse(path.read_text())
+
+              # Update dependencies the operator already uses in this group.
+              for name, group in project["tool"]["poetry"].get("group", {}).items():
+                  source_deps = groups.get(name, {}).get("dependencies", {})
+                  target_deps = group.get("dependencies", {})
+                  for dependency, value in source_deps.items():
+                      if dependency in target_deps:
+                          target_deps[dependency] = deepcopy(value)
+
+              path.write_text(tomlkit.dumps(project))
+          PY
+
           VERSION_NUMBER="${VERSION#v}"
 
           for dir in . kubernetes machine; do
+            cp "${RUNNER_TEMP}/single-kernel-poetry.lock" "${dir}/poetry.lock"
             (
               cd "${dir}"
-              poetry remove "${DEP_NAME}"
 
               for i in {1..30}; do
                 echo "Attempt $i: adding ${DEP_NAME}==${VERSION_NUMBER} in ${dir}"
@@ -127,10 +156,10 @@ jobs:
               exit 1
             ) || exit 1
           done
-      - name: Poetry update
+      - name: Check lockfiles
         run: |
           for dir in . kubernetes machine; do
-            (cd "${dir}" && poetry update "${DEP_NAME}")
+            (cd "${dir}" && poetry check --lock)
           done
 
       - name: Configure git signing
