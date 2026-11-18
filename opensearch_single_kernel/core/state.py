@@ -139,6 +139,11 @@ class ClusterState(Object):
         self.secrets = OpenSearchSecrets(charm, peer_relation=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+
+        # Used to hide the running-version status while reporting an operation's progress
+        # (e.g. starting or stopping OpenSearch).
+        self.unit_operation_in_progress = False
+
         # TODO: Add secrets
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)

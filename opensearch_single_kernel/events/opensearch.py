@@ -66,6 +66,7 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
+    HealthStatuses,
     InternalUsersStatuses,
     LockStatuses,
 )
@@ -86,6 +87,7 @@ from opensearch_single_kernel.utils.secrets import (
     password_key,
     user_from_hash_key,
 )
+from opensearch_single_kernel.utils.status import unit_operation
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -432,6 +434,12 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
+        if (
+            self._resume_pending_start()
+            and not self.charm.cluster_manager.opensearch_client.is_node_up()
+        ):
+            return
+
         if self.charm.substrate == Substrates.K8S:
             try:
                 self.charm.upgrade_events._reconcile_upgrade()
@@ -718,6 +726,29 @@ class OpenSearchEventsHandler(Object):
             self.charm.internal_users_manager.name,
         )
 
+    def _resume_pending_start(self) -> bool:
+        """Retry unfinished post-start work through the normal start handler.
+
+        A rollback through an older charm can lose a deferred custom event while
+        retaining its relation data. VM upgrade health checks also need to retry
+        after the startup flags have cleared.
+        """
+        after_upgrade = (
+            self.charm.substrate == Substrates.VM
+            and bool(self.charm.state.upgrade_relation)
+            and bool(self.charm.state.server_upgrade.snap_revision)
+            and self.charm.upgrades_manager.unit_state == UnitUpgradesState.UPGRADING
+        )
+        if not (
+            self.charm.state.server.start_pending
+            or self.charm.state.server.start_failed
+            or after_upgrade
+        ):
+            return False
+
+        self.charm.start_opensearch_event.emit(after_upgrade=after_upgrade)
+        return True
+
     def _on_start(self, event: StartEvent) -> None:
         """Prepare startup and retry failed Juju operations."""
         try:
@@ -750,6 +781,8 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
+            if self._resume_pending_start():
+                return
             self.cleanup_start_state()
             if self.charm.substrate == Substrates.K8S:
                 try:
@@ -859,8 +892,6 @@ class OpenSearchEventsHandler(Object):
             )
             event.defer()
             return
-        # We are requesting start of openSearch
-
         # In large deployments one data node needs to start to initialize the security index
         # this first node ignores the lock
         # if there are multiple data apps in the cluster
@@ -907,9 +938,11 @@ class OpenSearchEventsHandler(Object):
         self.charm.start_opensearch_event.emit()
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:
-        """Start OpenSearch and retry failed Juju operations."""
+        """Report startup progress and retry failed Juju operations."""
         try:
-            self._start_opensearch(event)
+            self.charm.upgrade_events._publish_app_upgrade_status()
+            with unit_operation(self.charm.state):
+                self._start_opensearch(event)
         except ModelError as e:
             logger.warning("Deferring OpenSearch startup: %s", e)
             event.defer()
@@ -943,6 +976,17 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.is_opensearch_started
             and not self.charm.workload.is_failed()
         ):
+            if (
+                self.charm.state.server_upgrade.post_upgrade_health is None
+                and not self.charm.state.server.start_failed
+            ):
+                self.charm.state.server.start_pending = True
+                self.charm.status_handler.set_running_status(
+                    GeneralStatuses.WAITING_TO_START.value,
+                    "unit",
+                    statuses_state=self.charm.state.statuses,
+                    component_name=self.charm.cluster_manager.name,
+                )
             try:
                 if not self._post_start_init(event):
                     return
@@ -966,6 +1010,7 @@ class OpenSearchEventsHandler(Object):
                         "Node is not ready to start, but data node exists and"
                         " the cluster was previously bootstrapped."
                     )
+                    self.charm.state.server.start_failed = True
                     self.charm.state.add_status_if_not_present(
                         GeneralStatuses.SERVICE_START_ERROR.value,
                         "unit",
@@ -988,6 +1033,7 @@ class OpenSearchEventsHandler(Object):
                 # to create the internal users
                 logger.warning(e)
                 self.charm.lock_manager.release()
+                self.charm.state.server.start_failed = True
                 self.charm.state.add_status_if_not_present(
                     GeneralStatuses.SERVICE_START_ERROR.value,
                     "unit",
@@ -1034,6 +1080,9 @@ class OpenSearchEventsHandler(Object):
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
         else:
+            self.charm.state.remove_status_if_present(
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+            )
             self.charm.status_handler.set_running_status(
                 LockStatuses.REQUEST_LOCK_ON_START.value,
                 "unit",
@@ -1047,6 +1096,7 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.workload.is_failed():
             self.charm.lock_manager.release()
+            self.charm.state.server.start_failed = True
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -1054,6 +1104,14 @@ class OpenSearchEventsHandler(Object):
             )
             event.defer()
             return
+
+        self.charm.state.server.start_pending = True
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
+        )
 
         try:
             # Set the configuration of the node
@@ -1085,13 +1143,6 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.status_handler.set_running_status(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.cluster_manager.name,
-        )
-
         try:
             self.charm.cluster_manager.start(
                 wait_until_http_200=(
@@ -1115,6 +1166,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.state.remove_status_if_present(
                 GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
             )
+            self.charm.state.server.start_failed = True
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -1239,9 +1291,6 @@ class OpenSearchEventsHandler(Object):
 
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.started = str(time.time())
-        self.charm.state.remove_status_if_present(
-            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
-        )
 
         # Apply OpenSearch upstream recommended settings
         self.charm.cluster_manager.apply_upstream_fixes()
@@ -1263,8 +1312,13 @@ class OpenSearchEventsHandler(Object):
 
         # clear waiting to start status
         self.charm.state.remove_status_if_present(
+            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+        )
+        self.charm.state.remove_status_if_present(
             GeneralStatuses.SERVICE_START_ERROR.value, "unit", self.charm.cluster_manager.name
         )
+        self.charm.state.server.start_failed = False
+        self.charm.state.server.start_pending = False
 
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
@@ -1382,6 +1436,13 @@ class OpenSearchEventsHandler(Object):
         # When a new unit joins, replica shards are automatically added to it. In order to prevent
         # overloading the cluster, units must be started one at a time. So we defer starting
         # opensearch until all shards in other units are in a "started" or "unassigned" state.
+        if not self.charm.state.server.start_failed:
+            self.charm.status_handler.set_running_status(
+                HealthStatuses.CHECKING_CLUSTER_HEALTH_BEFORE_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.health_manager.name,
+            )
         try:
             if (
                 self.charm.apply_health(wait_for_green_first=True, use_localhost=False, app=False)
@@ -1511,6 +1572,15 @@ class OpenSearchEventsHandler(Object):
         or if it is the first data node. If the cluster is already initialized
         we check cluster health and start.
         """
+        waiting_for_lock = (
+            LockStatuses.REQUEST_LOCK_ON_START.value
+            in self.charm.state.statuses.get("unit", self.charm.lock_manager.name).root
+        )
+        # Clear the previous lock-wait status before checking what currently blocks startup.
+        # The unit may now be waiting for something else.
+        self.charm.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.charm.lock_manager.name
+        )
         # Case of the first "main" cluster to get started.
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # the deployment description hasn't finished being computed by the leader
@@ -1525,11 +1595,9 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchHttpError:
             return False
 
-        if (
-            not self.charm.state.application.is_security_index_initialised
-            or not self.charm.cluster_manager.alt_hosts
-        ):
-            return self.charm.unit.is_leader() and (
+        security_index_initialized = self.charm.state.application.is_security_index_initialised
+        if not security_index_initialized or not self.charm.cluster_manager.alt_hosts:
+            allowed = self.charm.unit.is_leader() and (
                 deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 # first data node in a cluster-manager-only deployment
                 or (
@@ -1540,6 +1608,26 @@ class OpenSearchEventsHandler(Object):
                     and event.is_first_data_node
                 )
             )
+            if (
+                not allowed
+                and not event.ignore_lock
+                and (not security_index_initialized or waiting_for_lock)
+            ):
+                # This unit waits its turn while the first unit initializes the cluster.
+                # Keep that wait if the security index is ready before peer addresses arrive.
+                # Lock acquisition still happens only after startup is allowed.
+                self.charm.state.remove_status_if_present(
+                    GeneralStatuses.WAITING_TO_START.value,
+                    "unit",
+                    self.charm.cluster_manager.name,
+                )
+                self.charm.status_handler.set_running_status(
+                    LockStatuses.REQUEST_LOCK_ON_START.value,
+                    "unit",
+                    statuses_state=self.charm.state.statuses,
+                    component_name=self.charm.lock_manager.name,
+                )
+            return allowed
         return self.is_cluster_healthy_to_start()
 
     def trigger_peer_rel_changed(
@@ -1703,12 +1791,6 @@ class OpenSearchEventsHandler(Object):
             logger.error("An error occurred while updating opensearch config: %s", e)
             return False
         if changed:
-            self.charm.status_handler.set_running_status(
-                GeneralStatuses.WAITING_TO_START.value,
-                "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.cluster_manager.name,
-            )
             logger.debug("Restarting opensearch due to reconfiguring node roles")
             self.charm.restart_opensearch_event.emit()
         return True

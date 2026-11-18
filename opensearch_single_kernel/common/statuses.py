@@ -38,6 +38,12 @@ class GeneralStatuses(Enum):
         check="OpenSearch service readiness.",
         running="async",
     )
+    SERVICE_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="OpenSearch is not running or cannot be reached.",
+        short_message="OpenSearch unavailable",
+        check="OpenSearch service state and port 9200 reachability.",
+    )
     SERVICE_START_ERROR = StatusObject(
         status="blocked",
         message="An error occurred during the start of the OpenSearch service.",
@@ -65,6 +71,13 @@ class GeneralStatuses(Enum):
 class HealthStatuses(Enum):
     """Collection of charm statuses related to health manager."""
 
+    CHECKING_CLUSTER_HEALTH_BEFORE_START = StatusObject(
+        status="maintenance",
+        message="Checking cluster health before starting OpenSearch.",
+        short_message="Checking cluster health before start",
+        check="Cluster health before starting this node.",
+        running="blocking",
+    )
     CLUSTER_HEALTH_RED = StatusObject(
         status="blocked",
         message="1 or more 'primary' shards are not assigned, please scale your application up.",
@@ -142,7 +155,7 @@ class TlsStatuses(Enum):
         action="Relate a TLS certificates provider to this application.",
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
-        status="maintenance",
+        status="waiting",
         message="Waiting for TLS to be fully configured...",
         short_message="TLS not fully configured",
         check="TLS certificates and keystores on disk.",

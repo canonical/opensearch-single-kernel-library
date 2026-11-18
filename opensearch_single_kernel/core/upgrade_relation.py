@@ -11,6 +11,7 @@ import time
 import poetry.core.constraints.version as poetry_version
 from ops.model import Relation, Unit
 
+from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
@@ -73,6 +74,17 @@ class UpgradeServerState(RelationState):
     ) -> None:
         super().__init__(relation, data_interface, component)
         self.unit = component
+
+    @property
+    def post_upgrade_health(self) -> HealthColors | None:
+        """Read the saved upgrade health failure without relying on the status cache."""
+        value = self.relation.data[self.unit].get("post-upgrade-health")
+        return HealthColors(value) if value else None
+
+    @post_upgrade_health.setter
+    def post_upgrade_health(self, value: HealthColors | None) -> None:
+        """Save a failed check, or clear it after the upgrade health check succeeds."""
+        self.relation.data[self.unit]["post-upgrade-health"] = value.value if value else ""
 
     @property
     def unit_state(self) -> UnitUpgradesState | None:

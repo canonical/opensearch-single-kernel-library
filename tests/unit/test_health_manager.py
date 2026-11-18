@@ -307,17 +307,31 @@ def test_health_red_app_status_merges_running():
 
     assert running in statuses
     assert HealthStatuses.CLUSTER_HEALTH_RED.value in statuses
-    mgr.get.assert_called_once_with(wait_for_green_first=False)
+    mgr.get.assert_called_once_with()
 
 
-def test_health_recompute_waits_for_green():
-    state = MagicMock()
-    state.statuses.get.return_value = SimpleNamespace(root=[])
-    mgr = HealthManager(state, MagicMock())
-    mgr.get = MagicMock(return_value=HealthColors.GREEN)
+@pytest.mark.parametrize(
+    "health, expected",
+    [
+        ("green", GeneralStatuses.ACTIVE_IDLE.value),
+        ("yellow", HealthStatuses.CLUSTER_HEALTH_YELLOW.value),
+        ("red", HealthStatuses.CLUSTER_HEALTH_RED.value),
+    ],
+)
+def test_health_recompute_reports_current_health_without_waiting(
+    cluster_health_manager, health, expected
+):
+    cluster_health_manager.state.statuses.get.return_value = SimpleNamespace(root=[])
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
+        for host in ("node0", "node1"):
+            http.get(f"https://{host}:9200/", json={})
+        http.get(
+            "https://node0:9200/_cluster/health",
+            json={"status": health, "initializing_shards": 0, "relocating_shards": 0},
+        )
 
-    assert mgr.get_statuses("app", recompute=True) == [GeneralStatuses.ACTIVE_IDLE.value]
-    mgr.get.assert_called_once_with(wait_for_green_first=True)
+        assert cluster_health_manager.get_statuses("app", recompute=True) == [expected]
+        assert http.calls[-1].request.url == "https://node0:9200/_cluster/health"
 
 
 @pytest.mark.parametrize("health", [HealthColors.YELLOW_TEMP, HealthColors.YELLOW])
@@ -343,7 +357,7 @@ def test_health_unit_reports_busy_shards_only_during_movement(health_manager, mo
     else:
         assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
         busy_shards.assert_not_called()
-    health_manager.get.assert_called_once_with(wait_for_green_first=False)
+    health_manager.get.assert_called_once_with()
 
 
 @pytest.mark.parametrize("lookup_fails", [False, True])

@@ -5,12 +5,28 @@
 """Helpers for Charm."""
 
 import logging
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
+if TYPE_CHECKING:
+    from opensearch_single_kernel.core.state import ClusterState
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def unit_operation(state: "ClusterState") -> Iterator[None]:
+    """Temporarily hide the running-version status while reporting an operation's progress."""
+    previous = state.unit_operation_in_progress
+    state.unit_operation_in_progress = True
+    try:
+        yield
+    finally:
+        state.unit_operation_in_progress = previous
 
 
 def running_statuses(

@@ -14,6 +14,7 @@ from opensearch_single_kernel.common.constants import (
     State,
 )
 from opensearch_single_kernel.common.exceptions import OpenSearchProvidedRolesException
+from opensearch_single_kernel.common.statuses import GeneralStatuses
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
@@ -226,3 +227,53 @@ def test_existing_cluster_setup_applies_new_roles(harness):
     assert deployment_desc.start == StartMode.WITH_PROVIDED_ROLES
     assert deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
     assert deployment_desc.promotion_time == prev_deployment_desc.promotion_time
+
+
+@pytest.mark.parametrize("security_initialized", [False, True])
+@pytest.mark.parametrize("tls_configured", [False, True])
+@pytest.mark.parametrize("started", [False, True])
+def test_startup_status_respects_local_tls_without_hiding_unavailable_nodes(
+    harness, mocker, patch_deployment_desc, security_initialized, tls_configured, started
+):
+    charm = harness.charm
+    mocker.patch.object(
+        type(charm.state.application),
+        "is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=security_initialized,
+    )
+    mocker.patch.object(
+        type(charm.state.server),
+        "tls_configured",
+        new_callable=PropertyMock,
+        return_value=tls_configured,
+    )
+    charm.state.server.started = "2026-11-13T00:00:00" if started else ""
+    charm.state.server.start_pending = not started
+    mocker.patch.object(charm.workload, "is_service_started", return_value=False)
+
+    statuses = charm.cluster_manager.get_statuses("unit")
+    messages = [status.message for status in statuses]
+
+    assert (GeneralStatuses.WAITING_TO_START.value.message in messages) == (
+        not started and tls_configured
+    )
+    assert (GeneralStatuses.SERVICE_UNAVAILABLE.value.message in messages) == started
+
+
+def test_tls_ready_does_not_imply_startup_was_requested(harness, mocker):
+    from tests.unit.helpers import deployment_descriptions
+
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        harness.charm.state.application.deployment_desc = deployment_descriptions[
+            "cm-only"
+        ].model_copy(deep=True)
+    charm = harness.charm
+    mocker.patch.object(
+        type(charm.state.server), "tls_configured", new_callable=PropertyMock, return_value=True
+    )
+
+    statuses = charm.cluster_manager.get_statuses("unit", recompute=True)
+
+    assert GeneralStatuses.WAITING_TO_START.value.message not in [s.message for s in statuses]

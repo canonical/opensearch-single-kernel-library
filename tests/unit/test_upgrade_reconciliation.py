@@ -191,3 +191,41 @@ def test_periodic_reconciliation_preserves_pause_and_advances_ready_units(
     charm.opensearch_events._on_update_status(mocker.Mock())
 
     assert current_partition[0] == expected
+
+
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize("running,start_failed", [(False, False), (True, False), (False, True)])
+def test_k8s_refresh_reports_pending_start_before_preparing_workload(
+    harness, mocker, running, start_failed
+):
+    from ops import ActiveStatus, BlockedStatus
+
+    from opensearch_single_kernel.common.statuses import GeneralStatuses
+
+    charm = harness.charm
+    charm.state.server.start_failed = start_failed
+    charm.unit.status = (
+        BlockedStatus(GeneralStatuses.SERVICE_START_ERROR.value.message)
+        if start_failed
+        else ActiveStatus("OpenSearch running")
+    )
+    mocker.patch.object(type(charm.workload), "is_service_started", return_value=running)
+    observed = []
+    mocker.patch.object(
+        charm.upgrades_manager,
+        "reconcile_compatibility_matrix",
+        side_effect=lambda: observed.append(charm.unit.status),
+    )
+    mocker.patch.object(charm.upgrades_manager, "update_grafana_dashboards_title")
+    mocker.patch("opensearch_single_kernel.events.upgrades.get_charm_revision", return_value="1")
+    mocker.patch.object(charm.upgrade_events, "kubernetes_upgrade")
+
+    charm.upgrade_events._on_upgrade_charm(mocker.Mock())
+
+    if start_failed:
+        assert observed[0] == BlockedStatus(GeneralStatuses.SERVICE_START_ERROR.value.message)
+    elif running:
+        assert observed[0] == ActiveStatus("OpenSearch running")
+    else:
+        assert observed[0].name == "waiting"
+        assert observed[0].message == GeneralStatuses.WAITING_TO_START.value.message

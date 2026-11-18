@@ -44,6 +44,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     JwtStatuses,
+    LockStatuses,
     OAuthStatuses,
     PeerClusterStatuses,
 )
@@ -887,15 +888,27 @@ class ClusterManager(BaseManager):
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit":
-            # Keep cached start errors across update-status.
-            status_list.extend(
-                cached_non_running_statuses(
-                    self.state.statuses,
-                    scope,
-                    self.name,
-                    matches=[GeneralStatuses.SERVICE_START_ERROR.value],
+            if self.state.server.start_failed:
+                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
+            else:
+                # Keep cached startup errors from older charms that did not set start_failed.
+                # These errors are lost when status recomputation clears the cache.
+                status_list.extend(
+                    cached_non_running_statuses(
+                        self.state.statuses,
+                        scope,
+                        self.name,
+                        matches=[GeneralStatuses.SERVICE_START_ERROR.value],
+                    )
                 )
-            )
+
+            if GeneralStatuses.SERVICE_START_ERROR.value in status_list:
+                status_list = [
+                    status
+                    for status in status_list
+                    if status != GeneralStatuses.WAITING_TO_START.value
+                ]
+
             self._add_unit_statuses(status_list)
 
         if scope == "app":
@@ -905,6 +918,24 @@ class ClusterManager(BaseManager):
 
     def _add_unit_statuses(self, status_list: list[StatusObject]) -> None:
         """Compute the manager's unit statuses and append them to list."""
+        if (
+            self.state.peer_relation
+            and GeneralStatuses.SERVICE_START_ERROR.value not in status_list
+            and GeneralStatuses.WAITING_TO_START.value not in status_list
+            and LockStatuses.REQUEST_LOCK_ON_START.value
+            not in self.state.statuses.get("unit", "lock_manager").root
+        ):
+            # Report a requested start until post-start work finishes.
+            # TLS readiness alone does not mean startup has been requested.
+            if self.state.server.start_pending and self.state.server.tls_configured:
+                status_list.append(
+                    GeneralStatuses.WAITING_TO_START.value.model_copy(update={"running": None})
+                )
+            elif self.state.server.started and (
+                not self.workload.is_service_started() or not self.is_opensearch_started
+            ):
+                status_list.append(GeneralStatuses.SERVICE_UNAVAILABLE.value)
+
         if (
             (deployment_desc := self.state.application.deployment_desc)
             and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR

@@ -20,6 +20,7 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
     UPGRADES_COMPATIBILITY_MATRIX,
     Substrates,
 )
@@ -29,7 +30,11 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchUpgradePrecheckError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    LockStatuses,
+    UpgradesStatuses,
+)
 from opensearch_single_kernel.core.models import (
     JWTAuthConfiguration,
     UnitUpgradesState,
@@ -232,7 +237,13 @@ class UpgradesManagerBase(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute upgrade statuses from upgrade state."""
+        if self.state.planned_units == 0:
+            return [GeneralStatuses.ACTIVE_IDLE.value]
+
         status_list = running_statuses(self.state.statuses, scope, self.name)
+        if not self.state.upgrade_relation or not self.state.application_upgrade.versions:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
         if scope == "unit":
             status_list.extend(
                 cached_non_running_statuses(
@@ -245,9 +256,28 @@ class UpgradesManagerBase(BaseManager):
 
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
-            formatted = format_status(unit_status, unit_dynamic_params)
-            if formatted not in status_list:
-                status_list.append(formatted)
+            if unit_status.status != "active" or (
+                not self.state.unit_operation_in_progress
+                and self.state.server.started
+                and not self.state.server.start_pending
+                and not self.state.server.start_failed
+                and LockStatuses.REQUEST_LOCK_ON_START.value
+                not in self.state.statuses.get("unit", "lock_manager").root
+                and self.state.server_upgrade.unit_state
+                not in (UnitUpgradesState.UPGRADING, UnitUpgradesState.RESTARTING)
+                and not any(
+                    status in self.state.statuses.get("unit", "cluster_manager").root
+                    for status in (
+                        GeneralStatuses.WAITING_TO_START.value,
+                        GeneralStatuses.SERVICE_START_ERROR.value,
+                    )
+                )
+                and self.workload.is_service_started()
+                and self.workload.is_reachable(self.state.node_host, OPENSEARCH_HTTP_PORT)
+            ):
+                formatted = format_status(unit_status, unit_dynamic_params)
+                if formatted not in status_list:
+                    status_list.append(formatted)
 
         if scope == "app" and (status := self.app_status) and status not in status_list:
             status_list.append(status)

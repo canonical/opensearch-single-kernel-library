@@ -126,6 +126,26 @@ class OpenSearchServer(RelationState):
         self.relation.data[self.unit].pop("started", None)
 
     @property
+    def start_pending(self) -> bool:
+        """Whether a requested start still needs to finish."""
+        return self.relation_data.get("start_pending", "").lower() == "true"
+
+    @start_pending.setter
+    def start_pending(self, value: bool) -> None:
+        """Keep startup progress across deferred hooks and status recomputation."""
+        self.update({"start_pending": str(value)})
+
+    @property
+    def start_failed(self) -> bool:
+        """Whether startup failed and has not completed successfully since."""
+        return self.relation_data.get("start_failed", "").lower() == "true"
+
+    @start_failed.setter
+    def start_failed(self, value: bool) -> None:
+        """Keep the startup result across hooks and status recomputation."""
+        self.update({"start_failed": str(value)})
+
+    @property
     def tls_ca_renewing(self) -> bool:
         """Return value of 'tls_ca_renewing' from unit state"""
         return self.relation.data[self.unit].get("tls_ca_renewing", "").lower() == "true"

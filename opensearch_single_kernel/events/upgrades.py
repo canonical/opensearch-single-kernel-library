@@ -8,6 +8,7 @@ import logging
 import typing
 
 import ops
+from data_platform_helpers.advanced_statuses.utils import as_status
 from data_platform_helpers.version_check import get_charm_revision
 from ops import Object, UpgradeCharmEvent
 
@@ -26,7 +27,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchStopError,
     OpenSearchUpgradePrecheckError,
 )
-from opensearch_single_kernel.common.statuses import UpgradesStatuses
+from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
 from opensearch_single_kernel.core.models import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
@@ -229,6 +230,12 @@ class UpgradesEventsHandler(Object):
 
     def _on_upgrade_charm(self, event: UpgradeCharmEvent) -> None:
         """Handle Juju upgrade charm event."""
+        if (
+            self.charm.substrate == Substrates.K8S
+            and not self.charm.state.server.start_failed
+            and not self.charm.workload.is_service_started()
+        ):
+            self.charm.unit.status = as_status(GeneralStatuses.WAITING_TO_START.value)
         self.charm.upgrades_manager.reconcile_compatibility_matrix()
         self.charm.upgrades_manager.update_grafana_dashboards_title(
             get_charm_revision(self.charm.model.unit)
@@ -436,6 +443,16 @@ class UpgradesEventsHandler(Object):
         logger.debug("Starting OpenSearch after upgrade")
         self.charm.start_opensearch_event.emit(ignore_lock=event.ignore_lock, after_upgrade=True)
 
+    def _publish_app_upgrade_status(self) -> None:
+        """Publish approved upgrade guidance before a long hook can delay status collection."""
+        if not self.charm.unit.is_leader():
+            return
+
+        for status in self.charm.upgrades_manager.get_statuses("app"):
+            if status.approved_critical_component:
+                self.charm.app.status = as_status(status)
+                return
+
     def _on_refresh_force_start_action(self, event: ops.ActionEvent) -> None:
         """Handle force-refresh-start action for rollback scenario."""
         try:
@@ -617,4 +634,5 @@ class UpgradesEventsHandler(Object):
         logger.debug(
             f"Saved {self.charm.upgrades_manager.current_versions.workload=} in unit databag after upgrade"
         )
+        self._publish_app_upgrade_status()
         self.charm.start_opensearch_event.emit(ignore_lock=True, after_upgrade=True)

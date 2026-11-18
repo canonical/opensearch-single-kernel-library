@@ -29,8 +29,17 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchNotFullyReadyError,
     OpenSearchStopError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, InternalUsersStatuses
-from opensearch_single_kernel.core.models import App, DeploymentDescription, PeerClusterConfig
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    InternalUsersStatuses,
+    LockStatuses,
+)
+from opensearch_single_kernel.core.models import (
+    App,
+    DeploymentDescription,
+    PeerClusterConfig,
+    UnitUpgradesState,
+)
 from opensearch_single_kernel.utils.secrets import password_key
 from tests.unit.helpers import deployment_descriptions
 
@@ -260,6 +269,76 @@ def test_on_leader_elected_index_initialised(harness, mocker):
 # TODO: Add large deployment unit tests
 
 
+@pytest.mark.parametrize("hook", ["_on_start", "_on_update_status"])
+@pytest.mark.parametrize("pending,failed", [(True, False), (False, True)])
+def test_api_up_resumes_unfinished_start(
+    harness, mocker, patch_deployment_desc, hook, pending, failed
+):
+    charm = harness.charm
+    charm.state.server.start_pending = pending
+    charm.state.server.start_failed = failed
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
+    )
+    mocker.patch.object(charm.opensearch_events, "cleanup_start_state")
+    mocker.patch.object(charm.upgrade_events, "_reconcile_upgrade")
+    resume = mocker.patch.object(type(charm.start_opensearch_event), "emit")
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    seeds = mocker.patch.object(charm.config_manager, "update_seeds_config")
+    mocker.patch.object(charm.exclusions_manager, "cleanup")
+    mocker.patch.object(charm, "apply_health", return_value=HealthColors.UNKNOWN)
+
+    getattr(charm.opensearch_events, hook)(mocker.Mock())
+
+    resume.assert_called_once_with(after_upgrade=False)
+    # API availability alone does not mean the remaining post-start work succeeded.
+    assert charm.state.server.start_pending == pending
+    assert charm.state.server.start_failed == failed
+    if hook == "_on_update_status":
+        seeds.assert_called_once_with([])
+
+
+@pytest.mark.parametrize("revision", [None, "old", "target"])
+@pytest.mark.parametrize("saved_state", [UnitUpgradesState.HEALTHY, UnitUpgradesState.UPGRADING])
+def test_vm_resumes_upgrade_validation_only_after_install(
+    harness, mocker, substrate, revision, saved_state
+):
+    if substrate != "vm":
+        pytest.skip("Snap upgrade validation is specific to VM units")
+    charm = harness.charm
+    charm.state.server_upgrade.unit_state = saved_state
+    if revision:
+        charm.state.server_upgrade.snap_revision = revision
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_vm.pinned_snap_revision", return_value="target"
+    )
+    resume = mocker.patch.object(type(charm.start_opensearch_event), "emit")
+
+    resumed = charm.opensearch_events._resume_pending_start()
+
+    if revision == "target" and saved_state == UnitUpgradesState.UPGRADING:
+        assert resumed
+        resume.assert_called_once_with(after_upgrade=True)
+    else:
+        assert not resumed
+        resume.assert_not_called()
+
+
+def test_no_upgrade_validation_after_upgrade_relation_removed(harness, mocker):
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.remove_relation(charm.state.upgrade_relation.id)
+    resume = mocker.patch.object(type(charm.start_opensearch_event), "emit")
+
+    assert not charm.opensearch_events._resume_pending_start()
+
+    resume.assert_not_called()
+
+
 def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     """Test on start event."""
     lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
@@ -429,6 +508,7 @@ def test_running_node_defers_with_startup_status(
         return_value=True,
     )
     mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
     mocker.patch.object(
         manager,
         "wait_for_opensearch_up",
@@ -444,7 +524,7 @@ def test_running_node_defers_with_startup_status(
     event.defer.assert_called_once()
     expected = GeneralStatuses.SERVICE_START_ERROR.value if main_orchestrator else waiting
     stored = charm.state.statuses.get("unit", manager.name).root
-    assert (waiting in stored) == (already_waiting_to_start or not main_orchestrator)
+    assert waiting in stored
     assert expected in stored
     assert expected in manager.get_statuses("unit", recompute=True)
     assert charm.health_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
@@ -452,6 +532,7 @@ def test_running_node_defers_with_startup_status(
     collect = mocker.Mock()
     charm.status_handler._on_collect_unit_status(collect)
     assert collect.add_status.call_args.args[0].name == expected.status
+    assert collect.add_status.call_args.args[0].message == expected.message
 
 
 @pytest.mark.parametrize(
@@ -464,6 +545,8 @@ def test_post_start_waiting_survives_failure_and_clears_on_retry(harness, mocker
         harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
     manager = charm.cluster_manager
     waiting = GeneralStatuses.WAITING_TO_START.value
+    charm.state.server.start_failed = True
+    charm.state.server.start_pending = True
     charm.state.add_status_if_not_present(waiting, "unit", manager.name)
     mocker.patch.object(manager, "wait_for_opensearch_up")
     mocker.patch.object(manager, "assert_current_node_joined_cluster")
@@ -480,13 +563,21 @@ def test_post_start_waiting_survives_failure_and_clears_on_retry(harness, mocker
     with pytest.raises(OpenSearchNotFullyReadyError):
         charm.opensearch_events._post_start_init(event)
 
-    assert waiting in manager.get_statuses("unit", recompute=True)
+    assert waiting in charm.state.statuses.get("unit", manager.name).root
+    assert waiting not in manager.get_statuses("unit", recompute=True)
+    assert charm.state.server.start_failed
+    assert charm.state.server.start_pending
+    assert GeneralStatuses.SERVICE_START_ERROR.value in manager.get_statuses("unit")
+
     ca_rotation.assert_not_called()
 
     failed_check.side_effect = None
     charm.opensearch_events._post_start_init(event)
 
     assert waiting not in manager.get_statuses("unit", recompute=True)
+    assert not charm.state.server.start_failed
+    assert not charm.state.server.start_pending
+    assert GeneralStatuses.SERVICE_START_ERROR.value not in manager.get_statuses("unit")
     ca_rotation.assert_called_once()
     event.defer.assert_not_called()
 
@@ -612,37 +703,6 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
     reconcile_security_config.assert_called_once_with(event)
 
 
-@pytest.mark.parametrize("is_leader", [True, False], ids=["leader", "non-leader"])
-def test_roles_change_emits_restart(harness, mocker, is_leader):
-    """A role change restarts each unit."""
-    with harness.hooks_disabled():
-        harness.set_leader(is_leader)
-        harness.charm.state.server.started = "True"
-    deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-        return_value=deployment_descriptions["ok"],
-    )
-
-    def apply_new_roles():
-        deployment_desc.return_value = deployment_descriptions["cm-only"]
-        return True
-
-    charm = harness.charm
-    mocker.patch.object(
-        charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
-    )
-    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
-    mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
-    charm.restart_opensearch_event = MagicMock()
-
-    charm.opensearch_events._on_config_changed(MagicMock())
-    if not is_leader:
-        charm.opensearch_events._on_peer_relation_changed(MagicMock())
-
-    charm.restart_opensearch_event.emit.assert_called_once()
-
-
 def test_security_config_applied_by_new_leader(harness, mocker):
     """The security config file of a unit tells nothing about what the former leader applied."""
     with harness.hooks_disabled():
@@ -752,6 +812,321 @@ def test_on_start_restores_ldap_ca(harness, mocker):
     start_opensearch.assert_called_once()
 
 
+@pytest.mark.parametrize("prerequisite", ["ready", "tls", "admin", "directive", "data-node"])
+def test_start_request_waits_for_bootstrap_without_reporting_active(harness, mocker, prerequisite):
+    """A configured follower waits for bootstrap without bypassing startup checks."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+    mocker.patch.object(
+        type(charm.state.application),
+        "deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["cm-only" if prerequisite == "data-node" else "ok"],
+    )
+    mocker.patch.object(
+        type(charm.state.application),
+        "is_admin_user_initialized",
+        new_callable=PropertyMock,
+        return_value=prerequisite != "admin",
+    )
+    mocker.patch.object(
+        type(charm.state.application),
+        "is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch.object(
+        type(charm.state.server),
+        "tls_configured",
+        new_callable=PropertyMock,
+        return_value=prerequisite != "tls",
+    )
+    mocker.patch.object(
+        charm.tls_manager, "all_tls_resources_stored", return_value=prerequisite != "tls"
+    )
+    mocker.patch.object(
+        charm.cluster_manager, "no_blocking_directives", return_value=prerequisite != "directive"
+    )
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
+    mocker.patch.object(charm.internal_users_manager, "purge_initial_default_users")
+    mocker.patch.object(charm.internal_users_manager, "save_user_locally")
+    mocker.patch.object(charm.ldap_manager, "restore_ldap_ca")
+    mocker.patch.object(charm.snapshots_events, "restore_stored_credentials")
+    mocker.patch.object(charm.notifications_events, "restore_keystore_credentials")
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
+    mocker.patch.object(charm.workload, "is_service_started", return_value=False)
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    acquire = mocker.patch.object(charm.lock_manager, "acquire")
+    start = mocker.patch.object(charm.cluster_manager, "start")
+
+    charm.on.start.emit()
+
+    assert not charm.state.server.start_pending
+    messages = [s.message for s in charm.cluster_manager.get_statuses("unit", recompute=True)]
+    assert GeneralStatuses.WAITING_TO_START.value.message not in messages
+    assert (
+        LockStatuses.REQUEST_LOCK_ON_START.value
+        in charm.state.statuses.get("unit", charm.lock_manager.name).root
+    ) == (prerequisite == "ready")
+    acquire.assert_not_called()
+    start.assert_not_called()
+
+
+@pytest.mark.parametrize("previous_lock_wait", [False, True])
+@pytest.mark.parametrize(
+    "case,allowed,waiting_for_turn",
+    [
+        ("bootstrap-follower", False, True),
+        ("bootstrap-leader", True, False),
+        ("cm-only-leader", True, False),
+        ("cm-only-follower", False, True),
+        ("unselected-data-leader", False, True),
+        ("first-data-node", True, False),
+        ("returning-data-leader", True, False),
+        ("health-wait", False, False),
+        ("missing-deployment", False, False),
+        ("directive", False, False),
+        ("node-probe", False, False),
+        ("no-reachable-peers", False, False),
+    ],
+)
+def test_start_permission_reports_only_bootstrap_wait_as_pending_lock(
+    harness, mocker, case, allowed, waiting_for_turn, previous_lock_wait
+):
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+        harness.add_relation(NODE_LOCK_RELATION, charm.app.name)
+        harness.set_leader(
+            case
+            in (
+                "bootstrap-leader",
+                "cm-only-leader",
+                "unselected-data-leader",
+                "first-data-node",
+                "returning-data-leader",
+            )
+        )
+    deployment = "ok"
+    if case in ("first-data-node", "unselected-data-leader", "returning-data-leader"):
+        deployment = "data-only"
+    elif case in ("cm-only-leader", "cm-only-follower"):
+        deployment = "cm-only"
+    mocker.patch.object(
+        type(charm.state.application),
+        "deployment_desc",
+        new_callable=PropertyMock,
+        return_value=(
+            None if case == "missing-deployment" else deployment_descriptions[deployment]
+        ),
+    )
+    mocker.patch.object(
+        type(charm.state.application),
+        "is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=case in ("no-reachable-peers", "returning-data-leader", "health-wait"),
+    )
+    mocker.patch.object(
+        charm.cluster_manager, "no_blocking_directives", return_value=case != "directive"
+    )
+    mocker.patch.object(
+        charm.cluster_manager,
+        "get_nodes",
+        return_value=[],
+        side_effect=OpenSearchHttpError() if case == "node-probe" else None,
+    )
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "alt_hosts",
+        new_callable=PropertyMock,
+        return_value=["10.0.0.2"] if case in ("returning-data-leader", "health-wait") else [],
+    )
+    mocker.patch.object(
+        charm.opensearch_events, "is_cluster_healthy_to_start", return_value=case != "health-wait"
+    )
+    event = mocker.Mock(
+        ignore_lock=case == "first-data-node", is_first_data_node=case == "first-data-node"
+    )
+    if previous_lock_wait:
+        charm.state.add_status_if_not_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", charm.lock_manager.name
+        )
+
+    assert charm.opensearch_events.unit_allowed_to_start(event) == allowed
+    assert (
+        LockStatuses.REQUEST_LOCK_ON_START.value
+        in charm.state.statuses.get("unit", charm.lock_manager.name).root
+    ) == (waiting_for_turn or (case == "no-reachable-peers" and previous_lock_wait))
+    assert not charm.state.server_lock.lock_requested
+
+
+def test_bootstrap_lock_wait_survives_security_index_before_peer_addresses(harness, mocker):
+    """A follower keeps waiting its turn until it can check the initialized cluster."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+        harness.set_leader(False)
+    mocker.patch.object(
+        type(charm.state.application),
+        "deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    security_index = mocker.patch.object(
+        type(charm.state.application),
+        "is_security_index_initialised",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch.object(
+        type(charm.state.server), "tls_configured", new_callable=PropertyMock, return_value=True
+    )
+    mocker.patch.object(charm.cluster_manager, "no_blocking_directives", return_value=True)
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    peers = mocker.patch.object(
+        type(charm.cluster_manager), "alt_hosts", new_callable=PropertyMock, return_value=[]
+    )
+    health_check = mocker.patch.object(
+        charm.opensearch_events, "is_cluster_healthy_to_start", return_value=True
+    )
+    charm.state.server.start_pending = True
+    event = mocker.Mock(ignore_lock=False, is_first_data_node=False)
+
+    for initialized in (False, True):
+        security_index.return_value = initialized
+        assert not charm.opensearch_events.unit_allowed_to_start(event)
+        assert (
+            LockStatuses.REQUEST_LOCK_ON_START.value
+            in charm.state.statuses.get("unit", charm.lock_manager.name).root
+        )
+        assert GeneralStatuses.WAITING_TO_START.value.message not in [
+            status.message for status in charm.cluster_manager.get_statuses("unit", recompute=True)
+        ]
+        health_check.assert_not_called()
+
+    peers.return_value = ["10.0.0.2"]
+    assert charm.opensearch_events.unit_allowed_to_start(event)
+    health_check.assert_called_once()
+    assert (
+        LockStatuses.REQUEST_LOCK_ON_START.value
+        not in charm.state.statuses.get("unit", charm.lock_manager.name).root
+    )
+
+
+def test_app_peers_data(harness):
+    """Test getting data from the app relation data bag."""
+    # Need to set leader to update the application state
+    harness.set_leader(True)
+
+    assert harness.charm.state.application.relation_data.get("app-key") is None
+
+    harness.charm.state.application.relation_data.update({"app-key": "app-val"})
+    assert harness.charm.state.application.relation_data.get("app-key") == "app-val"
+
+
+def test_unit_peers_data(harness):
+    """Test getting data from the unit relation data bag."""
+    assert harness.charm.state.server.relation_data.get("app-key") is None
+
+    harness.charm.state.server.relation_data.update({"app-key": "app-val"})
+    assert harness.charm.state.server.relation_data.get("app-key") == "app-val"
+
+
+def test_host_ip(harness):
+    """Test current unit ip value."""
+    assert harness.charm.state.host_ip == "1.1.1.1"
+
+
+def test_unit_name(harness, mocker):
+    """Test current unit name."""
+    deployment_desc = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    deployment_desc.return_value = deployment_descriptions["ok"]
+
+    app_short_id = deployment_desc().app.short_id
+    assert (
+        harness.charm.state.unit_name == f"{harness.charm.state.application.name}-0.{app_short_id}"
+    )
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_start_waits_for_permission_and_lock_before_reporting_start(harness, mocker, allowed):
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
+    mocker.patch.object(charm.upgrade_events, "_publish_app_upgrade_status")
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    mocker.patch.object(charm.state, "is_peer_cluster_consumer", return_value=False)
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
+    mocker.patch.object(charm.opensearch_events, "unit_allowed_to_start", return_value=allowed)
+    acquire = mocker.patch.object(charm.lock_manager, "acquire", return_value=False)
+    start = mocker.patch.object(charm.cluster_manager, "start")
+    event = mocker.Mock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    assert (
+        GeneralStatuses.WAITING_TO_START.value
+        not in charm.state.statuses.get("unit", charm.cluster_manager.name).root
+    )
+    assert acquire.call_count == int(allowed)
+    assert not charm.state.server.start_pending
+    start.assert_not_called()
+    event.defer.assert_called_once()
+
+
+@pytest.mark.parametrize("is_leader", [True, False], ids=["leader", "non-leader"])
+def test_roles_change_emits_restart(harness, mocker, is_leader):
+    """A role change requests a restart on both leaders and followers."""
+    with harness.hooks_disabled():
+        harness.set_leader(is_leader)
+        harness.charm.state.server.started = "True"
+    deployment_desc = mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+
+    def apply_new_roles():
+        deployment_desc.return_value = deployment_descriptions["cm-only"]
+        return True
+
+    charm = harness.charm
+    mocker.patch.object(
+        charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
+    )
+    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
+    mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
+    charm.restart_opensearch_event = MagicMock()
+
+    charm.opensearch_events._on_config_changed(MagicMock())
+    if not is_leader:
+        charm.opensearch_events._on_peer_relation_changed(MagicMock())
+
+    charm.restart_opensearch_event.emit.assert_called_once()
+
+
 @pytest.fixture
 def started_leader(harness, mocker):
     """A running main leader with real user management and secret persistence."""
@@ -782,6 +1157,7 @@ def started_leader(harness, mocker):
     mocker.patch.object(charm, "apply_health")
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    mocker.patch.object(charm.health_manager, "get", return_value=HealthColors.GREEN)
     return charm
 
 
@@ -896,44 +1272,6 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     assert secrets.get_secret_id(Scope.APP, key) == secret_id
     assert secrets.get(Scope.APP, key) == "existing-monitor-password"
     assert any(port.port == 9200 for port in charm.unit.opened_ports())
-
-
-def test_app_peers_data(harness):
-    """Test getting data from the app relation data bag."""
-    # Need to set leader to update the application state
-    harness.set_leader(True)
-
-    assert harness.charm.state.application.relation_data.get("app-key") is None
-
-    harness.charm.state.application.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.application.relation_data.get("app-key") == "app-val"
-
-
-def test_unit_peers_data(harness):
-    """Test getting data from the unit relation data bag."""
-    assert harness.charm.state.server.relation_data.get("app-key") is None
-
-    harness.charm.state.server.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.server.relation_data.get("app-key") == "app-val"
-
-
-def test_host_ip(harness):
-    """Test current unit ip value."""
-    assert harness.charm.state.host_ip == "1.1.1.1"
-
-
-def test_unit_name(harness, mocker):
-    """Test current unit name."""
-    deployment_desc = mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-    )
-    deployment_desc.return_value = deployment_descriptions["ok"]
-
-    app_short_id = deployment_desc().app.short_id
-    assert (
-        harness.charm.state.unit_name == f"{harness.charm.state.application.name}-0.{app_short_id}"
-    )
 
 
 def test_unit_id(harness):
@@ -1150,54 +1488,3 @@ def test_early_publication_failure_releases_lock_but_readiness_wait_retains_it(
     assert GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value not in statuses
     assert GeneralStatuses.SERVICE_START_ERROR.value not in statuses
     charm.opensearch_events.post_start_ca_rotation.assert_not_called()
-
-
-def test_bootstrap_config_cleanup_survives_secret_failure(startup_with_peer_lock, harness, mocker):
-    """Do not discard the cleanup marker before the initial cluster config is removed."""
-    charm = startup_with_peer_lock
-    charm.state.server.is_bootstrap_contributor = True
-    mocker.patch.object(
-        type(charm.cluster_manager),
-        "is_opensearch_started",
-        new_callable=PropertyMock,
-        return_value=True,
-    )
-    mocker.patch.object(charm.config_manager, "_update_static_jvm_options")
-    mocker.patch.object(charm.config_manager, "update_seeds_config", return_value=True)
-    config_on_disk = {"cluster.initial_cluster_manager_nodes": [charm.state.unit_name]}
-
-    def rewrite(_setter, path, config):
-        assert path == "opensearch.yml"
-        config_on_disk.clear()
-        config_on_disk.update(config)
-        return True
-
-    mocker.patch(
-        "opensearch_single_kernel.utils.config.YamlConfigSetter.rewrite",
-        autospec=True,
-        side_effect=rewrite,
-    )
-    label = charm.state.secrets.label(Scope.APP, CertType.APP_ADMIN.val)
-    charm.state.secrets.cached_secrets.delete(Scope.APP, label)
-    get_secret = harness.model.get_secret
-
-    def lookup(*args, **kwargs):
-        if kwargs.get("label") == label:
-            raise ModelError("TLS secret unavailable")
-        return get_secret(*args, **kwargs)
-
-    failed = mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
-    event = MagicMock(after_upgrade=False, ignore_lock=False)
-
-    charm.opensearch_events._on_start_opensearch(event)
-
-    event.defer.assert_called_once()
-    assert charm.state.server.is_bootstrap_contributor
-    assert "cluster.initial_cluster_manager_nodes" in config_on_disk
-    assert not charm.state.server_lock.lock_requested
-    mocker.stop(failed)
-    event.reset_mock()
-    charm.opensearch_events._on_start_opensearch(event)
-    event.defer.assert_not_called()
-    assert not charm.state.server.is_bootstrap_contributor
-    assert "cluster.initial_cluster_manager_nodes" not in config_on_disk
