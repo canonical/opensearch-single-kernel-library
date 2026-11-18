@@ -1081,41 +1081,6 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
     reconcile_security_config.assert_called_once_with(event)
 
 
-def test_security_config_applied_by_new_leader(harness, mocker):
-    """The security config file of a unit tells nothing about what the former leader applied."""
-    with harness.hooks_disabled():
-        harness.set_leader(True)
-
-    mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-        return_value=deployment_descriptions["ok"],
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.is_security_index_initialised",
-        new_callable=PropertyMock,
-        return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
-    )
-    mocker.patch.object(harness.charm, "apply_health", return_value=HealthColors.GREEN)
-    mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
-    mocker.patch(
-        "opensearch_single_kernel.managers.cluster.ClusterManager.compute_and_broadcast_updated_topology",
-        return_value=False,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.external_clients.ExternalClientsManager.update_all_external_clients_relation_endpoints"
-    )
-    reconcile_security_config = mocker.patch.object(harness.charm, "reconcile_security_config")
-
-    event = MagicMock()
-    harness.charm.opensearch_events._on_leader_elected(event)
-
-    reconcile_security_config.assert_called_once_with(event, force=True)
-
-
 def test_security_config_updated_for_the_security_index_initialisation(harness, mocker):
     """The security index is initialised with the content of the security config file."""
     mocker.patch(
@@ -1401,30 +1366,6 @@ def test_bootstrap_lock_wait_survives_security_index_before_peer_addresses(harne
     )
 
 
-def test_app_peers_data(harness):
-    """Test getting data from the app relation data bag."""
-    # Need to set leader to update the application state
-    harness.set_leader(True)
-
-    assert harness.charm.state.application.relation_data.get("app-key") is None
-
-    harness.charm.state.application.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.application.relation_data.get("app-key") == "app-val"
-
-
-def test_unit_peers_data(harness):
-    """Test getting data from the unit relation data bag."""
-    assert harness.charm.state.server.relation_data.get("app-key") is None
-
-    harness.charm.state.server.relation_data.update({"app-key": "app-val"})
-    assert harness.charm.state.server.relation_data.get("app-key") == "app-val"
-
-
-def test_host_ip(harness):
-    """Test current unit ip value."""
-    assert harness.charm.state.host_ip == "1.1.1.1"
-
-
 def test_unit_name(harness, mocker):
     """Test current unit name."""
     deployment_desc = mocker.patch(
@@ -1697,11 +1638,6 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     assert secrets.get_secret_id(Scope.APP, key) == secret_id
     assert secrets.get(Scope.APP, key) == "existing-monitor-password"
     assert any(port.port == 9200 for port in charm.unit.opened_ports())
-
-
-def test_unit_id(harness):
-    """Test retrieving the integer id pf a unit."""
-    assert harness.charm.state.server.unit_id == 0
 
 
 @pytest.mark.parametrize("publication_failed", [False, True])

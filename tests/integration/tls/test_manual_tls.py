@@ -8,6 +8,7 @@ import pytest
 from juju.application import Application
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.statuses import TlsStatuses
 from tests.integration.conftest import (
     APP_NAME,
     CONFIG_OPTS,
@@ -16,7 +17,6 @@ from tests.integration.conftest import (
 )
 from tests.integration.helpers import (
     EmptyActiveStatus,
-    EmptyMaintenanceStatus,
     deploy_opensearch,
     wait_until,
 )
@@ -91,12 +91,12 @@ async def test_build_and_deploy_with_manual_tls(
         # Scale up the application by adding a new unit
         await os_app.add_unit(1)
 
-    # Wait for the new unit to be in maintenance
-    logger.info("Waiting for the new unit to be in maintenance waiting for certificates")
+    # The existing units stay active while the new unit waits for certificates.
+    logger.info("Waiting for the new unit to request certificates")
     await wait_until(
         ops_test,
         apps=[APP_NAME],
-        units_statuses={APP_NAME: [EmptyActiveStatus, EmptyMaintenanceStatus]},
+        units_statuses={APP_NAME: [EmptyActiveStatus, TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value]},
         wait_for_exact_units=len(UNIT_IDS) + 1,
     )
 

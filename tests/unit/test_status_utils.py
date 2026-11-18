@@ -7,9 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
-from opensearch_single_kernel.utils.status import (
-    cached_non_running_statuses,
-)
+from opensearch_single_kernel.utils.status import cached_non_running_statuses
 
 
 def test_cached_non_running_matches_exact_and_message():

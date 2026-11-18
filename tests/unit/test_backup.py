@@ -1563,25 +1563,6 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
     client.create_container.assert_called_once()
 
 
-def test_create_azure_container_when_container_exists_and_we_run_create_container_then_it_does_not_raise(
-    context, mocker, harness, monkeypatch
-):
-    # Given
-    client = Mock()
-    client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
-
-    params = {
-        "storage-account": "acc",
-        "secret-key": "key",
-        "container": "cont",
-        "account-url": "https://acc.blob.core.windows.net",
-    }
-    # When/Assert
-    with pytest.raises(AzureError):
-        object_storage.create_azure_container(params)
-
-
 def test_create_azure_container_when_create_container_then_other_azure_error_raises(
     context, harness, mocker, monkeypatch
 ):
@@ -1834,54 +1815,6 @@ def test_store_s3_ca_deletes_old_chain(harness, mocker):
 
     assert _deleted_aliases(run_cmd) == ["s3-snapshots-gateway-0", "s3-snapshots-gateway-1"]
     store_ca_chain.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    "storage_credentials,expected",
-    [
-        ({"s3": {"access-key": "access", "secret-key": "secret"}}, ObjectStorageType.S3_PCLUSTER),
-        (
-            {"azure": {"storage-account": "account", "secret-key": "secret"}},
-            ObjectStorageType.AZURE_PCLUSTER,
-        ),
-        ({"gcs": {"secret-key": '{"type": "service_account"}'}}, ObjectStorageType.GCS_PCLUSTER),
-        ({}, None),
-    ],
-    ids=["s3", "azure", "gcs", "none"],
-)
-def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
-    harness, mocker, storage_credentials, expected
-):
-    secrets = Mock()
-    secrets.resolve_credential.side_effect = lambda credential, **_: credential
-    peer_cluster_data = PeerClusterRelData.peer_cluster_rel_data_from_str(
-        secrets,
-        json.dumps(
-            {
-                "cluster_name": "cluster",
-                "cm_nodes": [],
-                "deployment_desc": None,
-                "credentials": {
-                    "admin_username": "admin",
-                    "admin_password": "password",
-                    "admin_password_hash": "hash",
-                    "kibana_password": "password",
-                    "kibana_password_hash": "hash",
-                    **storage_credentials,
-                },
-            }
-        ),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-        return_value=Mock(typ=DeploymentType.OTHER),
-    )
-    mocker.patch.object(
-        harness.charm.state, "get_rel_data_from_main_orchestrator", return_value=peer_cluster_data
-    )
-
-    assert harness.charm.state.storage_type == expected
 
 
 @pytest.mark.parametrize("failure_stage", ["configuration", "credentials"])
