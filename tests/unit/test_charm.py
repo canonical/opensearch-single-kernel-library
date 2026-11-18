@@ -58,6 +58,31 @@ def test_stop_wait_failure_leaves_workload_running(harness, mocker):
     stop.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "restart, node_up, drains",
+    [(False, True, True), (True, True, False), (False, False, False)],
+    ids=["removal", "restart", "node-down"],
+)
+def test_drain_on_stop(harness, mocker, restart, node_up, drains):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=node_up
+    )
+    mocker.patch.object(harness.charm.cluster_manager, "get_nodes", return_value=[])
+    wait = mocker.patch.object(harness.charm.health_manager, "wait_for_only_copies_to_move")
+    relocation = mocker.patch.object(harness.charm.health_manager, "wait_for_shards_relocation")
+    mocker.patch.object(harness.charm.cluster_manager, "stop_workload")
+
+    harness.charm.stop_opensearch(restart=restart)
+
+    assert wait.called == drains
+    assert relocation.called == restart
+
+
 def test_on_install(harness, substrate):
     """Test the install event callback on success."""
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"

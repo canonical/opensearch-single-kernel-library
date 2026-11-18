@@ -254,7 +254,8 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             component_name=self.cluster_manager.name,
         )
 
-        if self.cluster_manager.opensearch_client.is_node_up():
+        node_up = self.cluster_manager.opensearch_client.is_node_up()
+        if node_up:
             try:
                 nodes = self.cluster_manager.get_nodes(True)
                 # do not add exclusions if it's the last unit to stop
@@ -272,7 +273,10 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         # Let ongoing shard initialization and relocation finish before stopping.
         try:
-            self.health_manager.wait_for_shards_relocation()
+            if restart:
+                self.health_manager.wait_for_shards_relocation()
+            elif node_up:
+                self.health_manager.wait_for_only_copies_to_move()
         except OpenSearchHAError as e:
             raise OpenSearchStopError(str(e)) from e
 
