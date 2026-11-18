@@ -440,6 +440,27 @@ def test_relation_and_start_flows_defer_when_upgrade_state_is_unknown(
     event.defer.assert_called_once_with()
 
 
+def test_resume_action_does_not_record_request_after_failed_partition_read(
+    harness, mocker, substrate
+):
+    if substrate != "k8s":
+        pytest.skip("Kubernetes partition")
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    mocker.patch.object(
+        type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=True
+    )
+    mocker.patch.object(
+        charm.upgrades_manager,
+        "get_resume_partition",
+        side_effect=exceptions.OpenSearchK8sError("Partition read failed"),
+    )
+    with pytest.raises(ActionFailed, match="Partition read failed"):
+        harness.run_action("resume-upgrade")
+    assert charm.state.application_upgrade.resume_request is None
+
+
 def test_force_refresh_start_reports_request_when_startup_is_deferred(harness, mocker, substrate):
     if substrate != "k8s":
         pytest.skip("Kubernetes startup")

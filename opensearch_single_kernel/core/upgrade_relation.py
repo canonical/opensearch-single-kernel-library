@@ -12,7 +12,11 @@ import poetry.core.constraints.version as poetry_version
 from ops.model import Relation, Unit
 
 from opensearch_single_kernel.common.constants import HealthColors
-from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
+from opensearch_single_kernel.core.models import (
+    UnitUpgradesState,
+    UpgradeResumeRequest,
+    UpgradeVersions,
+)
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
@@ -21,6 +25,18 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 
 class UpgradeAppState(RelationState):
     """State collection for the application side of upgrade relation."""
+
+    @property
+    def resume_request(self) -> UpgradeResumeRequest | None:
+        """Read the saved resume request, or None if there is no pending request."""
+        if raw := self.get_object("resume-request"):
+            return UpgradeResumeRequest.from_dict(raw)
+        return None
+
+    @resume_request.setter
+    def resume_request(self, value: UpgradeResumeRequest | None) -> None:
+        """Save a resume request in the application databag, or remove it with None."""
+        self.update({"resume-request": value.to_str() if value is not None else None})
 
     @property
     def versions(self) -> UpgradeVersions | None:

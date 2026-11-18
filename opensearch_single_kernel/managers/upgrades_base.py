@@ -13,7 +13,6 @@ import logging
 import re
 from typing import Any
 
-import ops
 import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -163,6 +162,9 @@ class UpgradesManagerBase(BaseManager):
                 return UpgradesStatuses.UPGRADES_UPGRADING.value
             return None
 
+        if self.state.application_upgrade.resume_request:
+            return UpgradesStatuses.UPGRADES_RESUME_REQUESTED.value
+
         if not self.upgrade_resumed:
             units = self.state.sorted_upgrades_units
             if not self.state.upgrade_membership_complete or len(units) < 2:
@@ -217,9 +219,7 @@ class UpgradesManagerBase(BaseManager):
         """Whether the user has resumed the upgrade with the Juju action."""
 
     @abc.abstractmethod
-    def reconcile_partition(
-        self, *, action_event: ops.ActionEvent | None = None, force=False
-    ) -> None:
+    def reconcile_partition(self) -> None:
         """If ready, allow next unit to upgrade."""
 
     @property

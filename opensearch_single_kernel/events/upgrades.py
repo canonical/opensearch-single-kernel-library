@@ -31,6 +31,7 @@ from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesSt
 from opensearch_single_kernel.core.models import (
     LifecycleUnitTearingDownAndAppActive,
     UnitUpgradesState,
+    UpgradeResumeRequest,
 )
 from opensearch_single_kernel.events.custom_events import UpgradeOpenSearch
 from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
@@ -59,6 +60,8 @@ class UpgradesEventsHandler(Object):
             )
 
         self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
+        if self.charm.substrate == Substrates.K8S:
+            self.framework.observe(self.charm.on.update_status, self._on_update_status)
         self.framework.observe(
             self.charm.on[UPGRADE_RELATION].relation_created,
             self._on_upgrade_peer_relation_created,
@@ -225,7 +228,10 @@ class UpgradesEventsHandler(Object):
                     self.charm.cluster_manager.name,
                 )
             if self.charm.unit.is_leader():
-                self.charm.upgrades_manager.reconcile_partition()
+                if request := self.charm.state.application_upgrade.resume_request:
+                    self._apply_resume_request(request)
+                else:
+                    self.charm.upgrades_manager.reconcile_partition()
 
         if (
             self.authorized_leader
@@ -237,6 +243,24 @@ class UpgradesEventsHandler(Object):
             # require another workload upgrade. Its charm compatibility check is skipped.
             # Handling a completed forced upgrade takes priority over that rare case.
             self.charm.upgrades_manager.save_upgrades_versions()
+
+    def _on_update_status(self, event: ops.UpdateStatusEvent) -> None:
+        """Apply a pending resume even if the leader's OpenSearch service is stopped.
+
+        The normal update-status handler returns early when OpenSearch is down.
+        This handler allows a forced resume to proceed in that case.
+        """
+        if not self.charm.unit.is_leader() or not self.charm.state.upgrade_relation:
+            return
+
+        if not (request := self.charm.state.application_upgrade.resume_request):
+            return
+
+        try:
+            self._apply_resume_request(request)
+        except OpenSearchK8sError as e:
+            logger.error("Cannot apply the requested upgrade step: %s", e)
+            event.defer()
 
     def _run_general_prechecks(self) -> None:
         """Check health and snapshot state before upgrade.
@@ -317,12 +341,19 @@ class UpgradesEventsHandler(Object):
         logger.debug(f"Pre-upgrade check event succeeded: {message}")
 
     def _on_resume_upgrade_action(self, event: ops.ActionEvent) -> None:
-        """Handle resume-upgrade action."""
+        """Handle resume-upgrade action.
+
+        Confirm that the first upgraded unit has been checked and the upgrade can continue.
+        On Kubernetes, force=True also allows the next unit to upgrade despite unhealthy
+        upgraded units. Save the request for a later hook so replacing the leader does not
+        terminate the action before it reports its result.
+        """
         if not self.authorized_leader:
             message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-upgrade`)"
             logger.debug(f"Resume upgrade event failed: {message}")
             event.fail(message)
             return
+
         if not self.charm.state.upgrade_membership_complete:
             event.fail("Waiting for all units in the upgrade peer relation.")
             return
@@ -340,15 +371,18 @@ class UpgradesEventsHandler(Object):
             logger.error("Cannot check upgrade state: %s", e)
             event.fail(str(e))
             return
-        force = False
-        if self.charm.substrate == Substrates.K8S:
-            # Get force parameter
-            force = event.params.get("force", False)
+
         try:
-            message = self.charm.upgrades_manager.reconcile_partition(
-                action_event=event, force=force
-            )
-            event.set_results({"result": message})
+            if self.charm.substrate == Substrates.K8S:
+                force = event.params.get("force", False)
+                revision = self.charm.upgrades_manager.k8s_client.get_revision()
+                partition = self.charm.upgrades_manager.get_resume_partition(force=force)
+                self.charm.state.application_upgrade.resume_request = UpgradeResumeRequest(
+                    revision=revision, partition=partition, force=force
+                )
+                event.set_results({"result": f"Upgrade resume requested for unit {partition}."})
+            else:
+                self.charm.upgrades_manager.reconcile_partition(action_event=event)
         except OpenSearchReconcilePartitionError as e:
             logger.debug(f"Resume upgrade event failed: {e}")
             event.fail(e.message)
@@ -357,6 +391,37 @@ class UpgradesEventsHandler(Object):
             logger.error("Cannot reconcile the Kubernetes partition: %s", e)
             event.fail(str(e))
             return
+
+    def _apply_resume_request(self, request: UpgradeResumeRequest) -> None:
+        """Apply a saved resume request after the action has completed.
+
+        Lowering the partition can replace the leader's pod. Do this in a later hook
+        so the action can report its result before its Juju agent is stopped.
+        """
+        if not self.charm.state.upgrade_membership_complete:
+            logger.debug("Waiting for all units in the upgrade peer relation")
+            return
+
+        manager = self.charm.upgrades_manager
+        if (
+            request.revision != self.charm.upgrades_manager.k8s_client.get_revision()
+            or manager.partition <= request.partition
+        ):
+            self.charm.state.application_upgrade.resume_request = None
+            return
+
+        try:
+            partition = manager.get_resume_partition(force=request.force)
+        except OpenSearchReconcilePartitionError as e:
+            logger.info("Waiting to resume upgrade: %s", e.message)
+            return
+
+        if partition > request.partition:
+            return
+
+        # Use the partition requested by the action, even if more units are now HEALTHY.
+        manager.partition = request.partition
+        self.charm.state.application_upgrade.resume_request = None
 
     def _on_force_upgrade_action(self, event: ops.ActionEvent) -> None:
         """Handle force-upgrade action."""

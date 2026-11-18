@@ -12,6 +12,7 @@ from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     STATUS_PEERS_RELATION,
+    UPGRADE_RELATION,
     HealthColors,
     Substrates,
 )
@@ -526,6 +527,31 @@ def test_vm_install_publishes_progress_before_blocking(harness, mocker, substrat
     charm.upgrade_events._upgrade_opensearch(
         mocker.Mock(ignore_lock=False, override_version=False)
     )
+
+
+def test_vm_resume_keeps_the_existing_action_and_relation_flow(harness, mocker, substrate):
+    if substrate != "vm":
+        pytest.skip("Machine upgrade action")
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        relation = harness.model.get_relation(UPGRADE_RELATION)
+        harness.add_relation_unit(relation.id, f"{charm.app.name}/1")
+        harness.update_relation_data(
+            relation.id, f"{charm.app.name}/1", {"state": "healthy", "snap_revision": "new"}
+        )
+    mocker.patch.object(
+        type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=True
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.upgrades_vm.pinned_snap_revision", return_value="new"
+    )
+
+    result = harness.run_action("resume-upgrade")
+
+    assert result.results["result"] == "Upgrade resumed."
+    assert charm.state.application_upgrade.upgrade_resumed is True
+    assert charm.state.application_upgrade.resume_request is None
 
 
 def test_upgrades_app_incompatible():

@@ -680,6 +680,11 @@ class UpgradesStatuses(Enum):
         check="In-place upgrade progress.",
         approved_critical_component=True,
     )
+    UPGRADES_RESUME_REQUESTED = StatusObject(
+        status="waiting",
+        message="Upgrade resume requested.",
+        check="Pending resume-upgrade request.",
+    )
     UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
         message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",

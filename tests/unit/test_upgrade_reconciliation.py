@@ -587,6 +587,56 @@ def test_failed_shutdown_invalidates_readiness_before_replacement(
     assert partition[0] == 0
 
 
+@pytest.mark.parametrize("patch_applied", [False, True])
+def test_lost_partition_response_preserves_resume_decision(
+    recovering_upgrade, harness, mocker, patch_applied
+):
+    """Keep the request if the write failed, or clear it if Kubernetes applied the partition."""
+    charm = recovering_upgrade.charm
+    relation = harness.model.get_relation(UPGRADE_RELATION)
+    app = charm.app.name
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        for unit in (1, 2):
+            harness.add_relation_unit(relation.id, f"{app}/{unit}")
+            harness.update_relation_data(
+                relation.id, f"{app}/{unit}", {"state": "healthy", "state-revision": "new"}
+            )
+    mocker.patch.object(K8sClient, "get_revision", return_value="new")
+    mocker.patch.object(
+        K8sClient,
+        "list_revisions",
+        return_value={
+            f"{app}/0": "old",
+            f"{app}/1": "old",
+            f"{app}/2": "new",
+        },
+    )
+    partition = [2]
+    mocker.patch.object(K8sClient, "get_partition", side_effect=lambda: partition[0])
+
+    def patch_then_lose_response(value):
+        if patch_applied:
+            partition[0] = value
+        raise OpenSearchK8sError("Partition response timed out")
+
+    patch = mocker.patch.object(K8sClient, "set_partition", side_effect=patch_then_lose_response)
+    harness.run_action("resume-upgrade")
+    patch.assert_not_called()
+
+    with pytest.raises(OpenSearchK8sError, match="Partition response timed out"):
+        charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    if patch_applied:
+        # Read the partition from Kubernetes again without repeating the resume action.
+        charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+        assert charm.state.application_upgrade.resume_request is None
+    else:
+        assert charm.state.application_upgrade.resume_request is not None
+    assert partition[0] == (1 if patch_applied else 2)
+    patch.assert_called_once_with(1)
+
+
 @pytest.fixture
 def paused_upgrade(recovering_upgrade, harness, mocker):
     charm = recovering_upgrade.charm
@@ -610,6 +660,168 @@ def paused_upgrade(recovering_upgrade, harness, mocker):
     return SimpleNamespace(
         charm=charm, partition=partition, patch=patch, revision=revision, relation=relation
     )
+
+
+def test_resume_action_finishes_before_replacing_any_pod(paused_upgrade, harness):
+    trial = paused_upgrade
+
+    result = harness.run_action("resume-upgrade")
+
+    assert "requested" in result.results["result"].lower()
+    assert trial.partition[0] == 2
+    trial.patch.assert_not_called()
+    assert trial.charm.state.application_upgrade.resume_request.partition == 1
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    assert trial.partition[0] == 1
+    assert trial.charm.state.application_upgrade.resume_request is None
+
+
+def test_resume_request_does_not_apply_to_a_later_refresh(paused_upgrade, harness):
+    trial = paused_upgrade
+    harness.run_action("resume-upgrade")
+    trial.revision.return_value = "another-refresh"
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    trial.patch.assert_not_called()
+    assert trial.charm.state.application_upgrade.resume_request is None
+
+
+def test_resume_rechecks_health_before_advancing(paused_upgrade, harness):
+    trial = paused_upgrade
+    harness.run_action("resume-upgrade")
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            trial.relation.id, f"{trial.charm.app.name}/2", {"state": "restarting"}
+        )
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    trial.patch.assert_not_called()
+    assert trial.charm.state.application_upgrade.resume_request is not None
+
+
+def test_forced_resume_only_approves_one_step(paused_upgrade, harness):
+    trial = paused_upgrade
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            trial.relation.id, f"{trial.charm.app.name}/2", {"state": "restarting"}
+        )
+    harness.run_action("resume-upgrade", {"force": True})
+    trial.patch.assert_not_called()
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    trial.patch.assert_called_once_with(1)
+    assert trial.partition[0] == 1
+
+
+def test_resume_request_waits_for_leader_and_survives_leadership_change(paused_upgrade, harness):
+    trial = paused_upgrade
+    harness.run_action("resume-upgrade")
+    saved = harness.get_relation_data(trial.relation.id, trial.charm.app.name)["resume-request"]
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+    trial.patch.assert_not_called()
+    assert (
+        harness.get_relation_data(trial.relation.id, trial.charm.app.name)["resume-request"]
+        == saved
+    )
+
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    assert trial.partition[0] == 1
+    assert "resume-request" not in harness.get_relation_data(
+        trial.relation.id, trial.charm.app.name
+    )
+
+
+def test_refresh_during_resume_validation_cannot_approve_the_new_revision(
+    paused_upgrade, harness, mocker
+):
+    trial = paused_upgrade
+
+    def refresh_during_validation(**kwargs):
+        trial.revision.return_value = "later-refresh"
+        return 1
+
+    mocker.patch.object(
+        trial.charm.upgrades_manager, "get_resume_partition", side_effect=refresh_during_validation
+    )
+    harness.run_action("resume-upgrade")
+    assert trial.charm.state.application_upgrade.resume_request.revision == "new"
+
+    trial.charm.upgrade_events._reconcile_upgrade(during_upgrade=True)
+
+    trial.patch.assert_not_called()
+    assert trial.charm.state.application_upgrade.resume_request is None
+
+
+def test_accepted_resume_does_not_keep_asking_for_the_action(paused_upgrade, harness):
+    trial = paused_upgrade
+    assert trial.charm.upgrades_manager.app_status.status == "blocked"
+
+    harness.run_action("resume-upgrade")
+
+    assert trial.charm.upgrades_manager.app_status.status == "waiting"
+    assert "requested" in trial.charm.upgrades_manager.app_status.message.lower()
+
+
+@pytest.mark.parametrize("health", [HealthColors.RED, HealthColors.YELLOW])
+def test_pending_resume_does_not_hide_cluster_health_failure(
+    paused_upgrade, harness, mocker, health
+):
+    charm = paused_upgrade.charm
+    harness.run_action("resume-upgrade")
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "current_versions",
+        new_callable=PropertyMock,
+        return_value=UpgradeVersions(charm="1", workload="2.19.6"),
+    )
+    charm.health_manager.get.return_value = health
+    charm.status_handler.components = (charm.upgrades_manager, charm.health_manager)
+    event = mocker.Mock()
+
+    charm.status_handler._on_collect_app_status(event)
+
+    status = event.add_status.call_args.args[0]
+    assert status.name == "blocked"
+    assert "unassigned" in status.message.lower()
+
+
+def test_forced_resume_progresses_when_leader_workload_is_down(paused_upgrade, harness, mocker):
+    trial = paused_upgrade
+    trial.charm.status_handler.components = ()
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    harness.run_action("resume-upgrade", {"force": True})
+
+    trial.charm.on.update_status.emit()
+
+    assert trial.partition[0] == 1
+    assert trial.charm.state.application_upgrade.resume_request is None
+
+
+def test_pending_resume_does_not_prevent_local_upgrade_recovery(paused_upgrade, harness, mocker):
+    trial = paused_upgrade
+    harness.run_action("resume-upgrade")
+    # This unit has rejoined, but normal start still needs to mark it HEALTHY.
+    with harness.hooks_disabled():
+        trial.charm.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
+
+    trial.charm.upgrade_events._reconcile_upgrade()
+
+    assert trial.charm.state.server_upgrade.unit_state == UnitUpgradesState.HEALTHY
+    assert trial.partition[0] == 1
 
 
 def test_ready_state_survives_failed_partition_reconciliation(recovering_upgrade, harness, mocker):
