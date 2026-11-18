@@ -32,6 +32,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchStopError,
 )
 from opensearch_single_kernel.common.pebble_observer import PebbleObserver
@@ -224,9 +225,14 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             logger.debug("Unit is going away. Keeping the security config.")
             return
 
-        if self.upgrades_manager.in_progress or not (
-            self.config_manager.reconcile_security_config(force)
-        ):
+        try:
+            upgrade_in_progress = self.upgrades_manager.in_progress
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+            event.defer()
+            return
+
+        if upgrade_in_progress or not self.config_manager.reconcile_security_config(force):
             logger.debug("Security config not reconciled. Deferring event.")
             event.defer()
 

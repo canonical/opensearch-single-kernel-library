@@ -616,6 +616,11 @@ class JwtStatuses(Enum):
 class UpgradesStatuses(Enum):
     """Collection of charm statuses related to upgrades manager."""
 
+    K8S_API_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="Cannot check Kubernetes upgrade state.",
+        check="Kubernetes API access for upgrade coordination.",
+    )
     UPGRADES_ACTIVE = StatusObject(
         status="active",
         message=(

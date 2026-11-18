@@ -54,6 +54,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchLockError,
     OpenSearchMissingError,
     OpenSearchNoClusterManagersError,
@@ -137,21 +138,27 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
         self.framework.observe(self.charm.on.pebble_can_connect, self._on_pebble_can_connect)
 
-    def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
+    def _on_peer_relation_created(self, _: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Adding units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Adding units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
 
-    def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
+    def _on_peer_relation_joined(self, _: RelationJoinedEvent) -> None:
         """Event received by all units when a new node joins the cluster."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Adding units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Adding units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
@@ -161,7 +168,12 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.substrate == Substrates.K8S:
-            self.charm.upgrade_events._reconcile_upgrade()
+            try:
+                self.charm.upgrade_events._reconcile_upgrade()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                event.defer()
+                return
 
         # Peer TLS readiness must reach consumers even while cluster health is pending.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
@@ -199,8 +211,13 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
 
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
             event.defer()
             return
 
@@ -245,14 +262,19 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Removing units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Removing units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state before unit removal: %s", e)
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # that happens in the very last stages of the application removal
             return
+
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
@@ -295,10 +317,13 @@ class OpenSearchEventsHandler(Object):
         self, event: StorageDetachingEvent
     ) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Removing units during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Removing units during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state before unit removal: %s", e)
 
         planned_units = self.charm.app.planned_units()
 
@@ -408,7 +433,12 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.substrate == Substrates.K8S:
-            self.charm.upgrade_events._reconcile_upgrade()
+            try:
+                self.charm.upgrade_events._reconcile_upgrade()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                event.defer()
+                return
 
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
@@ -439,7 +469,14 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
 
-        if self.charm.upgrades_manager.in_progress:
+        try:
+            upgrade_in_progress = self.charm.upgrades_manager.in_progress
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+            event.defer()
+            return
+
+        if upgrade_in_progress:
             logger.debug(
                 "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
             )
@@ -497,22 +534,31 @@ class OpenSearchEventsHandler(Object):
         )
         self.charm.workload.install()
 
-    def _on_stop(self, event: StopEvent) -> None:
+    def _on_stop(self, _: StopEvent) -> None:
         """Event handler for stop event."""
-        if (
-            self.charm.substrate == Substrates.K8S
-            and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
-            and self.charm.upgrades_manager.in_progress
-        ):
-            self.charm.upgrades_manager.prepare_for_shutdown()
-        self.charm.pebble_observer.stop()
+        try:
+            if (
+                self.charm.substrate == Substrates.K8S
+                and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
+                and self.charm.upgrades_manager.in_progress
+            ):
+                self.charm.upgrades_manager.prepare_for_shutdown()
+        except OpenSearchK8sError as e:
+            logger.error("Cannot prepare Kubernetes upgrade shutdown: %s", e)
+        finally:
+            self.charm.pebble_observer.stop()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+                )
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
             event.defer()
             return
 
@@ -688,8 +734,13 @@ class OpenSearchEventsHandler(Object):
         ):
             self.charm.pebble_observer.start()
 
-        if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
-            logger.debug("Rollback in progress, deferring start event.")
+        try:
+            if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+                logger.debug("Rollback in progress, deferring start event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state: %s", e)
             event.defer()
             return
 
@@ -701,7 +752,12 @@ class OpenSearchEventsHandler(Object):
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             self.cleanup_start_state()
             if self.charm.substrate == Substrates.K8S:
-                self.charm.upgrade_events._reconcile_upgrade()
+                try:
+                    self.charm.upgrade_events._reconcile_upgrade()
+                except OpenSearchK8sError as e:
+                    logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                    event.defer()
+                    return
             return
 
         # VM-specific: Handle host reboot scenario where service should be up but isn't
@@ -867,13 +923,19 @@ class OpenSearchEventsHandler(Object):
 
         # This will block unit to start if it is an upgrade
         # until the user unblock with `force-refresh-start`
-        if (
-            not event.after_upgrade
-            and self.charm.substrate == Substrates.K8S
-            and self.charm.upgrades_manager.is_rollback
-        ):
+        try:
+            if (
+                not event.after_upgrade
+                and self.charm.substrate == Substrates.K8S
+                and self.charm.upgrades_manager.is_rollback
+            ):
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state: %s", e)
             event.defer()
             return
+
         if self.charm.state.is_peer_cluster_consumer() and self.charm.unit.is_leader():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
@@ -931,6 +993,9 @@ class OpenSearchEventsHandler(Object):
                     "unit",
                     self.charm.cluster_manager.name,
                 )
+                event.defer()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state after startup: %s", e)
                 event.defer()
 
             if (
@@ -1065,6 +1130,9 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             event.defer()
             return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot reconcile Kubernetes upgrade state after startup: %s", e)
+            event.defer()
 
         # In large deployments with cluster-manager-only-nodes, the startup might fail
         # for the cluster-manager if a joining data node did not yet initialize the
@@ -1594,7 +1662,10 @@ class OpenSearchEventsHandler(Object):
     def _handle_change_to_main_orchestrator_if_needed(
         self, event: ConfigChangedEvent, previous_deployment_desc: DeploymentDescription | None
     ) -> None:
-        """Handle when the user changes the roles or init_hold config from True to False."""
+        """Set up the admin user and certificate when this app becomes the main orchestrator.
+
+        The config-changed handler checks upgrade state before applying roles or init_hold changes.
+        """
         # if the current cluster wasn't already a "main-Orchestrator" and we're now updating
         # the roles for it to become one. We need to: create the admin user if missing, and
         # generate the admin certificate if missing and the TLS relation is established.
@@ -1606,14 +1677,6 @@ class OpenSearchEventsHandler(Object):
         )
 
         if not cluster_changed_to_main_cm:
-            return
-
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Changing config during an upgrade is not supported. The charm may be in a broken"
-                " ,unrecoverable state"
-            )
-            event.defer()
             return
 
         # we check if we need to create the admin user

@@ -12,20 +12,21 @@ from typing import Any
 
 import ops
 from data_platform_helpers.advanced_statuses import StatusObject
-from lightkube.core.exceptions import ApiError
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchK8sDeployedWithoutTrustError,
+    OpenSearchK8sError,
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.core.models import UnitUpgradesState
-from opensearch_single_kernel.core.state import ClusterState, UpgradeServerState
+from opensearch_single_kernel.core.state import UpgradeServerState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
-from opensearch_single_kernel.workload.base import BaseWorkload
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +35,6 @@ FORCE_ACTION_NAME = "force-upgrade"
 
 class UpgradesManagerK8s(UpgradesManagerBase):
     """In-place upgrades on kubernetes"""
-
-    def __init__(
-        self,
-        state: ClusterState,
-        workload: BaseWorkload,
-    ) -> None:
-        super().__init__(state, workload)
-        try:
-            self.k8s_client.get_partition()
-        except ApiError as err:
-            if err.status.code == 403:
-                raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.state.application.name)
-            raise
 
     @property
     def partition(self) -> int:
@@ -283,3 +271,28 @@ class UpgradesManagerK8s(UpgradesManagerBase):
     def _app_workload_container_version(self) -> str:
         """App's Kubernetes controller revision hash"""
         return self.k8s_client.get_revision()
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Return upgrade statuses, or explain why Kubernetes could not be checked.
+
+        Check trust before reading upgrade state. Report missing trust as blocked and other
+        API failures as waiting. Each call checks again, so the failure status clears when
+        access is restored.
+        """
+        if self.state.planned_units == 0:
+            return super().get_statuses(scope, recompute)
+
+        try:
+            self.k8s_client.check_if_deployed_without_trust()
+            return super().get_statuses(scope, recompute)
+        except OpenSearchK8sDeployedWithoutTrustError as e:
+            status = format_status(
+                UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
+                {"charm_app": e.app_name},
+            )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check Kubernetes upgrade status: %s", e)
+            status = UpgradesStatuses.K8S_API_UNAVAILABLE.value
+        return [*running_statuses(self.state.statuses, scope, self.name), status]

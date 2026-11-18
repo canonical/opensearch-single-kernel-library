@@ -48,9 +48,9 @@ def cached_non_running_statuses(
 
 
 def format_status(status: StatusObject, params: dict[str, Any] | None) -> StatusObject:
-    """Get the copy of the status object with the message formatted to params.
+    """Copy the status with parameters applied to its message and action guidance.
 
-    If params are empty, returns original status.
+    Return the original status when params is None.
     """
     if params is None:
         return status
@@ -64,7 +64,7 @@ def format_status(status: StatusObject, params: dict[str, Any] | None) -> Status
         message=status.message.format_map(SafeDict(params)),
         short_message=status.short_message,
         check=status.check,
-        action=status.action,
+        action=status.action.format_map(SafeDict(params)) if status.action is not None else None,
         running=status.running,
         approved_critical_component=status.approved_critical_component,
     )

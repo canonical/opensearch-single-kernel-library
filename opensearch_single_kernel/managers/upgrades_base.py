@@ -27,7 +27,6 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
-    OpenSearchK8sDeployedWithoutTrustError,
     OpenSearchUpgradePrecheckError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
@@ -145,15 +144,6 @@ class UpgradesManagerBase(BaseManager):
     @property
     def app_status(self) -> StatusObject | None:
         """App upgrade status"""
-        if self.state.substrate == Substrates.K8S:
-            try:
-                self.k8s_client.check_if_deployed_without_trust()
-            except OpenSearchK8sDeployedWithoutTrustError as e:
-                return format_status(
-                    UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
-                    {"charm_app": e.app_name},
-                )
-
         if not self.in_progress:
             return None
 
