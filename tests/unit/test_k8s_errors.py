@@ -440,6 +440,31 @@ def test_relation_and_start_flows_defer_when_upgrade_state_is_unknown(
     event.defer.assert_called_once_with()
 
 
+def test_force_refresh_start_reports_request_when_startup_is_deferred(harness, mocker, substrate):
+    if substrate != "k8s":
+        pytest.skip("Kubernetes startup")
+    charm = harness.charm
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=True
+    )
+    mocker.patch.object(charm.upgrades_manager, "override_version")
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(
+        charm.opensearch_events,
+        "_post_start_init",
+        side_effect=exceptions.OpenSearchK8sError("Cannot read Kubernetes revisions"),
+    )
+    result = harness.run_action("force-refresh-start", {"check-compatibility": False})
+    assert "Requested startup" in result.results["result"]
+    assert "forcefully upgraded" not in result.results["result"]
+
+
 def test_restart_waits_for_kubernetes_before_stopping_and_recovers(
     harness, mocker, substrate, patch_deployment_desc
 ):
@@ -496,6 +521,41 @@ def test_restart_defers_before_stopping_during_rollback(
     stop.assert_not_called()
     start.assert_not_called()
     event.defer.assert_called_once_with()
+
+
+def test_deferred_start_resumes_when_kubernetes_recovers(harness, mocker, substrate):
+    """A failed rollback check must leave startup queued for a later event."""
+    if substrate != "k8s":
+        pytest.skip("Kubernetes startup")
+    charm = harness.charm
+    mocker.patch.object(charm, "is_unit_going_away", return_value=False)
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "is_rollback",
+        new_callable=PropertyMock,
+        side_effect=[exceptions.OpenSearchK8sError("Cannot read Kubernetes revisions"), False],
+    )
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    post_start = mocker.patch.object(charm.opensearch_events, "_post_start_init")
+
+    charm.start_opensearch_event.emit(ignore_lock=True, after_upgrade=False)
+    post_start.assert_not_called()
+
+    harness.framework.reemit()
+
+    post_start.assert_called_once()
+    event = post_start.call_args.args[0]
+    assert event.ignore_lock is True
+    assert event.after_upgrade is False
+
+    harness.framework.reemit()
+    post_start.assert_called_once()
 
 
 def test_removal_continues_past_optional_upgrade_check(

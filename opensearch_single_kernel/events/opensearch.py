@@ -545,11 +545,12 @@ class OpenSearchEventsHandler(Object):
     def _on_stop(self, _: StopEvent) -> None:
         """Event handler for stop event."""
         try:
-            if (
-                self.charm.substrate == Substrates.K8S
-                and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
-                and self.charm.upgrades_manager.in_progress
+            if self.charm.substrate == Substrates.K8S and (
+                isinstance(self.charm.upgrades_manager, UpgradesManagerK8s)
             ):
+                if self.charm.state.upgrade_relation:
+                    # The replacement must run its own health checks after starting.
+                    self.charm.state.server_upgrade.post_upgrade_health = None
                 self.charm.upgrades_manager.prepare_for_shutdown()
         except OpenSearchK8sError as e:
             logger.error("Cannot prepare Kubernetes upgrade shutdown: %s", e)
@@ -1279,7 +1280,12 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.lock_manager.release()
 
-        if event.after_upgrade:
+        # The final Kubernetes pod can take the normal start path with after_upgrade=False.
+        # Its RESTARTING state still requires allocation to be restored before waiting for green.
+        if event.after_upgrade or (
+            self.charm.substrate == Substrates.K8S
+            and self.charm.state.server_upgrade.unit_state == UnitUpgradesState.RESTARTING
+        ):
             try:
                 self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
                     alt_hosts=self.charm.cluster_manager.alt_hosts
@@ -1322,6 +1328,7 @@ class OpenSearchEventsHandler(Object):
 
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
+            self.charm.upgrades_manager.record_upgrade_health(health)
             # Cluster is considered healthy if green or yellow
             # TODO future improvement: try to narrow scope to just green or green + yellow in
             # specific cases
@@ -1362,8 +1369,12 @@ class OpenSearchEventsHandler(Object):
                     "other than primary shards on upgraded unit & not enough upgraded units available "
                     "for replica shards"
                 )
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
-            logger.debug("Set upgrade unit state to healthy")
+            if self.charm.substrate == Substrates.VM:
+                self.charm.state.server_upgrade.unit_state_revision = (
+                    self.charm.state.server_upgrade.snap_revision
+                )
+                self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+                logger.debug("Set upgrade unit state to healthy")
 
         if event.after_upgrade or self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()

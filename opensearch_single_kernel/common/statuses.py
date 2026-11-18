@@ -85,12 +85,19 @@ class HealthStatuses(Enum):
         check="Cluster health API (red).",
         action="Scale the application up so all primary shards can be assigned.",
     )
+    CLUSTER_HEALTH_RED_UPGRADE = StatusObject(
+        status="blocked",
+        message="1 or more 'primary' shards are not assigned in the cluster. Fix unhealthy units",
+        short_message="Primary shards unassigned",
+        check="Cluster health API after upgrade (red).",
+        action="Fix unhealthy units.",
+    )
     CLUSTER_HEALTH_YELLOW = StatusObject(
         status="blocked",
-        message="1 or more 'replica' shards are not assigned, please scale your application up.",
+        message="1 or more 'replica' shards are unassigned, consider scaling up your application.",
         short_message="Replica shards unassigned.",
         check="Cluster health API (yellow, permanent).",
-        action="Scale the application up so replica shards can be assigned.",
+        action="Check the shard allocation explanation to identify why replicas are unassigned.",
     )
     WAITING_FOR_BUSY_SHARDS = StatusObject(
         status="maintenance",
@@ -689,9 +696,12 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_UNHEALTHY = StatusObject(
         status="blocked",
-        message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
+        message=(
+            "Post-upgrade checks failed. Check logs. Consider rollback to the previous revision "
+            "with `juju refresh` if needed."
+        ),
         check="Unit health after upgrade.",
-        action="Rollback to previous revision with `juju refresh`.",
+        action="Check unit logs. If needed, follow the rollback procedure for the previous revision.",
         approved_critical_component=True,
     )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(

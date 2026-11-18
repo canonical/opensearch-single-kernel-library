@@ -291,6 +291,13 @@ class ClusterState(Object):
         )
 
     @property
+    def upgrade_membership_complete(self) -> bool:
+        """Whether the upgrade relation includes every planned application unit."""
+        return bool(
+            self.upgrade_relation and len(self.upgrade_relation.units) + 1 == self.planned_units
+        )
+
+    @property
     def sorted_upgrades_units(self) -> list[UpgradeServerState]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (

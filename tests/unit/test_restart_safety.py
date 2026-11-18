@@ -231,6 +231,12 @@ def test_vm_upgrade_checks_manager_survival_before_disabling_allocation(
     if substrate != "vm":
         pytest.skip("VM controls the workload stop before installing the new snap")
     charm = harness.charm
+    mocker.patch.object(
+        type(charm.state),
+        "upgrade_membership_complete",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
     mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
     mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[restart_node])
     mocker.patch.object(charm.upgrade_events, "_publish_app_upgrade_status")
@@ -259,6 +265,12 @@ def test_vm_upgrade_restores_allocation_if_final_stop_check_fails(
     charm = harness.charm
     original_state = charm.state.server_upgrade.unit_state
     other = restart_node.model_copy(update={"name": "other-0"})
+    mocker.patch.object(
+        type(charm.state),
+        "upgrade_membership_complete",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
     mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
     mocker.patch.object(
         charm.cluster_manager,
@@ -287,6 +299,40 @@ def test_vm_upgrade_restores_allocation_if_final_stop_check_fails(
     install.assert_not_called()
     assert charm.state.server_upgrade.unit_state == original_state
     release.assert_called_once()
+    event.defer.assert_called_once()
+
+
+def test_vm_upgrade_of_unreachable_node_reaches_allocation_preparation(
+    harness, mocker, restart_node, substrate
+):
+    if substrate != "vm":
+        pytest.skip("VM prepares allocation before replacing the snap")
+    charm = harness.charm
+    charm.state.application.nodes_config = {}
+    mocker.patch.object(
+        type(charm.state),
+        "upgrade_membership_complete",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    nodes = mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.upgrade_events, "_publish_app_upgrade_status")
+    mocker.patch.object(charm.lock_manager, "acquire", return_value=True)
+    allocation = mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.disable_shard_allocation",
+        side_effect=OpenSearchHttpError("Allocation request failed"),
+    )
+    event = mocker.Mock()
+
+    charm.upgrade_events._upgrade_opensearch(event)
+
+    nodes.assert_not_called()
+    allocation.assert_called_once()
+    charm.cluster_manager.stop_workload.assert_not_called()
     event.defer.assert_called_once()
 
 

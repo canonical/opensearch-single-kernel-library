@@ -81,17 +81,17 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         if not self.state.upgrade_relation:
             return (None, None)
 
-        if not self.in_progress:
-            return (None, None)
-
-        if not self.is_compatible:
-            return (UpgradesStatuses.UPGRADES_INCOMPATIBLE.value, None)
-
         if self.is_rollback:
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             else:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
+
+        if not self.in_progress:
+            return (None, None)
+
+        if not self.is_compatible:
+            return (UpgradesStatuses.UPGRADES_INCOMPATIBLE.value, None)
 
         version = self.k8s_client.list_revisions().get(self.state.server.unit.name)
         if version == self.k8s_client.get_revision():
@@ -180,24 +180,37 @@ class UpgradesManagerK8s(UpgradesManagerBase):
                 message = f"Upgrade resumed. Unit {partition} is upgrading next."
         return message
 
-    def prepare_for_shutdown(self) -> None:  # pragma: nocover
-        """Handler for the stop event.
+    def prepare_for_shutdown(self) -> None:
+        """Prepare this unit to stop and leave the OpenSearch cluster.
 
-        K8S Only, VM has nothing to do on this step.
+        K8S only. VM has nothing to do at this step.
+        During an upgrade, the partition is used to keep the other units running while
+        this unit is replaced. This method prepares the shutdown. The node stops afterward.
+
         On K8S:
-         * First: Raise partition to prevent other units from restarting if an
-         upgrade is in progress. If an upgrade is not in progress, the leader
-         unit will reset the partition to 0.
-         * Second: Sets the unit state to RESTARTING and step down from replicaset.
+         * First: If the upgrade relation exists, set the unit state to RESTARTING before
+         querying Kubernetes, so an API error caught by the stop handler does not leave
+         the replacement pod with the old pod's HEALTHY state.
+         * Second: Raise partition to prevent other units from restarting if an
+         upgrade is in progress. Pre-upgrade-check establishes this protection before
+         refresh, so a stop-time API failure does not leave the other units unprotected.
+         * Third: Disable shard allocation and flush the translog during an upgrade.
 
-        Note that with how Juju currently operates, we only have at most 30
-        seconds until SIGTERM command, so we are by no means guaranteed to have
-        stepped down before the pod is removed.
-        Upon restart, the upgrade will still resume because all hooks run the
-        `_reconcile_upgrade` handler.
+        Note that with how Juju currently operates, we have at most 30 seconds before
+        SIGTERM, so these operations are not guaranteed to finish before the pod is removed.
+        The replacement must rejoin the cluster and pass its health checks before becoming HEALTHY.
+        After restart, the start, peer-relation and update-status hooks can run
+        `_reconcile_upgrade` to check readiness and resume the upgrade.
         """
+        # Record RESTARTING before any API call. If the stop handler catches an API error,
+        # the replacement pod must still pass its own health checks before becoming HEALTHY.
+        if self.state.upgrade_relation:
+            self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
+
+        if not self.in_progress:
+            return
+
         # Raise partition to prevent other units from restarting if an upgrade is in progress.
-        # If an upgrade is not in progress, the leader unit will reset the partition to 0.
         current_unit_number = self.state.server_upgrade.unit_number
         if self.k8s_client.get_partition() < current_unit_number:
             self.k8s_client.set_partition(value=current_unit_number)
@@ -216,9 +229,6 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         except OpenSearchHttpError as e:
             logger.debug("Failed to flush before upgrade", exc_info=e)
 
-        # We update the state to set up the unit as restarting
-        self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
-
     def _determine_partition(
         self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
     ) -> int:
@@ -231,20 +241,26 @@ class UpgradesManagerK8s(UpgradesManagerBase):
          return because it means we're waiting for the resume-refresh/force-refresh event to run.
         """
         if not self.in_progress:
-            return 0
+            return self.partition
         logger.debug(f"{self.state.server_upgrade.relation_data=}")
         logger.debug(f"{action_event=}, {force=}, {self.in_progress=}")
+        workload_container_versions = self.k8s_client.list_revisions()
+        app_container_version = self.k8s_client.get_revision()
         for upgrade_order_index, server_upgrade_unit in enumerate(units):
             logger.debug(f"{upgrade_order_index=}, {server_upgrade_unit=}")
             # Note: upgrade_order_index != unit number
             state = server_upgrade_unit.unit_state
-            workload_container_versions = self.k8s_client.list_revisions()
-            app_container_version = self.k8s_client.get_revision()
             logger.debug(
                 f"{server_upgrade_unit.unit.name=}, {state=}, {workload_container_versions=}, {app_container_version=}"
             )
+            # The leader may see the new pod before receiving the old pod's RESTARTING update.
+            # Unless forced, require HEALTHY for this revision before the next unit can stop.
             if (
-                not force and state is not UnitUpgradesState.HEALTHY
+                not force
+                and (
+                    state != UnitUpgradesState.HEALTHY
+                    or server_upgrade_unit.unit_state_revision != app_container_version
+                )
             ) or workload_container_versions[
                 server_upgrade_unit.unit.name
             ] != app_container_version:

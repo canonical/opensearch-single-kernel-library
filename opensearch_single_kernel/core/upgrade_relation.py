@@ -101,6 +101,16 @@ class UpgradeServerState(RelationState):
         self.relation.data[self.unit].update({"state": value.value})
 
     @property
+    def unit_state_revision(self) -> str | None:
+        """Get the revision that last passed the unit's health checks."""
+        return self.relation.data[self.unit].get("state-revision")
+
+    @unit_state_revision.setter
+    def unit_state_revision(self, value: str) -> None:
+        """Record which revision passed the unit's health checks."""
+        self.relation.data[self.unit].update({"state-revision": value})
+
+    @property
     def snap_revision(self) -> str | None:
         """Get the revision of installed OpenSearch snap from the relation bag."""
         return self.relation.data[self.unit].get("snap_revision")

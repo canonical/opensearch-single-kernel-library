@@ -591,6 +591,61 @@ def test_post_start_waiting_survives_failure_and_clears_on_retry(harness, mocker
     assert waiting in manager.get_statuses("unit", recompute=True)
 
 
+@pytest.mark.parametrize(
+    "health",
+    [
+        HealthColors.GREEN,
+        HealthColors.YELLOW,
+        HealthColors.RED,
+        HealthColors.YELLOW_TEMP,
+        HealthColors.UNKNOWN,
+    ],
+)
+def test_startup_status_clears_before_upgrade_health_check_without_completing_upgrade(
+    harness, mocker, patch_deployment_desc, substrate, health
+):
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+    charm.state.server_upgrade.unit_state = UnitUpgradesState.UPGRADING
+    if substrate == "vm":
+        charm.state.server_upgrade.snap_revision = "193"
+        charm.state.server_upgrade.unit_state_revision = "98"
+    waiting = GeneralStatuses.WAITING_TO_START.value
+    charm.state.statuses.add(waiting, "unit", charm.cluster_manager.name)
+    for method in (
+        "wait_for_opensearch_up",
+        "assert_current_node_joined_cluster",
+        "apply_upstream_fixes",
+    ):
+        mocker.patch.object(charm.cluster_manager, method)
+    mocker.patch.object(charm.exclusions_manager, "delete_current")
+    mocker.patch.object(charm.lock_manager, "release")
+    mocker.patch.object(charm, "apply_health")
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=False)
+    mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    mocker.patch.object(charm.upgrade_events, "_reconcile_upgrade")
+    mocker.patch("opensearch_single_kernel.common.client.OpenSearchClient.enable_shard_allocation")
+
+    def final_health(**kwargs):
+        assert waiting not in charm.state.statuses.get("unit", charm.cluster_manager.name).root
+        assert charm.state.server_upgrade.unit_state == UnitUpgradesState.UPGRADING
+        if substrate == "vm":
+            assert charm.state.server_upgrade.unit_state_revision == "98"
+        return health
+
+    mocker.patch.object(charm.health_manager, "get", side_effect=final_health)
+    charm.opensearch_events._post_start_init(mocker.Mock(after_upgrade=True))
+    healthy = health in (HealthColors.GREEN, HealthColors.YELLOW)
+    completed = healthy and substrate == "vm"
+    assert charm.state.server_upgrade.unit_state == (
+        UnitUpgradesState.HEALTHY if completed else UnitUpgradesState.UPGRADING
+    )
+    if substrate == "vm":
+        assert charm.state.server_upgrade.unit_state_revision == ("193" if healthy else "98")
+    assert waiting not in charm.state.statuses.get("unit", charm.cluster_manager.name).root
+
+
 @pytest.fixture
 def reconcile_security_config(harness, mocker) -> MagicMock:
     """Leader of a main orchestrator, able to reconcile its security config."""

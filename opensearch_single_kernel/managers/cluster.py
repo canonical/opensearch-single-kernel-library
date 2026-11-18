@@ -55,6 +55,7 @@ from opensearch_single_kernel.core.models import (
     Node,
     PeerClusterConfig,
     PeerClusterRelData,
+    UnitUpgradesState,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -946,8 +947,18 @@ class ClusterManager(BaseManager):
 
     def _add_unit_statuses(self, status_list: list[StatusObject]) -> None:
         """Compute the manager's unit statuses and append them to list."""
+        # The upgrade manager reports startup while upgrade checks are pending.
+        # Avoid adding the same startup message from this manager.
+        pending_upgrade_start = (
+            self.state.application_upgrade.versions
+            and self.state.server_upgrade.unit_state
+            in (UnitUpgradesState.UPGRADING, UnitUpgradesState.RESTARTING)
+            and self.state.server_upgrade.post_upgrade_health is None
+        )
+
         if (
             self.state.peer_relation
+            and not pending_upgrade_start
             and GeneralStatuses.SERVICE_START_ERROR.value not in status_list
             and GeneralStatuses.WAITING_TO_START.value not in status_list
             and LockStatuses.REQUEST_LOCK_ON_START.value
