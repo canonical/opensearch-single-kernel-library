@@ -862,6 +862,49 @@ def test_reconciliation_records_first_and_repeated_upgrade_health_failure(
     assert charm.state.server_upgrade.unit_state == UnitUpgradesState.HEALTHY
 
 
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize("condition", ["last-pod", "incompatible", "rollback", "tls-error"])
+def test_upgrade_restores_tls_without_bypassing_startup_checks(harness, mocker, condition):
+    """Runtime files are needed even when no pod revisions remain to be replaced."""
+    charm = harness.charm
+    mocker.patch.object(charm.config_manager, "update_opensearch_config")
+    restore = mocker.patch.object(
+        charm.tls_manager,
+        "reconcile_k8s_runtime_resources",
+        side_effect=OpenSearchFileOperationError("Cannot restore chain.pem")
+        if condition == "tls-error"
+        else None,
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "in_progress",
+        new_callable=PropertyMock,
+        return_value=condition != "last-pod",
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "is_compatible",
+        new_callable=PropertyMock,
+        return_value=condition != "incompatible",
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "is_rollback",
+        new_callable=PropertyMock,
+        return_value=condition == "rollback",
+    )
+    start = mocker.patch.object(type(charm.start_opensearch_event), "emit")
+    partition = mocker.patch.object(K8sClient, "set_partition")
+    event = mocker.Mock()
+
+    charm.upgrade_events.kubernetes_upgrade(event)
+
+    restore.assert_called_once_with()
+    start.assert_not_called()
+    partition.assert_not_called()
+    assert event.defer.call_count == (condition in ("rollback", "tls-error"))
+
+
 @pytest.mark.parametrize("failure_stage", ["configuration", "tls", "post-start"])
 @pytest.mark.parametrize(
     "initial_state", [UnitUpgradesState.HEALTHY, UnitUpgradesState.RESTARTING]

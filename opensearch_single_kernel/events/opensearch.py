@@ -16,6 +16,7 @@ from ops import (
     LeaderElectedEvent,
     ModelError,
     Object,
+    PebbleReadyEvent,
     RelationChangedEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
@@ -140,6 +141,10 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
         self.framework.observe(self.charm.on.pebble_can_connect, self._on_pebble_can_connect)
+        if self.charm.substrate == Substrates.K8S:
+            self.framework.observe(
+                self.charm.on[CONTAINER_NAME].pebble_ready, self._on_pebble_ready
+            )
 
     def _on_peer_relation_created(self, _: RelationCreatedEvent) -> None:
         """Event received by the new node joining the cluster."""
@@ -520,14 +525,16 @@ class OpenSearchEventsHandler(Object):
             return
 
         # handle when/if certificates are expired
-        if certs := self.charm.tls_manager.check_certs_expiration():
-            # stop opensearch in case the Node-transport certificate expires.
-            if certs.get(CertType.UNIT_TRANSPORT):
-                try:
-                    self.charm.stop_opensearch()
-                except OpenSearchStopError:
-                    event.defer()
-                    return
+        if (certs := self.charm.tls_manager.check_certs_expiration()) is None:
+            return
+
+        # stop opensearch in case the Node-transport certificate expires.
+        if certs.get(CertType.UNIT_TRANSPORT):
+            try:
+                self.charm.stop_opensearch()
+            except OpenSearchStopError:
+                event.defer()
+                return
 
         self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
             CERTS_EXPIRATION_DATE_FORMAT
@@ -756,21 +763,28 @@ class OpenSearchEventsHandler(Object):
         self.charm.start_opensearch_event.emit(after_upgrade=after_upgrade)
         return True
 
-    def _on_start(self, event: StartEvent) -> None:
+    def _on_start(self, event: StartEvent | PebbleReadyEvent) -> None:
         """Prepare startup and retry failed Juju operations."""
         try:
             self._prepare_start(event)
         except ModelError as e:
-            logger.warning("Juju operation failed; deferring start preparation: %s", e)
+            logger.warning("Cannot prepare OpenSearch startup, deferring: %s", e)
             event.defer()
 
-    def _prepare_start(self, event: StartEvent) -> None:  # noqa: C901
-        """Event handler for start event."""
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.unit.get_container(CONTAINER_NAME).can_connect()
-        ):
-            self.charm.pebble_observer.start()
+    def _prepare_start(self, event: StartEvent | PebbleReadyEvent) -> None:  # noqa: C901
+        """Start the node, restoring runtime files when its container has restarted."""
+        if self.charm.state.substrate == Substrates.K8S:
+            if not self.charm.unit.get_container(CONTAINER_NAME).can_connect():
+                self.charm.pebble_observer.start()
+                event.defer()
+                return
+            # Restore the CA before probing nodes after a pod replacement.
+            try:
+                self.charm.tls_manager.reconcile_k8s_runtime_resources()
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot restore TLS files before starting OpenSearch: %s", e)
+                event.defer()
+                return
 
         try:
             if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
@@ -1458,6 +1472,23 @@ class OpenSearchEventsHandler(Object):
         )
         logger.debug("Restarting OpenSearch with ignore_lock=%s", ignore_lock)
         self.charm.start_opensearch_event.emit(ignore_lock=ignore_lock)
+
+    def _on_pebble_ready(self, event: PebbleReadyEvent) -> None:
+        """Recover the workload without bypassing upgrade or normal startup checks."""
+        if self.charm.is_unit_going_away(event):
+            return
+        try:
+            if self.charm.upgrades_manager.in_progress and (
+                not self.charm.state.application_upgrade.versions
+                or not self.charm.upgrades_manager.is_compatible
+            ):
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state after the container started: %s", e)
+            event.defer()
+            return
+        self._on_start(event)
 
     def _on_pebble_can_connect(self, event: PebbleCanConnectEvent) -> None:
         """Periodic pebble-can-connect trigger fired independently of update-status."""

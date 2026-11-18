@@ -728,8 +728,10 @@ class UpgradesEventsHandler(Object):
         """
         try:
             self.charm.config_manager.update_opensearch_config()
+            # The last replacement pod needs its files even when all pod revisions match.
+            self.charm.tls_manager.reconcile_k8s_runtime_resources()
         except OpenSearchFileOperationError as e:
-            logger.error("An error occurred while updating opensearch config: %s", str(e))
+            logger.error("Cannot prepare OpenSearch configuration and TLS files: %s", e)
             event.defer()
             return
 

@@ -3,6 +3,7 @@
 
 """Unit Tests for Charm related operations."""
 
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import bcrypt
@@ -14,6 +15,7 @@ from ops.pebble import APIError
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
+    CERTS_EXPIRATION_DATE_FORMAT,
     COS_USER,
     INTERNAL_USER_ENDPOINT,
     NODE_LOCK_RELATION,
@@ -41,6 +43,7 @@ from opensearch_single_kernel.common.statuses import (
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
+    Node,
     PeerClusterConfig,
     UnitUpgradesState,
 )
@@ -83,6 +86,99 @@ def test_storage_detaching_checks_health_when_exclusion_cleanup_fails(
         wait_for_green_first=True, use_localhost=False, unit=False
     )
     release.assert_called_once_with()
+
+
+@pytest.fixture
+def certificate_expiry_update_status(harness, mocker, patch_deployment_desc):
+    """Set up a running node without a TLS relation for certificate expiry tests."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.remove_relation(charm.state.tls_relation.id)
+    mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
+    client = mocker.patch.object(
+        type(charm.cluster_manager), "opensearch_client", new_callable=PropertyMock
+    ).return_value
+    client.is_node_up.return_value = True
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.config_manager, "update_seeds_config")
+    mocker.patch.object(charm.exclusions_manager, "cleanup")
+    mocker.patch.object(charm, "apply_health", return_value=HealthColors.GREEN)
+    mocker.patch.object(charm.upgrade_events, "_reconcile_upgrade")
+    mocker.patch.object(
+        type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=False
+    )
+    mocker.patch.object(charm.tls_manager, "read_stored_ca", return_value=None)
+    return charm
+
+
+@pytest.mark.parametrize(
+    "certs",
+    [None, {}, {CertType.UNIT_HTTP: "certificate"}, {CertType.UNIT_TRANSPORT: "certificate"}],
+)
+def test_update_status_records_only_completed_certificate_checks(
+    certificate_expiry_update_status, mocker, certs
+):
+    charm = certificate_expiry_update_status
+    now = datetime(2026, 11, 12, 12)
+    previous = (now - timedelta(hours=5)).strftime(CERTS_EXPIRATION_DATE_FORMAT)
+    charm.state.server.certs_exp_checked_at = previous
+    charm.tls_manager.check_certs_expiration.return_value = certs
+    clock = mocker.patch("opensearch_single_kernel.events.opensearch.datetime", wraps=datetime)
+    clock.now.return_value = now
+    stop = mocker.patch.object(charm, "stop_opensearch")
+
+    charm.opensearch_events._on_update_status(mocker.Mock())
+
+    assert charm.state.server.certs_exp_checked_at == (
+        previous if certs is None else now.strftime(CERTS_EXPIRATION_DATE_FORMAT)
+    )
+    assert stop.call_count == int(bool(certs and CertType.UNIT_TRANSPORT in certs))
+
+
+def test_update_status_retries_failed_stop_for_expiring_transport_certificate(
+    certificate_expiry_update_status, mocker
+):
+    charm = certificate_expiry_update_status
+    previous = "2026-11-10 12:00:00"
+    charm.state.server.certs_exp_checked_at = previous
+    charm.tls_manager.check_certs_expiration.return_value = {
+        CertType.UNIT_TRANSPORT: "certificate"
+    }
+    stop = mocker.patch.object(charm, "stop_opensearch", side_effect=OpenSearchStopError())
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_update_status(event)
+
+    assert charm.state.server.certs_exp_checked_at == previous
+    event.defer.assert_called_once()
+    stop.side_effect = None
+    charm.opensearch_events._on_update_status(mocker.Mock())
+    assert charm.state.server.certs_exp_checked_at != previous
+    assert stop.call_count == 2
+
+
+def test_frequent_update_status_does_not_postpone_certificate_checks(
+    certificate_expiry_update_status, mocker
+):
+    charm = certificate_expiry_update_status
+    mocker.stop(charm.tls_manager.check_certs_expiration)
+    mocker.patch.object(charm.tls_manager, "get_unit_certificates", return_value={})
+    clocks = [
+        mocker.patch(f"opensearch_single_kernel.{module}.datetime", wraps=datetime)
+        for module in ("events.opensearch", "managers.tls")
+    ]
+    start = datetime(2026, 11, 12)
+    previous = start.strftime(CERTS_EXPIRATION_DATE_FORMAT)
+    charm.state.server.certs_exp_checked_at = previous
+
+    for elapsed_hours in (1, 5, 6):
+        now = start + timedelta(hours=elapsed_hours)
+        for clock in clocks:
+            clock.now.return_value = now
+        charm.opensearch_events._on_update_status(mocker.Mock())
+        assert charm.state.server.certs_exp_checked_at == (
+            previous if elapsed_hours < 6 else now.strftime(CERTS_EXPIRATION_DATE_FORMAT)
+        )
 
 
 def test_stop_wait_failure_leaves_workload_running(harness, mocker):
@@ -456,7 +552,23 @@ def test_start_retries_bootstrap_cleanup_without_blocking_host_recovery(
     assert start.call_count == int(not node_up)
 
 
-def test_on_start(harness, mocker, substrate, mock_fs_interactions):
+@pytest.mark.parametrize("startup_event", ["start", "pebble-ready"])
+def test_on_start(harness, mocker, substrate, mock_fs_interactions, startup_event):
+    if startup_event == "pebble-ready" and substrate == "vm":
+        pytest.skip("Pebble is only used on Kubernetes")
+    mocker.patch.object(
+        type(harness.charm.upgrades_manager),
+        "in_progress",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+
+    def emit_start():
+        if startup_event == "start":
+            harness.charm.on.start.emit()
+        else:
+            harness.container_pebble_ready("opensearch")
+
     """Test on start event."""
     lock_acquire = mocker.patch("opensearch_single_kernel.managers.lock.LockManager.acquire")
     deployment_desc = mocker.patch(
@@ -516,7 +628,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     is_node_up.return_value = True
     harness.charm.state.application.is_security_index_initialised = True
     is_admin_user_initialized.reset_mock()
-    harness.charm.on.start.emit()
+    emit_start()
     all_tls_resources_stored.assert_not_called()
     is_admin_user_initialized.assert_not_called()
 
@@ -525,7 +637,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     harness.charm.state.application.update({"security_index_initialised": ""})
     all_tls_resources_stored.return_value = False
     is_admin_user_initialized.return_value = False
-    harness.charm.on.start.emit()
+    emit_start()
     update_opensearch_config.assert_not_called()
 
     mocker.patch(
@@ -533,7 +645,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     )
     # when _get_nodes fails
     get_nodes.side_effect = OpenSearchHttpError()
-    harness.charm.on.start.emit()
+    emit_start()
     update_opensearch_config.assert_not_called()
 
     get_nodes.reset_mock()
@@ -549,7 +661,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     get_nodes.side_effect = None
     can_service_start.return_value = False
     check_profile_requirements.return_value = False
-    harness.charm.on.start.emit()
+    emit_start()
     update_opensearch_config.assert_not_called()
     initialise_security_index.assert_not_called()
     get_nodes.assert_called_once()
@@ -564,7 +676,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     lock_acquire.return_value = True
     unit_allowed_to_start.return_value = True
 
-    harness.charm.on.start.emit()
+    emit_start()
 
     # peer cluster manager
     no_blocking_directives.return_value = True
@@ -574,6 +686,100 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     start.assert_called_once()
     _post_start_init.assert_called_once()
     update_opensearch_config.assert_called()
+
+
+@pytest.mark.parametrize("live_roles", [["data"], ["cluster_manager", "data"], ["data.hot"]])
+def test_returning_data_leader_uses_normal_start_with_live_data_nodes(
+    harness, mocker, patch_deployment_desc, substrate, live_roles
+):
+    """A returning data leader must not wait for first-data-node selection."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    deployment = charm.state.application.deployment_desc
+    deployment.typ = DeploymentType.OTHER
+    deployment.start = StartMode.WITH_PROVIDED_ROLES
+    deployment.config.roles = ["data"]
+    charm.state.application.is_security_index_initialised = True
+    charm.state.application.is_admin_user_initialized = True
+    charm.state.server.started = "2026-11-13T11:00:00Z"
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=False
+    )
+    mocker.patch.object(
+        type(charm.cluster_manager), "roles", new_callable=PropertyMock, return_value=["data"]
+    )
+    mocker.patch.object(charm.workload, "is_service_started", return_value=False)
+    mocker.patch.object(charm.cluster_manager, "get_cluster_first_data_node", return_value=None)
+    mocker.patch.object(charm.state, "get_local_first_data_node", return_value=None)
+    restore_tls = mocker.patch.object(charm.tls_manager, "reconcile_k8s_runtime_resources")
+    live_nodes = [
+        Node(name="other-0", roles=live_roles, ip="10.0.0.2", app=deployment.app, unit_number=1)
+    ]
+
+    def get_nodes(use_localhost):
+        # Without the restored CA, peer probes fail even though those peers are running.
+        if substrate == "k8s" and not restore_tls.called:
+            return []
+        return live_nodes
+
+    mocker.patch.object(
+        charm.cluster_manager,
+        "get_nodes",
+        side_effect=get_nodes,
+    )
+    mocker.patch.object(charm.tls_manager, "all_tls_resources_stored", return_value=True)
+    mocker.patch.object(charm.ldap_manager, "restore_ldap_ca")
+    mocker.patch.object(charm.snapshots_events, "restore_stored_credentials")
+    mocker.patch.object(charm.notifications_events, "restore_keystore_credentials")
+    request_bootstrap = mocker.patch.object(charm.cluster_manager, "set_first_data_node")
+    start = mocker.patch.object(type(charm.start_opensearch_event), "emit")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_start(event)
+
+    request_bootstrap.assert_not_called()
+    event.defer.assert_not_called()
+    start.assert_called_once_with()
+    assert restore_tls.call_count == (substrate == "k8s")
+
+
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize("failure", [None, "container", "tls"])
+def test_start_restores_tls_before_probing(harness, mocker, patch_deployment_desc, failure):
+    """A replacement must prepare its CA before it can determine whether nodes are up."""
+    charm = harness.charm
+    harness.set_can_connect("opensearch", failure != "container")
+    mocker.patch.object(charm.pebble_observer, "start")
+    restore = mocker.patch.object(
+        charm.tls_manager,
+        "reconcile_k8s_runtime_resources",
+        side_effect=OpenSearchFileOperationError("Cannot restore chain.pem")
+        if failure == "tls"
+        else None,
+    )
+
+    def node_is_up(*args, **kwargs):
+        restore.assert_called_once_with()
+        return True
+
+    probe = mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up",
+        side_effect=node_is_up,
+    )
+    mocker.patch.object(charm.opensearch_events, "_resume_pending_start", return_value=True)
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_start(event)
+
+    if failure:
+        probe.assert_not_called()
+        event.defer.assert_called_once_with()
+    else:
+        probe.assert_called_once_with()
+        event.defer.assert_not_called()
+    if failure == "container":
+        restore.assert_not_called()
 
 
 def test_start_dropped_when_unit_removed(harness, mocker):
@@ -1266,6 +1472,45 @@ def test_start_waits_for_permission_and_lock_before_reporting_start(harness, moc
     assert not charm.state.server.start_pending
     start.assert_not_called()
     event.defer.assert_called_once()
+
+
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize(
+    "condition", ["compatible", "incompatible", "missing-versions", "api-error", "removing"]
+)
+def test_container_recovery_preserves_upgrade_and_removal_checks(harness, mocker, condition):
+    from opensearch_single_kernel.common.exceptions import OpenSearchK8sError
+
+    charm = harness.charm
+    mocker.patch.object(charm, "is_unit_going_away", return_value=condition == "removing")
+    progress = mocker.patch.object(
+        type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=True
+    )
+    if condition == "api-error":
+        progress.side_effect = OpenSearchK8sError("API unavailable")
+    mocker.patch.object(
+        type(charm.state.application_upgrade),
+        "versions",
+        new_callable=PropertyMock,
+        return_value=None if condition == "missing-versions" else mocker.Mock(),
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "is_compatible",
+        new_callable=PropertyMock,
+        return_value=condition != "incompatible",
+    )
+    start = mocker.patch.object(charm.opensearch_events, "_on_start")
+    upgrade = mocker.patch.object(charm.upgrade_events, "kubernetes_upgrade")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_pebble_ready(event)
+
+    upgrade.assert_not_called()
+    assert start.call_count == (condition == "compatible")
+    assert event.defer.call_count == (condition not in ("compatible", "removing"))
+    if condition == "removing":
+        progress.assert_not_called()
 
 
 @pytest.mark.parametrize("is_leader", [True, False], ids=["leader", "non-leader"])
