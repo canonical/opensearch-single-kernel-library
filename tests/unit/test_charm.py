@@ -1579,12 +1579,14 @@ def started_leader(harness, mocker):
 
 
 def test_repeated_leader_start_preserves_monitor_password(started_leader, monkeypatch):
-    """Startup creates the monitor once; subsequent starts must not rotate it."""
+    """Repeated startup preserves the monitor user and its stored password."""
     charm = started_leader
     live_user = {}
 
     def request(client, method, endpoint, payload=None, **kwargs):
         assert endpoint == f"{INTERNAL_USER_ENDPOINT}/monitor"
+        if method == "GET":
+            return {COS_USER: live_user.copy()}
         if method == "PUT":
             live_user.update(payload)
             return {"status": "CREATED"}
@@ -1652,7 +1654,13 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
     mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
     initialise = mocker.patch.object(charm.cluster_manager, "initialise_security_index")
-    request = mocker.patch.object(OpenSearchClient, "request")
+
+    def read_user(method, endpoint, **kwargs):
+        assert method == "GET"
+        assert endpoint == f"{INTERNAL_USER_ENDPOINT}/{COS_USER}"
+        return {COS_USER: {"hash": "existing-hash"}}
+
+    request = mocker.patch.object(OpenSearchClient, "request", side_effect=read_user)
     publish = mocker.patch.object(
         charm.peer_cluster_orchestrator_manager, "_refresh_relation_data", return_value=True
     )
@@ -1670,7 +1678,7 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     event = MagicMock(after_upgrade=False)
     charm.opensearch_events._on_start_opensearch(event)
     event.defer.assert_called()
-    request.assert_not_called()
+    assert request.call_count == (failure_stage == "peer-publication")
     initialise.assert_not_called()
     if failure_stage == "monitor":
         assert "Juju temporarily unavailable" in caplog.text
@@ -1685,7 +1693,7 @@ def test_start_retries_secret_failure_without_reinitialising_security(
     charm.opensearch_events._on_start_opensearch(event)
     event.defer.assert_not_called()
     initialise.assert_not_called()
-    request.assert_not_called()
+    assert request.call_count == 1 + (failure_stage == "peer-publication")
     assert secrets.get_secret_id(Scope.APP, key) == secret_id
     assert secrets.get(Scope.APP, key) == "existing-monitor-password"
     assert any(port.port == 9200 for port in charm.unit.opened_ports())
@@ -1701,6 +1709,7 @@ def test_post_start_publication_controls_continuation(started_leader, mocker, pu
     """A failed relation update stops CA rotation and tells the caller to stop too."""
     charm = started_leader
     charm.state.secrets.put(Scope.APP, password_key(COS_USER), "existing-password")
+    mocker.patch.object(OpenSearchClient, "get_user", return_value={COS_USER: {}})
     mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
     mocker.patch.object(
         charm.peer_cluster_orchestrator_manager,
