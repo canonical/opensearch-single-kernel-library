@@ -265,6 +265,19 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             if self.cluster_manager.opensearch_client.is_node_up():
                 try:
                     nodes = self.cluster_manager.get_nodes(True)
+                    if restart and not self.cluster_manager.can_restart_node(nodes):
+                        raise OpenSearchStopError(
+                            "Waiting for another cluster manager before restarting OpenSearch."
+                        )
+
+                    # Data and voting-only nodes cannot replace the last cluster manager.
+                    other_cms = any(
+                        node.name != self.state.unit_name
+                        and node.is_cm_eligible()
+                        and not node.is_voting_only()
+                        for node in nodes
+                    )
+
                     # do not add exclusions if it's the last unit to stop
                     # otherwise cluster manager election will be blocked when starting up again
                     # and reusing storage
@@ -272,10 +285,15 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                         # 1. Add current node to the voting + alloc exclusions
                         self.exclusions_manager.add_current(
                             scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
-                            voting=True,
+                            voting=other_cms,
                             allocation=not restart,
+                            raise_error=restart,
                         )
-                except (OpenSearchHttpError, OpenSearchExclusionsException):
+                except (OpenSearchHttpError, OpenSearchExclusionsException) as e:
+                    if restart:
+                        raise OpenSearchStopError(
+                            "Cannot confirm safe voting configuration before restarting OpenSearch."
+                        ) from e
                     logger.error(
                         "Failed to get online nodes, voting and alloc exclusions not added"
                     )

@@ -373,6 +373,22 @@ class UpgradesEventsHandler(Object):
                 return
         logger.debug("Acquired lock for upgrade")
 
+        # Leave allocation enabled if the running node cannot safely be restarted.
+        try:
+            if self.charm.cluster_manager.opensearch_client.is_node_up() and not (
+                self.charm.cluster_manager.can_restart_node(
+                    self.charm.cluster_manager.get_nodes(True)
+                )
+            ):
+                raise OpenSearchStopError(
+                    "Waiting for another cluster manager before restarting OpenSearch."
+                )
+        except (OpenSearchHttpError, OpenSearchStopError) as e:
+            logger.warning("Cannot prepare OpenSearch for upgrade: %s", e)
+            self.charm.lock_manager.release()
+            event.defer()
+            return
+
         # https://www.elastic.co/guide/en/elastic-stack/8.13/upgrading-elasticsearch.html
         try:
             self.charm.cluster_manager.opensearch_client.disable_shard_allocation()
@@ -392,6 +408,14 @@ class UpgradesEventsHandler(Object):
             self.charm.stop_opensearch(restart=True)
         except OpenSearchStopError as e:
             logger.exception(e)
+            try:
+                self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
+                    alt_hosts=self.charm.cluster_manager.alt_hosts
+                )
+            except OpenSearchHttpError:
+                logger.exception(
+                    "Failed to restore shard allocation after the upgrade stop failed"
+                )
             self.charm.lock_manager.release()
             event.defer()
             return

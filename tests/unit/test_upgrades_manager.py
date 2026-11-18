@@ -9,14 +9,17 @@ from unittest.mock import MagicMock, PropertyMock
 import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
 
+from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
     STATUS_PEERS_RELATION,
     HealthColors,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHAError,
     OpenSearchStartError,
     OpenSearchStartTimeoutError,
+    OpenSearchStopError,
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
@@ -345,6 +348,42 @@ def test_initial_start_status_clears_without_hiding_later_failure(upgrade_status
     )
 
 
+@pytest.mark.parametrize("stop_fails", [False, True])
+def test_stopping_replaces_upgrade_version_before_waiting(
+    upgrade_status_managers, mocker, stop_fails
+):
+    charm = upgrade_status_managers
+    service = mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
+    reachable = mocker.patch.object(type(charm.workload), "is_reachable", return_value=True)
+    mocker.patch.object(OpenSearchClient, "is_node_up", return_value=False)
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.cluster_manager, "can_restart_node", return_value=True)
+    charm.unit.status = ActiveStatus("OpenSearch old version running")
+
+    def wait_for_shards():
+        assert charm.unit.status.name == "waiting"
+        assert charm.unit.status.message == "The OpenSearch service is stopping."
+        if stop_fails:
+            raise OpenSearchHAError("Shards are still moving")
+
+    def stop_workload():
+        service.return_value = False
+        reachable.return_value = False
+
+    mocker.patch.object(
+        charm.health_manager, "wait_for_shards_relocation", side_effect=wait_for_shards
+    )
+    mocker.patch.object(charm.cluster_manager, "stop_workload", side_effect=stop_workload)
+    if stop_fails:
+        with pytest.raises(OpenSearchStopError):
+            charm.stop_opensearch(restart=True)
+    else:
+        charm.stop_opensearch(restart=True)
+        assert charm.unit.status.name == "waiting"
+        assert "not running" in charm.unit.status.message
+    assert not charm.state.unit_operation_in_progress
+
+
 def test_reachable_unit_does_not_hide_a_failed_start(upgrade_status_managers, mocker):
     charm = upgrade_status_managers
     mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
@@ -465,6 +504,29 @@ def test_app_upgrade_resume_status(mocker, manager_class, substrate, partition, 
     )
 
     assert manager.app_status == expected.value
+
+
+def test_restart_waiting_for_lock_does_not_report_running(upgrade_status_managers, mocker):
+    charm = upgrade_status_managers
+    charm.status_handler.components += (charm.lock_manager,)
+    mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
+    mocker.patch.object(type(charm.workload), "is_reachable", return_value=True)
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    mocker.patch.object(charm.lock_manager, "acquire", return_value=False)
+    stop = mocker.patch.object(charm, "stop_opensearch")
+    charm.unit.status = ActiveStatus("Old version running")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_restart_opensearch(event)
+
+    event.defer.assert_called_once()
+    stop.assert_not_called()
+    assert charm.unit.status.message == "Requesting lock on operation: start"
+    collect = mocker.Mock()
+    charm.status_handler._on_collect_unit_status(collect)
+    assert collect.add_status.call_args.args[0].name == "waiting"
 
 
 def test_unavailable_service_is_reported_before_upgrade_versions_are_known(

@@ -511,6 +511,34 @@ class ClusterManager(BaseManager):
         logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
         self.state.application.deployment_desc = deployment_desc
 
+    def can_restart_node(self, nodes: list[Node]) -> bool:
+        """Return whether this node can restart given the available cluster managers."""
+        current = next((node for node in nodes if node.name == self.state.unit_name), None)
+        if current is None:
+            return False
+
+        if not current.is_cm_eligible() or current.is_voting_only():
+            return True
+
+        if any(
+            node.name != current.name and node.is_cm_eligible() and not node.is_voting_only()
+            for node in nodes
+        ):
+            return True
+
+        fleet = dict(self.state.application.cluster_fleet_apps)
+        if local_app := self.state.current_peer_cluster_app:
+            fleet[local_app.app.id] = local_app
+
+        return (
+            sum(
+                app.planned_units
+                for app in fleet.values()
+                if "cluster_manager" in app.roles and "voting_only" not in app.roles
+            )
+            == 1
+        )
+
     def compute_and_broadcast_updated_topology(self, current_nodes: list[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
 

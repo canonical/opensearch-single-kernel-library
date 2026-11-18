@@ -440,6 +440,64 @@ def test_relation_and_start_flows_defer_when_upgrade_state_is_unknown(
     event.defer.assert_called_once_with()
 
 
+def test_restart_waits_for_kubernetes_before_stopping_and_recovers(
+    harness, mocker, substrate, patch_deployment_desc
+):
+    """Keep the running node and lock untouched until the restart can check Kubernetes."""
+    if substrate != "k8s":
+        pytest.skip("Kubernetes restart")
+    charm = harness.charm
+    revision = mocker.patch.object(
+        K8sClient,
+        "get_revision",
+        side_effect=exceptions.OpenSearchK8sError("Cannot read Kubernetes revisions"),
+    )
+    acquire = mocker.patch.object(charm.lock_manager, "acquire", return_value=True)
+    stop = mocker.patch.object(charm, "stop_opensearch")
+    start = mocker.patch.object(charm.opensearch_events, "_on_start_opensearch")
+
+    charm.restart_opensearch_event.emit()
+
+    acquire.assert_not_called()
+    stop.assert_not_called()
+    start.assert_not_called()
+
+    revision.side_effect = None
+    revision.return_value = "revision-0"
+    harness.framework.reemit()
+
+    acquire.assert_called_once_with()
+    stop.assert_called_once_with(restart=True)
+    start.assert_called_once()
+    assert start.call_args.args[0].after_upgrade is False
+
+    harness.framework.reemit()
+    stop.assert_called_once_with(restart=True)
+
+
+def test_restart_defers_before_stopping_during_rollback(
+    harness, mocker, substrate, patch_deployment_desc
+):
+    """An ordinary restart must respect the rollback guard before stopping the node."""
+    if substrate != "k8s":
+        pytest.skip("Kubernetes rollback")
+    charm = harness.charm
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=True
+    )
+    acquire = mocker.patch.object(charm.lock_manager, "acquire", return_value=True)
+    stop = mocker.patch.object(charm, "stop_opensearch")
+    start = mocker.patch.object(charm.opensearch_events, "_on_start_opensearch")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_restart_opensearch(event)
+
+    acquire.assert_not_called()
+    stop.assert_not_called()
+    start.assert_not_called()
+    event.defer.assert_called_once_with()
+
+
 def test_removal_continues_past_optional_upgrade_check(
     unavailable_kubernetes, harness, mocker, patch_deployment_desc
 ):

@@ -1384,12 +1384,30 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
-        self.charm.status_handler.set_running_status(
-            LockStatuses.REQUEST_LOCK_ON_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.lock_manager.name,
-        )
+        if self.charm.is_unit_going_away(event):
+            logger.debug("Unit is going away. Dropping deferred restart_opensearch_event.")
+            return
+
+        # Check is_rollback before taking the lock and stopping a running node.
+        # The start flow checks it too. If the Kubernetes API is unavailable, we could
+        # otherwise stop the node and be unable to start it again until API access returns.
+        try:
+            if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+                logger.debug("Rollback in progress, deferring restart event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state before restarting OpenSearch: %s", e)
+            event.defer()
+            return
+
+        with unit_operation(self.charm.state):
+            self.charm.status_handler.set_running_status(
+                LockStatuses.REQUEST_LOCK_ON_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.lock_manager.name,
+            )
         if not self.charm.lock_manager.acquire():
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
