@@ -25,6 +25,7 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchExclusionsException,
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
@@ -46,6 +47,42 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.secrets import password_key
 from tests.unit.helpers import deployment_descriptions
+
+
+@pytest.mark.parametrize("health", [HealthColors.GREEN, HealthColors.RED])
+def test_storage_detaching_checks_health_when_exclusion_cleanup_fails(
+    harness, mocker, patch_deployment_desc, health
+):
+    charm = harness.charm
+    harness.set_planned_units(2)
+    mocker.patch.object(charm.lock_manager, "acquire", return_value=True)
+    release = mocker.patch.object(charm.lock_manager, "release")
+    mocker.patch.object(charm.cluster_manager, "flush_translog_to_disk")
+    mocker.patch.object(charm, "stop_opensearch")
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "alt_hosts",
+        new_callable=PropertyMock,
+        return_value=["10.0.0.2"],
+    )
+    mocker.patch.object(
+        type(charm.exclusions_manager),
+        "api_or_state_node",
+        new_callable=PropertyMock,
+        side_effect=OpenSearchExclusionsException("Node configuration is unavailable"),
+    )
+    apply_health = mocker.patch.object(charm, "apply_health", return_value=health)
+
+    if health == HealthColors.RED:
+        with pytest.raises(OpenSearchHAError):
+            charm.opensearch_events._on_opensearch_data_storage_detaching(mocker.Mock())
+    else:
+        charm.opensearch_events._on_opensearch_data_storage_detaching(mocker.Mock())
+
+    apply_health.assert_called_once_with(
+        wait_for_green_first=True, use_localhost=False, unit=False
+    )
+    release.assert_called_once_with()
 
 
 def test_stop_wait_failure_leaves_workload_running(harness, mocker):

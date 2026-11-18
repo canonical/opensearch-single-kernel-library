@@ -51,6 +51,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchExclusionsException,
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
@@ -389,7 +390,10 @@ class OpenSearchEventsHandler(Object):
             if self.charm.cluster_manager.alt_hosts:
                 # There is enough peers available for us to try removing the unit
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
-                self.charm.exclusions_manager.delete_current(scope)
+                try:
+                    self.charm.exclusions_manager.delete_current(scope)
+                except OpenSearchExclusionsException as e:
+                    logger.error("Failed to remove exclusions during unit removal: %s", e)
             # safeguards in case planned_units > 0
             if planned_units > 0:
                 # check cluster status

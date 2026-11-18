@@ -67,6 +67,14 @@ class PeerClusterManager(BaseManager):
         self, rel_id: int, deployment_desc: DeploymentDescription, is_provider: bool
     ) -> None:
         """Report the current app on the peer cluster rel data to be broadcast to all apps."""
+        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
+            relation_id=rel_id,
+            is_provider=is_provider,
+            remote=True,
+        )
+        if not remote_peer_cluster:
+            return
+
         current_app = PeerClusterApp(
             app=deployment_desc.app,
             planned_units=self.state.planned_units,
@@ -85,11 +93,6 @@ class PeerClusterManager(BaseManager):
         local_peer_cluster.update({"app": current_app.to_str()})
 
         # update content of fleet in the current app's peer databag
-        remote_peer_cluster = self.state.peer_cluster_by_relation_id(
-            relation_id=rel_id,
-            is_provider=is_provider,
-            remote=True,
-        )
         related_cluster_fleet_apps = remote_peer_cluster.cluster_fleet_apps
         related_cluster_fleet_apps.update({deployment_desc.app.id: current_app})
 
@@ -338,7 +341,9 @@ class PeerClusterManager(BaseManager):
                 is_provider=False,
                 remote=True,
             )
-            if not (data := remote_peer_cluster.data()):  # not ready yet
+            if not remote_peer_cluster or not (
+                data := remote_peer_cluster.data()
+            ):  # not ready yet
                 continue
 
             cm_nodes = {**cm_nodes, **{node.name: node for node in data.cm_nodes}}

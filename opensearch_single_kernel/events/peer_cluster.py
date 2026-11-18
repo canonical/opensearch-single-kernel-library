@@ -235,6 +235,10 @@ class PeerClusterEventsHandler(Object):
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
+        if not self.charm.state.peer_relation:
+            logger.debug("Peer relation unavailable. Skipping fleet update.")
+            return
+
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             # if this unit is the one departing, dont update fleet apps
             # otherwise, update fleet apps after service restarts and event is re-emitted

@@ -37,7 +37,7 @@ def health_manager(mocker):
     state.node_host = "localhost"
     state.peer_unit_hosts = set()
     state.application.nodes_config = {}
-    state.get_rel_data_from_main_orchestrator.return_value = None
+    state.get_cm_nodes_from_main_orchestrator.return_value = []
     return HealthManager(state, workload)
 
 
@@ -51,7 +51,7 @@ def cluster_health_manager(mocker):
     state.node_host = "node0"
     state.peer_unit_hosts = {"node0", "node1"}
     state.application.nodes_config = {}
-    state.get_rel_data_from_main_orchestrator.return_value = None
+    state.get_cm_nodes_from_main_orchestrator.return_value = []
     state.application.admin_password = "password"
     mocker.patch("random.shuffle", side_effect=lambda hosts: hosts.sort())
     mocker.patch("time.sleep")
@@ -66,9 +66,10 @@ def test_health_checks_alternative_hosts_only_once(cluster_health_manager):
         "node2": SimpleNamespace(ip="node2"),
         "node3": SimpleNamespace(ip="node3"),
     }
-    manager.state.get_rel_data_from_main_orchestrator.return_value = SimpleNamespace(
-        cm_nodes=[SimpleNamespace(ip="node3"), SimpleNamespace(ip="node4")]
-    )
+    manager.state.get_cm_nodes_from_main_orchestrator.return_value = [
+        SimpleNamespace(ip="node3"),
+        SimpleNamespace(ip="node4"),
+    ]
     with responses.RequestsMock(assert_all_requests_are_fired=False) as http:
         for i in range(5):
             http.get(f"https://node{i}:9200/", json={})

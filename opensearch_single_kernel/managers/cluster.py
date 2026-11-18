@@ -744,7 +744,9 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        del self.state.server.started
+        # The peer relation may already be gone during storage removal.
+        if self.state.peer_relation:
+            del self.state.server.started
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -852,6 +854,10 @@ class ClusterManager(BaseManager):
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
+
+        if not remote_peer_cluster:
+            return None
+
         peer_cluster_data = remote_peer_cluster.data()
 
         if not peer_cluster_data:

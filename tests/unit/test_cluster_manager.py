@@ -61,6 +61,29 @@ p_units = [
 ]
 
 
+@pytest.mark.parametrize("peer_relation_present", [True, False])
+def test_stop_workload_clears_started_with_or_without_peer_relation(
+    harness, mocker, peer_relation_present
+):
+    """Stopping still finishes if the peer relation is gone during storage removal."""
+    charm = harness.charm
+    charm.state.server.started = "2026-11-13T11:00:00Z"
+    if not peer_relation_present:
+        with harness.hooks_disabled():
+            harness.remove_relation(charm.state.peer_relation.id)
+
+    stop = mocker.patch.object(charm.cluster_manager.workload, "stop")
+    mocker.patch.object(charm.cluster_manager, "is_started", return_value=False)
+
+    charm.cluster_manager.stop_workload()
+
+    stop.assert_called_once_with()
+    if peer_relation_present:
+        assert charm.state.server.started == ""
+    else:
+        assert charm.state.peer_relation is None
+
+
 def test_can_start(harness, mocker):
     """Test the can_start logic."""
     mocker.patch(

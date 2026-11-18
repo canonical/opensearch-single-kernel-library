@@ -1882,3 +1882,28 @@ def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
     )
 
     assert harness.charm.state.storage_type == expected
+
+
+@pytest.mark.parametrize("failure_stage", ["configuration", "credentials"])
+def test_peer_snapshot_secret_failure_preserves_credentials_and_retries(
+    peer_snapshot_cleanup, mocker, failure_stage
+):
+    from ops import ModelError
+
+    charm = peer_snapshot_cleanup
+    read = charm.snapshots_manager.read_snapshots_data_from_peer_cluster
+    credentials = mocker.patch.object(charm.snapshots_events, "_credentials_from_peer_cluster")
+    read.return_value = ({"access_key": "test"}, [ObjectStorageType.AZURE])
+    failing_read = read if failure_stage == "configuration" else credentials
+    failing_read.side_effect = ModelError("Kubernetes secret request timed out")
+    cleanup = mocker.patch.object(charm.keystore_manager, "cleanup_storage_credentials")
+    update = mocker.patch.object(charm.snapshots_events, "update_stored_credentials")
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    event.defer.assert_called_once_with()
+    cleanup.assert_not_called()
+    update.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+    charm.reload_keystore_event.emit.assert_not_called()
