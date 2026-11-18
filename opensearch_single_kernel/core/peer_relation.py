@@ -269,6 +269,21 @@ class OpenSearchServer(RelationState):
         self.update({"last_host_ip": value})
 
     @property
+    def snapshots_credentials_saved(self) -> str:
+        """Get the hash of the object storage relation data applied to the unit keystore."""
+        return self.relation_data.get("snapshots_credentials_saved", "")
+
+    @snapshots_credentials_saved.setter
+    def snapshots_credentials_saved(self, value: str) -> None:
+        """Set the hash of the object storage relation data applied to the unit keystore."""
+        self.update({"snapshots_credentials_saved": value})
+
+    @snapshots_credentials_saved.deleter
+    def snapshots_credentials_saved(self) -> None:
+        """Remove the hash of the object storage relation data applied to the unit keystore."""
+        self.relation.data[self.unit].pop("snapshots_credentials_saved", None)
+
+    @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
         """Returns configuration information for plugins this unit is managing"""
         plugin_config_info = self.get_object("plugin_config_info") or {}

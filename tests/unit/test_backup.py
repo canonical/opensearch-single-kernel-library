@@ -19,6 +19,7 @@ from ops import testing
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
+    S3_RELATION,
     DeploymentType,
     HealthColors,
     ObjectStorageType,
@@ -30,9 +31,12 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.core.models import PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
+from opensearch_single_kernel.utils.helpers import hash_credentials
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+S3_INFO = {"access-key": "a", "secret-key": "s", "bucket": "b"}
 
 
 @pytest.fixture
@@ -60,9 +64,12 @@ def peer_snapshot_cleanup(harness, mocker):
 def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
     charm = peer_snapshot_cleanup
     charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    charm.state.server.snapshots_credentials_saved = "saved"
     event = Mock()
 
     charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    assert charm.state.server.snapshots_credentials_saved == ""
 
     charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
     charm.reload_keystore_event.emit.assert_not_called()
@@ -1863,3 +1870,44 @@ def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
     )
 
     assert harness.charm.state.storage_type == expected
+
+
+@pytest.mark.parametrize(
+    "current_type, related, saved, synced",
+    [
+        (DeploymentType.MAIN_ORCHESTRATOR, True, "", True),
+        (DeploymentType.MAIN_ORCHESTRATOR, True, "stale", True),
+        (DeploymentType.MAIN_ORCHESTRATOR, True, hash_credentials(S3_INFO), False),
+        (DeploymentType.MAIN_ORCHESTRATOR, False, "", False),
+        (DeploymentType.FAILOVER_ORCHESTRATOR, True, "", False),
+    ],
+    ids=["not-saved", "other-saved", "already-saved", "no-relation", "not-main"],
+)
+def test_peer_change_syncs_relation_credentials_not_saved(
+    harness, mocker, current_type, related, saved, synced
+):
+    """Units of a main re-apply relation data they did not save, e.g. once re-promoted (#770)."""
+    charm = harness.charm
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"].model_copy(update={"typ": current_type}),
+    )
+    mocker.patch.object(charm.state, "get_rel_data_from_main_orchestrator", return_value=None)
+    mocker.patch.object(
+        charm.state, "get_storage_connection_info_from_relation", return_value=dict(S3_INFO)
+    )
+    credentials_changed = mocker.patch.object(
+        charm.snapshots_events, "_on_snapshots_credentials_changed"
+    )
+    with harness.hooks_disabled():
+        if related:
+            harness.add_relation(S3_RELATION, "s3-integrator")
+        if saved:
+            charm.state.server.snapshots_credentials_saved = saved
+
+    charm.snapshots_events.sync_relation_credentials()
+
+    assert credentials_changed.called == synced
+    if synced:
+        assert credentials_changed.call_args.args[0].relation.name == S3_RELATION

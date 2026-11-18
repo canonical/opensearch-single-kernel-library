@@ -208,6 +208,8 @@ def test_credentials_changed_sets_credentials_incorrect(mocker, harness, backend
     harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
 
     assert _cached_statuses(harness).root == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+    # Handled even if invalid: peer changes must not retry it until the relation data changes.
+    assert harness.charm.state.server.snapshots_credentials_saved
 
 
 def test_credentials_changed_clears_credentials_incorrect(mocker, harness, backend_setup):
