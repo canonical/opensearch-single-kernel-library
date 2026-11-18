@@ -175,6 +175,70 @@ def test_allocation_cleanup_removes_departed_units_and_keeps_pending_work_on_fai
     )
 
 
+@pytest.mark.parametrize("excluded", [True, False], ids=["still-excluded", "not-excluded"])
+def test_voting_cleanup_removes_own_leftover_once_started(
+    manager, client, cleanup_state, scope, nodes, excluded
+):
+    current = manager.state.unit_name
+    manager.state.server.started = "1234.0"
+    cleanup_state.voting_exclusions_to_delete = {current}
+    client.fetch_voting_exclusions_config.return_value = {current} if excluded else set()
+
+    manager.cleanup(scope, nodes)
+
+    assert client.remove_voting_exclusions.call_count == (1 if excluded else 0)
+    assert cleanup_state.voting_exclusions_to_delete == set()
+
+
+def test_allocation_cleanup_removes_own_leftover_once_started(
+    manager, client, cleanup_state, scope, nodes
+):
+    current = manager.state.unit_name
+    manager.state.server.started = "1234.0"
+    cleanup_state.allocation_exclusions_to_delete = {current}
+    client.fetch_allocation_exclusions.return_value = {current, "other-node"}
+    client.add_allocation_exclusions.return_value = True
+
+    manager.cleanup(scope, nodes)
+
+    client.add_allocation_exclusions.assert_called_once_with(
+        client.get_current_node.return_value,
+        allocations={"other-node"},
+        override=True,
+        alt_hosts=[],
+    )
+    assert cleanup_state.allocation_exclusions_to_delete == set()
+
+
+def test_started_cleanup_without_own_leftover_makes_no_requests(
+    manager, client, cleanup_state, scope, nodes
+):
+    manager.state.server.started = "1234.0"
+    cleanup_state.voting_exclusions_to_delete = set()
+    cleanup_state.allocation_exclusions_to_delete = set()
+
+    manager.cleanup(scope, nodes)
+
+    assert client.mock_calls == []
+
+
+@pytest.mark.parametrize("known", [True, False], ids=["node-not-in-cluster", "nodes-unknown"])
+def test_cleanup_keeps_own_leftover_until_its_node_is_back(
+    manager, client, cleanup_state, scope, known
+):
+    current = manager.state.unit_name
+    manager.state.server.started = "1234.0"
+    cleanup_state.voting_exclusions_to_delete = {current}
+    cleanup_state.allocation_exclusions_to_delete = {current}
+    cluster_nodes = [make_node(manager, "other-node")] if known else []
+
+    manager.cleanup(scope, cluster_nodes)
+
+    assert client.mock_calls == []
+    assert cleanup_state.voting_exclusions_to_delete == {current}
+    assert cleanup_state.allocation_exclusions_to_delete == {current}
+
+
 def test_explicit_removal_still_clears_current_units_voting_exclusion(
     manager, client, cleanup_state, scope
 ):

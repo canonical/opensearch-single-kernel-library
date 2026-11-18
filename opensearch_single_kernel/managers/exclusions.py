@@ -95,12 +95,18 @@ class NodesExclusionsManager(BaseManager):
         voting_exclusions_to_cleanup = self._units_to_cleanup(
             state.voting_exclusions_to_delete, node_names
         )
-        if voting_exclusions_to_cleanup:
-            self._delete_voting(voting_exclusions_to_cleanup, scope)
-
         allocations_to_cleanup = self._units_to_cleanup(
             state.allocation_exclusions_to_delete, node_names
         )
+        if self.state.server.started and self.state.unit_name in node_names:
+            # remove any leftover exclusions of this unit
+            if self.state.unit_name in state.voting_exclusions_to_delete:
+                voting_exclusions_to_cleanup.add(self.state.unit_name)
+            if self.state.unit_name in state.allocation_exclusions_to_delete:
+                allocations_to_cleanup.add(self.state.unit_name)
+
+        if voting_exclusions_to_cleanup:
+            self._delete_voting(voting_exclusions_to_cleanup, scope)
         if allocations_to_cleanup and self._delete_allocations(
             self.api_or_state_node, list(allocations_to_cleanup)
         ):
