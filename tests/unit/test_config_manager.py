@@ -13,6 +13,7 @@ import pytest
 from charmlibs.pathops import LocalPath
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode, State
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
@@ -69,6 +70,60 @@ def tmp_config_path(tmp_path: Path) -> LocalPath:
         shutil.copyfile(source, target)
 
     return LocalPath(str(target_path))
+
+
+@pytest.mark.real_fs
+@pytest.mark.parametrize("leader", [False, True])
+def test_bootstrap_cleanup_removes_only_initial_managers(harness, mocker, tmp_config_path, leader):
+    with harness.hooks_disabled():
+        harness.set_leader(leader)
+        charm = harness.charm
+        charm.state.server.is_bootstrap_contributor = True
+    setter = YamlConfigSetter(charm.workload)
+    setter.base_path = tmp_config_path
+    mocker.patch.object(
+        type(charm.config_manager), "yaml_setter", new_callable=PropertyMock, return_value=setter
+    )
+    setter.put(opensearch_yml, "cluster.initial_cluster_manager_nodes", ["opensearch-0"])
+    original = setter.load(opensearch_yml)
+    seeds = (tmp_config_path / seed_unicast_hosts).read_text()
+    jvm = (tmp_config_path / jvm_options).read_text()
+
+    charm.opensearch_events.cleanup_start_state()
+
+    del original["cluster.initial_cluster_manager_nodes"]
+    assert setter.load(opensearch_yml) == original
+    assert (tmp_config_path / seed_unicast_hosts).read_text() == seeds
+    assert (tmp_config_path / jvm_options).read_text() == jvm
+    assert not charm.state.server.is_bootstrap_contributor
+    assert charm.state.application.bootstrapped == leader
+
+
+@pytest.mark.real_fs
+def test_bootstrap_cleanup_write_failure_can_retry(harness, mocker, tmp_config_path):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        charm = harness.charm
+        charm.state.server.is_bootstrap_contributor = True
+    setter = YamlConfigSetter(charm.workload)
+    setter.base_path = tmp_config_path
+    mocker.patch.object(
+        type(charm.config_manager), "yaml_setter", new_callable=PropertyMock, return_value=setter
+    )
+    setter.put(opensearch_yml, "cluster.initial_cluster_manager_nodes", ["opensearch-0"])
+    remove = mocker.patch.object(
+        setter, "delete", side_effect=OpenSearchFileOperationError("Write failed")
+    )
+
+    with pytest.raises(OpenSearchFileOperationError, match="Write failed"):
+        charm.opensearch_events.cleanup_start_state()
+
+    assert charm.state.server.is_bootstrap_contributor
+    assert not charm.state.application.bootstrapped
+    mocker.stop(remove)
+    charm.opensearch_events.cleanup_start_state()
+    assert not charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" not in setter.load(opensearch_yml)
 
 
 @pytest.mark.real_fs

@@ -677,11 +677,13 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
-                # Nodes Config updated, we would need to reconfigure and restart
+                # Update the config for the new topology and restart only if it changed.
                 try:
-                    self.charm.config_manager.update_opensearch_config()
-                    logger.debug("Leader election reconfigured node roles; emitting restart.")
-                    self.charm.restart_opensearch_event.emit()
+                    if self.charm.config_manager.update_opensearch_config():
+                        logger.debug(
+                            "Leader election changed the node config. Requesting restart."
+                        )
+                        self.charm.restart_opensearch_event.emit()
                 except OpenSearchFileOperationError as e:
                     logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
@@ -784,7 +786,12 @@ class OpenSearchEventsHandler(Object):
         if self.charm.cluster_manager.opensearch_client.is_node_up():
             if self._resume_pending_start():
                 return
-            self.cleanup_start_state()
+            try:
+                self.cleanup_start_state()
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot remove bootstrap configuration: %s", e)
+                event.defer()
+                return
             if self.charm.substrate == Substrates.K8S:
                 try:
                     self.charm.upgrade_events._reconcile_upgrade()
@@ -808,16 +815,18 @@ class OpenSearchEventsHandler(Object):
                 "Start hook: snap already installed and service should be up, but it is not. Restarting it..."
             )
 
-            # We had a reboot in this node.
-            # We execute the same logic as above:
-            self.cleanup_start_state()
-
             # Now, reissue a restart: we should not have stopped in the first place
             # as "started" flag is still set to True.
             # We do not wait for the 200 return, as maybe more than one unit is coming back.
             try:
                 self.charm.workload.start_service_only()
+                # Recover the service before attempting bootstrap file cleanup.
+                self.cleanup_start_state()
                 # We're done here, we can return
+                return
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot remove bootstrap configuration after host recovery: %s", e)
+                event.defer()
                 return
             except OpenSearchStartError as e:
                 logger.warning("Machine restart detected but error at service start with: %s", e)
@@ -832,7 +841,7 @@ class OpenSearchEventsHandler(Object):
         # apply the directives computed and emitted by the peer cluster manager
         if self.charm.cluster_manager.no_blocking_directives():
             try:
-                self.charm.cluster_manager.get_nodes(False)
+                nodes = self.charm.cluster_manager.get_nodes(False)
             except OpenSearchHttpError:
                 logger.warning("No Blocking directives, but unable to get nodes. Deferring event.")
                 event.defer()
@@ -902,7 +911,7 @@ class OpenSearchEventsHandler(Object):
         # main orchestrator will choose which node to start first
         #   ->(app databag key: first_data_node on main orchestrator app)
         if (
-            self.charm.cluster_manager.should_ignore_lock(deployment_desc)
+            self.charm.cluster_manager.should_ignore_lock(deployment_desc, nodes)
             and self.charm.unit.is_leader()
         ):
             logger.debug(
@@ -1266,13 +1275,7 @@ class OpenSearchEventsHandler(Object):
         # Wait for opensearch to be online and part of the cluster
         self.charm.cluster_manager.assert_current_node_joined_cluster()
 
-        if self.charm.state.server.is_bootstrap_contributor:
-            self.charm.config_manager.update_opensearch_config()
-
-            # If the unit is leader we cleanup the application conf as well
-            self.charm.cluster_manager.update_bootstrap_state(
-                cleanup_application=self.charm.unit.is_leader()
-            )
+        self.cleanup_start_state()
 
         self.charm.exclusions_manager.delete_current(
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
@@ -1486,8 +1489,10 @@ class OpenSearchEventsHandler(Object):
         return True
 
     def cleanup_start_state(self) -> None:
-        """Clean Up Start statuses and state."""
+        """Remove bootstrap-only config before clearing the bootstrap state."""
         if self.charm.state.server.is_bootstrap_contributor:
+            self.charm.config_manager.remove_bootstrap_config()
+            # The leader also records that the application has completed bootstrapping.
             self.charm.cluster_manager.update_bootstrap_state(
                 cleanup_application=self.charm.unit.is_leader()
             )

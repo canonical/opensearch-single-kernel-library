@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import bcrypt
 import pytest
+from charmlibs.pathops import LocalPath
 from ops import LeaderElectedEvent, ModelError
 from ops.pebble import APIError
 
@@ -24,8 +25,10 @@ from opensearch_single_kernel.common.constants import (
     StartMode,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchNotFullyReadyError,
     OpenSearchStopError,
 )
@@ -40,6 +43,7 @@ from opensearch_single_kernel.core.models import (
     PeerClusterConfig,
     UnitUpgradesState,
 )
+from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.secrets import password_key
 from tests.unit.helpers import deployment_descriptions
 
@@ -225,6 +229,47 @@ def test_on_leader_elected_filesystem_access_denied(harness, mocker, caplog, ope
     assert harness.charm.state.application.get_user_password("admin") == password
 
 
+@pytest.mark.parametrize(
+    "topology_changed,config_changed", [(False, False), (True, False), (True, True)]
+)
+def test_leader_election_restarts_only_for_local_config_changes(
+    harness, mocker, patch_deployment_desc, topology_changed, config_changed
+):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        charm = harness.charm
+        charm.state.application.is_security_index_initialised = True
+    mocker.patch.object(
+        type(charm.workload), "workload_present", new_callable=PropertyMock, return_value=True
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
+    )
+    mocker.patch.object(charm, "apply_health", return_value=HealthColors.GREEN)
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(
+        charm.external_clients_manager, "update_all_external_clients_relation_endpoints"
+    )
+    mocker.patch.object(
+        charm.cluster_manager,
+        "compute_and_broadcast_updated_topology",
+        return_value=topology_changed,
+    )
+    config = mocker.patch.object(
+        charm.config_manager, "update_opensearch_config", return_value=config_changed
+    )
+    restart = mocker.patch.object(charm, "restart_opensearch_event").emit
+    security = mocker.patch.object(charm, "reconcile_security_config")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_leader_elected(event)
+
+    assert config.call_count == int(topology_changed)
+    assert restart.call_count == int(topology_changed and config_changed)
+    # The unit's config file does not tell the new leader what the previous leader applied.
+    security.assert_called_once_with(event, force=True)
+
+
 def test_on_leader_elected_index_initialised(harness, mocker):
     mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
@@ -337,6 +382,41 @@ def test_no_upgrade_validation_after_upgrade_relation_removed(harness, mocker):
     assert not charm.opensearch_events._resume_pending_start()
 
     resume.assert_not_called()
+
+
+@pytest.mark.parametrize("node_up", [False, True])
+def test_start_retries_bootstrap_cleanup_without_blocking_host_recovery(
+    harness, mocker, patch_deployment_desc, substrate, node_up
+):
+    if substrate == "k8s" and not node_up:
+        pytest.skip("Host reboot recovery is specific to VM units")
+    charm = harness.charm
+    charm.state.server.is_bootstrap_contributor = True
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=node_up
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
+    )
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "needs_start_after_host_reboot",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch.object(
+        charm.config_manager,
+        "remove_bootstrap_config",
+        side_effect=OpenSearchFileOperationError("Cannot write configuration"),
+    )
+    start = mocker.patch.object(type(charm.workload), "start_service_only")
+    event = mocker.Mock()
+
+    charm.opensearch_events._on_start(event)
+
+    event.defer.assert_called_once()
+    assert charm.state.server.is_bootstrap_contributor
+    assert start.call_count == int(not node_up)
 
 
 def test_on_start(harness, mocker, substrate, mock_fs_interactions):
@@ -1542,4 +1622,95 @@ def test_early_publication_failure_releases_lock_but_readiness_wait_retains_it(
     statuses = charm.state.statuses.get("unit", charm.cluster_manager.name).root
     assert GeneralStatuses.SECURITY_INDEX_INIT_IN_PROGRESS.value not in statuses
     assert GeneralStatuses.SERVICE_START_ERROR.value not in statuses
+    charm.opensearch_events.post_start_ca_rotation.assert_not_called()
+
+
+@pytest.mark.real_fs
+def test_bootstrap_cleanup_persists_after_later_secret_failure(
+    startup_with_peer_lock, harness, mocker, tmp_path
+):
+    """A later secret failure releases the lock without restoring bootstrap configuration."""
+    charm = startup_with_peer_lock
+    charm.state.server.is_bootstrap_contributor = True
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    setter = YamlConfigSetter(charm.workload)
+    setter.base_path = LocalPath(str(tmp_path))
+    (tmp_path / "opensearch.yml").write_text("cluster.name: cluster\n")
+    mocker.patch.object(
+        type(charm.config_manager), "yaml_setter", new_callable=PropertyMock, return_value=setter
+    )
+    setter.put("opensearch.yml", "cluster.initial_cluster_manager_nodes", [charm.state.unit_name])
+    mocker.patch.object(OpenSearchClient, "get_user", return_value={COS_USER: {}})
+    label = charm.state.secrets.label(Scope.APP, password_key(COS_USER))
+    charm.state.secrets.cached_secrets.delete(Scope.APP, label)
+    get_secret = harness.model.get_secret
+
+    def lookup(*args, **kwargs):
+        if kwargs.get("label") == label:
+            raise ModelError("Monitor secret unavailable")
+        return get_secret(*args, **kwargs)
+
+    failed = mocker.patch.object(harness.model, "get_secret", side_effect=lookup)
+    event = MagicMock(after_upgrade=False, ignore_lock=False)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    assert not charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" not in setter.load("opensearch.yml")
+    assert not charm.state.server_lock.lock_requested
+    mocker.stop(failed)
+    event.reset_mock()
+    charm.opensearch_events._on_start_opensearch(event)
+    event.defer.assert_not_called()
+    assert not charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" not in setter.load("opensearch.yml")
+
+
+@pytest.mark.parametrize("already_running", [False, True])
+def test_start_publishes_after_k8s_reconciliation_failure(
+    started_leader, mocker, substrate, already_running
+):
+    """Keep provider data current while retrying Kubernetes upgrade reconciliation."""
+    if substrate != "k8s":
+        pytest.skip("Kubernetes reconciliation is only used on Kubernetes")
+    charm = started_leader
+    charm.state.secrets.put(Scope.APP, password_key(COS_USER), "existing-password")
+    mocker.patch.object(OpenSearchClient, "get_user", return_value={COS_USER: {}})
+    mocker.patch.object(
+        type(charm.cluster_manager),
+        "is_opensearch_started",
+        new_callable=PropertyMock,
+        return_value=already_running,
+    )
+    mocker.patch.object(type(charm.workload), "is_failed", return_value=False)
+    mocker.patch.object(charm.state, "is_peer_cluster_provider", return_value=True)
+    if not already_running:
+        mocker.patch.object(
+            charm.profiles_manager, "check_profile_requirements", return_value=True
+        )
+        mocker.patch.object(charm.opensearch_events, "unit_allowed_to_start", return_value=True)
+        mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+        mocker.patch.object(charm.config_manager, "update_opensearch_config")
+        mocker.patch.object(charm.cluster_manager, "start")
+    mocker.patch.object(
+        charm.upgrade_events,
+        "_reconcile_upgrade",
+        side_effect=OpenSearchK8sError("API unavailable"),
+    )
+    mocker.patch.object(charm.config_manager, "remove_bootstrap_config")
+    publish = mocker.patch.object(
+        charm.peer_cluster_orchestrator_manager, "_refresh_relation_data", return_value=True
+    )
+    event = MagicMock(after_upgrade=False, ignore_lock=True)
+
+    charm.opensearch_events._on_start_opensearch(event)
+
+    event.defer.assert_called_once()
+    publish.assert_called_once()
     charm.opensearch_events.post_start_ca_rotation.assert_not_called()

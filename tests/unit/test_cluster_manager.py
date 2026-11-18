@@ -103,6 +103,48 @@ def test_can_start(harness, mocker):
         )
 
 
+@pytest.mark.parametrize(
+    "security_initialised,started,live_roles,ignore_lock",
+    [
+        (False, False, [], True),
+        (True, True, [], True),
+        (True, False, [], False),
+        (True, True, ["cluster_manager"], True),
+        (True, True, ["data"], False),
+        (False, False, ["data"], False),
+    ],
+)
+def test_first_data_node_bootstrap_requires_no_running_data_nodes(
+    harness, mocker, patch_deployment_desc, security_initialised, started, live_roles, ignore_lock
+):
+    """Allow bootstrap and recovery with all data nodes down, but use a live cluster's lock."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    deployment = charm.state.application.deployment_desc
+    deployment.typ = DeploymentType.OTHER
+    deployment.start = StartMode.WITH_PROVIDED_ROLES
+    deployment.config.roles = ["data"]
+    charm.state.application.is_security_index_initialised = security_initialised
+    if started:
+        charm.state.server.started = "2026-11-13T11:00:00Z"
+    mocker.patch.object(charm.workload, "is_service_started", return_value=False)
+    mocker.patch.object(charm.cluster_manager, "get_cluster_first_data_node", return_value=None)
+    nodes = []
+    if live_roles:
+        nodes.append(
+            Node(
+                name="other-0",
+                roles=live_roles,
+                ip="10.0.0.2",
+                app=deployment.app,
+                unit_number=1,
+            )
+        )
+
+    assert bool(charm.cluster_manager.should_ignore_lock(deployment, nodes)) == ignore_lock
+
+
 def test_pre_validate_roles_change(harness, mocker):
     """Test the pre_validation of roles change."""
     mocker.patch(

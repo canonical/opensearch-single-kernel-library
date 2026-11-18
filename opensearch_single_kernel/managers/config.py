@@ -88,6 +88,10 @@ class ConfigManager(BaseManager):
         # rewrite() returns whether the on-disk YAML text changed after the update.
         return self.yaml_setter.rewrite(self.CONFIG_YML, config)
 
+    def remove_bootstrap_config(self) -> None:
+        """Remove the initial manager list after bootstrap without changing other settings."""
+        self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
+
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
 

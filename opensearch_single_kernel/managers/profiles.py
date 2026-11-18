@@ -10,7 +10,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
 
-from opensearch_single_kernel.common.constants import PerformanceType
+from opensearch_single_kernel.common.constants import DeploymentType, PerformanceType
 from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
@@ -42,14 +42,32 @@ class ProfilesManager(BaseManager):
                 self.state.config.get("profile"),
             )
 
-    def get_missing_requirements(self) -> list[str]:
-        """Get the profile missing requirements."""
+    def get_missing_requirements(self, *, include_topology: bool = True) -> list[str]:
+        """Get missing requirements, optionally omitting topology from status reporting."""
         missing_requirements: list[str] = []
 
         missing_requirements.extend(self.workload.check_missing_system_requirements())
         missing_requirements.extend(self.check_memory_requirements(self.profile))
-        missing_requirements.extend(self.check_cluster_topology(self.profile))
+        if include_topology:
+            missing_requirements.extend(self.check_cluster_topology(self.profile))
         return missing_requirements
+
+    def _waiting_for_provider_fleet(self) -> bool:
+        """Whether a new related app is still waiting for its provider's first fleet data."""
+        deployment_desc = self.state.application.deployment_desc
+        if (
+            not deployment_desc
+            or deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+            or self.state.application.bootstrapped
+            or any(
+                app_id != deployment_desc.app.id
+                for app_id in self.state.application.cluster_fleet_apps
+            )
+        ):
+            return False
+        return bool(
+            self.state.peer_clusters_relations_ids(is_provider=False, must_have_units=False)
+        )
 
     def check_profile_requirements(self) -> bool:
         """Check all requirements of profile.
@@ -95,9 +113,10 @@ class ProfilesManager(BaseManager):
         """Check the cluster topology requirements."""
         cluster_fleet_apps = self.state.application.cluster_fleet_apps
         current_app = self.state.current_peer_cluster_app
-        # backwards compatibility for revisions that do not set generated roles
-        # in cluster_fleet_apps
-        if current_app and (not cluster_fleet_apps or current_app.app.id in cluster_fleet_apps):
+
+        # Use this application's current roles and planned unit count.
+        # Its fleet entry may be outdated, and older charms may omit generated roles.
+        if current_app:
             cluster_fleet_apps[current_app.app.id] = current_app
 
         logger.debug("current_cluster_fleet_apps: %s", cluster_fleet_apps)
@@ -148,7 +167,7 @@ class ProfilesManager(BaseManager):
         """Compute profile statuses from current config and local checks."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
-        if not self.state.current_peer_cluster_app:
+        if self.state.planned_units == 0 or not self.state.current_peer_cluster_app:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         if scope == "unit":
@@ -159,7 +178,11 @@ class ProfilesManager(BaseManager):
                 return status_list
 
             try:
-                if missing_requirements := self.get_missing_requirements():
+                # Until the provider's fleet is stored locally, the complete topology is unknown.
+                # Startup still checks all requirements through check_profile_requirements.
+                if missing_requirements := self.get_missing_requirements(
+                    include_topology=not self._waiting_for_provider_fleet()
+                ):
                     status_list.append(
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,

@@ -167,10 +167,10 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.status_handler = StatusHandler(
             self,
             self.upgrades_manager,
+            self.peer_cluster_manager,
             self.profiles_manager,
             self.tls_manager,
             self.health_manager,
-            self.peer_cluster_manager,
             self.cluster_manager,
             self.plugin_manager,
             self.lock_manager,

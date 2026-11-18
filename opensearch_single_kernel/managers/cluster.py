@@ -860,7 +860,9 @@ class ClusterManager(BaseManager):
         logger.debug("First data node: %s", peer_cluster_data.first_data_node)
         return peer_cluster_data.first_data_node
 
-    def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
+    def should_ignore_lock(
+        self, deployment_desc: DeploymentDescription, nodes: list[Node]
+    ) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
             self.state.server.is_app_leader
@@ -870,6 +872,8 @@ class ClusterManager(BaseManager):
                 or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
             )
             and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
+            # A returning data leader must take the lock if another data node is running.
+            and not any(node.is_data() for node in nodes)
             and (
                 not self.state.application.is_security_index_initialised
                 or (
@@ -986,6 +990,12 @@ class ClusterManager(BaseManager):
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
+        if self.state.planned_units == 0:
+            status_list.append(
+                GeneralStatuses.SERVICE_IS_STOPPING.value.model_copy(update={"running": None})
+            )
+            return None
+
         try:
             user_roles = self._user_config().roles
         except ValidationError:

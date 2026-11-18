@@ -218,12 +218,13 @@ class PeerClusterManager(BaseManager):
         self,
         orchestrators: PeerClusterOrchestrators,
         deployment_desc: DeploymentDescription,
-        peer_cluster_rel_data: PeerClusterRelData,
+        provider_deployment_desc: DeploymentDescription,
+        provider_cluster_name: str,
         event_rel_id: int | None,
+        trigger: str | None,
     ) -> PeerClusterRelErrorData | None:
         """Fetch error when relation is wrong and can only be computed on the requirer side."""
         blocked_msg = None
-        provider_deployment_desc = peer_cluster_rel_data.deployment_desc
         if deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR and (
             provider_deployment_desc.promotion_time is None
             or deployment_desc.promotion_time > provider_deployment_desc.promotion_time
@@ -237,15 +238,15 @@ class PeerClusterManager(BaseManager):
                 blocked_msg = (
                     PeerClusterErrorDataStatuses.PEER_CLUSTER_MAIN_IS_REQUIRER.value.message
                 )
-        elif event_rel_id and (
-            event_rel_id
-            not in [
-                orchestrators.main_rel_id,
-                orchestrators.failover_rel_id,
-            ]
+        elif (
+            event_rel_id is not None
+            and trigger
+            # A registered failover can announce promotion before the main departure arrives.
+            and event_rel_id not in (orchestrators.main_rel_id, orchestrators.failover_rel_id)
+            and orchestrators.check_relation_conflict(trigger, event_rel_id)
         ):
             blocked_msg = PeerClusterErrorDataStatuses.CLUSTER_CAN_ONLY_HAVE_ONE_MAIN_OR_FAILOVER.value.message
-        elif peer_cluster_rel_data.cluster_name != deployment_desc.config.cluster_name:
+        elif provider_cluster_name != deployment_desc.config.cluster_name:
             contains_inherit_directive = (
                 Directive.INHERIT_CLUSTER_NAME in deployment_desc.pending_directives
             )
@@ -256,13 +257,13 @@ class PeerClusterManager(BaseManager):
                 blocked_msg = PeerClusterErrorDataStatuses.CANNOT_RELATE_TO_CLUSTER_WITH_DIFFERENT_NAME.value.message
 
         logger.debug(
-            f"This is cluster_name from provider: {peer_cluster_rel_data.cluster_name}, "
+            f"This is cluster_name from provider: {provider_cluster_name}, "
             f"and this is cluster_name from requirer: {deployment_desc.config.cluster_name}"
         )
 
         if blocked_msg:
             return PeerClusterRelErrorData(
-                cluster_name=peer_cluster_rel_data.cluster_name,
+                cluster_name=provider_cluster_name,
                 should_sever_relation=True,
                 should_wait=False,
                 blocked_message=blocked_msg,
@@ -457,16 +458,34 @@ class PeerClusterManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute peer-cluster statuses from orchestrator and relation state."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
+        remote_peer_clusters = self.state.peer_clusters(remote=True, is_provider=False)
+        for peer_cluster in remote_peer_clusters:
+            if (error_data := peer_cluster.error_data) and (status := error_data.get_status()):
+                status_list.append(status)
 
-        if not self.state.application.deployment_desc:
+        if not (deployment_desc := self.state.application.deployment_desc):
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         if scope == "unit":
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
         orchestrators = self.state.application.orchestrators
-        # Empty dict = never related; empty ids = departed.
-        if self.state.application.orchestrators_dict:
+        has_live_main = any(
+            peer.trigger == "main" and peer.orchestrators.get("main_app")
+            for peer in remote_peer_clusters
+        )
+        waiting_for_initial_provider = any(
+            directive in deployment_desc.pending_directives
+            for directive in (Directive.VALIDATE_CLUSTER_NAME, Directive.INHERIT_CLUSTER_NAME)
+        ) and any(not peer.trigger for peer in remote_peer_clusters)
+
+        # During setup, a provider may still be installing and have no identity to publish yet.
+        # A live main may advertise itself before its identity is stored locally.
+        if (
+            self.state.application.orchestrators_dict
+            and not waiting_for_initial_provider
+            and not has_live_main
+        ):
             if (
                 not orchestrators.main_app
                 and orchestrators.failover_app
@@ -485,19 +504,17 @@ class PeerClusterManager(BaseManager):
 
             elif not orchestrators.main_app and not orchestrators.failover_app:
                 status_list.append(PeerClusterStatuses.PEER_CLUSTER_ORCHESTRATORS_REMOVED.value)
-        for peer_cluster in self.state.peer_clusters(remote=True, is_provider=False):
-            # check if there is an error
-            if error_data := peer_cluster.error_data:
-                status_list.append(error_data.get_status())
 
+        for peer_cluster in remote_peer_clusters:
             # requirer errors
-            if data := peer_cluster.data():
+            if provider_deployment_desc := peer_cluster.deployment_desc:
                 requirer_errors = self.requirer_errors(
                     orchestrators=orchestrators,
                     deployment_desc=self.state.application.deployment_desc,
-                    peer_cluster_rel_data=data,
-                    # only check if we have orchestrators in the data bag
-                    event_rel_id=peer_cluster.relation.id if orchestrators.main_app else None,
+                    provider_deployment_desc=provider_deployment_desc,
+                    provider_cluster_name=peer_cluster.cluster_name,
+                    event_rel_id=peer_cluster.relation.id,
+                    trigger=peer_cluster.trigger,
                 )
                 if requirer_errors and (status := requirer_errors.get_status()):
                     status_list.append(status)
