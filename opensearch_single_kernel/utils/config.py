@@ -384,8 +384,13 @@ class YamlConfigSetter(ConfigSetter):
             raise FileNotFoundError(f"{path} not found.")
 
         data = self.workload.read_text(path)
+        original = data
         if text_to_append not in data.splitlines():
             data = data + "\n" + text_to_append
+        if not data.endswith("\n"):
+            data += "\n"
+
+        if data != original:
             self.workload.write_text(data, path)
 
     def __dump(self, data: dict[str, Any], output_type: OutputType, target_file: str):

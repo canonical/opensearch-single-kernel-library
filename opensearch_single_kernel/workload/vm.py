@@ -201,6 +201,11 @@ class VMWorkload(BaseWorkload):
         return output.out.strip()
 
     @override
+    def get_http_publish_host(self, node_host: str, ingress_address: str) -> str:
+        """Use the public address, falling back to Juju's advertised ingress address."""
+        return self.get_host_public_ip() or ingress_address
+
+    @override
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
 
