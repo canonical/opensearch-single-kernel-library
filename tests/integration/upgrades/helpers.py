@@ -51,6 +51,9 @@ VM_VERSION_TO_REVISION = {
 K8S_VERSION_N = "2.19.6"
 K8S_VERSION_N_MINUS_1 = "2.19.5"
 K8S_VERSION_TO_REVISION = {K8S_VERSION_N_MINUS_1: {"jammy": 8, "noble": 7}}
+# Pin the image separately from the charm revision so the test starts on
+# OpenSearch 2.19.5. Image resource revision 1 contains that version.
+K8S_VERSION_TO_IMAGE_REVISION = {K8S_VERSION_N_MINUS_1: "1"}
 
 FROM_VERSION_PREFIX = "from_v{}_to_local"
 
@@ -68,7 +71,7 @@ UPGRADE_PARAMS = [
 logger = logging.getLogger(__name__)
 
 
-def testing_config_if_supported(revision: int) -> dict[str, str]:
+def get_testing_config_if_supported(revision: int) -> dict[str, str]:
     """Returns 'testing' profile config if given revision supports profiles"""
     return CONFIG_OPTS if revision >= PROFILES_REVISION else {}
 
@@ -181,7 +184,7 @@ async def assert_upgrade_to_revision(
             ops_test,
             app,
             revision=revision,
-            config=testing_config_if_supported(revision) | config,
+            config=get_testing_config_if_supported(revision) | config,
         )
 
         await wait_until(
@@ -303,17 +306,7 @@ async def assert_upgrade_to_local(
                 ):
                     raise Exception(f"Action {action_name} failed due to unhealthy cluster")
 
-                # If leader is second unit to upgrade, the task would be terminated
-                # Since unit will restart
-                second_unit = sorted(units, key=lambda u: u.id, reverse=True)[1]
-                if substrate == "k8s" and second_unit.id == leader_id:
-                    logger.info(
-                        "Unit '%s' is leader, action may be terminated due to unit restart."
-                        " Skipping status check.",
-                        second_unit,
-                    )
-                else:
-                    assert action.status == "completed"
+                assert action.status == "completed"
 
         await wait_until(
             ops_test,
@@ -383,7 +376,7 @@ async def assert_rollback_to_revision(
             ops_test,
             app,
             revision=revision,
-            config=testing_config_if_supported(revision) | config,
+            config=get_testing_config_if_supported(revision) | config,
         )
 
         logger.info("Waiting for rolled back unit to attempt restart...")

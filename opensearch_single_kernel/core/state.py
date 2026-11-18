@@ -139,6 +139,11 @@ class ClusterState(Object):
         self.secrets = OpenSearchSecrets(charm, peer_relation=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+
+        # Used to hide the running-version status while reporting an operation's progress
+        # (e.g. starting or stopping OpenSearch).
+        self.unit_operation_in_progress = False
+
         # TODO: Add secrets
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
@@ -286,6 +291,13 @@ class ClusterState(Object):
         )
 
     @property
+    def upgrade_membership_complete(self) -> bool:
+        """Whether the upgrade relation includes every planned application unit."""
+        return bool(
+            self.upgrade_relation and len(self.upgrade_relation.units) + 1 == self.planned_units
+        )
+
+    @property
     def sorted_upgrades_units(self) -> list[UpgradeServerState]:
         """Get state of upgrade relation for all units in it sorted by highest unit number."""
         return (
@@ -324,6 +336,8 @@ class ClusterState(Object):
     ) -> PeerCluster | None:
         """Return the current related peer cluster if any.
 
+        Remote data is unavailable when the relation has no remote application.
+
         Args:
             is_provider: whether the current cluster is provider or requirer in the relation.
             relation_id: the relation id of the peer cluster relation to look for.
@@ -344,6 +358,8 @@ class ClusterState(Object):
             return relation.app if remote else self.model.app
 
         if relation := self.model.get_relation(relation_name, relation_id):
+            if remote and not relation.app:
+                return None
             return PeerCluster(
                 relation=relation,
                 data_interface=data_interface,
@@ -355,7 +371,7 @@ class ClusterState(Object):
     def peer_clusters(
         self, is_provider: bool, must_have_units: bool = True, remote: bool = False
     ) -> list[PeerCluster]:
-        """Return the list of peer clusters for each relations."""
+        """Return peer clusters, skipping missing remote apps when remote=True."""
         relation_name = (
             PEER_CLUSTER_ORCHESTRATOR_RELATION if is_provider else PEER_CLUSTER_RELATION
         )
@@ -377,7 +393,7 @@ class ClusterState(Object):
                 secrets=self.secrets,
             )
             for rel in self.model.relations[relation_name]
-            if not must_have_units or len(rel.units) > 0
+            if (not must_have_units or len(rel.units) > 0) and (not remote or rel.app)
         ]
 
     def _peer_clusters_servers(
@@ -1140,6 +1156,18 @@ class ClusterState(Object):
             data: peer cluster rel data if any.
 
         """
+        if remote_peer_cluster := self._get_main_orchestrator_peer_cluster():
+            return remote_peer_cluster.data(peek_secrets=peek_secrets)
+        return None
+
+    def get_cm_nodes_from_main_orchestrator(self) -> list[Node]:
+        """Get the main orchestrator's advertised nodes without reading credentials."""
+        if remote_peer_cluster := self._get_main_orchestrator_peer_cluster():
+            return remote_peer_cluster.cm_nodes
+        return []
+
+    def _get_main_orchestrator_peer_cluster(self) -> PeerCluster | None:
+        """Find the remote peer cluster for the main orchestrator."""
         if not self.is_peer_cluster_consumer(of="main"):
             return None
 
@@ -1168,7 +1196,7 @@ class ClusterState(Object):
             )
             return None
 
-        return remote_peer_cluster.data(peek_secrets=peek_secrets)
+        return remote_peer_cluster
 
     @property
     def storage_type(self) -> ObjectStorageType | None:  # noqa: C901

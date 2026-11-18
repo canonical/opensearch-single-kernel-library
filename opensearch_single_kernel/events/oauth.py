@@ -77,7 +77,7 @@ class OAuthEventsHandler(Object):
         ) and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
             return
 
-        if not (relation := self.charm.state.oauth_relation):
+        if not (relation := self.charm.state.oauth_relation) or not relation.app:
             return
 
         if not relation.data[relation.app]:

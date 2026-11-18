@@ -38,6 +38,12 @@ class GeneralStatuses(Enum):
         check="OpenSearch service readiness.",
         running="async",
     )
+    SERVICE_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="OpenSearch is not running or cannot be reached.",
+        short_message="OpenSearch unavailable",
+        check="OpenSearch service state and port 9200 reachability.",
+    )
     SERVICE_START_ERROR = StatusObject(
         status="blocked",
         message="An error occurred during the start of the OpenSearch service.",
@@ -65,6 +71,13 @@ class GeneralStatuses(Enum):
 class HealthStatuses(Enum):
     """Collection of charm statuses related to health manager."""
 
+    CHECKING_CLUSTER_HEALTH_BEFORE_START = StatusObject(
+        status="maintenance",
+        message="Checking cluster health before starting OpenSearch.",
+        short_message="Checking cluster health before start",
+        check="Cluster health before starting this node.",
+        running="blocking",
+    )
     CLUSTER_HEALTH_RED = StatusObject(
         status="blocked",
         message="1 or more 'primary' shards are not assigned, please scale your application up.",
@@ -72,12 +85,19 @@ class HealthStatuses(Enum):
         check="Cluster health API (red).",
         action="Scale the application up so all primary shards can be assigned.",
     )
+    CLUSTER_HEALTH_RED_UPGRADE = StatusObject(
+        status="blocked",
+        message="1 or more 'primary' shards are not assigned in the cluster. Fix unhealthy units",
+        short_message="Primary shards unassigned",
+        check="Cluster health API after upgrade (red).",
+        action="Fix unhealthy units.",
+    )
     CLUSTER_HEALTH_YELLOW = StatusObject(
         status="blocked",
-        message="1 or more 'replica' shards are not assigned, please scale your application up.",
+        message="1 or more 'replica' shards are unassigned, consider scaling up your application.",
         short_message="Replica shards unassigned.",
         check="Cluster health API (yellow, permanent).",
-        action="Scale the application up so replica shards can be assigned.",
+        action="Check the shard allocation explanation to identify why replicas are unassigned.",
     )
     WAITING_FOR_BUSY_SHARDS = StatusObject(
         status="maintenance",
@@ -142,7 +162,7 @@ class TlsStatuses(Enum):
         action="Relate a TLS certificates provider to this application.",
     )
     TLS_NOT_FULLY_CONFIGURED = StatusObject(
-        status="maintenance",
+        status="waiting",
         message="Waiting for TLS to be fully configured...",
         short_message="TLS not fully configured",
         check="TLS certificates and keystores on disk.",
@@ -616,6 +636,11 @@ class JwtStatuses(Enum):
 class UpgradesStatuses(Enum):
     """Collection of charm statuses related to upgrades manager."""
 
+    K8S_API_UNAVAILABLE = StatusObject(
+        status="waiting",
+        message="Cannot check Kubernetes upgrade state.",
+        check="Kubernetes API access for upgrade coordination.",
+    )
     UPGRADES_ACTIVE = StatusObject(
         status="active",
         message=(
@@ -655,6 +680,11 @@ class UpgradesStatuses(Enum):
         check="In-place upgrade progress.",
         approved_critical_component=True,
     )
+    UPGRADES_RESUME_REQUESTED = StatusObject(
+        status="waiting",
+        message="Upgrade resume requested.",
+        check="Pending resume-upgrade request.",
+    )
     UPGRADES_WAITING_FOR_RESUME = StatusObject(
         status="blocked",
         message="Upgrading. Verify highest unit is healthy & run `resume-upgrade` action.",
@@ -671,9 +701,12 @@ class UpgradesStatuses(Enum):
     )
     UPGRADES_UNHEALTHY = StatusObject(
         status="blocked",
-        message="Unhealthy after upgrade. Rollback to previous revision with `juju refresh`.",
+        message=(
+            "Post-upgrade checks failed. Check logs. Consider rollback to the previous revision "
+            "with `juju refresh` if needed."
+        ),
         check="Unit health after upgrade.",
-        action="Rollback to previous revision with `juju refresh`.",
+        action="Check unit logs. If needed, follow the rollback procedure for the previous revision.",
         approved_critical_component=True,
     )
     UPGRADES_PRE_UPGRADE_CHECK_FAILED = StatusObject(
