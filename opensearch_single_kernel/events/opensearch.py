@@ -227,6 +227,10 @@ class OpenSearchEventsHandler(Object):
                     event.defer()
                     return
 
+        # The cluster topology may now meet the requirements of the configured profile.
+        if self.charm.state.server.started:
+            self.charm.apply_profile_and_restart()
+
         # Refresh the seed hosts from the live cluster query, so stale ones can recover.
         if not self.charm.config_manager.update_seeds_config(nodes):
             event.defer()
@@ -1637,19 +1641,13 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchFileOperationError as e:
             logger.error("An error occurred while updating opensearch config: %s", e)
             return False
-        # The cluster topology may now meet the requirements of the configured profile.
-        profile_applied = self.charm.profiles_manager.apply_profile()
-        if changed or profile_applied:
+        if changed:
             self.charm.status_handler.set_running_status(
                 GeneralStatuses.WAITING_TO_START.value,
                 "unit",
                 statuses_state=self.charm.state.statuses,
                 component_name=self.charm.cluster_manager.name,
             )
-            logger.debug(
-                "Restarting opensearch: node roles changed=%s, profile applied=%s",
-                changed,
-                profile_applied,
-            )
+            logger.debug("Restarting opensearch due to reconfiguring node roles")
             self.charm.restart_opensearch_event.emit()
         return True

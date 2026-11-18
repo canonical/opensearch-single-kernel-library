@@ -3,6 +3,7 @@
 
 """Unit tests for profile requirement checks and profile changes on config-changed."""
 
+import logging
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
@@ -133,20 +134,43 @@ def test_topology_change_restarts_once_for_profile(
     update_jvm_heap_size,
     restart_opensearch,
     roles_changed,
+    caplog,
 ):
     """A peer relation change meeting the profile requirements restarts once, roles changed or not."""
+    charm = harness.charm
     with harness.hooks_disabled():
         harness.update_config({"profile": "production"})
-    harness.charm.state.server.profile = TestingProfile()
+        harness.set_leader(False)
+    charm.state.server.started = "True"
+    charm.state.server.profile = TestingProfile()
     production_topology_met["value"] = True
-    mocker.patch.object(
-        harness.charm.config_manager, "update_opensearch_config", return_value=roles_changed
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        return_value=deployment_descriptions["ok"],
+        new_callable=PropertyMock,
     )
+    mocker.patch.object(charm.upgrade_events, "_reconcile_upgrade")
+    mocker.patch.object(OpenSearchClient, "is_node_up", return_value=True)
+    mocker.patch.object(charm, "apply_health", return_value=HealthColors.GREEN)
+    mocker.patch.object(charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(charm.config_manager, "update_seeds_config", return_value=True)
+    mocker.patch.object(charm.exclusions_manager, "cleanup")
+    mocker.patch.object(
+        charm.config_manager, "update_opensearch_config", return_value=roles_changed
+    )
+    # the start following a restart applies the configured profile
+    restart_opensearch.side_effect = lambda _: charm.profiles_manager.apply_profile()
+    event = MagicMock()
+    event.relation.data.get.side_effect = lambda key: {"app": "data"} if key is event.app else None
 
-    assert harness.charm.opensearch_events._reconfigure_and_restart_if_needed()
+    with caplog.at_level(logging.DEBUG):
+        charm.opensearch_events._on_peer_relation_changed(event)
 
-    assert harness.charm.state.server.profile == ProductionProfile()
+    event.defer.assert_not_called()
+    assert charm.state.server.profile == ProductionProfile()
     restart_opensearch.assert_called_once()
+    assert ("due to reconfiguring node roles" in caplog.text) == roles_changed
+    assert ("due to applying the configured profile" in caplog.text) != roles_changed
 
 
 def test_first_start_applies_profile_once_requirements_met(

@@ -242,6 +242,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             self.profiles_manager.apply_profile()
             and self.cluster_manager.workload.is_service_started()
         ):
+            logger.debug("Restarting opensearch due to applying the configured profile")
             self.restart_opensearch_event.emit()
 
     def is_unit_going_away(self, event: ops.EventBase | None = None) -> bool:
