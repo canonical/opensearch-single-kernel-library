@@ -45,7 +45,7 @@ class NodesExclusionsManager(BaseManager):
         if allocation and node.is_data():
             try:
                 success = self.opensearch_client.add_allocation_exclusions(
-                    node=node, alt_hosts=self.alt_hosts
+                    allocations={node.name}, alt_hosts=self.alt_hosts
                 )
             except OpenSearchHttpError as e:
                 logger.error(
@@ -68,24 +68,19 @@ class NodesExclusionsManager(BaseManager):
         raise_error: bool = False,
     ) -> None:
         """Delete voting and alloc exclusions."""
-        node = self.api_or_state_node
-        if voting and (node.is_cm_eligible() or node.is_voting_only()):
-            if not self._delete_voting({node.name}, scope):
-                logger.error("Failed to delete voting exclusion: %s.", node.name)
-                if raise_error:
-                    raise OpenSearchExclusionsException("Failed to delete voting exclusion.")
+        name = self.state.unit_name
+        if voting and not self._delete_voting({name}, scope):
+            logger.error("Failed to delete voting exclusion: %s.", name)
+            if raise_error:
+                raise OpenSearchExclusionsException("Failed to delete voting exclusion.")
 
-        if allocation and node.is_data():
-            if not self._delete_allocations(node):
-                logger.error("Failed to delete shard allocation exclusion: %s.", node.name)
-                # Load the content of the list, avoiding '' entries
-                state = self.state.application if scope == Scope.APP else self.state.server
-                current_allocations = state.allocation_exclusions_to_delete
-                current_allocations.add(node.name)
-                state.allocation_exclusions_to_delete = current_allocations
+        if allocation and not self._delete_allocations({name}):
+            logger.error("Failed to delete shard allocation exclusion: %s.", name)
+            state = self.state.application if scope == Scope.APP else self.state.server
+            state.allocation_exclusions_to_delete = state.allocation_exclusions_to_delete | {name}
 
-                if raise_error:
-                    raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
+            if raise_error:
+                raise OpenSearchExclusionsException("Failed to delete allocation exclusion.")
 
     def cleanup(self, scope: Scope, nodes: list[Node]) -> None:
         """Delete all exclusions that failed to be deleted."""
@@ -107,9 +102,7 @@ class NodesExclusionsManager(BaseManager):
 
         if voting_exclusions_to_cleanup:
             self._delete_voting(voting_exclusions_to_cleanup, scope)
-        if allocations_to_cleanup and self._delete_allocations(
-            self.api_or_state_node, list(allocations_to_cleanup)
-        ):
+        if allocations_to_cleanup and self._delete_allocations(allocations_to_cleanup):
             state.allocation_exclusions_to_delete = (
                 state.allocation_exclusions_to_delete - allocations_to_cleanup
             )
@@ -251,23 +244,19 @@ class NodesExclusionsManager(BaseManager):
         if pending := state.voting_exclusions_to_delete & units:
             state.voting_exclusions_to_delete = state.voting_exclusions_to_delete - pending
 
-    def _delete_allocations(self, node: Node, allocs: list[str] | None = None) -> bool:
+    def _delete_allocations(self, names: set[str]) -> bool:
         """This removes the allocation exclusions if needed.
 
         Args:
-            node: the node for which the allocation exclusion should be removed.
-            allocs: the list of allocations to remove. If None, it defaults to the node
-            name.
+            names: the unit names to remove from the allocation exclusions.
 
         Returns:
             True if the operation succeeded, False otherwise.
         """
         try:
             existing = self.opensearch_client.fetch_allocation_exclusions(alt_hosts=self.alt_hosts)
-            to_remove = set(allocs if allocs is not None else [node.name])
             res = self.opensearch_client.add_allocation_exclusions(
-                node,
-                allocations=existing - to_remove,
+                allocations=existing - names,
                 override=True,
                 alt_hosts=self.alt_hosts,
             )
