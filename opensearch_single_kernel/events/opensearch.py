@@ -372,7 +372,7 @@ class OpenSearchEventsHandler(Object):
                     )
 
                 health_color = self.charm.apply_health(
-                    wait_for_green_first=True, use_localhost=False, unit=False
+                    wait_for_green_first=True, use_localhost=False, app=False, unit=False
                 )
                 if health_color == HealthColors.RED:
                     raise OpenSearchHAError(

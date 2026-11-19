@@ -83,6 +83,31 @@ def test_drain_on_stop(harness, mocker, restart, node_up, drains):
     assert relocation.called == restart
 
 
+@pytest.mark.parametrize("leader", [True, False], ids=["leader", "non-leader"])
+def test_storage_detaching_raises_when_cluster_is_red(
+    harness, mocker, patch_deployment_desc, leader
+):
+    with harness.hooks_disabled():
+        harness.set_leader(leader)
+    harness.set_planned_units(1)
+    mocker.patch.object(harness.charm.lock_manager, "acquire", return_value=True)
+    mocker.patch.object(harness.charm.lock_manager, "release")
+    mocker.patch.object(harness.charm, "stop_opensearch")
+    mocker.patch.object(harness.charm.exclusions_manager, "delete_current")
+    mocker.patch(
+        "opensearch_single_kernel.managers.base.BaseManager.alt_hosts",
+        new_callable=PropertyMock,
+        return_value=["10.0.0.2"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.get_health",
+        return_value={"status": "red", "initializing_shards": 0, "relocating_shards": 0},
+    )
+
+    with pytest.raises(OpenSearchHAError, match="primary' shards are not assigned"):
+        harness.charm.opensearch_events._on_opensearch_data_storage_detaching(MagicMock())
+
+
 def test_on_install(harness, substrate):
     """Test the install event callback on success."""
     workload_class = "VMWorkload" if substrate == "vm" else "K8sWorkload"
