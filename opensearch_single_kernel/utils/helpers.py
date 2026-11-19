@@ -148,6 +148,22 @@ def normalized_tls_subject(subject: str) -> str:
     return subject.replace("/", ",")
 
 
+def certificate_subject_dn(cert: str) -> str | None:
+    """Get the subject DN of a certificate.
+
+    Args:
+        cert: the certificate, in PEM format.
+
+    Returns:
+        The subject DN in RFC 4514 form, or None if the certificate cannot be read.
+    """
+    try:
+        return x509.load_pem_x509_certificate(data=cert.encode()).subject.rfc4514_string()
+    except ValueError as e:
+        logger.warning("Unable to read the subject of the certificate: %s", e)
+        return None
+
+
 def cert_expiration_remaining_hours(cert: str) -> int:
     """Returns the remaining hours for the cert to expire."""
     certificate_object = x509.load_pem_x509_certificate(data=cert.encode())
