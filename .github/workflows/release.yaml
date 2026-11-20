@@ -25,6 +25,7 @@ jobs:
     permissions:
       pull-requests: write # Needed by lib-check job
       contents: write # Needed by integration-test job for Allure Report
+      actions: read # Needed by flake0 classify in ci.yaml
 
   release-part1:
     needs:

@@ -23,6 +23,8 @@ on:
         required: true
       GCP_SERVICE_ACCOUNT:
         required: true
+      OPENROUTER_API_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -160,5 +162,8 @@ jobs:
       AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
       AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     permissions:
       contents: write # Needed for Allure Report
+      pull-requests: write # the diff and the PR comment, for flake0 classify and summarize
+      actions: read # run history, for flake0 classify
