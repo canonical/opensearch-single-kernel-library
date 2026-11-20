@@ -991,14 +991,13 @@ class OpenSearchClient:
 
     def add_allocation_exclusions(
         self,
-        node: Node,
-        allocations: set[str] | None = None,
+        allocations: set[str],
         override: bool = False,
         alt_hosts: list[str] | None = None,
     ) -> bool:
         """Register new allocation exclusions."""
         existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
+        all_exclusions = existing.union(allocations)
         response = self.request(
             "PUT",
             "/_cluster/settings",

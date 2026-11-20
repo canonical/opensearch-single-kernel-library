@@ -14,11 +14,16 @@ from tenacity import stop_after_attempt
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import HealthColors
-from opensearch_single_kernel.common.exceptions import OpenSearchHAError, OpenSearchHttpError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchHAError,
+    OpenSearchHttpError,
+    OpenSearchStopError,
+)
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     HealthStatuses,
 )
+from opensearch_single_kernel.core.models import App, Node
 from opensearch_single_kernel.managers.health import HealthManager
 from opensearch_single_kernel.utils.status import format_status
 
@@ -294,6 +299,94 @@ def test_relocation_wait_budget_includes_request_time(
     assert get_health.call_count == expected_attempts
     # An in-flight request may finish beyond the budget; no further retry should begin.
     assert 900 <= elapsed <= 905
+
+
+LEAVING = "opensearch-1"
+
+
+def shard(node, state="STARTED"):
+    return {"index": "logs", "shard": "0", "state": state, "node": node}
+
+
+def node(name, roles=("data",)):
+    return Node(
+        name=name, roles=list(roles), ip="10.0.0.1", app=App(id="model/app"), unit_number=0
+    )
+
+
+@pytest.fixture
+def drain_client(health_manager, mocker):
+    health_manager.state.unit_name = LEAVING
+    health_manager.state.planned_units = 2
+    client = health_manager.opensearch_client
+    mocker.patch.object(client, "get_shards", return_value=[shard(LEAVING)])
+    mocker.patch.object(
+        client, "fetch_allocation_exclusions", return_value={LEAVING, "opensearch-2"}
+    )
+    mocker.patch.object(
+        health_manager, "_nodes", return_value=[node(LEAVING), node("opensearch-0")]
+    )
+    return client
+
+
+def waits(health_manager):
+    try:
+        health_manager.wait_for_only_copies_to_move.retry_with(stop=stop_after_attempt(1))(
+            health_manager
+        )
+    except OpenSearchHAError:
+        return True
+    return False
+
+
+@pytest.mark.parametrize(
+    "other_copy, expected",
+    [
+        (shard("opensearch-0", "STARTED"), False),
+        (shard("opensearch-0", "INITIALIZING"), True),
+        (shard("opensearch-2", "STARTED"), True),
+    ],
+    ids=["started", "initializing", "on-leaving-node"],
+)
+def test_drain_waits_until_another_node_has_shards(
+    health_manager, drain_client, other_copy, expected
+):
+    drain_client.get_shards.return_value = [shard(LEAVING), other_copy]
+
+    assert waits(health_manager) == expected
+
+
+@pytest.mark.parametrize(
+    "excluded, nodes",
+    [
+        ({LEAVING, "opensearch-0"}, [node(LEAVING), node("opensearch-0")]),
+        ({LEAVING}, [node(LEAVING), node("opensearch-0", roles=["cluster_manager"])]),
+    ],
+    ids=["other-node-excluded", "other-node-not-data"],
+)
+def test_drain_stops_when_no_node_can_take_shards(health_manager, drain_client, excluded, nodes):
+    health_manager.state.planned_units = 0
+    drain_client.fetch_allocation_exclusions.return_value = excluded
+    health_manager._nodes.return_value = nodes
+
+    assert not waits(health_manager)
+
+
+def test_drain_raises_when_no_node_can_take_shards(health_manager, drain_client):
+    health_manager._nodes.return_value = [node(LEAVING)]
+
+    with pytest.raises(OpenSearchStopError):
+        waits(health_manager)
+
+
+@pytest.mark.parametrize(
+    "planned_units, expected", [(2, True), (0, False)], ids=["scale-down", "app-removal"]
+)
+def test_drain_waits_when_unreadable(health_manager, drain_client, planned_units, expected):
+    health_manager.state.planned_units = planned_units
+    drain_client.get_shards.side_effect = OpenSearchHttpError(response_text="timed out")
+
+    assert waits(health_manager) == expected
 
 
 def test_health_red_app_status_merges_running():
