@@ -37,6 +37,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     CertificateInvalidatedEvent,
     TLSCertificatesRequiresV3,
 )
+from opensearch_single_kernel.utils.certificates import ca_fingerprints
 from opensearch_single_kernel.utils.helpers import generate_password
 from opensearch_single_kernel.utils.secrets import password_key
 
@@ -259,6 +260,15 @@ class TLSEventsHandler(Object):
         if not self.charm.unit.is_leader() and scope == Scope.APP:
             return
 
+        # skip a deferred event if the provider has issued another cert for same csr
+        if any(
+            provider_cert.csr.strip() == event.certificate_signing_request.strip()
+            and provider_cert.certificate.strip() != event.certificate.strip()
+            for provider_cert in self.certs.get_provider_certificates()
+        ):
+            logger.debug("Ignoring a replaced %s certificate.", cert_type.val)
+            return
+
         old_cert = secrets.get("cert", None)
         ca_chain = "\n".join(event.chain[::-1])
 
@@ -278,7 +288,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
         logger.debug("Current stored CA: %s, New CA: %s", current_stored_ca, event.ca)
-        if current_stored_ca != event.ca:
+        if ca_fingerprints(current_stored_ca) != ca_fingerprints(event.ca):
             if not self.charm.tls_manager.store_new_ca(
                 cert_type,
                 create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,

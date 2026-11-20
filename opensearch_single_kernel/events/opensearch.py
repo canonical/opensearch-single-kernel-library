@@ -1500,9 +1500,11 @@ class OpenSearchEventsHandler(Object):
 
         # request new certificates after rotating the CA
         if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
-            self.request_new_unit_certificates()
+            if self._needs_new_cert([CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]):
+                self.request_new_unit_certificates()
             if self.charm.unit.is_leader():
-                self.request_new_admin_certificate()
+                if self._needs_new_cert([CertType.APP_ADMIN]):
+                    self.request_new_admin_certificate()
             else:
                 self.charm.tls_manager.store_admin_tls_secrets_if_applies()
 
@@ -1522,6 +1524,28 @@ class OpenSearchEventsHandler(Object):
             del self.charm.state.server.is_cluster_manager_removed
             self.charm.restart_opensearch_event.emit()
 
+    def _needs_new_cert(self, cert_types: list[CertType]) -> bool:
+        """Whether new certificates should be requested for given types."""
+        # already from the current CA
+        if self.charm.tls_manager.all_tls_resources_stored(cert_types=cert_types):
+            return False
+
+        unfulfilled_csrs = {
+            request.csr.strip()
+            for request in self.charm.tls_events.certs.get_certificate_signing_requests(
+                unfulfilled_only=True
+            )
+        }
+        for cert_type in cert_types:
+            # revoked, waiting to be re-requested
+            if cert_type.val in self.charm.state.server.certs_reissue_pending:
+                return False
+            # re-requested, waiting for the provider to sign it
+            csr = (self.charm.tls_manager.get_secrets_for_cert_type(cert_type) or {}).get("csr")
+            if csr and csr.strip() in unfulfilled_csrs:
+                return False
+        return True
+
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
         del self.charm.state.server.tls_configured
@@ -1536,44 +1560,28 @@ class OpenSearchEventsHandler(Object):
                 if cert_type == CertType.UNIT_TRANSPORT
                 else self.charm.state.server.http_secrets
             )
-            self.charm.tls_events.certs.request_certificate_revocation(
-                secret["csr"].encode("utf-8")
-            )
-
-        # doing this sequentially (revoking -> requesting new ones), to avoid triggering
-        # the "certificate available" callback with old certificates
-        for cert_type in [CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]:
-            secret = (
-                self.charm.state.server.transport_secrets
-                if cert_type == CertType.UNIT_TRANSPORT
-                else self.charm.state.server.http_secrets
-            )
-            old_csr = secret["csr"].encode("utf-8")
-            csr = self.charm.tls_manager.create_certificate_signing_request(
+            old_csr = secret["csr"]
+            self.charm.tls_manager.create_certificate_signing_request(
                 scope=Scope.UNIT,
                 cert_type=cert_type,
                 secret=secret,
                 tls_file=False,
             )
-
-            self.charm.tls_events.certs.request_certificate_renewal(
-                old_certificate_signing_request=old_csr,
-                new_certificate_signing_request=csr,
-            )
+            self.charm.tls_events.request_certificate_reissue(cert_type, old_csr)
 
     def request_new_admin_certificate(self) -> None:
         """Request the generation of a new admin certificate."""
         if not self.charm.unit.is_leader():
             return
 
-        csr = self.charm.tls_manager.create_certificate_signing_request(
+        old_csr = self.charm.state.application.admin_secrets.get("csr")
+        self.charm.tls_manager.create_certificate_signing_request(
             scope=Scope.APP,
             cert_type=CertType.APP_ADMIN,
             secret=self.charm.state.application.admin_secrets,
             tls_file=False,
         )
-
-        self.charm.tls_events.certs.request_certificate_creation(certificate_signing_request=csr)
+        self.charm.tls_events.request_certificate_reissue(CertType.APP_ADMIN, old_csr)
 
     def on_unit_ip_changed(self, event: ConfigChangedEvent) -> None:
         """Triggered when the unit IP is changed."""
