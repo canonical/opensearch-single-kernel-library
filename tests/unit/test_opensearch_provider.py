@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, call
 
 import pytest
-from ops import SecretNotFoundError
+from ops import ModelError, SecretNotFoundError
+from ops.charm import CharmBase
+from ops.testing import Harness
 from pydantic import ValidationError
 
 from opensearch_single_kernel.common.constants import CLIENT_RELATION, KIBANA_SERVER_USER
@@ -18,9 +20,11 @@ from opensearch_single_kernel.core.external_clients_relation import (
     ExternalOpenSearchClient,
 )
 from opensearch_single_kernel.core.models import ExternalClientRequestedEntity
+from opensearch_single_kernel.events.opensearch import OpenSearchEventsHandler
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     ENTITY_GROUP,
     ENTITY_USER,
+    OpenSearchProvidesData,
 )
 from opensearch_single_kernel.managers.external_clients import ExternalClientsManager
 from opensearch_single_kernel.utils.helpers import validate_entity_name
@@ -1042,8 +1046,9 @@ def test_entity_client_statuses(
     client_groups,
     expected_statuses,
 ):
+    state = make_state(client_groups=client_groups)
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client(entity_type=entity_type)
     external_client.get_requested_entity.return_value = requested_entity
     if not permissions_valid:
@@ -1051,7 +1056,6 @@ def test_entity_client_statuses(
             side_effect=ValidationError.from_exception_data("entity-permissions", [])
         )
 
-    state = make_state(client_groups=client_groups)
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.is_node_up.return_value = False
@@ -1081,11 +1085,11 @@ def test_entity_client_statuses(
 def test_group_client_status_for_existing_role(
     opensearch_client, client_groups, existing_role, expected_statuses
 ):
+    state = make_state(client_groups=client_groups)
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client(entity_type=ENTITY_GROUP)
     external_client.get_requested_entity.return_value = GROUP_ENTITY
-    state = make_state(client_groups=client_groups)
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.indices.return_value = ["logs"]
@@ -1097,11 +1101,11 @@ def test_group_client_status_for_existing_role(
 
 
 def test_client_entity_not_reported_as_failed_while_node_is_down(opensearch_client):
+    state = make_state()
     relation = MagicMock(id=1)
-    relation.data = {relation.app: {"index": "logs"}}
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
     external_client = make_client()
     external_client.get_requested_entity.return_value = None
-    state = make_state()
     state.external_client_relations = [relation]
     state.external_client_by_relation.return_value = external_client
     opensearch_client.is_node_up.return_value = False
@@ -1122,6 +1126,99 @@ def test_client_status_outside_main_orchestrator(opensearch_client):
     statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
 
     assert statuses == [format_status(ExternalClientsStatuses.RELATION_INVALID.value, {"id": 1})]
+
+
+def test_get_status_idle_before_index_created(opensearch_client):
+    """Tests no failed status displayed if index requested but not yet provisioned."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    opensearch_client.indices.assert_not_called()
+
+
+def test_get_status_index_missing(opensearch_client):
+    """Tests failed status displayed when provisioned index is missing."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {"index": "logs"}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+    opensearch_client.indices.return_value = {}
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(ExternalClientsStatuses.INDEX_MISSING.value, {"id": 1, "index": "logs"})
+    ]
+
+
+def test_get_status_invalid_index_name(opensearch_client):
+    """Tests failed status displayed when requested index name invalid."""
+    state = make_state()
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "INVALID"}, state.model.app: {}}
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = make_client(index="INVALID")
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(
+            ExternalClientsStatuses.INVALID_INDEX_NAME.value, {"id": 1, "index": "INVALID"}
+        )
+    ]
+
+
+def test_index_creation_failure_stored(opensearch_client):
+    """Tests failed index creation is stored."""
+    state = make_state()
+    state.application.client_index_failures = {}
+    opensearch_client.create_index.side_effect = OpenSearchHttpError()
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"1": "logs"}
+
+
+def test_index_creation_failure_cleared_on_success(opensearch_client):
+    """Tests successful index creation clears the stored failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs", "2": "other"}
+
+    ExternalClientsManager(state, MagicMock()).provide_client_index(make_client())
+
+    assert state.application.client_index_failures == {"2": "other"}
+
+
+def test_get_status_index_creation_failure(opensearch_client):
+    """Tests failed status displayed for stored index creation failure."""
+    state = make_state()
+    state.application.client_index_failures = {"1": "logs"}
+    relation = MagicMock(id=1)
+    relation.data = {relation.app: {"index": "logs"}, state.model.app: {}}
+    external_client = make_client()
+    external_client.get_requested_entity.return_value = None
+    state.external_client_relations = [relation]
+    state.external_client_by_relation.return_value = external_client
+
+    statuses = ExternalClientsManager(state, MagicMock()).get_statuses("unit")
+
+    assert statuses == [
+        format_status(
+            ExternalClientsStatuses.INDEX_CREATION_FAILED.value, {"id": 1, "index": "logs"}
+        )
+    ]
 
 
 @pytest.mark.parametrize("is_main_orchestrator", [True, False], ids=["main", "non-main"])
@@ -1153,3 +1250,131 @@ def test_role_mappings_reconciled_on_config_changed_by_main_orchestrator_only(
     harness.charm.opensearch_events._on_config_changed(MagicMock())
 
     assert reconcile_role_mappings.called is is_main_orchestrator
+
+
+class DashboardProviderCharm(CharmBase):
+    """Minimal provider to exercise real secret-backed client relation writes."""
+
+
+@pytest.fixture
+def dashboard_credentials(monkeypatch):
+    monkeypatch.setenv("JUJU_VERSION", "3.6.0")
+    harness = Harness(
+        DashboardProviderCharm,
+        meta="name: opensearch\nprovides:\n  opensearch-client:\n    interface: opensearch_client\n",
+    )
+    harness.set_leader(True)
+    harness.begin()
+    relation_id = harness.add_relation("opensearch-client", "dashboards")
+    harness.add_relation_unit(relation_id, "dashboards/0")
+    harness.update_relation_data(
+        relation_id,
+        "dashboards",
+        {
+            "index": "example",
+            "requested-secrets": '["username", "password"]',
+            "extra-user-roles": "kibana_server",
+        },
+    )
+    interface = OpenSearchProvidesData(harness.model, "opensearch-client")
+    interface.set_credentials(relation_id, "kibanaserver", "original-password")
+    client = ExternalOpenSearchClient(
+        harness.model.get_relation("opensearch-client", relation_id),
+        interface,
+        harness.model.get_app("dashboards"),
+        "opensearch-client",
+    )
+    state = SimpleNamespace(
+        application=SimpleNamespace(kibana_server_password=None),
+        dashboards_clients=[client],
+        is_peer_cluster_provider=lambda **kwargs: False,
+    )
+    manager = ExternalClientsManager(state, MagicMock())
+    yield manager, client, interface, relation_id
+    harness.cleanup()
+
+
+@pytest.mark.parametrize("cached_password", [None, "stale-password"])
+def test_dashboard_secret_change_publishes_refreshed_content(
+    dashboard_credentials, cached_password
+):
+    manager, _, interface, relation_id = dashboard_credentials
+    manager.state.application.kibana_server_password = cached_password
+    charm = SimpleNamespace(
+        state=manager.state,
+        unit=SimpleNamespace(is_leader=lambda: True),
+        app=SimpleNamespace(name="opensearch"),
+        external_clients_manager=manager,
+    )
+    event = MagicMock()
+    event.secret.label = "opensearch:app:kibanaserver-password"
+    event.secret.get_content.return_value = {"kibanaserver-password": "replacement-password"}
+
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "replacement-password"
+    )
+    event.defer.assert_not_called()
+
+
+def test_dashboard_creation_waits_for_its_password(dashboard_credentials):
+    manager, client, interface, relation_id = dashboard_credentials
+
+    with pytest.raises(OpenSearchUserMgmtError):
+        manager.provide_client_entity(client, None)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "original-password"
+    )
+
+
+def test_dashboard_index_request_defers_until_password_available(
+    harness, mocker, client_request_ready, provide_client_index
+):
+    dashboards_client = make_client(extra_user_roles="kibana_server", password="original-password")
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.external_client_by_relation",
+        return_value=dashboards_client,
+    )
+    mocker.patch(
+        "opensearch_single_kernel.core.peer_relation.OpenSearchApplication.kibana_server_password",
+        new_callable=PropertyMock,
+        return_value=None,
+    )
+
+    event = MagicMock(index="example", relation=dashboards_client.relation)
+    harness.charm.external_clients_events._on_client_requested(event)
+
+    assert dashboards_client.password == "original-password"
+    event.defer.assert_called_once_with()
+
+
+def test_dashboard_secret_change_read_failure_does_not_publish(dashboard_credentials):
+    manager, _, interface, relation_id = dashboard_credentials
+    charm = SimpleNamespace(
+        state=manager.state,
+        unit=SimpleNamespace(is_leader=lambda: True),
+        app=SimpleNamespace(name="opensearch"),
+        external_clients_manager=manager,
+    )
+    event = MagicMock()
+    event.secret.label = "opensearch:app:kibanaserver-password"
+    manager.state.application.kibana_server_password = "stale-available-password"
+    event.secret.get_content.side_effect = ModelError("secret temporarily unavailable")
+
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "original-password"
+    )
+    event.defer.assert_called_once()
+
+    event.reset_mock()
+    event.secret.get_content.side_effect = None
+    event.secret.get_content.return_value = {"kibanaserver-password": "replacement-password"}
+    OpenSearchEventsHandler._on_secret_changed(SimpleNamespace(charm=charm), event)
+    assert interface.fetch_my_relation_data([relation_id])[relation_id]["password"] == (
+        "replacement-password"
+    )
+    event.defer.assert_not_called()

@@ -5,7 +5,7 @@
 
 """OpenSearch Charm literals."""
 
-from enum import Enum
+from enum import Enum, auto
 
 from opensearch_single_kernel.utils.enum import BaseStrEnum
 
@@ -78,6 +78,14 @@ class DeploymentType(BaseStrEnum):
     MAIN_ORCHESTRATOR = "main-orchestrator"
     FAILOVER_ORCHESTRATOR = "failover-orchestrator"
     OTHER = "other"
+
+
+class PClusterRefreshRelDataRes(Enum):
+    """Possible states of a peer cluster refresh relation data operation."""
+
+    COMPLETED = auto()
+    WAITING = auto()
+    FAILED = auto()
 
 
 class State(BaseStrEnum):

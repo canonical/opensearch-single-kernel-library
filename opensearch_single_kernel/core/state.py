@@ -240,11 +240,6 @@ class ClusterState(Object):
         """Get peer upgrade relation."""
         return self.model.get_relation(UPGRADE_RELATION)
 
-    def peer_cluster_orchestrator_relation_exists(self, relation_id: int) -> bool:
-        """Check if the relation with id exists"""
-        relation = self.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
-        return bool(relation)
-
     @property
     def cos_agent_relation(self) -> Relation | None:
         """Return the cos-agent relation if present."""
@@ -993,7 +988,9 @@ class ClusterState(Object):
             or present_status.message != format_status(status, dynamic_params).message
         ):
             # Updates dynamic params if status already present.
-            self.remove_status_if_present(status, scope, component, interpolated=True)
+            self.remove_status_if_present(
+                status, scope, component, interpolated=True, search_parameters=search_parameters
+            )
             self.statuses.add(format_status(status, dynamic_params), scope, component)
 
     def remove_status_if_present(
@@ -1150,7 +1147,9 @@ class ClusterState(Object):
             logger.info("no orchestrators found")
             return None
 
-        if not self.peer_cluster_orchestrator_relation_exists(orchestrators.main_rel_id):
+        if orchestrators.main_rel_id not in {
+            relation.id for relation in self.peer_cluster_relations
+        }:
             logger.info(
                 "relation with id %s not found for main orchestrator", orchestrators.main_rel_id
             )
@@ -1158,7 +1157,7 @@ class ClusterState(Object):
 
         if not (
             remote_peer_cluster := self.peer_cluster_by_relation_id(
-                is_provider=True,
+                is_provider=False,
                 relation_id=orchestrators.main_rel_id,
                 remote=True,
             )

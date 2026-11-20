@@ -22,6 +22,7 @@ from opensearch_single_kernel.common.constants import (
     DeploymentType,
     HealthColors,
     ObjectStorageType,
+    PClusterRefreshRelDataRes,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
@@ -205,7 +206,11 @@ class SnapshotsEventsHandler(Object):
 
         self._clear_repository_misconfigured_status()
         # Refresh peer relations
-        self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+        if (
+            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+            == PClusterRefreshRelDataRes.FAILED
+        ):
+            event.defer()
 
     def _on_snapshots_credentials_gone(  # noqa C901
         self, event: StorageConnectionInfoGoneEvent
@@ -263,13 +268,17 @@ class SnapshotsEventsHandler(Object):
         ):
             self.charm.snapshots_manager.remove_s3_ca()
 
+        # Reload the keystore even if updating peer cluster relation data fails.
+        self._set_credentials_cleanup_failed_status(False)
+        self.charm.reload_keystore_event.emit()
+
         if self.charm.unit.is_leader():
             # Refresh peer relations
-            self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
-
-        self._set_credentials_cleanup_failed_status(False)
-
-        self.charm.reload_keystore_event.emit()
+            if (
+                self.charm.peer_cluster_orchestrator_manager.refresh_relation_data()
+                == PClusterRefreshRelDataRes.FAILED
+            ):
+                event.defer()
 
     def _on_verify_snapshots_credentials(  # noqa C901
         self, event: VerifySnapshotsCredentialsEvent

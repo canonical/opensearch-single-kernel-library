@@ -6,10 +6,9 @@
 """State collection for opensearch-peers relation."""
 
 import json
-import logging
 from typing import Any
 
-from ops.model import Application, ModelError, Relation, Unit
+from ops.model import Application, Relation, Unit
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
@@ -39,8 +38,6 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 from opensearch_single_kernel.utils.helpers import normalized_tls_subject
 from opensearch_single_kernel.utils.secrets import hash_key, password_key
-
-logger = logging.getLogger(__name__)
 
 
 class OpenSearchServer(RelationState):
@@ -570,6 +567,20 @@ class OpenSearchApplication(RelationState):
         return self.client_users_dict | self.client_groups_dict
 
     @property
+    def client_index_failures(self) -> dict[str, str]:
+        """Get the indexes which failed to be created for the client relations, by relation id."""
+        return self.get_object("client_index_failures") or {}
+
+    @client_index_failures.setter
+    def client_index_failures(self, failures: dict[str, str]) -> None:
+        """Set the indexes which failed to be created for the client relations in app databag."""
+        if not failures:
+            self.relation.data[self.app].pop("client_index_failures", None)
+            return
+
+        self.put_object("client_index_failures", failures)
+
+    @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
         """Returns configuration information for plugins this app is managing"""
         plugin_config_info = self.get_object("plugin_config_info") or {}
@@ -613,56 +624,32 @@ class OpenSearchApplication(RelationState):
     @property
     def admin_password(self) -> str | None:
         """Get the admin password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
-        except ModelError:
-            logger.debug("Admin password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, password_key(ADMIN_USER))
 
     @property
     def kibana_server_password(self) -> str | None:
         """Get the kibana server password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
-        except ModelError:
-            logger.debug("Kibana server password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, password_key(KIBANA_SERVER_USER))
 
     @property
     def cos_password(self) -> str | None:
         """Get the cos user password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, password_key(COS_USER))
-        except ModelError:
-            logger.debug("COS user password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, password_key(COS_USER))
 
     @property
     def admin_hashed_password(self) -> str | None:
         """Get the admin hashed password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
-        except ModelError:
-            logger.debug("Admin hashed password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, hash_key(ADMIN_USER))
 
     @property
     def kibana_server_hashed_password(self) -> str | None:
         """Get the kibana server hashed password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
-        except ModelError:
-            logger.debug("Kibana server hashed password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, hash_key(KIBANA_SERVER_USER))
 
     @property
     def cos_hashed_password(self) -> str | None:
         """Get the cos user hashed password from the admin secrets."""
-        try:
-            return self.secrets.get(Scope.APP, hash_key(COS_USER))
-        except ModelError:
-            logger.debug("COS user hashed password not set yet.")
-            return None
+        return self.secrets.get(Scope.APP, hash_key(COS_USER))
 
     def get_user_password(self, user: str) -> str | None:
         """Get the password for a given user from the client relation users dict."""

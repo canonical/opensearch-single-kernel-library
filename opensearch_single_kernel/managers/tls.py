@@ -688,6 +688,9 @@ class TlsManager(BaseManager):
             ca_chain := self.state.application.admin_secrets.get("chain")
         ):
             for external_client in self.state.external_clients:
+                # skip clients that haven't requested an index yet
+                if not external_client.index:
+                    continue
                 external_client.tls_ca = ca_chain
         try:
             return self.update_request_ca_bundle()
@@ -776,7 +779,9 @@ class TlsManager(BaseManager):
         Returns True on success, False if a filesystem error occurred.
         """
         if create_store_pwd:
-            self.create_store_pwd_if_not_exists(Scope.APP, CertType.APP_ADMIN, StoreType.KEYSTORE)
+            self.create_store_pwd_if_not_exists(
+                Scope.APP, CertType.APP_ADMIN, StoreType.TRUSTSTORE
+            )
 
         admin_secrets = self.state.application.admin_secrets
         cert_secrets = self.get_secrets_for_cert_type(cert_type)

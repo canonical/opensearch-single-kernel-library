@@ -7,6 +7,7 @@ import json
 from unittest.mock import PropertyMock
 
 import pytest
+from ops import ModelError, Secret
 
 from opensearch_single_kernel.common.constants import (
     ADMIN_USER,
@@ -118,6 +119,25 @@ def test_initial_tls_completion_clears_provider_error(
         charm.model.get_secret(id=credentials["admin_tls"]).get_content()["truststore-password"]
         == "truststore-password"
     )
+
+
+def test_tls_completion_retries_failed_publication(harness, mocker, provider, certificate_event):
+    """TLS completion must be republished after Juju recovers from a failed secret grant."""
+    charm = harness.charm
+    failed = mocker.patch.object(Secret, "grant", side_effect=ModelError("grant unavailable"))
+
+    charm.tls_events._on_certificate_available(certificate_event)
+
+    assert charm.state.server.tls_configured
+    assert "TLS not fully configured" in provider.error_data.blocked_message
+    certificate_event.defer.assert_called()
+
+    mocker.stop(failed)
+    certificate_event.reset_mock()
+    charm.tls_events._on_certificate_available(certificate_event)
+
+    assert provider.error_data is None
+    certificate_event.defer.assert_not_called()
 
 
 @pytest.mark.parametrize("health", [HealthColors.UNKNOWN, HealthColors.YELLOW_TEMP])
