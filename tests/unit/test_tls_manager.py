@@ -32,6 +32,7 @@ from opensearch_single_kernel.utils.certificates import remove_ca, store_ca_chai
 from tests.unit.constants import (
     CHAIN_INTERMEDIATE_CA_PEM,
     CHAIN_ROOT_CA_PEM,
+    CHAIN_UNIT_CERT_PEM,
     NEW_CA_PEM,
     OLD_CA_PEM,
 )
@@ -1790,6 +1791,10 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         "opensearch_single_kernel.managers.tls.TlsManager._remove_ca_from_request_bundle"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored",
+        return_value=True,
+    )
     workload_class = _workload_class_name(substrate)
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.temp_file"
@@ -2066,3 +2071,26 @@ def test_on_certificate_available_same_ca_chain_does_not_rotate_ca(harness, mock
     store_new_ca.assert_not_called()
     harness.charm.restart_opensearch_event.emit.assert_not_called()
     assert not harness.charm.state.server.tls_ca_renewing
+
+
+@pytest.mark.parametrize(
+    "stored_ca, expected",
+    [
+        (f"{CHAIN_ROOT_CA_PEM}{CHAIN_INTERMEDIATE_CA_PEM}", True),
+        (CHAIN_INTERMEDIATE_CA_PEM, True),
+        (CHAIN_ROOT_CA_PEM, False),
+        (OLD_CA_PEM, False),
+    ],
+    ids=["chain", "intermediate-only", "root-only", "unrelated-ca"],
+)
+def test_all_tls_resources_stored_checks_cert_is_signed_by_stored_ca(
+    stored_ca, expected, harness, mocker
+):
+    """The unit's certificates count as current only if the stored CA signed them."""
+    tls_manager = harness.charm.tls_manager
+    mocker.patch.object(tls_manager, "read_stored_ca", return_value=stored_ca)
+    mocker.patch.object(tls_manager.workload, "exists", return_value=True)
+    mocker.patch.object(tls_manager, "get_secrets_for_cert_type", return_value={})
+    mocker.patch.object(tls_manager, "get_cert_from_path", return_value=CHAIN_UNIT_CERT_PEM)
+
+    assert tls_manager.all_tls_resources_stored() is expected

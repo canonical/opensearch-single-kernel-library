@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from charmlibs.pathops import PathProtocol
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 
 from opensearch_single_kernel.common.exceptions import (
@@ -444,6 +445,22 @@ def ca_fingerprints(pem_content: str | None) -> set[str]:
         }
     except ValueError:
         return set()
+
+
+def is_signed_by_ca(cert_pem: str, ca_pem: str) -> bool:
+    """Whether the given CA signed the given certificate."""
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        cas = x509.load_pem_x509_certificates(ca_pem.encode())
+    except ValueError:
+        return False
+    for ca in cas:
+        try:
+            cert.verify_directly_issued_by(ca)
+            return True
+        except (ValueError, TypeError, InvalidSignature):
+            continue
+    return False
 
 
 def _normalize_certificate_chain(text: str | None) -> str:
