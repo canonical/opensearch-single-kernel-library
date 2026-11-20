@@ -64,7 +64,8 @@ class InternalUsersManager(BaseManager):
         password_secret = self.state.application.get_user_password(user)
         if password_secret and not update:
             try:
-                self.save_user_locally(user)
+                if user in OPENSEARCH_SYSTEM_USERS:
+                    self.save_user_locally(user)
                 return True
             except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
                 logger.error("An error occurred while saving internal user %s: %s", user, str(e))
@@ -100,6 +101,7 @@ class InternalUsersManager(BaseManager):
 
         if user == ADMIN_USER:
             self.state.application.is_admin_user_initialized = True
+
         return True
 
     def purge_initial_default_users(self) -> None:
@@ -164,24 +166,19 @@ class InternalUsersManager(BaseManager):
                     "description": "Kibanaserver user",
                 },
             )
-
-    def create_cos_user(self, pwd: str | None = None) -> None:
-        """Create COS user using the OpenSearch API."""
-        hashed_pwd, pwd = generate_hashed_password(pwd)
-
-        roles = [COS_ROLE]
-        try:
-            self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
-            self.opensearch_client.patch_user(
-                COS_USER,
-                [
-                    {
-                        "op": "replace",
-                        "path": "/opendistro_security_roles",
-                        "value": roles,
-                    }
-                ],
-            )
-            self.state.secrets.put(Scope.APP, password_key(COS_USER), pwd)
-        except OpenSearchHttpError as e:
-            raise OpenSearchUserMgmtError(e)
+        elif user == COS_USER:
+            roles = [COS_ROLE]
+            try:
+                self.opensearch_client.create_user(COS_USER, roles, hashed_pwd)
+                self.opensearch_client.patch_user(
+                    COS_USER,
+                    [
+                        {
+                            "op": "replace",
+                            "path": "/opendistro_security_roles",
+                            "value": roles,
+                        }
+                    ],
+                )
+            except OpenSearchHttpError as e:
+                raise OpenSearchUserMgmtError(e)

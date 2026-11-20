@@ -259,6 +259,13 @@ class ExternalClientsStatuses(Enum):
         check="OpenSearch user or role for client relation.",
         action="Check unit logs and retry the client relation.",
     )
+    INDEX_MISSING = StatusObject(
+        status="blocked",
+        message="Index {index} for client relation {id} no longer exists",
+        short_message="Client index missing",
+        check="Existence of client relation index in OpenSearch.",
+        action="Remove and re-relate the client.",
+    )
     ENTITY_TYPE_UNSUPPORTED = StatusObject(
         status="blocked",
         message="entity-type=USER is not supported on client relation {id}",
