@@ -1414,9 +1414,11 @@ class OpenSearchEventsHandler(Object):
 
         # request new certificates after rotating the CA
         if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
-            self.request_new_unit_certificates()
+            if self._needs_new_cert([CertType.UNIT_HTTP, CertType.UNIT_TRANSPORT]):
+                self.request_new_unit_certificates()
             if self.charm.unit.is_leader():
-                self.request_new_admin_certificate()
+                if self._needs_new_cert([CertType.APP_ADMIN]):
+                    self.request_new_admin_certificate()
             else:
                 self.charm.tls_manager.store_admin_tls_secrets_if_applies()
 
@@ -1435,6 +1437,28 @@ class OpenSearchEventsHandler(Object):
             logger.debug("Restoring cluster_manager role and restarting the service")
             del self.charm.state.server.is_cluster_manager_removed
             self.charm.restart_opensearch_event.emit()
+
+    def _needs_new_cert(self, cert_types: list[CertType]) -> bool:
+        """Whether new certificates should be requested for given types."""
+        # already from the current CA
+        if self.charm.tls_manager.all_tls_resources_stored(cert_types=cert_types):
+            return False
+
+        unfulfilled_csrs = {
+            request.csr.strip()
+            for request in self.charm.tls_events.certs.get_certificate_signing_requests(
+                unfulfilled_only=True
+            )
+        }
+        for cert_type in cert_types:
+            # revoked, waiting to be re-requested
+            if cert_type.val in self.charm.state.server.certs_reissue_pending:
+                return False
+            # re-requested, waiting for the provider to sign it
+            csr = (self.charm.tls_manager.get_secrets_for_cert_type(cert_type) or {}).get("csr")
+            if csr and csr.strip() in unfulfilled_csrs:
+                return False
+        return True
 
     def request_new_unit_certificates(self) -> None:
         """Requests a new certificate with the given scope and type from the tls operator."""
