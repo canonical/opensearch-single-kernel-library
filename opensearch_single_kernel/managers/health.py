@@ -133,6 +133,8 @@ class HealthManager(BaseManager):
             excluded = self.opensearch_client.fetch_allocation_exclusions(self.peer_hosts)
             nodes = self._nodes(True, self.peer_hosts)
         except OpenSearchHttpError as e:
+            if self.state.planned_units == 0:
+                return
             raise OpenSearchHAError(f"Failed to read shards or nodes: {e}") from e
 
         elsewhere = {

@@ -379,10 +379,14 @@ def test_drain_raises_when_no_node_can_take_shards(health_manager, drain_client)
         waits(health_manager)
 
 
-def test_drain_waits_when_unreadable(health_manager, drain_client):
+@pytest.mark.parametrize(
+    "planned_units, expected", [(2, True), (0, False)], ids=["scale-down", "app-removal"]
+)
+def test_drain_waits_when_unreadable(health_manager, drain_client, planned_units, expected):
+    health_manager.state.planned_units = planned_units
     drain_client.get_shards.side_effect = OpenSearchHttpError(response_text="timed out")
 
-    assert waits(health_manager)
+    assert waits(health_manager) == expected
 
 
 def test_health_red_app_status_merges_running():
