@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from charmlibs.pathops import PathProtocol
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
@@ -430,6 +431,19 @@ def split_ca_chain(pem_content: str) -> list[str]:
     end_cert_marker = "-----END CERTIFICATE-----"
     parts = [part.strip() for part in pem_content.split(end_cert_marker) if part.strip()]
     return [f"{part}\n{end_cert_marker}" for part in parts]
+
+
+def ca_fingerprints(pem_content: str | None) -> set[str]:
+    """Return the SHA-256 fingerprints of every certificate in a chain."""
+    if not pem_content:
+        return set()
+    try:
+        return {
+            cert.fingerprint(hashes.SHA256()).hex()
+            for cert in x509.load_pem_x509_certificates(pem_content.encode())
+        }
+    except ValueError:
+        return set()
 
 
 def _normalize_certificate_chain(text: str | None) -> str:

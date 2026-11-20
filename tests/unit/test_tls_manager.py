@@ -29,6 +29,12 @@ from opensearch_single_kernel.core.models import (
     PeerClusterConfig,
 )
 from opensearch_single_kernel.utils.certificates import remove_ca, store_ca_chain
+from tests.unit.constants import (
+    CHAIN_INTERMEDIATE_CA_PEM,
+    CHAIN_ROOT_CA_PEM,
+    NEW_CA_PEM,
+    OLD_CA_PEM,
+)
 from tests.unit.helpers import (
     create_utf8_encoded_private_key,
     deployment_descriptions,
@@ -1118,7 +1124,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     new_cert = "new_cert"
     new_chain = ["new_chain"]
-    new_ca = "new_ca"
+    new_ca = NEW_CA_PEM
 
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
@@ -1167,7 +1173,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     )
 
     # The CA stored in the keystore is still the old one
-    read_stored_ca.return_value = "old_ca"
+    read_stored_ca.return_value = OLD_CA_PEM
 
     # Applies to ANY deployment type
     deployment_desc.return_value = DeploymentDescription(
@@ -1962,7 +1968,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     csr = "old_csr"
     cert = "new_cert"
     chain = ["new_chain"]
-    ca = "new_ca"
+    ca = NEW_CA_PEM
 
     harness.charm.state.secrets.put_object(
         Scope.APP,
@@ -1976,7 +1982,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         },
     )
 
-    read_stored_ca.return_value = "stored_ca"
+    read_stored_ca.return_value = OLD_CA_PEM
 
     # Applies to ANY deployment type
     deployment_desc.return_value = DeploymentDescription(
@@ -2010,7 +2016,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
             "chain": "new_chain",
             "keystore-password": "keystore_12345",
             "truststore-password": "truststore_12345",
-            "ca-cert": "new_ca",
+            "ca-cert": ca,
             "cert": "new_cert",
         }
     else:
@@ -2030,3 +2036,33 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
 # TODO: Add final test of on_certificate_available and rotation ongoing on other unit
 # After we implement scale up scale down.
+
+
+def test_on_certificate_available_same_ca_chain_does_not_rotate_ca(harness, mocker):
+    """A CA chain stored in a different order than provided does not start a CA rotation."""
+    harness.charm.state.secrets.put_object(Scope.UNIT, CertType.UNIT_HTTP.val, {"csr": "csr"})
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    mocker.patch.object(
+        harness.charm.tls_manager,
+        "read_stored_ca",
+        return_value=f"{CHAIN_ROOT_CA_PEM}{CHAIN_INTERMEDIATE_CA_PEM}",
+    )
+    store_new_ca = mocker.patch.object(harness.charm.tls_manager, "store_new_ca")
+    mocker.patch.object(harness.charm.tls_manager, "store_new_tls_resources", return_value=True)
+    harness.charm.restart_opensearch_event = MagicMock()
+
+    harness.charm.tls_events._on_certificate_available(
+        MagicMock(
+            certificate_signing_request="csr",
+            certificate="cert",
+            chain=["cert"],
+            ca=f"{CHAIN_INTERMEDIATE_CA_PEM}{CHAIN_ROOT_CA_PEM}",
+        )
+    )
+
+    store_new_ca.assert_not_called()
+    harness.charm.restart_opensearch_event.emit.assert_not_called()
+    assert not harness.charm.state.server.tls_ca_renewing

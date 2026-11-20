@@ -34,6 +34,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
     CertificateInvalidatedEvent,
     TLSCertificatesRequiresV3,
 )
+from opensearch_single_kernel.utils.certificates import ca_fingerprints
 from opensearch_single_kernel.utils.helpers import generate_password
 from opensearch_single_kernel.utils.secrets import password_key
 
@@ -265,7 +266,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
         logger.debug("Current stored CA: %s, New CA: %s", current_stored_ca, event.ca)
-        if current_stored_ca != event.ca:
+        if ca_fingerprints(current_stored_ca) != ca_fingerprints(event.ca):
             if not self.charm.tls_manager.store_new_ca(
                 cert_type,
                 create_store_pwd=self.charm.unit.is_leader() and is_main_orchestrator,
