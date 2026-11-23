@@ -242,10 +242,10 @@ def test_credentials_changed_clears_credentials_incorrect(mocker, harness, backe
     harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
 
     assert _cached_statuses(harness).root == []
-    assert harness.charm.state.server.snapshots_credentials_saved
+    assert harness.charm.state.server.snapshots_info_handled
 
 
-def test_credentials_changed_not_marked_saved_if_store_fails(mocker, harness, backend_setup):
+def test_credentials_changed_not_marked_handled_if_store_fails(mocker, harness, backend_setup):
     _, (relation,) = backend_setup
     _mock_backup(mocker)
     _relate_backups(harness, relation)
@@ -256,12 +256,12 @@ def test_credentials_changed_not_marked_saved_if_store_fails(mocker, harness, ba
         "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler.update_stored_credentials",
         side_effect=OpenSearchFileOperationError("keystore write failed"),
     )
-    harness.charm.state.server.snapshots_credentials_saved = "previous"
+    harness.charm.state.server.snapshots_info_handled = "previous"
 
     harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
 
     # Not stored: the next peer relation change must retry it
-    assert harness.charm.state.server.snapshots_credentials_saved == ""
+    assert harness.charm.state.server.snapshots_info_handled == ""
 
 
 def test_credentials_gone_clears_cached_status(mocker, harness, backend_setup):

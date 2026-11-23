@@ -1914,7 +1914,7 @@ def test_peer_change_syncs_relation_credentials_not_handled(
         assert credentials_changed.call_args.args[0].relation.name == S3_RELATION
 
 
-def test_saved_credentials_resynced_after_demotion_and_promotion(
+def test_handled_info_resynced_after_demotion_and_promotion(
     peer_snapshot_cleanup, harness, mocker
 ):
     """A keystore cleaned while demoted must be re-applied from the relation once promoted."""
@@ -1924,11 +1924,11 @@ def test_saved_credentials_resynced_after_demotion_and_promotion(
     )
     with harness.hooks_disabled():
         rel_id = harness.add_relation(S3_RELATION, "s3-integrator")
-    # Saved while main, then the keystore is cleaned with the peer-cluster data once demoted
-    charm.state.server.snapshots_credentials_saved = hash_credentials(S3_INFO)
+    # Handled while main, then the keystore is cleaned with the peer-cluster data once demoted
+    charm.state.server.snapshots_info_handled = hash_credentials(S3_INFO)
     charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
 
-    assert charm.state.server.snapshots_credentials_saved == ""
+    assert charm.state.server.snapshots_info_handled == ""
 
     # Promoted back to main
     charm.snapshots_events.sync_relation_credentials()

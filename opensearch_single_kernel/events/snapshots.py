@@ -179,7 +179,7 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchFileOperationError:
             logger.error("Failed to update stored backup credentials.")
-            del self.charm.state.server.snapshots_credentials_saved
+            del self.charm.state.server.snapshots_info_handled
             return
 
         # Reload keystore
