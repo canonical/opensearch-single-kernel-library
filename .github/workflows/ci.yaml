@@ -23,6 +23,12 @@ on:
         required: true
       GCP_SERVICE_ACCOUNT:
         required: true
+      FLAKE0_INGEST_URL:
+        required: false
+      FLAKE0_INGEST_USER:
+        required: false
+      FLAKE0_INGEST_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -160,5 +166,8 @@ jobs:
       AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
       AZURE_SECRET_KEY: ${{ secrets.AZURE_SECRET_KEY }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      FLAKE0_INGEST_URL: ${{ secrets.FLAKE0_INGEST_URL }}
+      FLAKE0_INGEST_USER: ${{ secrets.FLAKE0_INGEST_USER }}
+      FLAKE0_INGEST_PASSWORD: ${{ secrets.FLAKE0_INGEST_PASSWORD }}
     permissions:
       contents: write # Needed for Allure Report
