@@ -215,8 +215,6 @@ class NodesExclusionsManager(BaseManager):
 
         to_stay = current_excl - exclusions
 
-        # "wait_for_removal" is VERY important, it removes all voting configs immediately
-        # and allows any node to return to the voting config in the future
         try:
             if not self.opensearch_client.remove_voting_exclusions(
                 alt_hosts=self.alt_hosts,

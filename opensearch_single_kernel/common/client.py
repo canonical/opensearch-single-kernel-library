@@ -936,6 +936,8 @@ class OpenSearchClient:
 
     def remove_voting_exclusions(self, alt_hosts: list[str] | None = None) -> bool:
         """Remove voting exclusions from OpenSearch cluster."""
+        # "wait_for_removal" is VERY important, it removes all voting configs immediately
+        # and allows any node to return to the voting config in the future
         response = self.request(
             "DELETE",
             "/_cluster/voting_config_exclusions?wait_for_removal=false",

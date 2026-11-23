@@ -18,7 +18,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
-    OpenSearchStopError,
+    OpenSearchShardsCannotMoveError,
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
@@ -157,7 +157,7 @@ class HealthManager(BaseManager):
             )
             raise OpenSearchHAError("Shards haven't finished moving off this node.")
         if only_copies and self.state.planned_units > 0:
-            raise OpenSearchStopError(
+            raise OpenSearchShardsCannotMoveError(
                 "Node holds the only copy of some shards and no other node can take them."
             )
 

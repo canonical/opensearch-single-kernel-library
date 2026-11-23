@@ -17,7 +17,7 @@ from opensearch_single_kernel.common.constants import HealthColors
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
-    OpenSearchStopError,
+    OpenSearchShardsCannotMoveError,
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
@@ -375,7 +375,7 @@ def test_drain_stops_when_no_node_can_take_shards(health_manager, drain_client, 
 def test_drain_raises_when_no_node_can_take_shards(health_manager, drain_client):
     health_manager._nodes.return_value = [node(LEAVING)]
 
-    with pytest.raises(OpenSearchStopError):
+    with pytest.raises(OpenSearchShardsCannotMoveError):
         waits(health_manager)
 
 
