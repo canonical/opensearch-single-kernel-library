@@ -16,6 +16,7 @@ from azure.core.exceptions import AzureError, ResourceNotFoundError
 from botocore.exceptions import ClientError
 from google.api_core.exceptions import Conflict, Forbidden
 from ops import testing
+from ops.framework import BoundEvent
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
@@ -1911,3 +1912,26 @@ def test_peer_change_syncs_relation_credentials_not_saved(
     assert credentials_changed.called == synced
     if synced:
         assert credentials_changed.call_args.args[0].relation.name == S3_RELATION
+
+
+def test_saved_credentials_resynced_after_demotion_and_promotion(
+    peer_snapshot_cleanup, harness, mocker
+):
+    """A keystore cleaned while demoted must be re-applied from the relation once promoted."""
+    charm = peer_snapshot_cleanup
+    mocker.patch.object(
+        charm.state, "get_storage_connection_info_from_relation", return_value=dict(S3_INFO)
+    )
+    with harness.hooks_disabled():
+        rel_id = harness.add_relation(S3_RELATION, "s3-integrator")
+    # Saved while main, then the keystore is cleaned with the peer-cluster data once demoted
+    charm.state.server.snapshots_credentials_saved = hash_credentials(S3_INFO)
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
+
+    assert charm.state.server.snapshots_credentials_saved == ""
+
+    # Promoted back to main
+    charm.snapshots_events.sync_relation_credentials()
+
+    relation = charm.model.get_relation(S3_RELATION, rel_id)
+    BoundEvent.emit.assert_any_call(relation, app=relation.app)
