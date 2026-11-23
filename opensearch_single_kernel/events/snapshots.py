@@ -135,7 +135,7 @@ class SnapshotsEventsHandler(Object):
             connection_info = self.charm.state.get_storage_connection_info_from_relation(
                 object_storage_type
             )
-            self.charm.state.server.snapshots_credentials_saved = hash_credentials(connection_info)
+            self.charm.state.server.snapshots_info_handled = hash_credentials(connection_info)
 
             if not (
                 object_storage_config := (
@@ -467,7 +467,7 @@ class SnapshotsEventsHandler(Object):
             return None
 
         # clean up
-        del self.charm.state.server.snapshots_credentials_saved
+        del self.charm.state.server.snapshots_info_handled
 
         try:
             info_to_save, object_storage_type_to_cleanup = (
@@ -600,7 +600,7 @@ class SnapshotsEventsHandler(Object):
         self.charm.reload_keystore_event.emit()
 
     def sync_relation_credentials(self, _: RelationEvent | None = None) -> None:
-        """Apply the object storage relation credentials of a main if not saved on the unit."""
+        """Apply the object storage relation credentials of a main if not handled by the unit."""
         # This is handling two cases. Main orchestrator leader unit after promotion
         # and non-leader units of main orchestrator to also sync credentials
         # Once main is promoted peer relation change is triggered
@@ -625,8 +625,7 @@ class SnapshotsEventsHandler(Object):
             object_storage_type
         )
         if not connection_info or (
-            self.charm.state.server.snapshots_credentials_saved
-            == hash_credentials(connection_info)
+            self.charm.state.server.snapshots_info_handled == hash_credentials(connection_info)
         ):
             return
 

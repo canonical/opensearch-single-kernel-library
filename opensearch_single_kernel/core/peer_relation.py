@@ -269,19 +269,19 @@ class OpenSearchServer(RelationState):
         self.update({"last_host_ip": value})
 
     @property
-    def snapshots_credentials_saved(self) -> str:
-        """Get the hash of the object storage relation data applied to the unit keystore."""
-        return self.relation_data.get("snapshots_credentials_saved", "")
+    def snapshots_info_handled(self) -> str:
+        """Get the hash of the object storage relation info handled by the unit."""
+        return self.relation_data.get("snapshots_info_handled", "")
 
-    @snapshots_credentials_saved.setter
-    def snapshots_credentials_saved(self, value: str) -> None:
-        """Set the hash of the object storage relation data applied to the unit keystore."""
-        self.update({"snapshots_credentials_saved": value})
+    @snapshots_info_handled.setter
+    def snapshots_info_handled(self, value: str) -> None:
+        """Set the hash of the object storage relation info handled by the unit."""
+        self.update({"snapshots_info_handled": value})
 
-    @snapshots_credentials_saved.deleter
-    def snapshots_credentials_saved(self) -> None:
-        """Remove the hash of the object storage relation data applied to the unit keystore."""
-        self.relation.data[self.unit].pop("snapshots_credentials_saved", None)
+    @snapshots_info_handled.deleter
+    def snapshots_info_handled(self) -> None:
+        """Remove the hash of the object storage relation info handled by the unit."""
+        self.relation.data[self.unit].pop("snapshots_info_handled", None)
 
     @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:

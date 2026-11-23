@@ -65,12 +65,12 @@ def peer_snapshot_cleanup(harness, mocker):
 def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
     charm = peer_snapshot_cleanup
     charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
-    charm.state.server.snapshots_credentials_saved = "saved"
+    charm.state.server.snapshots_info_handled = "handled"
     event = Mock()
 
     charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
 
-    assert charm.state.server.snapshots_credentials_saved == ""
+    assert charm.state.server.snapshots_info_handled == ""
 
     charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
     charm.reload_keystore_event.emit.assert_not_called()
@@ -1874,7 +1874,7 @@ def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
 
 
 @pytest.mark.parametrize(
-    "current_type, related, saved, synced",
+    "current_type, related, handled, synced",
     [
         (DeploymentType.MAIN_ORCHESTRATOR, True, "", True),
         (DeploymentType.MAIN_ORCHESTRATOR, True, "stale", True),
@@ -1882,12 +1882,12 @@ def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
         (DeploymentType.MAIN_ORCHESTRATOR, False, "", False),
         (DeploymentType.FAILOVER_ORCHESTRATOR, True, "", False),
     ],
-    ids=["not-saved", "other-saved", "already-saved", "no-relation", "not-main"],
+    ids=["not-handled", "other-handled", "already-handled", "no-relation", "not-main"],
 )
-def test_peer_change_syncs_relation_credentials_not_saved(
-    harness, mocker, current_type, related, saved, synced
+def test_peer_change_syncs_relation_credentials_not_handled(
+    harness, mocker, current_type, related, handled, synced
 ):
-    """Units of a main re-apply relation data they did not save, e.g. once re-promoted (#770)."""
+    """Units of a main re-apply relation info they did not handle, e.g. once re-promoted (#770)."""
     charm = harness.charm
     mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
@@ -1904,8 +1904,8 @@ def test_peer_change_syncs_relation_credentials_not_saved(
     with harness.hooks_disabled():
         if related:
             harness.add_relation(S3_RELATION, "s3-integrator")
-        if saved:
-            charm.state.server.snapshots_credentials_saved = saved
+        if handled:
+            charm.state.server.snapshots_info_handled = handled
 
     charm.snapshots_events.sync_relation_credentials()
 
