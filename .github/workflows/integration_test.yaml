@@ -127,7 +127,7 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 246 # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 266 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
     steps:
@@ -250,7 +250,8 @@ jobs:
           test-log: ${{ runner.temp }}/spread.log
           artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}-${{ github.run_attempt }}
       - name: Load telemetry into OpenSearch
-        timeout-minutes: 10
+        timeout-minutes: 30
+        continue-on-error: true
         if: always()
         uses: canonical/flake0/.github/actions/ingest@ingest-via-data-prepper
         with:
