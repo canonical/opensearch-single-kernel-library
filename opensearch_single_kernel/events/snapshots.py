@@ -616,7 +616,7 @@ class SnapshotsEventsHandler(Object):
             ),
             ObjectStorageType.GCS: (self.charm.state.gcs_requires, self.charm.state.gcs_relation),
         }
-        # Only if we are relation to a snapshots integrator
+        # Only if we are related to a snapshots integrator
         if (object_storage_type := self.charm.state.storage_type) not in relations:
             return
 
