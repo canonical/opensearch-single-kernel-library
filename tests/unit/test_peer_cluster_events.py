@@ -85,8 +85,6 @@ def peer_provider(harness, mocker):
     mocker.patch.object(manager, "fetch_current_app_cm_nodes", return_value=[])
     mocker.patch.object(manager, "build_peer_cluster_rel_err_data", return_value=None)
     mocker.patch.object(charm.tls_manager, "is_fully_configured", return_value=False)
-    # a peer cluster joining may complete the profile's topology, which writes jvm.options
-    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     assert manager.refresh_relation_data(relation_id) == PClusterRefreshRelDataRes.COMPLETED
     return charm, harness.model.get_relation(PEER_CLUSTER_ORCHESTRATOR_RELATION, relation_id)
 

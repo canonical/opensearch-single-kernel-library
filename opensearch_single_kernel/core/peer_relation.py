@@ -76,6 +76,18 @@ class OpenSearchServer(RelationState):
         self.relation_data.update({PERFORMANCE_PROFILE: profile_value.type.value})
 
     @property
+    def profile_apply_failure(self) -> PerformanceType | None:
+        """The type of the profile which failed to be applied on the unit, if any."""
+        if failure := self.relation_data.get("profile_apply_failure"):
+            return PerformanceType(failure)
+        return None
+
+    @profile_apply_failure.setter
+    def profile_apply_failure(self, profile_type: PerformanceType | None) -> None:
+        """Record, or clear with None, the type of the profile which failed to be applied."""
+        self.update({"profile_apply_failure": profile_type.value if profile_type else ""})
+
+    @property
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""
         return self.unit.is_leader()

@@ -302,6 +302,49 @@ def test_statuses_follow_configured_profile(harness, mocker, production_topology
     assert not any(status.short_message == missing for status in statuses)
 
 
+def test_heap_write_failure_reported_in_statuses(
+    harness, mocker, production_topology_met, update_jvm_heap_size
+):
+    """A met profile whose heap cannot be written reports a failed apply, not active."""
+    mocker.patch.object(
+        type(harness.charm.state),
+        "current_peer_cluster_app",
+        new_callable=PropertyMock,
+        return_value=object(),
+    )
+    harness.charm.state.server.profile = TestingProfile()
+    production_topology_met["value"] = True
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+    failed = ProfileStatuses.PROFILE_APPLY_FAILED.value.short_message
+
+    def recomputed_statuses():
+        # As update-status does: the cached statuses are cleared before recomputing.
+        harness.charm.state.statuses.clear("unit", component="profiles_manager")
+        return harness.charm.profiles_manager.get_statuses("unit", recompute=True)
+
+    update_jvm_heap_size.side_effect = OpenSearchFileOperationError("read-only file system")
+    assert not harness.charm.profiles_manager.apply_profile()
+    assert harness.charm.state.server.profile == TestingProfile()
+    assert any(status.short_message == failed for status in recomputed_statuses())
+
+    # switching back to the applied profile clears it
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "testing"})
+    assert not harness.charm.profiles_manager.apply_profile()
+    assert not any(status.short_message == failed for status in recomputed_statuses())
+
+    with harness.hooks_disabled():
+        harness.update_config({"profile": "production"})
+    assert not harness.charm.profiles_manager.apply_profile()
+    assert any(status.short_message == failed for status in recomputed_statuses())
+
+    # a successful retry clears it
+    update_jvm_heap_size.side_effect = None
+    assert harness.charm.profiles_manager.apply_profile()
+    assert not any(status.short_message == failed for status in recomputed_statuses())
+
+
 @pytest.fixture
 def start_gate(harness, mocker):
     """Run the start of OpenSearch up to the checks following the profile ones."""

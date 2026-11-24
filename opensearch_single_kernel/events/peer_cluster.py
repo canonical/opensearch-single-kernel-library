@@ -181,8 +181,6 @@ class PeerClusterEventsHandler(Object):
             p_cluster_app=related_peer_cluster_app,
             trigger_rel_id=event.relation.id,
         )
-        # needed for leader
-        self.charm.apply_profile_and_restart()
 
         if (
             deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
@@ -332,8 +330,6 @@ class PeerClusterEventsHandler(Object):
             deployment_desc=deployment_desc,
             is_provider=False,
         )
-        # needed for leader
-        self.charm.apply_profile_and_restart()
 
         # set the main orchestrator registered flag for this relation
         if (

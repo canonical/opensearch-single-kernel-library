@@ -163,15 +163,18 @@ class ProfilesManager(BaseManager):
             return False
 
         if profile == self.state.server.profile:
+            self.state.server.profile_apply_failure = None
             return False
 
         if not self.check_profile_requirements(profile):
             return False
 
         if not self.write_jvm_heap_size(profile):
+            self.state.server.profile_apply_failure = profile.type
             return False
 
         self.state.server.profile = profile
+        self.state.server.profile_apply_failure = None
         return True
 
     def write_jvm_heap_size(self, profile: OpenSearchProfile) -> bool:
@@ -230,6 +233,13 @@ class ProfilesManager(BaseManager):
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
                             {"requirements": "; ".join(missing_requirements)},
+                        )
+                    )
+                elif self.state.server.profile_apply_failure == config_profile.type:
+                    status_list.append(
+                        format_status(
+                            ProfileStatuses.PROFILE_APPLY_FAILED.value,
+                            {"profile": config_profile.type.value},
                         )
                     )
             except OpenSearchCmdError as e:
