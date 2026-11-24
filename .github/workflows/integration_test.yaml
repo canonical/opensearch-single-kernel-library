@@ -259,3 +259,5 @@ jobs:
           url: ${{ secrets.FLAKE0_INGEST_URL }}
           username: ${{ secrets.FLAKE0_INGEST_USER }}
           password: ${{ secrets.FLAKE0_INGEST_PASSWORD }}
+          skip-steps: juju debug-log
+          skip-files: workload/k8s/controller-*_api-server-*.log
