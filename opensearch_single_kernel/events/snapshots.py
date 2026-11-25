@@ -12,12 +12,13 @@ from object_storage import (
     StorageConnectionInfoChangedEvent,
     StorageConnectionInfoGoneEvent,
 )
-from ops import ActionEvent, ModelError, Object
+from ops import ActionEvent, ModelError, Object, RelationEvent
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
     GCS_RELATION,
     PEER_CLUSTER_RELATION,
+    PEER_RELATION,
     S3_RELATION,
     DeploymentType,
     HealthColors,
@@ -49,6 +50,7 @@ from opensearch_single_kernel.core.models import (
 from opensearch_single_kernel.events.custom_events import (
     VerifySnapshotsCredentialsEvent,
 )
+from opensearch_single_kernel.utils.helpers import hash_credentials
 from opensearch_single_kernel.utils.object_storage import (
     repository_name,
     storage_config_from_connection_info,
@@ -90,6 +92,10 @@ class SnapshotsEventsHandler(Object):
             charm.on[PEER_CLUSTER_RELATION].relation_departed,
             self._on_peer_clusters_relation_departed_for_snapshots,
         )
+        # Sync credentials of main orchestrator units
+        self.framework.observe(
+            charm.on[PEER_RELATION].relation_changed, self.sync_relation_credentials
+        )
 
         # Custom events
         self.framework.observe(
@@ -130,6 +136,7 @@ class SnapshotsEventsHandler(Object):
             connection_info = self.charm.state.get_storage_connection_info_from_relation(
                 object_storage_type
             )
+            self.charm.state.server.snapshots_info_handled = hash_credentials(connection_info)
 
             if not (
                 object_storage_config := (
@@ -173,6 +180,7 @@ class SnapshotsEventsHandler(Object):
             )
         except OpenSearchFileOperationError:
             logger.error("Failed to update stored backup credentials.")
+            del self.charm.state.server.snapshots_info_handled
             return
 
         # Reload keystore
@@ -459,6 +467,9 @@ class SnapshotsEventsHandler(Object):
             event.defer()
             return None
 
+        # clean up
+        del self.charm.state.server.snapshots_info_handled
+
         try:
             info_to_save, object_storage_type_to_cleanup = (
                 self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
@@ -592,6 +603,39 @@ class SnapshotsEventsHandler(Object):
             self.charm.snapshots_manager.remove_s3_ca()
 
         self.charm.reload_keystore_event.emit()
+
+    def sync_relation_credentials(self, _: RelationEvent | None = None) -> None:
+        """Apply the object storage relation credentials of a main if not handled by the unit."""
+        # This is handling two cases. Main orchestrator leader unit after promotion
+        # and non-leader units of main orchestrator to also sync credentials
+        # Once main is promoted peer relation change is triggered
+        deployment_desc = self.charm.state.application.deployment_desc
+        if not deployment_desc or deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR:
+            return
+
+        relations = {
+            ObjectStorageType.S3: (self.charm.state.s3_requirer, self.charm.state.s3_relation),
+            ObjectStorageType.AZURE: (
+                self.charm.state.azure_requires,
+                self.charm.state.azure_relation,
+            ),
+            ObjectStorageType.GCS: (self.charm.state.gcs_requires, self.charm.state.gcs_relation),
+        }
+        # Only if we are related to a snapshots integrator
+        if (object_storage_type := self.charm.state.storage_type) not in relations:
+            return
+
+        # Check if there is snapshots credentials from relation
+        connection_info = self.charm.state.get_storage_connection_info_from_relation(
+            object_storage_type
+        )
+        if not connection_info or (
+            self.charm.state.server.snapshots_info_handled == hash_credentials(connection_info)
+        ):
+            return
+
+        requirer, relation = relations[object_storage_type]
+        requirer.on.storage_connection_info_changed.emit(relation, app=relation.app)
 
     def _action_missing_pre_requisites(  # noqa C901
         self,

@@ -11,15 +11,17 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from overrides import override
 
 from opensearch_single_kernel.common.constants import DeploymentType, PerformanceType
-from opensearch_single_kernel.common.exceptions import OpenSearchCmdError
+from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
+    OpenSearchFileOperationError,
+)
 from opensearch_single_kernel.common.statuses import GeneralStatuses, ProfileStatuses
 from opensearch_single_kernel.core.models import (
     OpenSearchProfile,
-    ProductionProfile,
-    TestingProfile,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
+from opensearch_single_kernel.utils.config import YamlConfigSetter
 from opensearch_single_kernel.utils.status import format_status, running_statuses
 from opensearch_single_kernel.workload.base import BaseWorkload
 
@@ -29,27 +31,26 @@ logger = logging.getLogger(__name__)
 class ProfilesManager(BaseManager):
     """Manage all profile related operations"""
 
+    JVM_OPTIONS = "jvm.options"
+
     def __init__(self, state: ClusterState, workload: BaseWorkload):
         super().__init__(state, workload, "profiles_manager")
-        try:
-            if self.profile.type == PerformanceType.TESTING:
-                logger.warning(
-                    "Testing profile is used. This profile is not suitable for production use and should only be used for testing purposes."
-                )
-        except ValueError:
-            logger.error(
-                "Invalid profile configuration. Value: %s",
-                self.state.config.get("profile"),
+        self.yaml_setter = YamlConfigSetter(self.workload)
+        if self.state.server.profile and self.state.server.profile.type == PerformanceType.TESTING:
+            logger.warning(
+                "Testing profile is used. This profile is not suitable for production use and should only be used for testing purposes."
             )
 
-    def get_missing_requirements(self, *, include_topology: bool = True) -> list[str]:
-        """Get missing requirements, optionally omitting topology from status reporting."""
+    def get_missing_requirements(
+        self, profile: OpenSearchProfile, *, include_topology: bool = True
+    ) -> list[str]:
+        """Get the missing requirements of a profile, optionally omitting topology."""
         missing_requirements: list[str] = []
 
         missing_requirements.extend(self.workload.check_missing_system_requirements())
-        missing_requirements.extend(self.check_memory_requirements(self.profile))
+        missing_requirements.extend(self.check_memory_requirements(profile))
         if include_topology:
-            missing_requirements.extend(self.check_cluster_topology(self.profile))
+            missing_requirements.extend(self.check_cluster_topology(profile))
         return missing_requirements
 
     def _waiting_for_provider_fleet(self) -> bool:
@@ -69,22 +70,40 @@ class ProfilesManager(BaseManager):
             self.state.peer_clusters_relations_ids(is_provider=False, must_have_units=False)
         )
 
-    def check_profile_requirements(self) -> bool:
-        """Check all requirements of profile.
+    @property
+    def current_profile(self) -> OpenSearchProfile | None:
+        """The profile the unit runs with: the applied one, or the configured one until applied.
 
-        Returns:
-            True if the profile passed validation and all requirements.
+        Returns None if no profile is applied and the configured one is invalid, as only a new
+        config change can fix the value.
         """
+        if self.state.server.profile:
+            return self.state.server.profile
         try:
-            self.get_config_profile()
+            return self.state.config_profile
         except ValueError:
             logger.error(
                 "Invalid profile configuration. Value: %s",
                 self.state.config.get("profile"),
             )
-            return False
+            return None
+
+    def check_profile_requirements(self, profile: OpenSearchProfile | None = None) -> bool:
+        """Check all requirements of the given profile, defaulting to the current one.
+
+        Args:
+            profile: The profile to check requirements for. Defaults to the current profile,
+                i.e. the one applied on the unit, or the configured one until one is applied.
+
+        Returns:
+            True if all requirements of the profile are met.
+        """
+        if profile is None:
+            profile = self.current_profile
+            if profile is None:
+                return False
         try:
-            return not self.get_missing_requirements()
+            return not self.get_missing_requirements(profile)
         except OpenSearchCmdError as e:
             logger.error("An error occurred while checking profile requirements: %s", str(e))
             return False
@@ -147,17 +166,69 @@ class ProfilesManager(BaseManager):
         logger.error("Missing cluster topology requirements: %s", error_message)
         return [error_message]
 
-    @property
-    def profile(self) -> OpenSearchProfile:
-        """Get the current profile."""
-        return self.state.server.profile or self.get_config_profile()
+    def apply_profile(self) -> bool:
+        """Apply the configured profile on the unit, once all its requirements are met.
 
-    def get_config_profile(self) -> OpenSearchProfile:
-        """Get the current config profile."""
-        return (
-            ProductionProfile()
-            if PerformanceType(self.state.config.get("profile")) == PerformanceType.PRODUCTION
-            else TestingProfile()
+        Returns:
+            True if a new profile was applied: OpenSearch must restart for it to take effect.
+            False otherwise, including when its JVM heap cannot be written: the profile is then
+            not applied, so the next call retries it.
+        """
+        try:
+            profile = self.state.config_profile
+        except ValueError:
+            logger.error(
+                "Invalid profile configuration. Value: %s",
+                self.state.config.get("profile"),
+            )
+            return False
+
+        if profile == self.state.server.profile:
+            self.state.server.profile_apply_failure = None
+            return False
+
+        if not self.check_profile_requirements(profile):
+            return False
+
+        if not self.write_jvm_heap_size(profile):
+            self.state.server.profile_apply_failure = profile.type
+            return False
+
+        self.state.server.profile = profile
+        self.state.server.profile_apply_failure = None
+        return True
+
+    def write_jvm_heap_size(self, profile: OpenSearchProfile) -> bool:
+        """Write the JVM heap of the given profile.
+
+        Returns:
+            True if written. False if the memory of the unit cannot be read, or jvm.options
+            cannot be read or written.
+        """
+        try:
+            heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
+            logger.debug(
+                "Updating JVM heap size to %s KB based on profile requirements", heap_size
+            )
+            self._update_jvm_heap_size(heap_size)
+        except (OpenSearchCmdError, OpenSearchFileOperationError, FileNotFoundError) as e:
+            logger.error("Failed to write the JVM heap: %s", e)
+            return False
+        return True
+
+    def _update_jvm_heap_size(self, heap_size_in_kb: int) -> None:
+        """Update Opensearch JVM config file using the provided values."""
+        self.yaml_setter.replace(
+            self.JVM_OPTIONS,
+            "-Xms[0-9]+[kmgKMG]",
+            f"-Xms{heap_size_in_kb}k",
+            regex=True,
+        )
+        self.yaml_setter.replace(
+            self.JVM_OPTIONS,
+            "-Xmx[0-9]+[kmgKMG]",
+            f"-Xmx{heap_size_in_kb}k",
+            regex=True,
         )
 
     @override
@@ -172,7 +243,7 @@ class ProfilesManager(BaseManager):
 
         if scope == "unit":
             try:
-                _ = self.get_config_profile()
+                config_profile = self.state.config_profile
             except ValueError:
                 status_list.append(ProfileStatuses.INVALID_PROFILE_CONFIG_OPTION.value)
                 return status_list
@@ -181,12 +252,19 @@ class ProfilesManager(BaseManager):
                 # Until the provider's fleet is stored locally, the complete topology is unknown.
                 # Startup still checks all requirements through check_profile_requirements.
                 if missing_requirements := self.get_missing_requirements(
-                    include_topology=not self._waiting_for_provider_fleet()
+                    config_profile, include_topology=not self._waiting_for_provider_fleet()
                 ):
                     status_list.append(
                         format_status(
                             ProfileStatuses.MISSING_PROFILE_REQUIREMENTS.value,
                             {"requirements": "; ".join(missing_requirements)},
+                        )
+                    )
+                elif self.state.server.profile_apply_failure == config_profile.type:
+                    status_list.append(
+                        format_status(
+                            ProfileStatuses.PROFILE_APPLY_FAILED.value,
+                            {"profile": config_profile.type.value},
                         )
                     )
             except OpenSearchCmdError as e:

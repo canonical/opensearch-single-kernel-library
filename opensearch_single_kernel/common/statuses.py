@@ -139,6 +139,13 @@ class ProfileStatuses(Enum):
         check="Machine resources against selected profile.",
         action="Provide the missing resources or switch profile.",
     )
+    PROFILE_APPLY_FAILED = StatusObject(
+        status="blocked",
+        message="Failed to apply the {profile} profile - see the logs",
+        short_message="Profile apply failed",
+        check="JVM heap of the configured profile written to jvm.options.",
+        action="Check unit logs; the profile is retried on the next update-status.",
+    )
 
 
 class InternalUsersStatuses(Enum):

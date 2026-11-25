@@ -123,6 +123,8 @@ def upgrade_status_managers(harness, mocker, patch_deployment_desc):
         unit_params={"workload_version": "2.19.6", "charm_version": "1"},
     )
     charm.status_handler.components = (manager, charm.cluster_manager)
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     return charm
 
 

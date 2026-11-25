@@ -17,9 +17,11 @@ from azure.core.exceptions import AzureError, ResourceNotFoundError
 from botocore.exceptions import ClientError
 from google.api_core.exceptions import Conflict, Forbidden
 from ops import testing
+from ops.framework import BoundEvent
 
 from opensearch_single_kernel.common.client import OpenSearchClient
 from opensearch_single_kernel.common.constants import (
+    S3_RELATION,
     DeploymentType,
     HealthColors,
     ObjectStorageType,
@@ -31,9 +33,12 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.core.models import GcsRelDataCredentials, PeerClusterRelData
 from opensearch_single_kernel.utils import object_storage
+from opensearch_single_kernel.utils.helpers import hash_credentials
 from tests.unit.conftest import azure_relation, s3_relation, use_s3
 from tests.unit.constants import DEFAULT_GCS_INFO, S3_CONN_INFO_WITH_CA
 from tests.unit.helpers import deployment_descriptions
+
+S3_INFO = {"access-key": "a", "secret-key": "s", "bucket": "b"}
 
 
 @pytest.fixture
@@ -61,9 +66,12 @@ def peer_snapshot_cleanup(harness, mocker):
 def test_peer_snapshot_cleanup_without_credentials_skips_reload(peer_snapshot_cleanup):
     charm = peer_snapshot_cleanup
     charm.snapshots_manager.is_custom_s3_ca_stored.return_value = True
+    charm.state.server.snapshots_info_handled = "handled"
     event = Mock()
 
     charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    assert charm.state.server.snapshots_info_handled == ""
 
     charm.workload.run_cmd.assert_called_once_with(charm.keystore_manager.keystore, "list")
     charm.reload_keystore_event.emit.assert_not_called()
@@ -1840,3 +1848,67 @@ def test_peer_snapshot_secret_failure_preserves_credentials_and_retries(
     update.assert_not_called()
     charm.snapshots_manager.set_credentials_saved.assert_not_called()
     charm.reload_keystore_event.emit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "current_type, related, handled, synced",
+    [
+        (DeploymentType.MAIN_ORCHESTRATOR, True, "", True),
+        (DeploymentType.MAIN_ORCHESTRATOR, True, "stale", True),
+        (DeploymentType.MAIN_ORCHESTRATOR, True, hash_credentials(S3_INFO), False),
+        (DeploymentType.MAIN_ORCHESTRATOR, False, "", False),
+        (DeploymentType.FAILOVER_ORCHESTRATOR, True, "", False),
+    ],
+    ids=["not-handled", "other-handled", "already-handled", "no-relation", "not-main"],
+)
+def test_peer_change_syncs_relation_credentials_not_handled(
+    harness, mocker, current_type, related, handled, synced
+):
+    """Units of a main re-apply relation info they did not handle, e.g. once re-promoted (#770)."""
+    charm = harness.charm
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"].model_copy(update={"typ": current_type}),
+    )
+    mocker.patch.object(charm.state, "get_rel_data_from_main_orchestrator", return_value=None)
+    mocker.patch.object(
+        charm.state, "get_storage_connection_info_from_relation", return_value=dict(S3_INFO)
+    )
+    credentials_changed = mocker.patch.object(
+        charm.snapshots_events, "_on_snapshots_credentials_changed"
+    )
+    with harness.hooks_disabled():
+        if related:
+            harness.add_relation(S3_RELATION, "s3-integrator")
+        if handled:
+            charm.state.server.snapshots_info_handled = handled
+
+    charm.snapshots_events.sync_relation_credentials()
+
+    assert credentials_changed.called == synced
+    if synced:
+        assert credentials_changed.call_args.args[0].relation.name == S3_RELATION
+
+
+def test_handled_info_resynced_after_demotion_and_promotion(
+    peer_snapshot_cleanup, harness, mocker
+):
+    """A keystore cleaned while demoted must be re-applied from the relation once promoted."""
+    charm = peer_snapshot_cleanup
+    mocker.patch.object(
+        charm.state, "get_storage_connection_info_from_relation", return_value=dict(S3_INFO)
+    )
+    with harness.hooks_disabled():
+        rel_id = harness.add_relation(S3_RELATION, "s3-integrator")
+    # Handled while main, then the keystore is cleaned with the peer-cluster data once demoted
+    charm.state.server.snapshots_info_handled = hash_credentials(S3_INFO)
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(Mock())
+
+    assert charm.state.server.snapshots_info_handled == ""
+
+    # Promoted back to main
+    charm.snapshots_events.sync_relation_credentials()
+
+    relation = charm.model.get_relation(S3_RELATION, rel_id)
+    BoundEvent.emit.assert_any_call(relation, app=relation.app)

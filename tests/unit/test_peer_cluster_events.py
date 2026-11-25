@@ -373,6 +373,39 @@ def test_promoted_provider_does_not_try_to_grant_previous_main_plugin_secrets(
     assert json.loads(relation.data[charm.app]["data"])["plugins"] == {}
 
 
+def test_promoted_provider_applies_kept_object_storage_relation_credentials(
+    peer_provider, harness, mocker
+):
+    """A failover keeping its S3 relation must store its credentials once promoted (#770)."""
+    charm, relation = peer_provider
+    desc = charm.state.application.deployment_desc
+    desc.typ = DeploymentType.FAILOVER_ORCHESTRATOR
+    charm.state.application.deployment_desc = desc
+    charm.state.application.orchestrators = PeerClusterOrchestrators(
+        failover_app=desc.app, failover_rel_id=relation.id
+    )
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            relation.id, relation.app.name, {"main_orchestrator_registered": "false"}
+        )
+        harness.add_relation(PEER_CLUSTER_RELATION, "previous-main")
+        harness.add_relation(S3_RELATION, "s3-integrator")
+    mocker.patch.object(
+        charm.state, "get_storage_connection_info_from_relation", return_value={"bucket": "b"}
+    )
+    credentials_changed = mocker.patch.object(
+        charm.snapshots_events, "_on_snapshots_credentials_changed"
+    )
+    charm.tls_manager.is_fully_configured.return_value = True
+    event = MagicMock(relation=relation, app=relation.app)
+
+    charm.peer_cluster_events._on_peer_cluster_orchestrator_relation_changed(event)
+
+    assert charm.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
+    credentials_changed.assert_called_once()
+    assert credentials_changed.call_args.args[0].relation.name == S3_RELATION
+
+
 @pytest.mark.parametrize("failure", ["read", "grant", "waiting"])
 def test_peer_change_stops_on_publication_failure_before_counting_contributors(
     peer_provider, harness, mocker, failure
@@ -456,7 +489,7 @@ def test_provider_publication_failure_stops_startup_and_failover_registration(
     charm.tls_manager.is_fully_configured.return_value = True
     mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
     mocker.patch.object(type(charm.workload), "memtotal", return_value=8 * 1024**3)
-    mocker.patch.object(charm.config_manager, "_update_jvm_heap_size")
+    mocker.patch.object(charm.profiles_manager, "_update_jvm_heap_size")
     # Observe start requests without executing the workload lifecycle.
     emit = mocker.patch.object(BoundEvent, "emit")
     previous_data = relation.data[charm.app]["data"]

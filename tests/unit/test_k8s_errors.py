@@ -334,12 +334,15 @@ def test_late_api_failure_preserves_config_changes(
             return_value=mocker.Mock(),
         )
     mocker.patch.object(
-        charm.profiles_manager, "get_config_profile", return_value=ProductionProfile()
+        type(charm.state),
+        "config_profile",
+        new_callable=PropertyMock,
+        return_value=ProductionProfile(),
     )
     mocker.patch.object(charm.profiles_manager, "check_profile_requirements", return_value=True)
     mocker.patch.object(type(charm.workload), "memtotal", return_value=8 * 1024 * 1024)
     mocker.patch.object(type(charm.workload), "is_service_started", return_value=True)
-    heap = mocker.patch.object(charm.config_manager, "_update_jvm_heap_size")
+    heap = mocker.patch.object(charm.profiles_manager, "_update_jvm_heap_size")
     mocker.patch.object(charm.external_clients_manager, "reconcile_role_mappings")
     security = mocker.patch.object(
         charm.config_manager, "reconcile_security_config", return_value=True

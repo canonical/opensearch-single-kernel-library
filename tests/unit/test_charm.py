@@ -108,6 +108,8 @@ def certificate_expiry_update_status(harness, mocker, patch_deployment_desc):
         type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=False
     )
     mocker.patch.object(charm.tls_manager, "read_stored_ca", return_value=None)
+    # update-status applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     return charm
 
 
@@ -455,6 +457,8 @@ def test_api_up_resumes_unfinished_start(
     charm = harness.charm
     charm.state.server.start_pending = pending
     charm.state.server.start_failed = failed
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     mocker.patch.object(
         type(charm.upgrades_manager), "is_rollback", new_callable=PropertyMock, return_value=False
     )
@@ -592,6 +596,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions, startup_even
     update_opensearch_config = mocker.patch(
         "opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config"
     )
+    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile")
     get_nodes = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
     can_service_start = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
@@ -1066,11 +1071,7 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
         return_value=False,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements",
-        return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile",
         return_value=False,
     )
     reconcile_security_config = mocker.patch.object(harness.charm, "reconcile_security_config")
@@ -1159,6 +1160,8 @@ def test_on_start_restores_ldap_ca(harness, mocker):
 def test_start_request_waits_for_bootstrap_without_reporting_active(harness, mocker, prerequisite):
     """A configured follower waits for bootstrap without bypassing startup checks."""
     charm = harness.charm
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     with harness.hooks_disabled():
         harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
     mocker.patch.object(
@@ -1383,6 +1386,8 @@ def test_unit_name(harness, mocker):
 @pytest.mark.parametrize("allowed", [False, True])
 def test_start_waits_for_permission_and_lock_before_reporting_start(harness, mocker, allowed):
     charm = harness.charm
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     with harness.hooks_disabled():
         harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
@@ -1474,7 +1479,9 @@ def test_roles_change_emits_restart(harness, mocker, is_leader):
     mocker.patch.object(
         charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
     )
-    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
+    mocker.patch.object(charm.profiles_manager, "apply_profile", return_value=False)
+    # an unmet profile no longer holds back the rest of config-changed
+    mocker.patch.object(charm, "reconcile_security_config")
     mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
     charm.restart_opensearch_event = MagicMock()
 
@@ -1516,6 +1523,8 @@ def started_leader(harness, mocker):
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
     mocker.patch.object(charm.health_manager, "get", return_value=HealthColors.GREEN)
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     return charm
 
 
