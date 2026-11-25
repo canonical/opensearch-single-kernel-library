@@ -248,8 +248,6 @@ def test_client_removal_still_cleans_up_after_advisory_api_failure(
 @pytest.mark.parametrize(
     "handler, method",
     [
-        ("opensearch_events", "_on_peer_relation_created"),
-        ("opensearch_events", "_on_peer_relation_joined"),
         ("tls_events", "_on_tls_relation_broken"),
     ],
 )

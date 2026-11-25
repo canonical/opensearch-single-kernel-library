@@ -18,9 +18,7 @@ from ops import (
     Object,
     PebbleReadyEvent,
     RelationChangedEvent,
-    RelationCreatedEvent,
     RelationDepartedEvent,
-    RelationJoinedEvent,
     SecretChangedEvent,
     SecretNotFoundError,
     StartEvent,
@@ -117,13 +115,6 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
         self.framework.observe(self.charm.on.update_status, self._on_update_status)
         self.framework.observe(
-            self.charm.on[PEER_RELATION].relation_created,
-            self._on_peer_relation_created,
-        )
-        self.framework.observe(
-            self.charm.on[PEER_RELATION].relation_joined, self._on_peer_relation_joined
-        )
-        self.framework.observe(
             self.charm.on[PEER_RELATION].relation_changed,
             self._on_peer_relation_changed,
         )
@@ -145,28 +136,6 @@ class OpenSearchEventsHandler(Object):
             self.framework.observe(
                 self.charm.on[CONTAINER_NAME].pebble_ready, self._on_pebble_ready
             )
-
-    def _on_peer_relation_created(self, _: RelationCreatedEvent) -> None:
-        """Event received by the new node joining the cluster."""
-        try:
-            if self.charm.upgrades_manager.in_progress:
-                logger.warning(
-                    "Adding units during an upgrade is not supported."
-                    "The charm may be in a broken, unrecoverable state"
-                )
-        except OpenSearchK8sError as e:
-            logger.warning("Cannot check upgrade state: %s", e)
-
-    def _on_peer_relation_joined(self, _: RelationJoinedEvent) -> None:
-        """Event received by all units when a new node joins the cluster."""
-        try:
-            if self.charm.upgrades_manager.in_progress:
-                logger.warning(
-                    "Adding units during an upgrade is not supported."
-                    "The charm may be in a broken, unrecoverable state"
-                )
-        except OpenSearchK8sError as e:
-            logger.warning("Cannot check upgrade state: %s", e)
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
         """Handle peer relation changes."""
@@ -1805,17 +1774,6 @@ class OpenSearchEventsHandler(Object):
         """Triggered when the unit IP is changed."""
         self.charm.tls_manager.delete_stored_tls_resources()
         self.request_new_unit_certificates()
-        # since when an IP change happens, "_on_peer_relation_joined" won't be called,
-        # we need to alert the leader that it must recompute the node roles for any unit whose
-        # roles were changed while the current unit was cut-off from the rest of the network
-        self._on_peer_relation_joined(
-            RelationJoinedEvent(
-                event.handle,
-                self.charm.state.peer_relation,
-                self.charm.app,
-                self.charm.unit,
-            )
-        )
 
     def _handle_change_to_main_orchestrator_if_needed(
         self, event: ConfigChangedEvent, previous_deployment_desc: DeploymentDescription | None

@@ -92,6 +92,8 @@ class UpgradesEventsHandler(Object):
         self.charm.state.server_upgrade.workload_version = (
             self.charm.upgrades_manager.current_versions.workload
         )
+        # Units added during an upgrade never receive upgrade-charm. A rollback needs this file.
+        self.charm.upgrades_manager.reconcile_compatibility_matrix()
         if not self.authorized_leader:
             logger.debug("Skipping upgrade relation created because unit is not leader")
             return
@@ -207,8 +209,7 @@ class UpgradesEventsHandler(Object):
                 # Preserve the post-upgrade health gate when recovery is retried by lifecycle hooks.
                 health = self.charm.health_manager.get(local_app_only=False)
                 if (
-                    self.charm.state.server_upgrade.unit_state
-                    in (UnitUpgradesState.UPGRADING, UnitUpgradesState.RESTARTING)
+                    self.charm.state.server_upgrade.unit_state == UnitUpgradesState.RESTARTING
                     and self.charm.state.server_upgrade.unit_state_revision != unit_revision
                 ) or self.charm.state.server_upgrade.post_upgrade_health is not None:
                     self.charm.upgrades_manager.record_upgrade_health(health)
@@ -281,7 +282,12 @@ class UpgradesEventsHandler(Object):
             and not self.charm.state.server.start_failed
             and not self.charm.workload.is_service_started()
         ):
-            self.charm.unit.status = as_status(GeneralStatuses.WAITING_TO_START.value)
+            self.charm.status_handler.set_running_status(
+                GeneralStatuses.WAITING_TO_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.cluster_manager.name,
+            )
         self.charm.upgrades_manager.reconcile_compatibility_matrix()
         self.charm.upgrades_manager.update_grafana_dashboards_title(
             get_charm_revision(self.charm.model.unit)
@@ -345,8 +351,8 @@ class UpgradesEventsHandler(Object):
 
         Confirm that the first upgraded unit has been checked and the upgrade can continue.
         On Kubernetes, force=True also allows the next unit to upgrade despite unhealthy
-        upgraded units. Save the request for a later hook so replacing the leader does not
-        terminate the action before it reports its result.
+        upgraded units. If the next unit is the leader, save the request for a later hook
+        so replacing the leader does not terminate the action before it reports its result.
         """
         if not self.authorized_leader:
             message = f"Must run action on leader unit. (e.g. `juju run {self.charm.app.name}/leader resume-upgrade`)"
@@ -377,6 +383,14 @@ class UpgradesEventsHandler(Object):
                 force = event.params.get("force", False)
                 revision = self.charm.upgrades_manager.k8s_client.get_revision()
                 partition = self.charm.upgrades_manager.get_resume_partition(force=force)
+                if not self._resume_replaces_leader(partition, revision):
+                    # Replacing another unit's pod does not stop this action.
+                    self.charm.upgrades_manager.partition = partition
+                    self.charm.state.application_upgrade.resume_request = None
+                    event.set_results(
+                        {"result": f"Upgrade resumed. Unit {partition} is upgrading next."}
+                    )
+                    return
                 self.charm.state.application_upgrade.resume_request = UpgradeResumeRequest(
                     revision=revision, partition=partition, force=force
                 )
@@ -391,6 +405,13 @@ class UpgradesEventsHandler(Object):
             logger.error("Cannot reconcile the Kubernetes partition: %s", e)
             event.fail(str(e))
             return
+
+    def _resume_replaces_leader(self, partition: int, revision: str) -> bool:
+        """Whether lowering the partition to this value can replace the leader's pod."""
+        if partition > self.charm.state.server_upgrade.unit_number:
+            return False
+        revisions = self.charm.upgrades_manager.k8s_client.list_revisions()
+        return revisions.get(self.charm.unit.name) != revision
 
     def _apply_resume_request(self, request: UpgradeResumeRequest) -> None:
         """Apply a saved resume request after the action has completed.

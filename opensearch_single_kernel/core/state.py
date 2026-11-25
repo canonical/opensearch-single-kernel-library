@@ -295,15 +295,28 @@ class ClusterState(Object):
         )
 
     @property
+    def upgrade_peer_units(self) -> set[Unit]:
+        """Other units in the upgrade relation, excluding units being removed."""
+        if not self.upgrade_relation:
+            return set()
+        # A removed unit stays in the relation until it departs, which can take long or hang.
+        goals = hookcmds.goal_state().units
+        return {
+            unit
+            for unit in self.upgrade_relation.units
+            if not ((goal := goals.get(unit.name)) and goal.status == "dying")
+        }
+
+    @property
     def upgrade_membership_complete(self) -> bool:
         """Whether the upgrade relation includes every planned application unit."""
         return bool(
-            self.upgrade_relation and len(self.upgrade_relation.units) + 1 == self.planned_units
+            self.upgrade_relation and len(self.upgrade_peer_units) + 1 == self.planned_units
         )
 
     @property
     def sorted_upgrades_units(self) -> list[UpgradeServerState]:
-        """Get state of upgrade relation for all units in it sorted by highest unit number."""
+        """Get the upgrade state of planned units, sorted by highest unit number."""
         return (
             [
                 UpgradeServerState(
@@ -314,7 +327,7 @@ class ClusterState(Object):
                     component=unit,
                 )
                 for unit in sorted(
-                    (self.server.unit, *self.upgrade_relation.units),
+                    (self.server.unit, *self.upgrade_peer_units),
                     key=lambda unit: int(unit.name.split("/")[1]),
                     reverse=True,
                 )

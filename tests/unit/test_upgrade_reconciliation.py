@@ -621,6 +621,7 @@ def test_lost_partition_response_preserves_resume_decision(
         raise OpenSearchK8sError("Partition response timed out")
 
     patch = mocker.patch.object(K8sClient, "set_partition", side_effect=patch_then_lose_response)
+    mocker.patch.object(charm.upgrade_events, "_resume_replaces_leader", return_value=True)
     harness.run_action("resume-upgrade")
     patch.assert_not_called()
 
@@ -657,9 +658,49 @@ def paused_upgrade(recovering_upgrade, harness, mocker):
     patch = mocker.patch.object(
         K8sClient, "set_partition", side_effect=lambda value: partition.__setitem__(0, value)
     )
-    return SimpleNamespace(
-        charm=charm, partition=partition, patch=patch, revision=revision, relation=relation
+    # Exercise the deferred path: the next replacement would stop the leader's action.
+    replaces_leader = mocker.patch.object(
+        charm.upgrade_events, "_resume_replaces_leader", return_value=True
     )
+    return SimpleNamespace(
+        charm=charm,
+        partition=partition,
+        patch=patch,
+        revision=revision,
+        relation=relation,
+        replaces_leader=replaces_leader,
+    )
+
+
+@pytest.mark.parametrize(
+    "partition, leader_revision, replaced",
+    [
+        (1, "old", False),  # Leader is below the new partition.
+        (0, "old", True),  # Leader is the next unit to upgrade.
+        (0, "new", False),  # Leader already runs the target revision.
+    ],
+)
+def test_resume_replaces_leader_only_if_its_pod_changes(
+    recovering_upgrade, mocker, partition, leader_revision, replaced
+):
+    charm = recovering_upgrade.charm
+    mocker.patch.object(
+        K8sClient, "list_revisions", return_value={charm.unit.name: leader_revision}
+    )
+
+    assert charm.upgrade_events._resume_replaces_leader(partition, "new") is replaced
+
+
+def test_resume_applies_immediately_when_the_leader_is_not_replaced(paused_upgrade, harness):
+    trial = paused_upgrade
+    trial.replaces_leader.return_value = False
+
+    result = harness.run_action("resume-upgrade")
+
+    assert "resumed" in result.results["result"].lower()
+    trial.patch.assert_called_once_with(1)
+    assert trial.partition[0] == 1
+    assert trial.charm.state.application_upgrade.resume_request is None
 
 
 def test_resume_action_finishes_before_replacing_any_pod(paused_upgrade, harness):
@@ -1058,3 +1099,86 @@ def test_k8s_refresh_reports_pending_start_before_preparing_workload(
     else:
         assert observed[0].name == "waiting"
         assert observed[0].message == GeneralStatuses.WAITING_TO_START.value.message
+
+
+@pytest.mark.parametrize("departing_status", ["dying", "active"])
+def test_departing_unit_does_not_block_upgrade_membership(harness, mocker, departing_status):
+    """A unit being removed stays in the relation until it departs; do not wait for it."""
+    charm = harness.charm
+    app = charm.app.name
+    relation = harness.model.get_relation(UPGRADE_RELATION)
+    with harness.hooks_disabled():
+        for unit in (1, 2):
+            harness.add_relation_unit(relation.id, f"{app}/{unit}")
+    goals = {
+        charm.unit.name: SimpleNamespace(status="active"),
+        f"{app}/1": SimpleNamespace(status="active"),
+        f"{app}/2": SimpleNamespace(status=departing_status),
+    }
+    mocker.patch(
+        "opensearch_single_kernel.core.state.hookcmds.goal_state",
+        return_value=SimpleNamespace(units=goals),
+    )
+
+    removing = departing_status == "dying"
+    # Juju no longer plans the removed unit, but it stays in the relation until it departs.
+    planned = len(charm.state.upgrade_relation.units) + 1 - (1 if removing else 0)
+    harness.set_planned_units(planned)
+
+    assert charm.state.upgrade_membership_complete
+    names = [server.unit.name for server in charm.state.sorted_upgrades_units]
+    assert (f"{app}/2" in names) is not removing
+    assert names[-1] == charm.unit.name
+
+
+@pytest.mark.parametrize("leader", [True, False])
+def test_new_unit_stores_compatibility_matrix(harness, mocker, leader):
+    """Units added during an upgrade never run upgrade-charm, so store the matrix on join."""
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.set_leader(leader)
+    reconcile = mocker.patch.object(charm.upgrades_manager, "reconcile_compatibility_matrix")
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "current_versions",
+        new_callable=PropertyMock,
+        return_value=UpgradeVersions(charm="1", workload="2.19.6"),
+    )
+    mocker.patch("opensearch_single_kernel.events.upgrades.pinned_snap_revision", return_value="1")
+    mocker.patch.object(
+        type(charm.upgrades_manager), "in_progress", new_callable=PropertyMock, return_value=True
+    )
+
+    charm.upgrade_events._on_upgrade_peer_relation_created(mocker.Mock())
+
+    reconcile.assert_called_once_with()
+
+
+def test_upgrade_statuses_survive_peer_relation_broken(harness, mocker):
+    """Statuses are collected in peer relation-broken, when the peer relation is gone."""
+    from opensearch_single_kernel.common.constants import PEER_RELATION
+    from opensearch_single_kernel.common.statuses import UpgradesStatuses
+
+    charm = harness.charm
+    with harness.hooks_disabled():
+        harness.remove_relation(harness.model.get_relation(PEER_RELATION).id)
+    mocker.patch.object(
+        type(charm.state),
+        "application_upgrade",
+        new_callable=PropertyMock,
+        return_value=SimpleNamespace(versions=UpgradeVersions(charm="1", workload="2.19.6")),
+    )
+    mocker.patch.object(
+        type(charm.upgrades_manager),
+        "unit_status",
+        new_callable=PropertyMock,
+        return_value=(
+            UpgradesStatuses.K8S_UPGRADES_ACTIVE.value,
+            {"workload_version": "2.19.6", "charm_version": "1"},
+        ),
+    )
+
+    assert charm.state.server.started == ""
+    statuses = charm.upgrades_manager.get_statuses("unit")
+
+    assert all(status.status == "active" for status in statuses)

@@ -125,6 +125,9 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
+        # Statuses are still collected in peer relation-broken, after the relation is gone.
+        if not self.relation:
+            return ""
         return self.relation.data[self.unit].get("started", "")
 
     @started.setter
