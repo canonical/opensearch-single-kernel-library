@@ -3,7 +3,7 @@
 
 import socket
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import PropertyMock
 
 import pytest
 import yaml
@@ -45,19 +45,13 @@ from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S
 @pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
     if substrate == "vm":
-        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
 
         # unit tests should not depend on a running snapd daemon.
-        fake_snap = MagicMock()
-        fake_snap.present = True
-        fake_snap.held = True
-        mocker.patch(
-            "opensearch_single_kernel.workload.vm.snap.SnapCache",
-            return_value={"opensearch": fake_snap},
-        )
+        for func in ("list_one", "ensure_installed", "hold", "connect", "start", "stop"):
+            mocker.patch(f"opensearch_single_kernel.workload.vm.snap.{func}")
         # Unit tests should not run Juju CLI (such as unit-get public-address).
         # VM workload callers can fall back to state.host_ip populated by harness.add_network.
         mocker.patch(

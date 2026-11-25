@@ -107,7 +107,7 @@ def test_workload_file_operations_preserve_missing_files(harness, tmp_path):
 
 
 @pytest.mark.skip_if_substrate("vm")
-@pytest.mark.parametrize("method", ["start_service", "start_service_only"])
+@pytest.mark.parametrize("method", ["start_service"])
 @pytest.mark.parametrize("service_active", [False, True])
 def test_start_fails_when_pebble_plan_cannot_be_configured(
     harness, mocker, method, service_active

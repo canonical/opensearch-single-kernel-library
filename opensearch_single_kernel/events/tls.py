@@ -28,6 +28,7 @@ from opensearch_single_kernel.common.constants import (
     StoreType,
 )
 from opensearch_single_kernel.common.exceptions import (
+    OpenSearchCmdError,
     OpenSearchError,
     OpenSearchFileOperationError,
 )
@@ -153,9 +154,17 @@ class TLSEventsHandler(Object):
                 f"Private key not rotated due to credentials access error, please retry.\n{e}"
             )
 
+    def _is_workload_ready(self) -> bool:
+        """Check if the workload is present or connectable."""
+        try:
+            return self.charm.workload.workload_present or self.charm.workload.can_connect
+        except OpenSearchCmdError as e:
+            logger.warning("Failed to check the workload status: %s", e)
+            return False
+
     def _on_tls_relation_created(self, event: RelationCreatedEvent) -> None:
         """Request certificate when TLS relation created."""
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+        if not self._is_workload_ready():
             logger.warning("Workload not ready for TLS relation created, deferring.")
             event.defer()
             return
@@ -237,7 +246,7 @@ class TLSEventsHandler(Object):
             event.defer()
             return
 
-        if not (self.charm.workload.workload_present or self.charm.workload.can_connect):
+        if not self._is_workload_ready():
             logger.warning("Workload not ready for certificate available, deferring.")
             event.defer()
             return
