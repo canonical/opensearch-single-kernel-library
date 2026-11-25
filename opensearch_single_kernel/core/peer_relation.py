@@ -269,6 +269,21 @@ class OpenSearchServer(RelationState):
         self.update({"last_host_ip": value})
 
     @property
+    def snapshots_info_handled(self) -> str:
+        """Get the hash of the object storage relation info handled by the unit."""
+        return self.relation_data.get("snapshots_info_handled", "")
+
+    @snapshots_info_handled.setter
+    def snapshots_info_handled(self, value: str) -> None:
+        """Set the hash of the object storage relation info handled by the unit."""
+        self.update({"snapshots_info_handled": value})
+
+    @snapshots_info_handled.deleter
+    def snapshots_info_handled(self) -> None:
+        """Remove the hash of the object storage relation info handled by the unit."""
+        self.relation.data[self.unit].pop("snapshots_info_handled", None)
+
+    @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:
         """Returns configuration information for plugins this unit is managing"""
         plugin_config_info = self.get_object("plugin_config_info") or {}

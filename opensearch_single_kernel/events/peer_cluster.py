@@ -540,6 +540,7 @@ class PeerClusterEventsHandler(Object):
         self.charm.peer_cluster_orchestrator_manager.promote_failover()
         self.charm.plugin_manager.remove_plugin_secret_ids()
         self.check_credentials_with_missing_relations()
+        self.charm.snapshots_events.sync_relation_credentials()
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins/backups without a relation."""
