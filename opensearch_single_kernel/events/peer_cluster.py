@@ -330,6 +330,7 @@ class PeerClusterEventsHandler(Object):
             deployment_desc=deployment_desc,
             is_provider=False,
         )
+
         # set the main orchestrator registered flag for this relation
         if (
             self.charm.state.application.is_admin_user_initialized
@@ -561,19 +562,10 @@ class PeerClusterEventsHandler(Object):
         if self.charm.state.server.started:
             return
 
-        try:
-            config_profile = self.charm.profiles_manager.get_config_profile()
-        except ValueError:
-            return
-
         if not self.charm.profiles_manager.check_profile_requirements():
             return
 
-        self.charm.config_manager._update_jvm_heap_size(
-            config_profile.get_jvm_heap_size(self.charm.workload.memtotal())
-        )
-        # store profile in unit state
-        self.charm.state.server.profile = config_profile
+        # the profile is applied on start
         self.charm.start_opensearch_event.emit(ignore_lock=True)
 
     def reconcile_peer_cluster_errors(
