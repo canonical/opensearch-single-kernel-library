@@ -104,7 +104,9 @@ class VMWorkload(BaseWorkload):
         try:
             self._ensure_snap_reexec()
             snap.ensure_installed(OPENSEARCH_SNAP_NAME, revision=pinned_snap_revision())
-            snap.hold(OPENSEARCH_SNAP_NAME)
+            if snap.list_one(OPENSEARCH_SNAP_NAME).hold is None:
+                # hold the snap in charm determined revision, keeping any existing hold
+                snap.hold(OPENSEARCH_SNAP_NAME)
             snap.connect((OPENSEARCH_SNAP_NAME, "process-control"))
         except (snap.Error, SystemdError, OSError) as e:
             logger.error("Failed to install/upgrade opensearch. \n%s", e)
