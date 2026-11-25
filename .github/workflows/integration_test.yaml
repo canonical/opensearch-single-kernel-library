@@ -33,6 +33,8 @@ on:
         required: false
       FLAKE0_INGEST_PASSWORD:
         required: false
+      OPENROUTER_API_KEY:
+        required: false
 
 jobs:
   collect-integration-tests:
@@ -130,6 +132,8 @@ jobs:
     timeout-minutes: 266 # Sum of steps `timeout-minutes` + 5
     permissions:
       contents: read
+      pull-requests: read
+      actions: read
     steps:
       - name: Disk usage
         timeout-minutes: 1
@@ -146,6 +150,7 @@ jobs:
         with:
           phase: start
           extra-config: ${{ github.workspace }}/.github/collect-opensearch.conf
+          markers: true
       - name: Set up environment
         timeout-minutes: 5
         run: sudo snap install charmcraft --classic
@@ -243,12 +248,23 @@ jobs:
       - name: Stop telemetry
         id: collect
         timeout-minutes: 5
+        continue-on-error: true
         if: always()
         uses: canonical/flake0/.github/actions/collect@ingest-via-data-prepper
         with:
           phase: stop
           test-log: ${{ runner.temp }}/spread.log
           artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}-${{ github.run_attempt }}
+      - name: Classify failure
+        id: classify
+        timeout-minutes: 25
+        continue-on-error: true
+        if: ${{ failure() && steps.spread.outcome == 'failure' }}
+        uses: canonical/flake0/.github/actions/classify@ingest-via-data-prepper
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          bundle-path: ${{ steps.collect.outputs.bundle-path }}
+          job-name: ${{ matrix.job.name }}
       - name: Load telemetry into OpenSearch
         timeout-minutes: 30
         continue-on-error: true
@@ -256,8 +272,11 @@ jobs:
         uses: canonical/flake0/.github/actions/ingest@ingest-via-data-prepper
         with:
           bundle-path: ${{ steps.collect.outputs.bundle-path }}
+          verdict-path: ${{ steps.classify.outputs.verdict-path }}
           url: ${{ secrets.FLAKE0_INGEST_URL }}
           username: ${{ secrets.FLAKE0_INGEST_USER }}
           password: ${{ secrets.FLAKE0_INGEST_PASSWORD }}
-          skip-steps: juju debug-log
+          skip-steps: |
+            juju debug-log
+            spread -vv
           skip-files: workload/k8s/controller-*_api-server-*.log
