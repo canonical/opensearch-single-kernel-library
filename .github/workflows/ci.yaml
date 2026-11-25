@@ -29,6 +29,8 @@ on:
         required: false
       FLAKE0_INGEST_PASSWORD:
         required: false
+      OPENROUTER_API_KEY:
+        required: false
 
 permissions:
   contents: read
