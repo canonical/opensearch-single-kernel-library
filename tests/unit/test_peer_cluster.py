@@ -1,9 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Orchestrator identity and role transitions across peer-cluster relations."""
+"""Unit tests for the peer-cluster relation."""
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,9 +23,18 @@ from opensearch_single_kernel.core.models import (
     App,
     PeerClusterApp,
     PeerClusterOrchestrators,
+    PeerClusterRelData,
     PeerClusterRelErrorData,
 )
+from opensearch_single_kernel.core.peer_cluster_relation import PeerCluster
 from tests.unit.helpers import deployment_descriptions
+
+
+def test_peer_cluster_data_when_relation_is_gone():
+    relation = MagicMock(data={})
+    peer_cluster = PeerCluster(relation, MagicMock(), MagicMock(), MagicMock())
+
+    assert peer_cluster.data() is None
 
 
 @pytest.fixture
@@ -308,3 +318,26 @@ def test_demoted_provider_clears_its_previous_main_role(harness, consumer, mocke
     )
 
     assert charm.state.application.orchestrators == original
+
+
+@pytest.mark.parametrize("provider", ["main", "failover"])
+def test_security_conf_set_from_main(harness, consumer, mocker, provider):
+    """Security settings come from the main orchestrator's data."""
+    charm = harness.charm
+    for name, relation in consumer.items():
+        harness.update_relation_data(relation.id, relation.app.name, {"data": name})
+    mocker.patch.object(charm.peer_cluster_manager, "requirer_errors", return_value=None)
+    payloads = {name: mocker.MagicMock() for name in consumer}
+    mocker.patch.object(
+        PeerClusterRelData,
+        "peer_cluster_rel_data_from_str",
+        side_effect=lambda _secrets, content, **_: payloads[content],
+    )
+    set_security_conf = mocker.patch.object(charm.peer_cluster_events, "_set_security_conf")
+
+    relation = consumer[provider]
+    charm.peer_cluster_events._on_peer_cluster_relation_changed(
+        mocker.Mock(relation=relation, app=relation.app)
+    )
+
+    set_security_conf.assert_called_once_with(payloads["main"])
