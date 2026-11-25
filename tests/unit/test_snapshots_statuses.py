@@ -15,6 +15,7 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchBackupCredentialsIncorrectError,
+    OpenSearchFileOperationError,
     OpenSearchObjectStorageConfigValidationError,
 )
 from opensearch_single_kernel.common.statuses import GeneralStatuses, SnapshotsStatuses
@@ -208,6 +209,8 @@ def test_credentials_changed_sets_credentials_incorrect(mocker, harness, backend
     harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
 
     assert _cached_statuses(harness).root == [SnapshotsStatuses.BACKUP_CREDENTIALS_INCORRECT.value]
+    # Handled even if invalid: peer changes must not retry it until the relation data changes.
+    assert harness.charm.state.server.snapshots_info_handled
 
 
 def test_credentials_changed_clears_credentials_incorrect(mocker, harness, backend_setup):
@@ -239,6 +242,26 @@ def test_credentials_changed_clears_credentials_incorrect(mocker, harness, backe
     harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
 
     assert _cached_statuses(harness).root == []
+    assert harness.charm.state.server.snapshots_info_handled
+
+
+def test_credentials_changed_not_marked_handled_if_store_fails(mocker, harness, backend_setup):
+    _, (relation,) = backend_setup
+    _mock_backup(mocker)
+    _relate_backups(harness, relation)
+    mocker.patch(
+        "opensearch_single_kernel.managers.snapshots.SnapshotsManager.validate_storage_config"
+    )
+    mocker.patch(
+        "opensearch_single_kernel.events.snapshots.SnapshotsEventsHandler.update_stored_credentials",
+        side_effect=OpenSearchFileOperationError("keystore write failed"),
+    )
+    harness.charm.state.server.snapshots_info_handled = "previous"
+
+    harness.charm.snapshots_events._on_snapshots_credentials_changed(MagicMock())
+
+    # Not stored: the next peer relation change must retry it
+    assert harness.charm.state.server.snapshots_info_handled == ""
 
 
 def test_credentials_gone_clears_cached_status(mocker, harness, backend_setup):
