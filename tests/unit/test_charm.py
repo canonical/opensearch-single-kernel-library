@@ -284,6 +284,7 @@ def test_on_start(harness, mocker, substrate, mock_fs_interactions):
     update_opensearch_config = mocker.patch(
         "opensearch_single_kernel.managers.config.ConfigManager.update_opensearch_config"
     )
+    mocker.patch("opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile")
     get_nodes = mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.get_nodes")
     can_service_start = mocker.patch(
         "opensearch_single_kernel.managers.cluster.ClusterManager.can_service_start"
@@ -597,11 +598,7 @@ def test_security_config_reconciled_on_config_changed(harness, mocker):
         return_value=False,
     )
     mocker.patch(
-        "opensearch_single_kernel.managers.profiles.ProfilesManager.check_profile_requirements",
-        return_value=True,
-    )
-    mocker.patch(
-        "opensearch_single_kernel.managers.config.ConfigManager.update_profile_configuration",
+        "opensearch_single_kernel.managers.profiles.ProfilesManager.apply_profile",
         return_value=False,
     )
     reconcile_security_config = mocker.patch.object(harness.charm, "reconcile_security_config")
@@ -632,7 +629,9 @@ def test_roles_change_emits_restart(harness, mocker, is_leader):
     mocker.patch.object(
         charm.cluster_manager, "reconcile_cluster_config", side_effect=apply_new_roles
     )
-    mocker.patch.object(charm.config_manager, "update_profile_configuration", return_value=False)
+    mocker.patch.object(charm.profiles_manager, "apply_profile", return_value=False)
+    # an unmet profile no longer holds back the rest of config-changed
+    mocker.patch.object(charm, "reconcile_security_config")
     mocker.patch.object(charm.config_manager, "update_opensearch_config", return_value=True)
     charm.restart_opensearch_event = MagicMock()
 
@@ -782,6 +781,8 @@ def started_leader(harness, mocker):
     mocker.patch.object(charm, "apply_health")
     mocker.patch.object(charm, "is_unit_going_away", return_value=False)
     mocker.patch.object(charm.opensearch_events, "post_start_ca_rotation")
+    # the start applies the profile, which writes jvm.options
+    mocker.patch.object(charm.profiles_manager, "write_jvm_heap_size", return_value=True)
     return charm
 
 
