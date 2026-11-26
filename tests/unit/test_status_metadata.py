@@ -57,3 +57,15 @@ def test_format_status_preserves_metadata():
     assert out.short_message == src.short_message
     assert out.check == src.check
     assert out.action == src.action
+
+
+def test_missing_trust_status_formats_action_without_changing_template():
+    from opensearch_single_kernel.common.statuses import UpgradesStatuses
+    from opensearch_single_kernel.utils.status import format_status
+
+    template = UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value
+    status = format_status(template, {"charm_app": "search"})
+
+    assert status.action == "Run `juju trust search --scope=cluster`."
+    assert "juju trust search --scope=cluster" in status.message
+    assert template.action == "Run `juju trust {charm_app} --scope=cluster`."

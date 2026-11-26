@@ -10,22 +10,22 @@ Derived from specification: DA058 - In-Place Upgrades - Kubernetes v2
 import logging
 from typing import Any
 
-import ops
 from data_platform_helpers.advanced_statuses import StatusObject
-from lightkube.core.exceptions import ApiError
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHttpError,
     OpenSearchK8sDeployedWithoutTrustError,
+    OpenSearchK8sError,
     OpenSearchReconcilePartitionError,
 )
 from opensearch_single_kernel.common.statuses import UpgradesStatuses
 from opensearch_single_kernel.core.models import UnitUpgradesState
-from opensearch_single_kernel.core.state import ClusterState, UpgradeServerState
+from opensearch_single_kernel.core.state import UpgradeServerState
 from opensearch_single_kernel.managers.upgrades_base import (
     UpgradesManagerBase,
 )
-from opensearch_single_kernel.workload.base import BaseWorkload
+from opensearch_single_kernel.utils.status import format_status, running_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +34,6 @@ FORCE_ACTION_NAME = "force-upgrade"
 
 class UpgradesManagerK8s(UpgradesManagerBase):
     """In-place upgrades on kubernetes"""
-
-    def __init__(
-        self,
-        state: ClusterState,
-        workload: BaseWorkload,
-    ) -> None:
-        super().__init__(state, workload)
-        try:
-            self.k8s_client.get_partition()
-        except ApiError as err:
-            if err.status.code == 403:
-                raise OpenSearchK8sDeployedWithoutTrustError(app_name=self.state.application.name)
-            raise
 
     @property
     def partition(self) -> int:
@@ -93,17 +80,17 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         if not self.state.upgrade_relation:
             return (None, None)
 
-        if not self.in_progress:
-            return (None, None)
-
-        if not self.is_compatible:
-            return (UpgradesStatuses.UPGRADES_INCOMPATIBLE.value, None)
-
         if self.is_rollback:
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             else:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
+
+        if not self.in_progress:
+            return (None, None)
+
+        if not self.is_compatible:
+            return (UpgradesStatuses.UPGRADES_INCOMPATIBLE.value, None)
 
         version = self.k8s_client.list_revisions().get(self.state.server.unit.name)
         if version == self.k8s_client.get_revision():
@@ -128,36 +115,24 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         """Calculate the upgrade state of current unit."""
         return self.state.server_upgrade.unit_state
 
-    def reconcile_partition(
-        self, *, action_event: ops.ActionEvent | None = None, force: bool = False
-    ) -> str | None:  # noqa: C901
+    def reconcile_partition(self) -> None:
         """If ready, lower partition to upgrade next unit.
 
-        If upgrade is not in progress, set partition to 0. (If a unit receives a stop event, it may
-        raise the partition even if an upgrade is not in progress.)
+        If upgrade is not in progress, preserve the partition established by pre-upgrade-check.
+        This keeps the other units protected before the first unit receives its stop event.
 
-        Automatically upgrades next unit if all upgraded units are healthy—except if only one unit
+        Automatically upgrades next unit if all upgraded units are healthy, except if only one unit
         has upgraded (need manual user confirmation [via Juju action] to upgrade next unit)
 
-        Handle Juju action to:
-        - confirm first upgraded unit is healthy and resume upgrade
-        - force upgrade of next unit if 1 or more upgraded units are unhealthy
+        Manual confirmation and forced resume use get_resume_partition instead.
+        The upgrade event handlers apply that request after the action completes.
         """
-        message: str | None = None
-
-        units = self.state.sorted_upgrades_units
-
         partition = self._determine_partition(
-            units,
-            action_event=action_event,
-            force=force,
+            self.state.sorted_upgrades_units, resume=False, force=False
         )
         logger.debug(f"{self.partition=}, {partition=}")
-        # Only lower the partition—do not raise it.
-        # If this method is called during the action event and then called during another event a
-        # few seconds later, `determine_partition()` could return a lower number during the action
-        # and then a higher number a few seconds later.
-        # This can cause the unit to hang.
+        # Only lower the partition. _determine_partition() can return a higher value
+        # on a later hook while the next unit is restarting.
         # Example: If partition is lowered to 1, unit 1 begins to upgrade, and partition is set to
         # 2 right away, the unit/Juju agent will hang
         # Details: https://chat.charmhub.io/charmhub/pl/on8rd538ufn4idgod139skkbfr
@@ -166,50 +141,62 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         # that causes the unit to hang.
         if partition < self.partition:
             self.partition = partition
-            logger.debug(
-                f"Lowered partition to {partition} {action_event} {force=} {self.in_progress=}"
-            )
-        if action_event:
-            assert len(units) >= 2
-            if self.partition > int(units[1].unit.name.split("/")[-1]):
-                message = "Highest number unit is unhealthy. Upgrade will not resume."
-                raise OpenSearchReconcilePartitionError(message=message)
-            if force:
-                # If a unit was unhealthy and the upgrade was forced, only
-                # the next unit will upgrade. As long as 1 or more units
-                # are unhealthy, the upgrade will need to be forced for
-                # each unit.
+            logger.debug("Lowered partition to %s", partition)
 
-                # Include "Attempting to" because (on Kubernetes) we only
-                # control the partition, not which units upgrade.
-                # Kubernetes may not upgrade a unit even if the partition
-                # allows it (e.g. if the charm container of a higher unit
-                # is not ready). This is also applicable `if not force`,
-                # but is unlikely to happen since all units are healthy `if
-                # not force`.
-                message = f"Attempting to upgrade unit {partition}."
-            else:
-                message = f"Upgrade resumed. Unit {partition} is upgrading next."
-        return message
+    def get_resume_partition(self, *, force: bool = False) -> int:
+        """Return the partition needed to resume the upgrade, without changing it.
 
-    def prepare_for_shutdown(self) -> None:  # pragma: nocover
-        """Handler for the stop event.
+        Normal resume requires the previously upgraded units to be HEALTHY.
+        With force=True, allow the next unit to upgrade even if an upgraded unit is
+        unhealthy. While any upgraded unit remains unhealthy, each further unit
+        requires another forced resume.
 
-        K8S Only, VM has nothing to do on this step.
-        On K8S:
-         * First: Raise partition to prevent other units from restarting if an
-         upgrade is in progress. If an upgrade is not in progress, the leader
-         unit will reset the partition to 0.
-         * Second: Sets the unit state to RESTARTING and step down from replicaset.
-
-        Note that with how Juju currently operates, we only have at most 30
-        seconds until SIGTERM command, so we are by no means guaranteed to have
-        stepped down before the pod is removed.
-        Upon restart, the upgrade will still resume because all hooks run the
-        `_reconcile_upgrade` handler.
+        The charm controls the partition, but Kubernetes decides when pods are replaced.
+        Even after lowering the partition, Kubernetes may wait if a pod with a higher
+        unit number has a charm container that is not Ready. This can also affect a
+        normal resume, although it is less likely when all upgraded units are HEALTHY.
         """
+        units = self.state.sorted_upgrades_units
+        if len(units) < 2:
+            raise OpenSearchReconcilePartitionError(message="No further unit to upgrade.")
+        partition = self._determine_partition(units, resume=True, force=force)
+        if partition > units[1].unit_number:
+            raise OpenSearchReconcilePartitionError(
+                message="Highest number unit is unhealthy. Upgrade will not resume."
+            )
+        return partition
+
+    def prepare_for_shutdown(self) -> None:
+        """Prepare this unit to stop and leave the OpenSearch cluster.
+
+        K8S only. VM has nothing to do at this step.
+        During an upgrade, the partition is used to keep the other units running while
+        this unit is replaced. This method prepares the shutdown. The node stops afterward.
+
+        On K8S:
+         * First: If the upgrade relation exists, set the unit state to RESTARTING before
+         querying Kubernetes, so an API error caught by the stop handler does not leave
+         the replacement pod with the old pod's HEALTHY state.
+         * Second: Raise partition to prevent other units from restarting if an
+         upgrade is in progress. Pre-upgrade-check establishes this protection before
+         refresh, so a stop-time API failure does not leave the other units unprotected.
+         * Third: Disable shard allocation and flush the translog during an upgrade.
+
+        Note that with how Juju currently operates, we have at most 30 seconds before
+        SIGTERM, so these operations are not guaranteed to finish before the pod is removed.
+        The replacement must rejoin the cluster and pass its health checks before becoming HEALTHY.
+        After restart, the start, peer-relation and update-status hooks can run
+        `_reconcile_upgrade` to check readiness and resume the upgrade.
+        """
+        # Record RESTARTING before any API call. If the stop handler catches an API error,
+        # the replacement pod must still pass its own health checks before becoming HEALTHY.
+        if self.state.upgrade_relation:
+            self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
+
+        if not self.in_progress:
+            return
+
         # Raise partition to prevent other units from restarting if an upgrade is in progress.
-        # If an upgrade is not in progress, the leader unit will reset the partition to 0.
         current_unit_number = self.state.server_upgrade.unit_number
         if self.k8s_client.get_partition() < current_unit_number:
             self.k8s_client.set_partition(value=current_unit_number)
@@ -228,39 +215,41 @@ class UpgradesManagerK8s(UpgradesManagerBase):
         except OpenSearchHttpError as e:
             logger.debug("Failed to flush before upgrade", exc_info=e)
 
-        # We update the state to set up the unit as restarting
-        self.state.server_upgrade.unit_state = UnitUpgradesState.RESTARTING
-
     def _determine_partition(
-        self, units: list[UpgradeServerState], action_event: ops.ActionEvent | None, force: bool
+        self, units: list[UpgradeServerState], *, resume: bool, force: bool
     ) -> int:
         """Determine the new partition to use.
 
-        We get the current state of each unit, and according to `action_event`,
-        `force` and the state, we decide the new value of the partition.
-        A specific case:
-         * If we don't have action event and the upgrade_order_index is 1, we
-         return because it means we're waiting for the resume-refresh/force-refresh event to run.
+        Use the current revisions, unit states, resume and force to choose the partition.
+        If resume=False and the second unit still needs to upgrade (upgrade_order_index == 1),
+        keep the partition at the first unit until the user runs resume-upgrade.
+        With force=True, skip the HEALTHY check when choosing the next unit to upgrade.
         """
         if not self.in_progress:
-            return 0
+            return self.partition
         logger.debug(f"{self.state.server_upgrade.relation_data=}")
-        logger.debug(f"{action_event=}, {force=}, {self.in_progress=}")
+        logger.debug(f"{resume=}, {force=}, {self.in_progress=}")
+        workload_container_versions = self.k8s_client.list_revisions()
+        app_container_version = self.k8s_client.get_revision()
         for upgrade_order_index, server_upgrade_unit in enumerate(units):
             logger.debug(f"{upgrade_order_index=}, {server_upgrade_unit=}")
             # Note: upgrade_order_index != unit number
             state = server_upgrade_unit.unit_state
-            workload_container_versions = self.k8s_client.list_revisions()
-            app_container_version = self.k8s_client.get_revision()
             logger.debug(
                 f"{server_upgrade_unit.unit.name=}, {state=}, {workload_container_versions=}, {app_container_version=}"
             )
+            # The leader may see the new pod before receiving the old pod's RESTARTING update.
+            # Unless forced, require HEALTHY for this revision before the next unit can stop.
             if (
-                not force and state is not UnitUpgradesState.HEALTHY
+                not force
+                and (
+                    state != UnitUpgradesState.HEALTHY
+                    or server_upgrade_unit.unit_state_revision != app_container_version
+                )
             ) or workload_container_versions[
                 server_upgrade_unit.unit.name
             ] != app_container_version:
-                if not action_event and upgrade_order_index == 1:
+                if not resume and upgrade_order_index == 1:
                     # User confirmation needed to resume upgrade (i.e. upgrade second unit)
                     return int(units[0].unit.name.split("/")[-1])
                 return int(server_upgrade_unit.unit.name.split("/")[-1])
@@ -283,3 +272,28 @@ class UpgradesManagerK8s(UpgradesManagerBase):
     def _app_workload_container_version(self) -> str:
         """App's Kubernetes controller revision hash"""
         return self.k8s_client.get_revision()
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Return upgrade statuses, or explain why Kubernetes could not be checked.
+
+        Check trust before reading upgrade state. Report missing trust as blocked and other
+        API failures as waiting. Each call checks again, so the failure status clears when
+        access is restored.
+        """
+        if self.state.planned_units == 0:
+            return super().get_statuses(scope, recompute)
+
+        try:
+            self.k8s_client.check_if_deployed_without_trust()
+            return super().get_statuses(scope, recompute)
+        except OpenSearchK8sDeployedWithoutTrustError as e:
+            status = format_status(
+                UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
+                {"charm_app": e.app_name},
+            )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check Kubernetes upgrade status: %s", e)
+            status = UpgradesStatuses.K8S_API_UNAVAILABLE.value
+        return [*running_statuses(self.state.statuses, scope, self.name), status]

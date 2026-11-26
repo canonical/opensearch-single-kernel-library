@@ -16,6 +16,7 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.managers.cluster import ClusterManager
 from opensearch_single_kernel.managers.config import ConfigManager
+from opensearch_single_kernel.workload.k8s import K8sPaths
 
 
 @pytest.fixture
@@ -30,6 +31,25 @@ def command_runner(harness, mocker, substrate):
         backend = mocker.patch.object(workload.container, "exec")
         backend.return_value.wait_output.return_value = ("done", "")
     return workload, backend
+
+
+@pytest.mark.real_fs
+@pytest.mark.skip_if_substrate("vm")
+@pytest.mark.parametrize("architecture", ["x86_64", "aarch64"])
+@pytest.mark.parametrize("older_image", [False, True])
+def test_keytool_uses_the_jdk_installed_in_the_image(
+    harness, mocker, tmp_path, architecture, older_image
+):
+    workload = harness.charm.workload
+    workload._paths = K8sPaths(LocalPath(tmp_path), LocalPath(tmp_path))
+    mocker.patch("platform.machine", return_value=architecture)
+    suffix = "arm64" if architecture == "aarch64" else "amd64"
+    directory = "java-21-openjdk" + (f"-{suffix}" if older_image else "")
+    keytool = tmp_path / "usr/lib/jvm" / directory / "bin/keytool"
+    keytool.parent.mkdir(parents=True)
+    keytool.touch()
+
+    assert workload.keytool_cmd == str(keytool)
 
 
 @pytest.mark.parametrize("timeout", [None, 60])
@@ -181,3 +201,27 @@ def test_temp_file_preserves_destination_and_caller_exception(harness, tmp_path,
 
     assert raised.value is error
     assert not path.exists()
+
+
+@pytest.mark.parametrize("initialise", [False, True])
+def test_security_commands_do_not_log_passwords(command_runner, initialise, caplog):
+    workload, backend = command_runner
+    state = Mock()
+    credentials = {
+        "truststore-password": "trust-password-marker",
+        "keystore-password": "store-password-marker",
+        "key-password": "key-password-marker",
+    }
+    state.application.admin_secrets = credentials
+    state.application.is_security_index_initialised = False
+    with caplog.at_level("DEBUG"):
+        if initialise:
+            ClusterManager(state, workload).initialise_security_index()
+        else:
+            ConfigManager(state, workload).apply_security_config(
+                credentials, "opensearch-security/config.yml"
+            )
+    executed = str(backend.call_args.args[0])
+    assert all(value in executed for value in credentials.values())
+    assert "securityadmin.sh" in caplog.text
+    assert all(value not in caplog.text for value in credentials.values())

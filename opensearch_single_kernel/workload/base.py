@@ -461,3 +461,7 @@ class BaseWorkload(ABC):
     def get_host_public_ip(self) -> str | None:
         """Get the public IP address of the host."""
         return None
+
+    def get_http_publish_host(self, node_host: str, ingress_address: str) -> str:
+        """Return the address advertised to HTTP clients."""
+        return node_host

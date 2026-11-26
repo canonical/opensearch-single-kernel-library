@@ -235,6 +235,10 @@ class PeerClusterEventsHandler(Object):
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
+        if not self.charm.state.peer_relation:
+            logger.debug("Peer relation unavailable. Skipping fleet update.")
+            return
+
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             # if this unit is the one departing, dont update fleet apps
             # otherwise, update fleet apps after service restarts and event is re-emitted
@@ -304,7 +308,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         logger.debug(
-            "PeerClusterRelationChanged from provider %s data: %s", event.relation.app.name, data
+            "PeerClusterRelationChanged from provider %s on relation %s",
+            event.relation.app.name,
+            event.relation.id,
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")
@@ -411,7 +417,12 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.secrets, data["data"]
         )
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
-            orchestrators, deployment_desc, data, event.relation.id
+            orchestrators,
+            deployment_desc,
+            data.deployment_desc,
+            data.cluster_name,
+            event.relation.id,
+            trigger,
         )
         logger.debug(f"Requirer errors: {requirer_errors}")
         if requirer_errors:

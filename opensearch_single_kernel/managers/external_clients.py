@@ -514,8 +514,8 @@ class ExternalClientsManager(BaseManager):
         """Compute the manager's app statuses for relation and append them to list."""
         if (
             not self.state.server.is_app_leader
-            or not (index := relation.data[relation.app].get("index"))
             or not (external_client := self.state.external_client_by_relation(relation))
+            or not (index := relation.data[relation.app].get("index"))
         ):
             return
 

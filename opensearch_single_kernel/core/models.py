@@ -955,6 +955,17 @@ class JWTAuthConfiguration(Model):
     jwt_clock_skew_tolerance_seconds: int | None = None
 
 
+class UpgradeResumeRequest(Model):
+    """A resume request for a specific Kubernetes controller revision.
+
+    The revision identifies the rollout, even when the OpenSearch version is unchanged.
+    """
+
+    revision: str
+    partition: int = Field(ge=0)
+    force: bool = False
+
+
 class UpgradeVersions(Model):
     """Model class for the charm & workload versions used for upgrades."""
 
