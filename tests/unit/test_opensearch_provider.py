@@ -37,6 +37,19 @@ GROUP_PERMISSIONS = {
 }
 
 
+def test_client_status_skips_relation_without_remote_app(harness):
+    harness.disable_hooks()
+    harness.set_leader(True)
+    relation_id = harness.add_relation(CLIENT_RELATION, "client")
+    relation = harness.model.get_relation(CLIENT_RELATION, relation_id)
+    relation.app = None
+    statuses = []
+
+    harness.charm.external_clients_manager._add_relation_statuses(statuses, relation)
+
+    assert statuses == []
+
+
 def make_client(
     relation_id: int = 1,
     entity_type: str = "",

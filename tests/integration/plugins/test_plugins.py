@@ -384,13 +384,7 @@ async def _ensure_small_opensearch_deployed(
         await _wait_for_units(ops_test, deploy_type)
         return
 
-    model_conf = MODEL_CONFIG.copy()
-    # Make it more regular as COS relation-broken really happens on the
-    # next hook call in each opensearch unit.
-    # If this value is changed, then update the sleep accordingly at:
-    #  test_prometheus_exporter_disabled_by_cos_relation_gone
-    model_conf["update-status-hook-interval"] = "1m"
-    await ops_test.model.set_config(model_conf)
+    await ops_test.model.set_config(MODEL_CONFIG)
 
     config = {"ca-common-name": "CN_CA"}
     opensearch_storage = {"opensearch-data": "kubernetes,10G,1"} if substrate == "k8s" else None

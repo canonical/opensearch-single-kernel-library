@@ -7,6 +7,7 @@ import logging
 import pytest
 from pytest_operator.plugin import OpsTest
 
+from opensearch_single_kernel.common.constants import UPGRADE_RELATION
 from tests.integration.conftest import CONFIG_OPTS, MODEL_CONFIG
 
 from ..ha.continuous_writes import ContinuousWrites
@@ -14,11 +15,12 @@ from ..ha.helpers import (
     assert_continuous_writes_consistency,
     assert_continuous_writes_increasing,
 )
-from ..helpers import APP_NAME, app_name, set_watermark, wait_until
+from ..helpers import APP_NAME, app_name, get_unit_relation_data, set_watermark, wait_until
 from ..tls.test_tls import TLS_CERTIFICATES_APP_NAME, TLS_STABLE_CHANNEL
 from .helpers import (
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_IMAGE_REVISION,
     K8S_VERSION_TO_REVISION,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
@@ -56,9 +58,11 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
             pytest.skip(f"Version {version} is not available for k8s upgrade tests")
         revision = K8S_VERSION_TO_REVISION[version][series]
         charm = OPENSEARCH_K8S_CHARM
+        resources = {"opensearch-image": K8S_VERSION_TO_IMAGE_REVISION[version]}
     else:
         revision = VM_VERSION_TO_REVISION[version][series]
         charm = OPENSEARCH_CHARM
+        resources = {}
 
     logger.info(
         "Deploying %s (revision: %s, series: %s, channel: %s)",
@@ -73,6 +77,7 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
         num_units=3,
         channel=OPENSEARCH_CHANNEL,
         revision=revision,
+        resources=resources,
         series=series,
         config=CONFIG_OPTS if (substrate == "k8s" or revision > PROFILES_REVISION) else {},
         trust=substrate == "k8s",
@@ -97,6 +102,7 @@ async def _build_env(ops_test: OpsTest, version: str, series, substrate) -> None
     )
 
     await set_watermark(ops_test, APP_NAME)
+    await assert_version_units(ops_test, APP_NAME, version, substrate)
 
 
 #######################################################################
@@ -163,6 +169,16 @@ async def test_upgrade_to_local(
         version = VM_VERSION_N
     await assert_version_units(ops_test, app, version, substrate)
     if substrate == "k8s":
+        for unit in ops_test.model.applications[app].units:
+            stored_version = await get_unit_relation_data(
+                ops_test,
+                unit_name=unit.name,
+                target_unit_name=unit.name,
+                relation_name=UPGRADE_RELATION,
+                key="workload_version",
+                local_unit=True,
+            )
+            assert stored_version == version, f"{unit.name} still records {stored_version}"
         # Update since the ips have changed after upgrade
         await c_writes.update()
 

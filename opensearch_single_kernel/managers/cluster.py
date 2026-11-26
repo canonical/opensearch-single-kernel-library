@@ -44,6 +44,7 @@ from opensearch_single_kernel.common.exceptions import (
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
     JwtStatuses,
+    LockStatuses,
     OAuthStatuses,
     PeerClusterStatuses,
 )
@@ -54,6 +55,7 @@ from opensearch_single_kernel.core.models import (
     Node,
     PeerClusterConfig,
     PeerClusterRelData,
+    UnitUpgradesState,
 )
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
@@ -510,6 +512,34 @@ class ClusterManager(BaseManager):
         logger.debug("Clearing directive %s. DeploymentDesc: %s", directive, deployment_desc)
         self.state.application.deployment_desc = deployment_desc
 
+    def can_restart_node(self, nodes: list[Node]) -> bool:
+        """Return whether this node can restart given the available cluster managers."""
+        current = next((node for node in nodes if node.name == self.state.unit_name), None)
+        if current is None:
+            return False
+
+        if not current.is_cm_eligible() or current.is_voting_only():
+            return True
+
+        if any(
+            node.name != current.name and node.is_cm_eligible() and not node.is_voting_only()
+            for node in nodes
+        ):
+            return True
+
+        fleet = dict(self.state.application.cluster_fleet_apps)
+        if local_app := self.state.current_peer_cluster_app:
+            fleet[local_app.app.id] = local_app
+
+        return (
+            sum(
+                app.planned_units
+                for app in fleet.values()
+                if "cluster_manager" in app.roles and "voting_only" not in app.roles
+            )
+            == 1
+        )
+
     def compute_and_broadcast_updated_topology(self, current_nodes: list[Node]) -> bool:
         """Compute cluster topology and broadcast node configs (roles for now) to change if any.
 
@@ -714,7 +744,9 @@ class ClusterManager(BaseManager):
         while self.is_started() and (datetime.now() - start).seconds < 60:
             time.sleep(3)
 
-        del self.state.server.started
+        # The peer relation may already be gone during storage removal.
+        if self.state.peer_relation:
+            del self.state.server.started
 
     def apply_upstream_fixes(self) -> None:
         """This changes the replication factor of some core indices."""
@@ -822,6 +854,10 @@ class ClusterManager(BaseManager):
         remote_peer_cluster = self.state.peer_cluster_by_relation_id(
             is_provider=False, relation_id=orchestrators.main_rel_id, remote=True
         )
+
+        if not remote_peer_cluster:
+            return None
+
         peer_cluster_data = remote_peer_cluster.data()
 
         if not peer_cluster_data:
@@ -830,7 +866,9 @@ class ClusterManager(BaseManager):
         logger.debug("First data node: %s", peer_cluster_data.first_data_node)
         return peer_cluster_data.first_data_node
 
-    def should_ignore_lock(self, deployment_desc: DeploymentDescription) -> bool:
+    def should_ignore_lock(
+        self, deployment_desc: DeploymentDescription, nodes: list[Node]
+    ) -> bool:
         """Check if we should ignore the lock when starting OpenSearch."""
         return (
             self.state.server.is_app_leader
@@ -840,6 +878,8 @@ class ClusterManager(BaseManager):
                 or deployment_desc.start == StartMode.WITH_GENERATED_ROLES
             )
             and deployment_desc.typ != DeploymentType.MAIN_ORCHESTRATOR
+            # A returning data leader must take the lock if another data node is running.
+            and not any(node.is_data() for node in nodes)
             and (
                 not self.state.application.is_security_index_initialised
                 or (
@@ -887,15 +927,27 @@ class ClusterManager(BaseManager):
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if scope == "unit":
-            # Keep cached start errors across update-status.
-            status_list.extend(
-                cached_non_running_statuses(
-                    self.state.statuses,
-                    scope,
-                    self.name,
-                    matches=[GeneralStatuses.SERVICE_START_ERROR.value],
+            if self.state.server.start_failed:
+                status_list.append(GeneralStatuses.SERVICE_START_ERROR.value)
+            else:
+                # Keep cached startup errors from older charms that did not set start_failed.
+                # These errors are lost when status recomputation clears the cache.
+                status_list.extend(
+                    cached_non_running_statuses(
+                        self.state.statuses,
+                        scope,
+                        self.name,
+                        matches=[GeneralStatuses.SERVICE_START_ERROR.value],
+                    )
                 )
-            )
+
+            if GeneralStatuses.SERVICE_START_ERROR.value in status_list:
+                status_list = [
+                    status
+                    for status in status_list
+                    if status != GeneralStatuses.WAITING_TO_START.value
+                ]
+
             self._add_unit_statuses(status_list)
 
         if scope == "app":
@@ -905,6 +957,34 @@ class ClusterManager(BaseManager):
 
     def _add_unit_statuses(self, status_list: list[StatusObject]) -> None:
         """Compute the manager's unit statuses and append them to list."""
+        # The upgrade manager reports startup while upgrade checks are pending.
+        # Avoid adding the same startup message from this manager.
+        pending_upgrade_start = (
+            self.state.application_upgrade.versions
+            and self.state.server_upgrade.unit_state
+            in (UnitUpgradesState.UPGRADING, UnitUpgradesState.RESTARTING)
+            and self.state.server_upgrade.post_upgrade_health is None
+        )
+
+        if (
+            self.state.peer_relation
+            and not pending_upgrade_start
+            and GeneralStatuses.SERVICE_START_ERROR.value not in status_list
+            and GeneralStatuses.WAITING_TO_START.value not in status_list
+            and LockStatuses.REQUEST_LOCK_ON_START.value
+            not in self.state.statuses.get("unit", "lock_manager").root
+        ):
+            # Report a requested start until post-start work finishes.
+            # TLS readiness alone does not mean startup has been requested.
+            if self.state.server.start_pending and self.state.server.tls_configured:
+                status_list.append(
+                    GeneralStatuses.WAITING_TO_START.value.model_copy(update={"running": None})
+                )
+            elif self.state.server.started and (
+                not self.workload.is_service_started() or not self.is_opensearch_started
+            ):
+                status_list.append(GeneralStatuses.SERVICE_UNAVAILABLE.value)
+
         if (
             (deployment_desc := self.state.application.deployment_desc)
             and deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
@@ -916,6 +996,12 @@ class ClusterManager(BaseManager):
 
     def _add_app_statuses(self, status_list: list[StatusObject]) -> None:  # noqa: C901
         """Compute the manager's app statuses and append them to list."""
+        if self.state.planned_units == 0:
+            status_list.append(
+                GeneralStatuses.SERVICE_IS_STOPPING.value.model_copy(update={"running": None})
+            )
+            return None
+
         try:
             user_roles = self._user_config().roles
         except ValidationError:

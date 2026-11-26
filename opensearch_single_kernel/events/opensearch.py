@@ -16,10 +16,9 @@ from ops import (
     LeaderElectedEvent,
     ModelError,
     Object,
+    PebbleReadyEvent,
     RelationChangedEvent,
-    RelationCreatedEvent,
     RelationDepartedEvent,
-    RelationJoinedEvent,
     SecretChangedEvent,
     SecretNotFoundError,
     StartEvent,
@@ -51,9 +50,11 @@ from opensearch_single_kernel.common.constants import (
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
+    OpenSearchExclusionsException,
     OpenSearchFileOperationError,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchLockError,
     OpenSearchMissingError,
     OpenSearchNoClusterManagersError,
@@ -65,6 +66,7 @@ from opensearch_single_kernel.common.exceptions import (
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
+    HealthStatuses,
     InternalUsersStatuses,
     LockStatuses,
 )
@@ -85,6 +87,7 @@ from opensearch_single_kernel.utils.secrets import (
     password_key,
     user_from_hash_key,
 )
+from opensearch_single_kernel.utils.status import unit_operation
 
 if TYPE_CHECKING:
     from opensearch_single_kernel.charms.base import OpenSearchBaseCharm
@@ -112,13 +115,6 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
         self.framework.observe(self.charm.on.update_status, self._on_update_status)
         self.framework.observe(
-            self.charm.on[PEER_RELATION].relation_created,
-            self._on_peer_relation_created,
-        )
-        self.framework.observe(
-            self.charm.on[PEER_RELATION].relation_joined, self._on_peer_relation_joined
-        )
-        self.framework.observe(
             self.charm.on[PEER_RELATION].relation_changed,
             self._on_peer_relation_changed,
         )
@@ -136,21 +132,9 @@ class OpenSearchEventsHandler(Object):
         self.framework.observe(self.charm.start_opensearch_event, self._on_start_opensearch)
         self.framework.observe(self.charm.restart_opensearch_event, self._on_restart_opensearch)
         self.framework.observe(self.charm.on.pebble_can_connect, self._on_pebble_can_connect)
-
-    def _on_peer_relation_created(self, event: RelationCreatedEvent) -> None:
-        """Event received by the new node joining the cluster."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Adding units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
-
-    def _on_peer_relation_joined(self, event: RelationJoinedEvent) -> None:
-        """Event received by all units when a new node joins the cluster."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Adding units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
+        if self.charm.substrate == Substrates.K8S:
+            self.framework.observe(
+                self.charm.on[CONTAINER_NAME].pebble_ready, self._on_pebble_ready
             )
 
     def _on_peer_relation_changed(self, event: RelationChangedEvent) -> None:  # noqa: C901
@@ -161,7 +145,12 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.substrate == Substrates.K8S:
-            self.charm.upgrade_events._reconcile_upgrade()
+            try:
+                self.charm.upgrade_events._reconcile_upgrade()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                event.defer()
+                return
 
         # Peer TLS readiness must reach consumers even while cluster health is pending.
         if self.charm.unit.is_leader() and self.charm.state.is_peer_cluster_provider():
@@ -199,8 +188,13 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
 
-        if self.charm.upgrades_manager.in_progress:
-            logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.debug("Upgrade in progress. Deferring peer relation changed event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
             event.defer()
             return
 
@@ -249,14 +243,19 @@ class OpenSearchEventsHandler(Object):
 
     def _on_peer_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Relation departed event."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Removing units during an upgrade is not supported."
-                "The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Removing units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state before unit removal: %s", e)
+
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # that happens in the very last stages of the application removal
             return
+
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
@@ -299,10 +298,13 @@ class OpenSearchEventsHandler(Object):
         self, event: StorageDetachingEvent
     ) -> None:
         """Triggered when removing unit, Prior to the storage being detached."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Removing units during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Removing units during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state before unit removal: %s", e)
 
         planned_units = self.charm.app.planned_units()
 
@@ -366,7 +368,10 @@ class OpenSearchEventsHandler(Object):
             if self.charm.cluster_manager.alt_hosts:
                 # There is enough peers available for us to try removing the unit
                 scope = Scope.APP if self.charm.unit.is_leader() else Scope.UNIT
-                self.charm.exclusions_manager.delete_current(scope)
+                try:
+                    self.charm.exclusions_manager.delete_current(scope)
+                except OpenSearchExclusionsException as e:
+                    logger.error("Failed to remove exclusions during unit removal: %s", e)
             # safeguards in case planned_units > 0
             if planned_units > 0:
                 # check cluster status
@@ -409,11 +414,21 @@ class OpenSearchEventsHandler(Object):
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             return
 
+        if (
+            self._resume_pending_start()
+            and not self.charm.cluster_manager.opensearch_client.is_node_up()
+        ):
+            return
         # In case system requirements changes
         self.charm.apply_profile_and_restart()
 
         if self.charm.substrate == Substrates.K8S:
-            self.charm.upgrade_events._reconcile_upgrade()
+            try:
+                self.charm.upgrade_events._reconcile_upgrade()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                event.defer()
+                return
 
         try:
             nodes = self.charm.cluster_manager.get_nodes(True)
@@ -444,7 +459,14 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
 
-        if self.charm.upgrades_manager.in_progress:
+        try:
+            upgrade_in_progress = self.charm.upgrades_manager.in_progress
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+            event.defer()
+            return
+
+        if upgrade_in_progress:
             logger.debug(
                 "Skipping `remove_lingering_users_and_roles` because upgrade is in-progress"
             )
@@ -476,14 +498,16 @@ class OpenSearchEventsHandler(Object):
             return
 
         # handle when/if certificates are expired
-        if certs := self.charm.tls_manager.check_certs_expiration():
-            # stop opensearch in case the Node-transport certificate expires.
-            if certs.get(CertType.UNIT_TRANSPORT):
-                try:
-                    self.charm.stop_opensearch()
-                except OpenSearchStopError:
-                    event.defer()
-                    return
+        if (certs := self.charm.tls_manager.check_certs_expiration()) is None:
+            return
+
+        # stop opensearch in case the Node-transport certificate expires.
+        if certs.get(CertType.UNIT_TRANSPORT):
+            try:
+                self.charm.stop_opensearch()
+            except OpenSearchStopError:
+                event.defer()
+                return
 
         self.charm.state.server.certs_exp_checked_at = datetime.now().strftime(
             CERTS_EXPIRATION_DATE_FORMAT
@@ -502,22 +526,32 @@ class OpenSearchEventsHandler(Object):
         )
         self.charm.workload.install()
 
-    def _on_stop(self, event: StopEvent) -> None:
+    def _on_stop(self, _: StopEvent) -> None:
         """Event handler for stop event."""
-        if (
-            self.charm.substrate == Substrates.K8S
-            and (isinstance(self.charm.upgrades_manager, UpgradesManagerK8s))
-            and self.charm.upgrades_manager.in_progress
-        ):
-            self.charm.upgrades_manager.prepare_for_shutdown()
-        self.charm.pebble_observer.stop()
+        try:
+            if self.charm.substrate == Substrates.K8S and (
+                isinstance(self.charm.upgrades_manager, UpgradesManagerK8s)
+            ):
+                if self.charm.state.upgrade_relation:
+                    # The replacement must run its own health checks after starting.
+                    self.charm.state.server_upgrade.post_upgrade_health = None
+                self.charm.upgrades_manager.prepare_for_shutdown()
+        except OpenSearchK8sError as e:
+            logger.error("Cannot prepare Kubernetes upgrade shutdown: %s", e)
+        finally:
+            self.charm.pebble_observer.stop()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:  # noqa: C901
         """On config changed event. Useful for IP changes or for user provided config changes."""
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
-            )
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Changing config during an upgrade is not supported. The charm may be in a broken, unrecoverable state"
+                )
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
             event.defer()
             return
 
@@ -613,11 +647,13 @@ class OpenSearchEventsHandler(Object):
                 nodes
             )
             if self.charm.cluster_manager.compute_and_broadcast_updated_topology(nodes):
-                # Nodes Config updated, we would need to reconfigure and restart
+                # Update the config for the new topology and restart only if it changed.
                 try:
-                    self.charm.config_manager.update_opensearch_config()
-                    logger.debug("Leader election reconfigured node roles; emitting restart.")
-                    self.charm.restart_opensearch_event.emit()
+                    if self.charm.config_manager.update_opensearch_config():
+                        logger.debug(
+                            "Leader election changed the node config. Requesting restart."
+                        )
+                        self.charm.restart_opensearch_event.emit()
                 except OpenSearchFileOperationError as e:
                     logger.error("An error occurred while updating opensearch config: %s", str(e))
                     event.defer()
@@ -663,24 +699,59 @@ class OpenSearchEventsHandler(Object):
             self.charm.internal_users_manager.name,
         )
 
-    def _on_start(self, event: StartEvent) -> None:
+    def _resume_pending_start(self) -> bool:
+        """Retry unfinished post-start work through the normal start handler.
+
+        A rollback through an older charm can lose a deferred custom event while
+        retaining its relation data. VM upgrade health checks also need to retry
+        after the startup flags have cleared.
+        """
+        after_upgrade = (
+            self.charm.substrate == Substrates.VM
+            and bool(self.charm.state.upgrade_relation)
+            and bool(self.charm.state.server_upgrade.snap_revision)
+            and self.charm.upgrades_manager.unit_state == UnitUpgradesState.UPGRADING
+        )
+        if not (
+            self.charm.state.server.start_pending
+            or self.charm.state.server.start_failed
+            or after_upgrade
+        ):
+            return False
+
+        self.charm.start_opensearch_event.emit(after_upgrade=after_upgrade)
+        return True
+
+    def _on_start(self, event: StartEvent | PebbleReadyEvent) -> None:
         """Prepare startup and retry failed Juju operations."""
         try:
             self._prepare_start(event)
         except ModelError as e:
-            logger.warning("Juju operation failed; deferring start preparation: %s", e)
+            logger.warning("Cannot prepare OpenSearch startup, deferring: %s", e)
             event.defer()
 
-    def _prepare_start(self, event: StartEvent) -> None:  # noqa: C901
-        """Event handler for start event."""
-        if (
-            self.charm.state.substrate == Substrates.K8S
-            and not self.charm.unit.get_container(CONTAINER_NAME).can_connect()
-        ):
-            self.charm.pebble_observer.start()
+    def _prepare_start(self, event: StartEvent | PebbleReadyEvent) -> None:  # noqa: C901
+        """Start the node, restoring runtime files when its container has restarted."""
+        if self.charm.state.substrate == Substrates.K8S:
+            if not self.charm.unit.get_container(CONTAINER_NAME).can_connect():
+                self.charm.pebble_observer.start()
+                event.defer()
+                return
+            # Restore the CA before probing nodes after a pod replacement.
+            try:
+                self.charm.tls_manager.reconcile_k8s_runtime_resources()
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot restore TLS files before starting OpenSearch: %s", e)
+                event.defer()
+                return
 
-        if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
-            logger.debug("Rollback in progress, deferring start event.")
+        try:
+            if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+                logger.debug("Rollback in progress, deferring start event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state: %s", e)
             event.defer()
             return
 
@@ -690,9 +761,21 @@ class OpenSearchEventsHandler(Object):
             return
 
         if self.charm.cluster_manager.opensearch_client.is_node_up():
-            self.cleanup_start_state()
+            if self._resume_pending_start():
+                return
+            try:
+                self.cleanup_start_state()
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot remove bootstrap configuration: %s", e)
+                event.defer()
+                return
             if self.charm.substrate == Substrates.K8S:
-                self.charm.upgrade_events._reconcile_upgrade()
+                try:
+                    self.charm.upgrade_events._reconcile_upgrade()
+                except OpenSearchK8sError as e:
+                    logger.warning("Cannot reconcile Kubernetes upgrade state: %s", e)
+                    event.defer()
+                    return
             return
 
         # VM-specific: Handle host reboot scenario where service should be up but isn't
@@ -709,16 +792,18 @@ class OpenSearchEventsHandler(Object):
                 "Start hook: snap already installed and service should be up, but it is not. Restarting it..."
             )
 
-            # We had a reboot in this node.
-            # We execute the same logic as above:
-            self.cleanup_start_state()
-
             # Now, reissue a restart: we should not have stopped in the first place
             # as "started" flag is still set to True.
             # We do not wait for the 200 return, as maybe more than one unit is coming back.
             try:
                 self.charm.workload.start_service_only()
+                # Recover the service before attempting bootstrap file cleanup.
+                self.cleanup_start_state()
                 # We're done here, we can return
+                return
+            except OpenSearchFileOperationError as e:
+                logger.error("Cannot remove bootstrap configuration after host recovery: %s", e)
+                event.defer()
                 return
             except OpenSearchStartError as e:
                 logger.warning("Machine restart detected but error at service start with: %s", e)
@@ -733,7 +818,7 @@ class OpenSearchEventsHandler(Object):
         # apply the directives computed and emitted by the peer cluster manager
         if self.charm.cluster_manager.no_blocking_directives():
             try:
-                self.charm.cluster_manager.get_nodes(False)
+                nodes = self.charm.cluster_manager.get_nodes(False)
             except OpenSearchHttpError:
                 logger.warning("No Blocking directives, but unable to get nodes. Deferring event.")
                 event.defer()
@@ -794,8 +879,6 @@ class OpenSearchEventsHandler(Object):
             )
             event.defer()
             return
-        # We are requesting start of openSearch
-
         # In large deployments one data node needs to start to initialize the security index
         # this first node ignores the lock
         # if there are multiple data apps in the cluster
@@ -805,7 +888,7 @@ class OpenSearchEventsHandler(Object):
         # main orchestrator will choose which node to start first
         #   ->(app databag key: first_data_node on main orchestrator app)
         if (
-            self.charm.cluster_manager.should_ignore_lock(deployment_desc)
+            self.charm.cluster_manager.should_ignore_lock(deployment_desc, nodes)
             and self.charm.unit.is_leader()
         ):
             logger.debug(
@@ -842,9 +925,11 @@ class OpenSearchEventsHandler(Object):
         self.charm.start_opensearch_event.emit()
 
     def _on_start_opensearch(self, event: StartOpenSearch) -> None:
-        """Start OpenSearch and retry failed Juju operations."""
+        """Report startup progress and retry failed Juju operations."""
         try:
-            self._start_opensearch(event)
+            self.charm.upgrade_events._publish_app_upgrade_status()
+            with unit_operation(self.charm.state):
+                self._start_opensearch(event)
         except ModelError as e:
             logger.warning("Deferring OpenSearch startup: %s", e)
             event.defer()
@@ -858,13 +943,19 @@ class OpenSearchEventsHandler(Object):
 
         # This will block unit to start if it is an upgrade
         # until the user unblock with `force-refresh-start`
-        if (
-            not event.after_upgrade
-            and self.charm.substrate == Substrates.K8S
-            and self.charm.upgrades_manager.is_rollback
-        ):
+        try:
+            if (
+                not event.after_upgrade
+                and self.charm.substrate == Substrates.K8S
+                and self.charm.upgrades_manager.is_rollback
+            ):
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state: %s", e)
             event.defer()
             return
+
         if self.charm.state.is_peer_cluster_consumer() and self.charm.unit.is_leader():
             self.charm.peer_cluster_manager.refresh_requirer_relation_data()
 
@@ -872,6 +963,17 @@ class OpenSearchEventsHandler(Object):
             self.charm.cluster_manager.is_opensearch_started
             and not self.charm.workload.is_failed()
         ):
+            if (
+                self.charm.state.server_upgrade.post_upgrade_health is None
+                and not self.charm.state.server.start_failed
+            ):
+                self.charm.state.server.start_pending = True
+                self.charm.status_handler.set_running_status(
+                    GeneralStatuses.WAITING_TO_START.value,
+                    "unit",
+                    statuses_state=self.charm.state.statuses,
+                    component_name=self.charm.cluster_manager.name,
+                )
             try:
                 if not self._post_start_init(event):
                     return
@@ -895,6 +997,7 @@ class OpenSearchEventsHandler(Object):
                         "Node is not ready to start, but data node exists and"
                         " the cluster was previously bootstrapped."
                     )
+                    self.charm.state.server.start_failed = True
                     self.charm.state.add_status_if_not_present(
                         GeneralStatuses.SERVICE_START_ERROR.value,
                         "unit",
@@ -917,11 +1020,15 @@ class OpenSearchEventsHandler(Object):
                 # to create the internal users
                 logger.warning(e)
                 self.charm.lock_manager.release()
+                self.charm.state.server.start_failed = True
                 self.charm.state.add_status_if_not_present(
                     GeneralStatuses.SERVICE_START_ERROR.value,
                     "unit",
                     self.charm.cluster_manager.name,
                 )
+                event.defer()
+            except OpenSearchK8sError as e:
+                logger.warning("Cannot reconcile Kubernetes upgrade state after startup: %s", e)
                 event.defer()
 
             if (
@@ -971,6 +1078,9 @@ class OpenSearchEventsHandler(Object):
             # where the main orchestrator has cluster-manager only nodes
             logger.debug("Starting without lock")
         else:
+            self.charm.state.remove_status_if_present(
+                GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+            )
             self.charm.status_handler.set_running_status(
                 LockStatuses.REQUEST_LOCK_ON_START.value,
                 "unit",
@@ -984,6 +1094,7 @@ class OpenSearchEventsHandler(Object):
 
         if self.charm.workload.is_failed():
             self.charm.lock_manager.release()
+            self.charm.state.server.start_failed = True
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -991,6 +1102,14 @@ class OpenSearchEventsHandler(Object):
             )
             event.defer()
             return
+
+        self.charm.state.server.start_pending = True
+        self.charm.status_handler.set_running_status(
+            GeneralStatuses.WAITING_TO_START.value,
+            "unit",
+            statuses_state=self.charm.state.statuses,
+            component_name=self.charm.cluster_manager.name,
+        )
 
         try:
             # Set the configuration of the node
@@ -1022,13 +1141,6 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        self.charm.status_handler.set_running_status(
-            GeneralStatuses.WAITING_TO_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.cluster_manager.name,
-        )
-
         try:
             self.charm.cluster_manager.start(
                 wait_until_http_200=(
@@ -1052,6 +1164,7 @@ class OpenSearchEventsHandler(Object):
             self.charm.state.remove_status_if_present(
                 GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
             )
+            self.charm.state.server.start_failed = True
             self.charm.state.add_status_if_not_present(
                 GeneralStatuses.SERVICE_START_ERROR.value,
                 "unit",
@@ -1067,6 +1180,9 @@ class OpenSearchEventsHandler(Object):
             self.charm.lock_manager.release()
             event.defer()
             return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot reconcile Kubernetes upgrade state after startup: %s", e)
+            event.defer()
 
         # In large deployments with cluster-manager-only-nodes, the startup might fail
         # for the cluster-manager if a joining data node did not yet initialize the
@@ -1147,13 +1263,7 @@ class OpenSearchEventsHandler(Object):
         # Wait for opensearch to be online and part of the cluster
         self.charm.cluster_manager.assert_current_node_joined_cluster()
 
-        if self.charm.state.server.is_bootstrap_contributor:
-            self.charm.config_manager.update_opensearch_config()
-
-            # If the unit is leader we cleanup the application conf as well
-            self.charm.cluster_manager.update_bootstrap_state(
-                cleanup_application=self.charm.unit.is_leader()
-            )
+        self.cleanup_start_state()
 
         self.charm.exclusions_manager.delete_current(
             scope=Scope.APP if self.charm.unit.is_leader() else Scope.UNIT,
@@ -1161,7 +1271,12 @@ class OpenSearchEventsHandler(Object):
 
         self.charm.lock_manager.release()
 
-        if event.after_upgrade:
+        # The final Kubernetes pod can take the normal start path with after_upgrade=False.
+        # Its RESTARTING state still requires allocation to be restored before waiting for green.
+        if event.after_upgrade or (
+            self.charm.substrate == Substrates.K8S
+            and self.charm.state.server_upgrade.unit_state == UnitUpgradesState.RESTARTING
+        ):
             try:
                 self.charm.cluster_manager.opensearch_client.enable_shard_allocation(
                     alt_hosts=self.charm.cluster_manager.alt_hosts
@@ -1173,9 +1288,6 @@ class OpenSearchEventsHandler(Object):
 
         # Add a timestamp to always trigger relation changed
         self.charm.state.server.started = str(time.time())
-        self.charm.state.remove_status_if_present(
-            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
-        )
 
         # Apply OpenSearch upstream recommended settings
         self.charm.cluster_manager.apply_upstream_fixes()
@@ -1197,11 +1309,17 @@ class OpenSearchEventsHandler(Object):
 
         # clear waiting to start status
         self.charm.state.remove_status_if_present(
+            GeneralStatuses.WAITING_TO_START.value, "unit", self.charm.cluster_manager.name
+        )
+        self.charm.state.remove_status_if_present(
             GeneralStatuses.SERVICE_START_ERROR.value, "unit", self.charm.cluster_manager.name
         )
+        self.charm.state.server.start_failed = False
+        self.charm.state.server.start_pending = False
 
         if event.after_upgrade:
             health = self.charm.health_manager.get(local_app_only=False, wait_for_green_first=True)
+            self.charm.upgrades_manager.record_upgrade_health(health)
             # Cluster is considered healthy if green or yellow
             # TODO future improvement: try to narrow scope to just green or green + yellow in
             # specific cases
@@ -1242,8 +1360,12 @@ class OpenSearchEventsHandler(Object):
                     "other than primary shards on upgraded unit & not enough upgraded units available "
                     "for replica shards"
                 )
-            self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
-            logger.debug("Set upgrade unit state to healthy")
+            if self.charm.substrate == Substrates.VM:
+                self.charm.state.server_upgrade.unit_state_revision = (
+                    self.charm.state.server_upgrade.snap_revision
+                )
+                self.charm.state.server_upgrade.unit_state = UnitUpgradesState.HEALTHY
+                logger.debug("Set upgrade unit state to healthy")
 
         if event.after_upgrade or self.charm.substrate == Substrates.K8S:
             self.charm.upgrade_events._reconcile_upgrade()
@@ -1264,12 +1386,30 @@ class OpenSearchEventsHandler(Object):
 
     def _on_restart_opensearch(self, event: RestartOpenSearch) -> None:
         """Event handler for restart opensearch event."""
-        self.charm.status_handler.set_running_status(
-            LockStatuses.REQUEST_LOCK_ON_START.value,
-            "unit",
-            statuses_state=self.charm.state.statuses,
-            component_name=self.charm.lock_manager.name,
-        )
+        if self.charm.is_unit_going_away(event):
+            logger.debug("Unit is going away. Dropping deferred restart_opensearch_event.")
+            return
+
+        # Check is_rollback before taking the lock and stopping a running node.
+        # The start flow checks it too. If the Kubernetes API is unavailable, we could
+        # otherwise stop the node and be unable to start it again until API access returns.
+        try:
+            if self.charm.substrate == Substrates.K8S and self.charm.upgrades_manager.is_rollback:
+                logger.debug("Rollback in progress, deferring restart event.")
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check rollback state before restarting OpenSearch: %s", e)
+            event.defer()
+            return
+
+        with unit_operation(self.charm.state):
+            self.charm.status_handler.set_running_status(
+                LockStatuses.REQUEST_LOCK_ON_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.lock_manager.name,
+            )
         if not self.charm.lock_manager.acquire():
             logger.debug("Lock to restart opensearch not acquired. Will retry next event")
             event.defer()
@@ -1303,6 +1443,23 @@ class OpenSearchEventsHandler(Object):
         logger.debug("Restarting OpenSearch with ignore_lock=%s", ignore_lock)
         self.charm.start_opensearch_event.emit(ignore_lock=ignore_lock)
 
+    def _on_pebble_ready(self, event: PebbleReadyEvent) -> None:
+        """Recover the workload without bypassing upgrade or normal startup checks."""
+        if self.charm.is_unit_going_away(event):
+            return
+        try:
+            if self.charm.upgrades_manager.in_progress and (
+                not self.charm.state.application_upgrade.versions
+                or not self.charm.upgrades_manager.is_compatible
+            ):
+                event.defer()
+                return
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state after the container started: %s", e)
+            event.defer()
+            return
+        self._on_start(event)
+
     def _on_pebble_can_connect(self, event: PebbleCanConnectEvent) -> None:
         """Periodic pebble-can-connect trigger fired independently of update-status."""
         logger.info("_on_pebble_can_connect triggered")
@@ -1316,6 +1473,13 @@ class OpenSearchEventsHandler(Object):
         # When a new unit joins, replica shards are automatically added to it. In order to prevent
         # overloading the cluster, units must be started one at a time. So we defer starting
         # opensearch until all shards in other units are in a "started" or "unassigned" state.
+        if not self.charm.state.server.start_failed:
+            self.charm.status_handler.set_running_status(
+                HealthStatuses.CHECKING_CLUSTER_HEALTH_BEFORE_START.value,
+                "unit",
+                statuses_state=self.charm.state.statuses,
+                component_name=self.charm.health_manager.name,
+            )
         try:
             if (
                 self.charm.apply_health(wait_for_green_first=True, use_localhost=False, app=False)
@@ -1330,8 +1494,10 @@ class OpenSearchEventsHandler(Object):
         return True
 
     def cleanup_start_state(self) -> None:
-        """Clean Up Start statuses and state."""
+        """Remove bootstrap-only config before clearing the bootstrap state."""
         if self.charm.state.server.is_bootstrap_contributor:
+            self.charm.config_manager.remove_bootstrap_config()
+            # The leader also records that the application has completed bootstrapping.
             self.charm.cluster_manager.update_bootstrap_state(
                 cleanup_application=self.charm.unit.is_leader()
             )
@@ -1445,6 +1611,15 @@ class OpenSearchEventsHandler(Object):
         or if it is the first data node. If the cluster is already initialized
         we check cluster health and start.
         """
+        waiting_for_lock = (
+            LockStatuses.REQUEST_LOCK_ON_START.value
+            in self.charm.state.statuses.get("unit", self.charm.lock_manager.name).root
+        )
+        # Clear the previous lock-wait status before checking what currently blocks startup.
+        # The unit may now be waiting for something else.
+        self.charm.state.remove_status_if_present(
+            LockStatuses.REQUEST_LOCK_ON_START.value, "unit", self.charm.lock_manager.name
+        )
         # Case of the first "main" cluster to get started.
         if not (deployment_desc := self.charm.state.application.deployment_desc):
             # the deployment description hasn't finished being computed by the leader
@@ -1459,11 +1634,9 @@ class OpenSearchEventsHandler(Object):
         except OpenSearchHttpError:
             return False
 
-        if (
-            not self.charm.state.application.is_security_index_initialised
-            or not self.charm.cluster_manager.alt_hosts
-        ):
-            return self.charm.unit.is_leader() and (
+        security_index_initialized = self.charm.state.application.is_security_index_initialised
+        if not security_index_initialized or not self.charm.cluster_manager.alt_hosts:
+            allowed = self.charm.unit.is_leader() and (
                 deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
                 # first data node in a cluster-manager-only deployment
                 or (
@@ -1474,6 +1647,26 @@ class OpenSearchEventsHandler(Object):
                     and event.is_first_data_node
                 )
             )
+            if (
+                not allowed
+                and not event.ignore_lock
+                and (not security_index_initialized or waiting_for_lock)
+            ):
+                # This unit waits its turn while the first unit initializes the cluster.
+                # Keep that wait if the security index is ready before peer addresses arrive.
+                # Lock acquisition still happens only after startup is allowed.
+                self.charm.state.remove_status_if_present(
+                    GeneralStatuses.WAITING_TO_START.value,
+                    "unit",
+                    self.charm.cluster_manager.name,
+                )
+                self.charm.status_handler.set_running_status(
+                    LockStatuses.REQUEST_LOCK_ON_START.value,
+                    "unit",
+                    statuses_state=self.charm.state.statuses,
+                    component_name=self.charm.lock_manager.name,
+                )
+            return allowed
         return self.is_cluster_healthy_to_start()
 
     def trigger_peer_rel_changed(
@@ -1581,22 +1774,14 @@ class OpenSearchEventsHandler(Object):
         """Triggered when the unit IP is changed."""
         self.charm.tls_manager.delete_stored_tls_resources()
         self.request_new_unit_certificates()
-        # since when an IP change happens, "_on_peer_relation_joined" won't be called,
-        # we need to alert the leader that it must recompute the node roles for any unit whose
-        # roles were changed while the current unit was cut-off from the rest of the network
-        self._on_peer_relation_joined(
-            RelationJoinedEvent(
-                event.handle,
-                self.charm.state.peer_relation,
-                self.charm.app,
-                self.charm.unit,
-            )
-        )
 
     def _handle_change_to_main_orchestrator_if_needed(
         self, event: ConfigChangedEvent, previous_deployment_desc: DeploymentDescription | None
     ) -> None:
-        """Handle when the user changes the roles or init_hold config from True to False."""
+        """Set up the admin user and certificate when this app becomes the main orchestrator.
+
+        The config-changed handler checks upgrade state before applying roles or init_hold changes.
+        """
         # if the current cluster wasn't already a "main-Orchestrator" and we're now updating
         # the roles for it to become one. We need to: create the admin user if missing, and
         # generate the admin certificate if missing and the TLS relation is established.
@@ -1608,14 +1793,6 @@ class OpenSearchEventsHandler(Object):
         )
 
         if not cluster_changed_to_main_cm:
-            return
-
-        if self.charm.upgrades_manager.in_progress:
-            logger.warning(
-                "Changing config during an upgrade is not supported. The charm may be in a broken"
-                " ,unrecoverable state"
-            )
-            event.defer()
             return
 
         # we check if we need to create the admin user
@@ -1642,12 +1819,6 @@ class OpenSearchEventsHandler(Object):
             logger.error("An error occurred while updating opensearch config: %s", e)
             return False
         if changed:
-            self.charm.status_handler.set_running_status(
-                GeneralStatuses.WAITING_TO_START.value,
-                "unit",
-                statuses_state=self.charm.state.statuses,
-                component_name=self.charm.cluster_manager.name,
-            )
             logger.debug("Restarting opensearch due to reconfiguring node roles")
             self.charm.restart_opensearch_event.emit()
         return True

@@ -207,14 +207,16 @@ def remove_backups(  # noqa C901
                 region_name=config["region"],
             )
             s3 = session.resource(
-                "s3", endpoint_url=config["endpoint"], verify=config.get("tls-ca-chain")
+                "s3",
+                endpoint_url=config["endpoint"],
+                verify="microceph_cert.pem" if cloud_name == "microceph" else True,
             )
             bucket = s3.Bucket(config["bucket"])
 
             # Some of our runs target only a single cloud, therefore, they will
             # raise errors on the other cloud's bucket. We catch and log them.
             try:
-                bucket.objects.filter(Prefix=f"{BackupsPath}/").delete()
+                bucket.objects.filter(Prefix=f"{config['path']}/").delete()
             except Exception as e:
                 logger.warning(f"Failed to clean up backups: {e}")
 

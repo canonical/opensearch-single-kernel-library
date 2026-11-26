@@ -32,6 +32,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchExclusionsException,
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchK8sError,
     OpenSearchStopError,
 )
 from opensearch_single_kernel.common.pebble_observer import PebbleObserver
@@ -81,6 +82,7 @@ from opensearch_single_kernel.managers.snapshots import SnapshotsManager
 from opensearch_single_kernel.managers.tls import TlsManager
 from opensearch_single_kernel.managers.upgrades_k8s import UpgradesManagerK8s
 from opensearch_single_kernel.managers.upgrades_vm import UpgradesManagerVM
+from opensearch_single_kernel.utils.status import unit_operation
 from opensearch_single_kernel.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -165,10 +167,10 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
         self.status_handler = StatusHandler(
             self,
             self.upgrades_manager,
-            self.profiles_manager,
-            self.tls_manager,
             self.health_manager,
             self.peer_cluster_manager,
+            self.profiles_manager,
+            self.tls_manager,
             self.cluster_manager,
             self.plugin_manager,
             self.lock_manager,
@@ -224,9 +226,14 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
             logger.debug("Unit is going away. Keeping the security config.")
             return
 
-        if self.upgrades_manager.in_progress or not (
-            self.config_manager.reconcile_security_config(force)
-        ):
+        try:
+            upgrade_in_progress = self.upgrades_manager.in_progress
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+            event.defer()
+            return
+
+        if upgrade_in_progress or not self.config_manager.reconcile_security_config(force):
             logger.debug("Security config not reconciled. Deferring event.")
             event.defer()
 
@@ -235,7 +242,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         The requirements can be met by any change in the cluster, e.g. a peer cluster joining.
         """
-        if self.upgrades_manager.in_progress:
+        try:
+            if self.upgrades_manager.in_progress:
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state. Not applying the profile: %s", e)
             return
 
         if (
@@ -263,36 +274,63 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
     def stop_opensearch(self, *, restart: bool = False) -> None:
         """Stop OpenSearch service."""
+        with unit_operation(self.state):
+            self.status_handler.set_running_status(
+                GeneralStatuses.SERVICE_IS_STOPPING.value,
+                "unit",
+                component_name=self.cluster_manager.name,
+            )
+
+            if self.cluster_manager.opensearch_client.is_node_up():
+                try:
+                    nodes = self.cluster_manager.get_nodes(True)
+                    if restart and not self.cluster_manager.can_restart_node(nodes):
+                        raise OpenSearchStopError(
+                            "Waiting for another cluster manager before restarting OpenSearch."
+                        )
+
+                    # Data and voting-only nodes cannot replace the last cluster manager.
+                    other_cms = any(
+                        node.name != self.state.unit_name
+                        and node.is_cm_eligible()
+                        and not node.is_voting_only()
+                        for node in nodes
+                    )
+
+                    # do not add exclusions if it's the last unit to stop
+                    # otherwise cluster manager election will be blocked when starting up again
+                    # and reusing storage
+                    if len(nodes) > 1:
+                        # 1. Add current node to the voting + alloc exclusions
+                        self.exclusions_manager.add_current(
+                            scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
+                            voting=other_cms,
+                            allocation=not restart,
+                            raise_error=restart,
+                        )
+                except (OpenSearchHttpError, OpenSearchExclusionsException) as e:
+                    if restart:
+                        raise OpenSearchStopError(
+                            "Cannot confirm safe voting configuration before restarting OpenSearch."
+                        ) from e
+                    logger.error(
+                        "Failed to get online nodes, voting and alloc exclusions not added"
+                    )
+
+            # Let ongoing shard initialization and relocation finish before stopping.
+            try:
+                self.health_manager.wait_for_shards_relocation()
+            except OpenSearchHAError as e:
+                raise OpenSearchStopError(str(e)) from e
+
+            # Stop the workload
+            self.cluster_manager.stop_workload()
+
         self.status_handler.set_running_status(
-            GeneralStatuses.SERVICE_IS_STOPPING.value,
+            GeneralStatuses.SERVICE_UNAVAILABLE.value.model_copy(update={"running": "blocking"}),
             "unit",
             component_name=self.cluster_manager.name,
         )
-
-        if self.cluster_manager.opensearch_client.is_node_up():
-            try:
-                nodes = self.cluster_manager.get_nodes(True)
-                # do not add exclusions if it's the last unit to stop
-                # otherwise cluster manager election will be blocked when starting up again
-                # and reusing storage
-                if len(nodes) > 1:
-                    # 1. Add current node to the voting + alloc exclusions
-                    self.exclusions_manager.add_current(
-                        scope=Scope.APP if self.unit.is_leader() else Scope.UNIT,
-                        voting=True,
-                        allocation=not restart,
-                    )
-            except (OpenSearchHttpError, OpenSearchExclusionsException):
-                logger.error("Failed to get online nodes, voting and alloc exclusions not added")
-
-        # Let ongoing shard initialization and relocation finish before stopping.
-        try:
-            self.health_manager.wait_for_shards_relocation()
-        except OpenSearchHAError as e:
-            raise OpenSearchStopError(str(e)) from e
-
-        # Stop the workload
-        self.cluster_manager.stop_workload()
 
     def apply_health(
         self,

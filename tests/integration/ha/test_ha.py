@@ -59,6 +59,10 @@ logger = logging.getLogger(__name__)
 
 
 NUM_HA_UNITS = 3
+# Freezing the process can make OpenSearch's filesystem health check fail.
+# After unfreezing, allow time for its next check, normally 60 seconds later,
+# and for the node to rejoin the cluster.
+REJOIN_ATTEMPTS_AFTER_FREEZE = 90
 
 
 @pytest.mark.abort_on_fail
@@ -365,7 +369,7 @@ async def test_freeze_db_process_node_with_primary_shard(
         reachable_ip,
         get_application_unit_names(ops_test, app=app),
         app=app,
-        stop_after_attempt=2,
+        stop_after_attempt=REJOIN_ATTEMPTS_AFTER_FREEZE,
     ), "Node did not re-join the cluster after being un-frozen."
 
     # fetch unit hosting the new primary shard of the previous index
@@ -456,7 +460,7 @@ async def test_freeze_db_process_node_with_elected_cm(
         reachable_ip,
         get_application_unit_names(ops_test, app=app),
         app=app,
-        stop_after_attempt=2,
+        stop_after_attempt=REJOIN_ATTEMPTS_AFTER_FREEZE,
     ), "Previously elected CM node did not re-join the cluster after being un-frozen."
 
     # continuous writes checks

@@ -50,14 +50,14 @@ class UpgradesManagerVM(UpgradesManagerBase):
         if not self.state.upgrade_relation:
             return (None, None)
 
-        if not self.in_progress:
-            return (None, None)
-
         if self.is_rollback:
             if not self.can_rollback:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_UNSUPPORTED.value, None
             else:
                 return UpgradesStatuses.UPGRADES_ROLLBACK_INCOMPATIBLE.value, None
+
+        if not self.in_progress:
+            return (None, None)
 
         if self.state.server_upgrade.snap_revision == pinned_snap_revision():
             return (

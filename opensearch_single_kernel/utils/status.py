@@ -5,12 +5,28 @@
 """Helpers for Charm."""
 
 import logging
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
+if TYPE_CHECKING:
+    from opensearch_single_kernel.core.state import ClusterState
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def unit_operation(state: "ClusterState") -> Iterator[None]:
+    """Temporarily hide the running-version status while reporting an operation's progress."""
+    previous = state.unit_operation_in_progress
+    state.unit_operation_in_progress = True
+    try:
+        yield
+    finally:
+        state.unit_operation_in_progress = previous
 
 
 def running_statuses(
@@ -48,9 +64,9 @@ def cached_non_running_statuses(
 
 
 def format_status(status: StatusObject, params: dict[str, Any] | None) -> StatusObject:
-    """Get the copy of the status object with the message formatted to params.
+    """Copy the status with parameters applied to its message and action guidance.
 
-    If params are empty, returns original status.
+    Return the original status when params is None.
     """
     if params is None:
         return status
@@ -64,7 +80,7 @@ def format_status(status: StatusObject, params: dict[str, Any] | None) -> Status
         message=status.message.format_map(SafeDict(params)),
         short_message=status.short_message,
         check=status.check,
-        action=status.action,
+        action=status.action.format_map(SafeDict(params)) if status.action is not None else None,
         running=status.running,
         approved_critical_component=status.approved_critical_component,
     )

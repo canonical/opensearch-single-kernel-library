@@ -12,7 +12,7 @@ from object_storage import (
     StorageConnectionInfoChangedEvent,
     StorageConnectionInfoGoneEvent,
 )
-from ops import ActionEvent, Object, RelationEvent
+from ops import ActionEvent, ModelError, Object, RelationEvent
 
 from opensearch_single_kernel.common.constants import (
     AZURE_RELATION,
@@ -33,6 +33,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchFileOperationError,
     OpenSearchHttpError,
     OpenSearchInvalidStorageTypeError,
+    OpenSearchK8sError,
     OpenSearchObjectStorageConfigValidationError,
     OpenSearchPeerClusterDidntSaveCredentialsYetError,
     OpenSearchRestoreBackupError,
@@ -473,8 +474,14 @@ class SnapshotsEventsHandler(Object):
             info_to_save, object_storage_type_to_cleanup = (
                 self.charm.snapshots_manager.read_snapshots_data_from_peer_cluster()
             )
+            if info_to_save:
+                object_storage_credentials, tls_ca_chain = self._credentials_from_peer_cluster()
         except OpenSearchSnapshotsPeerClusterDataConflictError:
             logger.warning("Ignoring conflicting snapshots data received over peer-clusters.")
+            return None
+        except ModelError as e:
+            logger.error("Cannot read backup secrets from the peer cluster: %s", e)
+            event.defer()
             return None
 
         if info_to_save:
@@ -491,8 +498,6 @@ class SnapshotsEventsHandler(Object):
                     return None
 
             self._set_credentials_cleanup_failed_status(False)
-
-            object_storage_credentials, tls_ca_chain = self._credentials_from_peer_cluster()
 
             try:
                 self.update_stored_credentials(
@@ -654,8 +659,12 @@ class SnapshotsEventsHandler(Object):
         if not self.charm.state.application.deployment_desc:
             return "Deployment not ready."
 
-        if self.charm.upgrades_manager.in_progress:
-            return "Backup/Restore operations not supported while upgrade in-progress."
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                return "Backup/Restore operations not supported while upgrade in-progress."
+        except OpenSearchK8sError as e:
+            logger.error("Cannot check upgrade state: %s", e)
+            return "Cannot check upgrade state. See logs."
 
         if object_storage_type == ObjectStorageType.CONFLICT:
             return "Conflict: more than one object storage integrators integrated."

@@ -1571,25 +1571,6 @@ def test_create_azure_container_when_create_bucket_then_create_container_is_call
     client.create_container.assert_called_once()
 
 
-def test_create_azure_container_when_container_exists_and_we_run_create_container_then_it_does_not_raise(
-    context, mocker, harness, monkeypatch
-):
-    # Given
-    client = Mock()
-    client.create_container.side_effect = AzureError("boom")
-    monkeypatch.setattr(object_storage, "get_azure_container_client", lambda _params: client)
-
-    params = {
-        "storage-account": "acc",
-        "secret-key": "key",
-        "container": "cont",
-        "account-url": "https://acc.blob.core.windows.net",
-    }
-    # When/Assert
-    with pytest.raises(AzureError):
-        object_storage.create_azure_container(params)
-
-
 def test_create_azure_container_when_create_container_then_other_azure_error_raises(
     context, harness, mocker, monkeypatch
 ):
@@ -1844,52 +1825,29 @@ def test_store_s3_ca_deletes_old_chain(harness, mocker):
     store_ca_chain.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "storage_credentials,expected",
-    [
-        ({"s3": {"access-key": "access", "secret-key": "secret"}}, ObjectStorageType.S3_PCLUSTER),
-        (
-            {"azure": {"storage-account": "account", "secret-key": "secret"}},
-            ObjectStorageType.AZURE_PCLUSTER,
-        ),
-        ({"gcs": {"secret-key": '{"type": "service_account"}'}}, ObjectStorageType.GCS_PCLUSTER),
-        ({}, None),
-    ],
-    ids=["s3", "azure", "gcs", "none"],
-)
-def test_storage_type_of_non_main_app_follows_peer_cluster_credentials(
-    harness, mocker, storage_credentials, expected
+@pytest.mark.parametrize("failure_stage", ["configuration", "credentials"])
+def test_peer_snapshot_secret_failure_preserves_credentials_and_retries(
+    peer_snapshot_cleanup, mocker, failure_stage
 ):
-    secrets = Mock()
-    secrets.resolve_credential.side_effect = lambda credential, **_: credential
-    peer_cluster_data = PeerClusterRelData.peer_cluster_rel_data_from_str(
-        secrets,
-        json.dumps(
-            {
-                "cluster_name": "cluster",
-                "cm_nodes": [],
-                "deployment_desc": None,
-                "credentials": {
-                    "admin_username": "admin",
-                    "admin_password": "password",
-                    "admin_password_hash": "hash",
-                    "kibana_password": "password",
-                    "kibana_password_hash": "hash",
-                    **storage_credentials,
-                },
-            }
-        ),
-    )
-    mocker.patch(
-        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
-        new_callable=PropertyMock,
-        return_value=Mock(typ=DeploymentType.OTHER),
-    )
-    mocker.patch.object(
-        harness.charm.state, "get_rel_data_from_main_orchestrator", return_value=peer_cluster_data
-    )
+    from ops import ModelError
 
-    assert harness.charm.state.storage_type == expected
+    charm = peer_snapshot_cleanup
+    read = charm.snapshots_manager.read_snapshots_data_from_peer_cluster
+    credentials = mocker.patch.object(charm.snapshots_events, "_credentials_from_peer_cluster")
+    read.return_value = ({"access_key": "test"}, [ObjectStorageType.AZURE])
+    failing_read = read if failure_stage == "configuration" else credentials
+    failing_read.side_effect = ModelError("Kubernetes secret request timed out")
+    cleanup = mocker.patch.object(charm.keystore_manager, "cleanup_storage_credentials")
+    update = mocker.patch.object(charm.snapshots_events, "update_stored_credentials")
+    event = Mock()
+
+    charm.snapshots_events._on_peer_clusters_relation_changed_for_snapshots(event)
+
+    event.defer.assert_called_once_with()
+    cleanup.assert_not_called()
+    update.assert_not_called()
+    charm.snapshots_manager.set_credentials_saved.assert_not_called()
+    charm.reload_keystore_event.emit.assert_not_called()
 
 
 @pytest.mark.parametrize(

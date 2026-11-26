@@ -122,13 +122,13 @@ class HealthManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute health statuses. ``recompute=True`` may wait briefly for green."""
+        """Compute statuses from current health without waiting for it to become green."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.is_security_index_initialised:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        status = self.get(wait_for_green_first=recompute and scope == "app")
+        status = self.get()
 
         if scope == "app":
             match status:

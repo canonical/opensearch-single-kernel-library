@@ -55,7 +55,7 @@ class InternalUsersManager(BaseManager):
             user: The system user to create or update.
             pwd: The password to set for the user. If None, a random password will be generated.
             update: If True, update the user's password if it already exists. If False,
-                do not update the password if the user already exists.
+                preserve the stored password, including when recreating a missing monitoring user.
 
         Returns:
             True if the user was created or updated, False if an error occurred.
@@ -66,9 +66,16 @@ class InternalUsersManager(BaseManager):
             try:
                 if user in OPENSEARCH_SYSTEM_USERS:
                     self.save_user_locally(user)
+                elif user == COS_USER and self.opensearch_client.get_user(user) is None:
+                    hashed_pwd, _ = generate_hashed_password(password_secret)
+                    self.put_internal_user(user, hashed_pwd)
                 return True
-            except (OpenSearchUserMgmtError, OpenSearchFileOperationError) as e:
-                logger.error("An error occurred while saving internal user %s: %s", user, str(e))
+            except (
+                OpenSearchHttpError,
+                OpenSearchUserMgmtError,
+                OpenSearchFileOperationError,
+            ) as e:
+                logger.error("Failed to restore internal user %s: %s", user, str(e))
                 return False
 
         hashed_pwd, pwd = generate_hashed_password(pwd)

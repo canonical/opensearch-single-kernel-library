@@ -125,6 +125,9 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
+        # Statuses are still collected in peer relation-broken, after the relation is gone.
+        if not self.relation:
+            return ""
         return self.relation.data[self.unit].get("started", "")
 
     @started.setter
@@ -136,6 +139,26 @@ class OpenSearchServer(RelationState):
     def started(self) -> None:
         """Remove the value of 'started' key from unit data bag"""
         self.relation.data[self.unit].pop("started", None)
+
+    @property
+    def start_pending(self) -> bool:
+        """Whether a requested start still needs to finish."""
+        return self.relation_data.get("start_pending", "").lower() == "true"
+
+    @start_pending.setter
+    def start_pending(self, value: bool) -> None:
+        """Keep startup progress across deferred hooks and status recomputation."""
+        self.update({"start_pending": str(value)})
+
+    @property
+    def start_failed(self) -> bool:
+        """Whether startup failed and has not completed successfully since."""
+        return self.relation_data.get("start_failed", "").lower() == "true"
+
+    @start_failed.setter
+    def start_failed(self, value: bool) -> None:
+        """Keep the startup result across hooks and status recomputation."""
+        self.update({"start_failed": str(value)})
 
     @property
     def tls_ca_renewing(self) -> bool:
