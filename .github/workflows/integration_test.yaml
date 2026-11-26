@@ -182,8 +182,7 @@ jobs:
         # TODO: replace with `charmcraft test` when
         # https://github.com/canonical/charmcraft/issues/2105 and
         # https://github.com/canonical/charmcraft/issues/2130 fixed
-        shell: bash
-        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}' 2>&1 | tee "$RUNNER_TEMP/spread.log"
+        run: ~/go/bin/spread -vv -artifacts=artifacts '${{ matrix.job.spread_job }}'
         env:
           AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
           AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
@@ -253,7 +252,6 @@ jobs:
         uses: canonical/flake0/.github/actions/collect@ingest-via-data-prepper
         with:
           phase: stop
-          test-log: ${{ runner.temp }}/spread.log
           artifact-name: flake0-collect-${{ matrix.job.name_in_artifact }}-${{ github.run_attempt }}
       - name: Classify failure
         id: classify
@@ -276,7 +274,5 @@ jobs:
           url: ${{ secrets.FLAKE0_INGEST_URL }}
           username: ${{ secrets.FLAKE0_INGEST_USER }}
           password: ${{ secrets.FLAKE0_INGEST_PASSWORD }}
-          skip-steps: |
-            juju debug-log
-            spread -vv
+          skip-steps: juju debug-log
           skip-files: workload/k8s/controller-*_api-server-*.log
