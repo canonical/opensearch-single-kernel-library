@@ -5,6 +5,7 @@
 """Kubernetes Workload."""
 
 import logging
+import platform
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -322,8 +323,12 @@ class K8sWorkload(BaseWorkload):
     @property
     @override
     def keytool_cmd(self) -> str:
-        """Return keytool command path from the workload JDK."""
-        return (self.paths.jdk / "bin" / "keytool").as_posix()
+        """Return keytool from the workload JDK, including older image layouts."""
+        keytool = self.paths.jdk / "bin" / "keytool"
+        if not self.exists(keytool):
+            architecture = "arm64" if platform.machine() == "aarch64" else "amd64"
+            keytool = self.paths.root / f"usr/lib/jvm/java-21-openjdk-{architecture}/bin/keytool"
+        return keytool.as_posix()
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:

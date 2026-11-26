@@ -23,6 +23,7 @@ from .helpers import (
     IDLE_PERIOD,
     K8S_VERSION_N,
     K8S_VERSION_N_MINUS_1,
+    K8S_VERSION_TO_IMAGE_REVISION,
     K8S_VERSION_TO_REVISION,
     OPENSEARCH_CHANNEL,
     OPENSEARCH_CHARM,
@@ -36,7 +37,7 @@ from .helpers import (
     assert_upgrade_to_local,
     assert_upgrade_to_revision,
     assert_version_units,
-    testing_config_if_supported,
+    get_testing_config_if_supported,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,10 +83,12 @@ async def _build_env(
         revision = K8S_VERSION_TO_REVISION[version][series]
         config = {"profile": "testing"}
         charm = OPENSEARCH_K8S_CHARM
+        resources = {"opensearch-image": K8S_VERSION_TO_IMAGE_REVISION[version]}
     else:
         revision = VM_VERSION_TO_REVISION[version][series]
-        config = testing_config_if_supported(revision)
+        config = get_testing_config_if_supported(revision)
         charm = OPENSEARCH_CHARM
+        resources = {}
     await asyncio.gather(
         ops_test.model.deploy(
             TLS_CERTIFICATES_APP_NAME, channel=TLS_STABLE_CHANNEL, config=tls_config
@@ -96,6 +99,7 @@ async def _build_env(
             application_name=MAIN_APP,
             num_units=APPS[MAIN_APP],
             revision=revision,
+            resources=resources,
             series=series,
             trust=substrate == "k8s",
             config={"cluster_name": "upgrades"} | config,
@@ -106,6 +110,7 @@ async def _build_env(
             application_name=FAILOVER_APP,
             num_units=APPS[FAILOVER_APP],
             revision=revision,
+            resources=resources,
             series=series,
             trust=substrate == "k8s",
             config={
@@ -121,6 +126,7 @@ async def _build_env(
             application_name=APP_NAME,
             num_units=APPS[APP_NAME],
             revision=revision,
+            resources=resources,
             series=series,
             trust=substrate == "k8s",
             config={"cluster_name": "upgrades", "init_hold": True, "roles": "data"} | config,
@@ -166,6 +172,7 @@ async def _build_env(
 
     for app in list(APPS.keys()):
         await set_watermark(ops_test, app)
+        await assert_version_units(ops_test, app, version, substrate)
 
 
 @pytest.mark.group(id="happy_path_upgrade")

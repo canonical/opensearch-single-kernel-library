@@ -13,24 +13,29 @@ import logging
 import re
 from typing import Any
 
-import ops
 import poetry.core.constraints.version as poetry_version
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
+    OPENSEARCH_HTTP_PORT,
     UPGRADES_COMPATIBILITY_MATRIX,
+    HealthColors,
     Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
     OpenSearchHttpError,
-    OpenSearchK8sDeployedWithoutTrustError,
     OpenSearchUpgradePrecheckError,
 )
-from opensearch_single_kernel.common.statuses import GeneralStatuses, UpgradesStatuses
+from opensearch_single_kernel.common.statuses import (
+    GeneralStatuses,
+    HealthStatuses,
+    LockStatuses,
+    UpgradesStatuses,
+)
 from opensearch_single_kernel.core.models import (
     JWTAuthConfiguration,
     UnitUpgradesState,
@@ -145,25 +150,34 @@ class UpgradesManagerBase(BaseManager):
     @property
     def app_status(self) -> StatusObject | None:
         """App upgrade status"""
-        if self.state.substrate == Substrates.K8S:
-            try:
-                self.k8s_client.check_if_deployed_without_trust()
-            except OpenSearchK8sDeployedWithoutTrustError as e:
-                return format_status(
-                    UpgradesStatuses.K8S_DEPLOYED_WITHOUT_TRUST.value,
-                    {"charm_app": e.app_name},
-                )
-
-        if not self.in_progress:
-            return None
-
-        if not self.is_compatible:
+        in_progress = self.in_progress
+        if in_progress and not self.is_compatible:
             logger.info(
                 "Upgrade incompatible. If you accept potential *data loss* and *downtime*, you can continue by running `force-upgrade` action on each remaining unit"
             )
             return UpgradesStatuses.UPGRADES_INCOMPATIBLE.value
 
+        if not in_progress:
+            if self.upgrade_checks_pending:
+                return UpgradesStatuses.UPGRADES_UPGRADING.value
+            return None
+
+        if self.state.application_upgrade.resume_request:
+            return UpgradesStatuses.UPGRADES_RESUME_REQUESTED.value
+
         if not self.upgrade_resumed:
+            units = self.state.sorted_upgrades_units
+            if not self.state.upgrade_membership_complete or len(units) < 2:
+                return UpgradesStatuses.UPGRADES_UPGRADING.value
+            first_unit = units[0]
+            target_revision = self._app_workload_container_version
+            if (
+                first_unit.unit_state != UnitUpgradesState.HEALTHY
+                or first_unit.unit_state_revision != target_revision
+                or self._unit_workload_container_versions.get(first_unit.unit.name)
+                != target_revision
+            ):
+                return UpgradesStatuses.UPGRADES_UPGRADING.value
             # User confirmation needed to resume upgrade (i.e. upgrade second unit)
             # Statuses over 120 characters are truncated in `juju status` as of juju 3.1.6 and
             # 2.9.45
@@ -172,14 +186,40 @@ class UpgradesManagerBase(BaseManager):
         return UpgradesStatuses.UPGRADES_UPGRADING.value
 
     @property
+    def upgrade_checks_pending(self) -> bool:
+        """Whether installed revisions still need their post-upgrade checks.
+
+        Older charms did not record the revision checked on machines. A missing
+        record alone does not mean an unchanged unit needs another upgrade.
+        An ordinary restart has the same validated revision and workload version.
+        A rollback can reuse an older pod revision while its data still needs recovery.
+        """
+        revisions = self._unit_workload_container_versions
+        return any(
+            unit.unit_state == UnitUpgradesState.UPGRADING
+            or (
+                unit.unit_state == UnitUpgradesState.RESTARTING
+                and (
+                    not revisions.get(unit.unit.name)
+                    or unit.unit_state_revision != revisions[unit.unit.name]
+                    or unit.workload_version != self.current_versions.workload
+                )
+            )
+            or (
+                unit.unit_state_revision
+                and revisions.get(unit.unit.name)
+                and unit.unit_state_revision != revisions[unit.unit.name]
+            )
+            for unit in self.state.sorted_upgrades_units
+        )
+
+    @property
     @abc.abstractmethod
     def upgrade_resumed(self) -> bool:
         """Whether the user has resumed the upgrade with the Juju action."""
 
     @abc.abstractmethod
-    def reconcile_partition(
-        self, *, action_event: ops.ActionEvent | None = None, force=False
-    ) -> None:
+    def reconcile_partition(self) -> None:
         """If ready, allow next unit to upgrade."""
 
     @property
@@ -208,6 +248,11 @@ class UpgradesManagerBase(BaseManager):
         See https://chat.canonical.com/canonical/pl/cmf6uhm1rp8b7k8gkjkdsj4mya
         """
         logger.debug("Running pre-upgrade checks")
+
+        if not self.state.upgrade_membership_complete:
+            raise OpenSearchUpgradePrecheckError(
+                "Waiting for all units in the upgrade peer relation."
+            )
 
         try:
             deployment_desc = self.state.application.deployment_desc
@@ -242,7 +287,13 @@ class UpgradesManagerBase(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute upgrade statuses from upgrade state."""
+        if self.state.planned_units == 0:
+            return [GeneralStatuses.ACTIVE_IDLE.value]
+
         status_list = running_statuses(self.state.statuses, scope, self.name)
+        if not self.state.upgrade_relation or not self.state.application_upgrade.versions:
+            return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
         if scope == "unit":
             status_list.extend(
                 cached_non_running_statuses(
@@ -255,14 +306,78 @@ class UpgradesManagerBase(BaseManager):
 
         unit_status, unit_dynamic_params = self.unit_status
         if scope == "unit" and unit_status:
-            formatted = format_status(unit_status, unit_dynamic_params)
-            if formatted not in status_list:
-                status_list.append(formatted)
+            if unit_status.status != "active" or (
+                not self.state.unit_operation_in_progress
+                and self.state.server.started
+                and not self.state.server.start_pending
+                and not self.state.server.start_failed
+                and LockStatuses.REQUEST_LOCK_ON_START.value
+                not in self.state.statuses.get("unit", "lock_manager").root
+                and self.state.server_upgrade.unit_state
+                not in (UnitUpgradesState.UPGRADING, UnitUpgradesState.RESTARTING)
+                and not any(
+                    status in self.state.statuses.get("unit", "cluster_manager").root
+                    for status in (
+                        GeneralStatuses.WAITING_TO_START.value,
+                        GeneralStatuses.SERVICE_START_ERROR.value,
+                    )
+                )
+                and self.workload.is_service_started()
+                and self.workload.is_reachable(self.state.node_host, OPENSEARCH_HTTP_PORT)
+            ):
+                formatted = format_status(unit_status, unit_dynamic_params)
+                if formatted not in status_list:
+                    status_list.append(formatted)
+
+        if scope == "unit" and (not unit_status or unit_status.status != "blocked"):
+            status_list.extend(self._pending_upgrade_statuses())
 
         if scope == "app" and (status := self.app_status) and status not in status_list:
             status_list.append(status)
 
         return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def _pending_upgrade_statuses(self) -> list[StatusObject]:
+        """Describe unfinished upgrade checks even after the display cache is cleared."""
+        if not self.state.upgrade_relation or self.state.server_upgrade.unit_state not in (
+            UnitUpgradesState.UPGRADING,
+            UnitUpgradesState.RESTARTING,
+        ):
+            return []
+        # A unit being removed will not restart or complete upgrade checks.
+        if self.state.unit_dying:
+            return []
+        # Application status shows upgrade progress. Report failed health checks on the unit.
+        health = self.state.server_upgrade.post_upgrade_health
+        if health == HealthColors.RED:
+            return [
+                UpgradesStatuses.UPGRADES_UNHEALTHY.value,
+                HealthStatuses.CLUSTER_HEALTH_RED_UPGRADE.value,
+            ]
+        if health == HealthColors.YELLOW_TEMP:
+            return [HealthStatuses.WAITING_FOR_BUSY_SHARDS.value]
+        if health in (HealthColors.UNKNOWN, HealthColors.IGNORE):
+            return [UpgradesStatuses.UPGRADES_UNHEALTHY.value]
+        if (
+            self.state.server.start_failed
+            or GeneralStatuses.WAITING_TO_START.value
+            in self.state.statuses.get("unit", "cluster_manager").root
+            or LockStatuses.REQUEST_LOCK_ON_START.value
+            in self.state.statuses.get("unit", "lock_manager").root
+        ):
+            return []
+        # Compute this from the saved upgrade state so it clears when startup finishes.
+        return [GeneralStatuses.WAITING_TO_START.value.model_copy(update={"running": None})]
+
+    def record_upgrade_health(self, health: HealthColors) -> None:
+        """Keep failed post-upgrade checks visible until a later check succeeds.
+
+        This only records the status. The caller still decides when the unit is HEALTHY
+        and whether the next unit may upgrade.
+        """
+        self.state.server_upgrade.post_upgrade_health = (
+            None if health in (HealthColors.GREEN, HealthColors.YELLOW) else HealthColors(health)
+        )
 
     def get_version_before_override(self) -> poetry_version.Version | None:  # noqa: C901
         """Get the version of OpenSearch before override-version is run."""
@@ -299,14 +414,8 @@ class UpgradesManagerBase(BaseManager):
 
             return check_output_for_version(str(output))
         except OpenSearchCmdError as e:
-            # If the workload runner raises an exception upon the tool exiting/aborting,
-            # the output containing the version string is often trapped inside
-            # the exception message (stderr).
-            if self.state.substrate == Substrates.VM:
-                output = str(e.out)
-            else:
-                # On K8s the output is stderr so we get both stdout and stderr from pebble
-                output = str(e.err)
+            # The failed command may report the version in stdout or stderr.
+            output = "\n".join(part for part in (e.out, e.err) if part)
 
             if version := check_output_for_version(str(output)):
                 return version
@@ -363,19 +472,21 @@ class UpgradesManagerBase(BaseManager):
         return disk_matrix
 
     def should_check_rollback(self) -> bool:
-        """Should we check if rollback is possible"""
-        # Basically We check if it is a rollback if:
-        # 1. We are in the highest numbered unit (i.e. the first unit to upgrade)
-        # 2. We are in the middle of an upgrade (i.e. not all units have upgraded)
-        # 3. The upgrade is compatible (i.e It is not a downgrade)
-        # 4. The version in application databag match the version in file
+        """Return whether this unit needs to be checked for rollback.
+
+        Keep the compatibility check so this does not permit an arbitrary downgrade.
+        The last unit may already have the target revision while its startup and
+        health checks are still pending, so revision differences alone are not enough.
+        """
+        if not (self.in_progress or self.upgrade_checks_pending):
+            return False
+
+        if not (previous_versions := self.state.application_upgrade.versions):
+            return False
+
         return (
-            self.in_progress
-            and self.state.server_upgrade.unit.name
-            == self.state.sorted_upgrades_units[0].unit.name
-            and self.is_compatible
-            and self.state.application_upgrade.versions.workload_parsed
-            == self.current_versions.workload_parsed
+            self.is_compatible
+            and previous_versions.workload_parsed == self.current_versions.workload_parsed
         )
 
     @property

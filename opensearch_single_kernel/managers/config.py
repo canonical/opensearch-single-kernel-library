@@ -11,13 +11,12 @@ from opensearch_single_kernel.common.constants import (
     CA_ALIAS,
     OPENSEARCH_USERS,
     CertType,
-    Substrates,
 )
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchFileOperationError,
 )
-from opensearch_single_kernel.core.models import Node, OpenSearchProfile
+from opensearch_single_kernel.core.models import Node
 from opensearch_single_kernel.core.state import ClusterState
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.config import YamlConfigSetter
@@ -87,6 +86,10 @@ class ConfigManager(BaseManager):
         self.state.server.last_host_ip = self.state.host_ip
         # rewrite() returns whether the on-disk YAML text changed after the update.
         return self.yaml_setter.rewrite(self.CONFIG_YML, config)
+
+    def remove_bootstrap_config(self) -> None:
+        """Remove the initial manager list after bootstrap without changing other settings."""
+        self.yaml_setter.delete(self.CONFIG_YML, "cluster.initial_cluster_manager_nodes")
 
     def update_security_config(self) -> bool:
         """Reconcile whole Opensearch security config using values from application state.
@@ -223,15 +226,17 @@ class ConfigManager(BaseManager):
 
     def _opensearch_general_config(self, roles: list[str]) -> dict[str, Any]:
         """General OpenSearch settings written to opensearch.yml."""
-        publish_hosts = {self.state.node_host}
-        if self.state.substrate == Substrates.VM:
-            if public_ip := self.workload.get_host_public_ip():
-                publish_hosts.add(public_ip)
+        # Older charms compare this value with a string. A list causes unnecessary
+        # certificate requests on rollback, even when the address has not changed.
+        publish_host = self.workload.get_http_publish_host(
+            self.state.node_host, self.state.network_ingress_address
+        )
+
         return {
             "cluster.name": self.state.application.deployment_desc.config.cluster_name,
             "node.name": self.state.unit_name,
             "network.host": self.state.network_hosts,
-            "http.publish_host": sorted(publish_hosts),
+            "http.publish_host": publish_host,
             "node.roles": sorted(roles),
             "node.attr.app_id": self.state.application.deployment_desc.app.id,
             "path.data": self.workload.paths.data.as_posix(),
@@ -678,36 +683,3 @@ class ConfigManager(BaseManager):
             return
         lines = "\n".join(sorted(set(cm_hosts)))
         self.workload.write_text(f"{lines}\n", self.workload.paths.seed_hosts)
-
-    def update_profile_configuration(self, profile: OpenSearchProfile) -> bool:
-        """Update JVM heap in jvm.options based on the performance profile.
-
-        Returns:
-            whether the configuration changed and restart required.
-        """
-        current_profile = self.state.server.profile
-        logger.debug("current profile: %s, config profile: %s", current_profile, profile)
-        if current_profile is None or current_profile != profile:
-            heap_size = profile.get_jvm_heap_size(self.workload.memtotal())
-            logger.debug(
-                "Updating JVM heap size to %s KB based on profile requirements", heap_size
-            )
-            self._update_jvm_heap_size(heap_size)
-            self.state.server.profile = profile
-            return True
-        return False
-
-    def _update_jvm_heap_size(self, heap_size_in_kb: int) -> None:
-        """Update Opensearch JVM config file using the provided values."""
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xms[0-9]+[kmgKMG]",
-            f"-Xms{heap_size_in_kb}k",
-            regex=True,
-        )
-        self.yaml_setter.replace(
-            self.JVM_OPTIONS,
-            "-Xmx[0-9]+[kmgKMG]",
-            f"-Xmx{heap_size_in_kb}k",
-            regex=True,
-        )
