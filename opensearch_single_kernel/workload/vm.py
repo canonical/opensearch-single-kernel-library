@@ -42,7 +42,7 @@ class VMWorkload(BaseWorkload):
     """OpenSearch Machine VM Workload."""
 
     SERVICE_NAME = "daemon"
-    UNIT_NAME = f"snap.{OPENSEARCH_SNAP_NAME}.{SERVICE_NAME}.service"
+    SYSTEMD_UNIT = f"snap.{OPENSEARCH_SNAP_NAME}.{SERVICE_NAME}.service"
 
     def __init__(self, charm_root: Path):
         super().__init__()
@@ -199,7 +199,7 @@ class VMWorkload(BaseWorkload):
 
         Set paused=True if the process was intentionally paused.
         """
-        if not service_running(self.UNIT_NAME):
+        if not service_running(self.SYSTEMD_UNIT):
             return False
 
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
@@ -235,7 +235,7 @@ class VMWorkload(BaseWorkload):
     @override
     def is_failed(self) -> bool:
         """Check if snap service failed."""
-        return service_failed(self.UNIT_NAME)
+        return service_failed(self.SYSTEMD_UNIT)
 
     @override
     def start_service(self):
