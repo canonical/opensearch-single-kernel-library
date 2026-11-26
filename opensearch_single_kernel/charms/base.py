@@ -242,7 +242,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
         The requirements can be met by any change in the cluster, e.g. a peer cluster joining.
         """
-        if self.upgrades_manager.in_progress:
+        try:
+            if self.upgrades_manager.in_progress:
+                return
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state. Not applying the profile: %s", e)
             return
 
         if (
