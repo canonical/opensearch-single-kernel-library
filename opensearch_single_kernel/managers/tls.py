@@ -48,6 +48,7 @@ from opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certi
 from opensearch_single_kernel.managers.base import BaseManager
 from opensearch_single_kernel.utils.certificates import (
     cert_expiration_remaining_hours,
+    is_signed_by_ca,
     parse_tls_file,
     read_ca,
     remove_ca,
@@ -104,12 +105,10 @@ class TlsManager(BaseManager):
         if not only_unit_resources:
             cert_types.append(CertType.APP_ADMIN)
 
-        # compare issuer of the cert with the issuer of the CA
+        # check that each cert was signed by the stored CA
         # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
         if not (current_ca := self.read_stored_ca()):
             return False
-
-        ca_issuer = self.get_cert_issuer(cert=current_ca)
 
         for cert_type in cert_types:
             cert_type_path = self.workload.paths.certs / f"{cert_type.val}.p12"
@@ -122,14 +121,14 @@ class TlsManager(BaseManager):
 
             secret = self.get_secrets_for_cert_type(cert_type)
 
-            cert_issuer = self.get_cert_issuer_from_path(
+            cert = self.get_cert_from_path(
                 store_pwd=secret.get("keystore-password"),
                 store_path=self.workload.paths.certs / f"{cert_type.val}.p12",
             )
-            if not cert_issuer:
+            if not cert:
                 return False
 
-            if cert_issuer != ca_issuer:
+            if not is_signed_by_ca(cert, current_ca):
                 return False
         logger.debug("All TLS resources are stored on disk and valid.")
         return True
@@ -622,14 +621,14 @@ class TlsManager(BaseManager):
             logger.error("Error reading the current truststore: %s", e)
             return None
 
-    def get_cert_issuer_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
-        """Retrieve the certificate issuer from the cert in the given PKCS12 store."""
+    def get_cert_from_path(self, store_pwd: str, store_path: PathProtocol) -> str | None:
+        """Retrieve the certificate from the given PKCS12 store."""
         try:
             return self.workload.run_cmd(
                 f"openssl pkcs12 -in {store_path}",
                 f"""-nodes \
                 -passin pass:{store_pwd} \
-                | openssl x509 -noout -issuer
+                | openssl x509
                 """,
                 use_errors_replace=True,
             ).out
@@ -682,6 +681,8 @@ class TlsManager(BaseManager):
         except OpenSearchFileOperationError as e:
             logger.error("Error removing old CA during rotation finalization: %s", e)
             return False
+
+        self.state.reset_ca_rotation_state()
 
         # the whole fleet reloaded the new CA and dropped the old one, it is now safe
         # to expose the new CA to the external clients

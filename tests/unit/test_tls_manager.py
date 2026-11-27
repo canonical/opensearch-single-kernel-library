@@ -34,6 +34,13 @@ from opensearch_single_kernel.core.models import (
     PeerClusterConfig,
 )
 from opensearch_single_kernel.utils.certificates import remove_ca, store_ca_chain
+from tests.unit.constants import (
+    CHAIN_INTERMEDIATE_CA_PEM,
+    CHAIN_ROOT_CA_PEM,
+    CHAIN_UNIT_CERT_PEM,
+    NEW_CA_PEM,
+    OLD_CA_PEM,
+)
 from tests.unit.helpers import (
     create_utf8_encoded_private_key,
     deployment_descriptions,
@@ -832,6 +839,28 @@ def test_on_certificate_available(harness, mocker):
     on_tls_conf_set.assert_called()
 
 
+def test_finalize_ca_certs_rotation_clears_rotation_flags(harness, mocker):
+    """Test the rotation flags are cleared after a completed rotation."""
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.ca_and_certs_rotation_complete_in_cluster",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.remove_old_ca")
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle",
+        return_value=True,
+    )
+    with harness.hooks_disabled():
+        harness.charm.state.server.tls_ca_renewing = True
+        harness.charm.state.server.tls_ca_renewed = True
+
+    assert harness.charm.tls_manager.finalize_ca_certs_rotation()
+
+    assert not harness.charm.state.server.tls_ca_renewing
+    assert not harness.charm.state.server.tls_ca_renewed
+
+
 def test_on_certificate_expiring(harness, mocker, substrate):
     """Test _on_certificate_expiring event."""
     request_certificate_creation = mocker.patch(
@@ -1440,7 +1469,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
 
     new_cert = "new_cert"
     new_chain = ["new_chain"]
-    new_ca = "new_ca"
+    new_ca = NEW_CA_PEM
 
     deployment_desc = mocker.patch(
         "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
@@ -1489,7 +1518,7 @@ def test_on_certificate_available_ca_rotation_first_stage_any_cluster_leader(
     )
 
     # The CA stored in the keystore is still the old one
-    read_stored_ca.return_value = "old_ca"
+    read_stored_ca.return_value = OLD_CA_PEM
 
     # Applies to ANY deployment type
     deployment_desc.return_value = DeploymentDescription(
@@ -1655,16 +1684,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
-    request_certificate_renewal = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_renewal"
-    )
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
     request_certificate_revocation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
-    )
-    request_certificate_creation = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
@@ -1758,38 +1781,23 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         Scope.APP, CertType.APP_ADMIN.val
     )
 
-    assert new_app_admin_secret["csr"] != old_csr
+    # only main orchestrator should request admin cert
+    is_main = deployment_type == DeploymentType.MAIN_ORCHESTRATOR
+    assert (new_app_admin_secret["csr"] != old_csr) is is_main
     assert new_app_admin_secret["ca-cert"] == new_ca
     assert new_app_admin_secret["key"] == old_key
-    assert new_app_admin_secret["subject"] != old_subject
+    assert (new_app_admin_secret["subject"] != old_subject) is is_main
     # 1 for admin cert, 2 for unit certs
-    assert generate_csr.call_count == 3
+    assert generate_csr.call_count == (3 if is_main else 2)
 
     # new unit certs
-    assert request_certificate_revocation.call_count == 2
-    request_certificate_revocation.assert_has_calls([call(b"csr-http"), call(b"csr-transport")])
+    revoked = [call(b"csr-http"), call(b"csr-transport")] + ([call(b"old_csr")] if is_main else [])
+    assert request_certificate_revocation.call_args_list == revoked
 
-    assert request_certificate_renewal.call_count == 2
-    request_certificate_renewal.assert_has_calls(
-        [
-            call(
-                old_certificate_signing_request=b"csr-http",
-                new_certificate_signing_request=generate_csr(),
-            ),
-            call(
-                old_certificate_signing_request=b"csr-transport",
-                new_certificate_signing_request=generate_csr(),
-            ),
-        ]
-    )
-
-    # new admin cert
-    assert request_certificate_creation.call_count == 1
-    # we store the decoded csr in the secret but pass it as bytes to the function
-    assert (
-        request_certificate_creation.call_args.kwargs["certificate_signing_request"].decode()
-        == new_app_admin_secret["csr"]
-    )
+    assert harness.charm.state.server.certs_reissue_pending == {
+        CertType.UNIT_HTTP.val,
+        CertType.UNIT_TRANSPORT.val,
+    } | ({CertType.APP_ADMIN.val} if is_main else set())
 
     add_status.assert_not_called()
 
@@ -1826,9 +1834,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         new_callable=PropertyMock,
     )
     generate_csr = mocker.patch("opensearch_single_kernel.managers.tls.generate_csr")
-    request_certificate_renewal = mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_renewal"
-    )
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
@@ -1837,9 +1842,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     )
     request_certificate_revocation = mocker.patch(
         "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_revocation"
-    )
-    mocker.patch(
-        "opensearch_single_kernel.lib.charms.tls_certificates_interface.v3.tls_certificates.TLSCertificatesRequiresV3.request_certificate_creation"
     )
     mocker.patch("opensearch_single_kernel.managers.cluster.ClusterManager.wait_for_opensearch_up")
     mocker.patch(
@@ -1938,19 +1940,10 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
         [call(csr_http_old.encode()), call(csr_transport_old.encode())]
     )
 
-    assert request_certificate_renewal.call_count == 2
-    request_certificate_renewal.assert_has_calls(
-        [
-            call(
-                old_certificate_signing_request=csr_http_old.encode(),
-                new_certificate_signing_request=generate_csr(),
-            ),
-            call(
-                old_certificate_signing_request=csr_transport_old.encode(),
-                new_certificate_signing_request=generate_csr(),
-            ),
-        ]
-    )
+    assert harness.charm.state.server.certs_reissue_pending == {
+        CertType.UNIT_HTTP.val,
+        CertType.UNIT_TRANSPORT.val,
+    }
 
     assert (
         harness.charm.state.secrets.get_object(Scope.UNIT, CertType.UNIT_HTTP.val)["csr"]
@@ -2140,6 +2133,10 @@ def test_on_certificate_available_ca_rotation_third_stage_any_unit_cert_unit(
         "opensearch_single_kernel.managers.tls.TlsManager._remove_ca_from_request_bundle"
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.update_request_ca_bundle")
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored",
+        return_value=True,
+    )
     workload_class = _workload_class_name(substrate)
     tempfile = mocker.patch(
         f"opensearch_single_kernel.workload.{substrate}.{workload_class}.temp_file"
@@ -2318,7 +2315,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
     csr = "old_csr"
     cert = "new_cert"
     chain = ["new_chain"]
-    ca = "new_ca"
+    ca = NEW_CA_PEM
 
     harness.charm.state.secrets.put_object(
         Scope.APP,
@@ -2332,7 +2329,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
         },
     )
 
-    read_stored_ca.return_value = "stored_ca"
+    read_stored_ca.return_value = OLD_CA_PEM
 
     # Applies to ANY deployment type
     deployment_desc.return_value = DeploymentDescription(
@@ -2368,7 +2365,7 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
             "chain": "new_chain",
             "keystore-password": "keystore_12345",
             "truststore-password": "truststore_12345",
-            "ca-cert": "new_ca",
+            "ca-cert": ca,
             "cert": "new_cert",
         }
     else:
@@ -2388,6 +2385,59 @@ def test_on_certificate_available_rotation_ongoing_on_this_unit(
 
 # TODO: Add final test of on_certificate_available and rotation ongoing on other unit
 # After we implement scale up scale down.
+
+
+def test_on_certificate_available_same_ca_chain_does_not_rotate_ca(harness, mocker):
+    """A CA chain stored in a different order than provided does not start a CA rotation."""
+    harness.charm.state.secrets.put_object(Scope.UNIT, CertType.UNIT_HTTP.val, {"csr": "csr"})
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+    )
+    mocker.patch.object(
+        harness.charm.tls_manager,
+        "read_stored_ca",
+        return_value=f"{CHAIN_ROOT_CA_PEM}{CHAIN_INTERMEDIATE_CA_PEM}",
+    )
+    store_new_ca = mocker.patch.object(harness.charm.tls_manager, "store_new_ca")
+    mocker.patch.object(harness.charm.tls_manager, "store_new_tls_resources", return_value=True)
+    harness.charm.restart_opensearch_event = MagicMock()
+
+    harness.charm.tls_events._on_certificate_available(
+        MagicMock(
+            certificate_signing_request="csr",
+            certificate="cert",
+            chain=["cert"],
+            ca=f"{CHAIN_INTERMEDIATE_CA_PEM}{CHAIN_ROOT_CA_PEM}",
+        )
+    )
+
+    store_new_ca.assert_not_called()
+    harness.charm.restart_opensearch_event.emit.assert_not_called()
+    assert not harness.charm.state.server.tls_ca_renewing
+
+
+@pytest.mark.parametrize(
+    "stored_ca, expected",
+    [
+        (f"{CHAIN_ROOT_CA_PEM}{CHAIN_INTERMEDIATE_CA_PEM}", True),
+        (CHAIN_INTERMEDIATE_CA_PEM, True),
+        (CHAIN_ROOT_CA_PEM, False),
+        (OLD_CA_PEM, False),
+    ],
+    ids=["chain", "intermediate-only", "root-only", "unrelated-ca"],
+)
+def test_all_tls_resources_stored_checks_cert_is_signed_by_stored_ca(
+    stored_ca, expected, harness, mocker
+):
+    """The unit's certificates count as current only if the stored CA signed them."""
+    tls_manager = harness.charm.tls_manager
+    mocker.patch.object(tls_manager, "read_stored_ca", return_value=stored_ca)
+    mocker.patch.object(tls_manager.workload, "exists", return_value=True)
+    mocker.patch.object(tls_manager, "get_secrets_for_cert_type", return_value={})
+    mocker.patch.object(tls_manager, "get_cert_from_path", return_value=CHAIN_UNIT_CERT_PEM)
+
+    assert tls_manager.all_tls_resources_stored() is expected
 
 
 @pytest.fixture
