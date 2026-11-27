@@ -1501,7 +1501,7 @@ class OpenSearchEventsHandler(Object):
         # request new certificates after rotating the CA
         if self.charm.state.server.tls_ca_renewing and self.charm.state.server.tls_ca_renewed:
             self.request_new_unit_certificates()
-            if self.charm.unit.is_leader():
+            if self.charm.unit.is_leader() and self.charm.state.is_main_orchestrator:
                 self.request_new_admin_certificate()
             else:
                 self.charm.tls_manager.store_admin_tls_secrets_if_applies()

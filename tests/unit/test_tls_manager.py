@@ -1705,24 +1705,23 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
         Scope.APP, CertType.APP_ADMIN.val
     )
 
-    assert new_app_admin_secret["csr"] != old_csr
+    # only main orchestrator should request admin cert
+    is_main = deployment_type == DeploymentType.MAIN_ORCHESTRATOR
+    assert (new_app_admin_secret["csr"] != old_csr) is is_main
     assert new_app_admin_secret["ca-cert"] == new_ca
     assert new_app_admin_secret["key"] == old_key
-    assert new_app_admin_secret["subject"] != old_subject
+    assert (new_app_admin_secret["subject"] != old_subject) is is_main
     # 1 for admin cert, 2 for unit certs
-    assert generate_csr.call_count == 3
+    assert generate_csr.call_count == (3 if is_main else 2)
 
     # new unit certs
-    assert request_certificate_revocation.call_count == 3
-    request_certificate_revocation.assert_has_calls(
-        [call(b"csr-http"), call(b"csr-transport"), call(b"old_csr")]
-    )
+    revoked = [call(b"csr-http"), call(b"csr-transport")] + ([call(b"old_csr")] if is_main else [])
+    assert request_certificate_revocation.call_args_list == revoked
 
     assert harness.charm.state.server.certs_reissue_pending == {
         CertType.UNIT_HTTP.val,
         CertType.UNIT_TRANSPORT.val,
-        CertType.APP_ADMIN.val,
-    }
+    } | ({CertType.APP_ADMIN.val} if is_main else set())
 
     add_status.assert_not_called()
 
