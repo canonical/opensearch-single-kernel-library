@@ -109,7 +109,7 @@ class UpgradesEventsHandler(Object):
         try:
             if self.charm.upgrades_manager.in_progress:
                 logger.warning(
-                    "Adding units during an upgrade is not supported."
+                    "Adding units during an upgrade is not supported. "
                     "The charm may be in a broken, unrecoverable state"
                 )
         except OpenSearchK8sError as e:
