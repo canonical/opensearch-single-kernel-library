@@ -1,4 +1,5 @@
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       artifact-prefix:
@@ -45,6 +46,11 @@ jobs:
           sudo snap install go --classic
           go install github.com/canonical/spread/cmd/spread@latest
           pipx install tox poetry
+      - name: Set up python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "poetry"
       - name: Install deps
         run: |
           sudo apt update
