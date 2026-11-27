@@ -354,11 +354,6 @@ class BaseWorkload(ABC):
         """Return the keytool command appropriate for this workload substrate."""
         pass
 
-    @abstractmethod
-    def start_service_only(self):
-        """Start the actual service only (snap / pebble)."""
-        pass
-
     def is_reachable(self, host: str, port: int) -> bool:
         """Attempting a socket connection to a host/port."""
         try:
