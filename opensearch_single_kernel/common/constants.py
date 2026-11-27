@@ -204,8 +204,8 @@ MAX_HEAP_SIZE_IN_KB = 31 * _1GB_IN_KB  # 31GB in KB
 PERFORMANCE_PROFILE = "profile"
 # Opensearch Snap revision
 OPENSEARCH_SNAP_REVISIONS = {
-    "x86_64": "364",
-    "aarch64": "365",
+    "x86_64": "384",
+    "aarch64": "385",
 }
 
 # OpenSearch Users and roles
