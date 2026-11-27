@@ -235,6 +235,10 @@ class PeerClusterEventsHandler(Object):
         if not (self.charm.unit.is_leader() and len(event.relation.units) > 0):
             return
 
+        if not self.charm.state.peer_relation:
+            logger.debug("Peer relation unavailable. Skipping fleet update.")
+            return
+
         if not self.charm.cluster_manager.opensearch_client.is_node_up():
             # if this unit is the one departing, dont update fleet apps
             # otherwise, update fleet apps after service restarts and event is re-emitted
@@ -304,7 +308,9 @@ class PeerClusterEventsHandler(Object):
             return
 
         logger.debug(
-            "PeerClusterRelationChanged from provider %s data: %s", event.relation.app.name, data
+            "PeerClusterRelationChanged from provider %s on relation %s",
+            event.relation.app.name,
+            event.relation.id,
         )
         # fetch the trigger of this event
         trigger = data.get("trigger")
@@ -330,6 +336,7 @@ class PeerClusterEventsHandler(Object):
             deployment_desc=deployment_desc,
             is_provider=False,
         )
+
         # set the main orchestrator registered flag for this relation
         if (
             self.charm.state.application.is_admin_user_initialized
@@ -410,7 +417,12 @@ class PeerClusterEventsHandler(Object):
             self.charm.state.secrets, data["data"]
         )
         requirer_errors = self.charm.peer_cluster_manager.requirer_errors(
-            orchestrators, deployment_desc, data, event.relation.id
+            orchestrators,
+            deployment_desc,
+            data.deployment_desc,
+            data.cluster_name,
+            event.relation.id,
+            trigger,
         )
         logger.debug(f"Requirer errors: {requirer_errors}")
         if requirer_errors:
@@ -540,6 +552,7 @@ class PeerClusterEventsHandler(Object):
         self.charm.peer_cluster_orchestrator_manager.promote_failover()
         self.charm.plugin_manager.remove_plugin_secret_ids()
         self.check_credentials_with_missing_relations()
+        self.charm.snapshots_events.sync_relation_credentials()
 
     def check_credentials_with_missing_relations(self) -> None:
         """Track whether credentials exist for plugins/backups without a relation."""
@@ -560,19 +573,10 @@ class PeerClusterEventsHandler(Object):
         if self.charm.state.server.started:
             return
 
-        try:
-            config_profile = self.charm.profiles_manager.get_config_profile()
-        except ValueError:
-            return
-
         if not self.charm.profiles_manager.check_profile_requirements():
             return
 
-        self.charm.config_manager._update_jvm_heap_size(
-            config_profile.get_jvm_heap_size(self.charm.workload.memtotal())
-        )
-        # store profile in unit state
-        self.charm.state.server.profile = config_profile
+        # the profile is applied on start
         self.charm.start_opensearch_event.emit(ignore_lock=True)
 
     def reconcile_peer_cluster_errors(

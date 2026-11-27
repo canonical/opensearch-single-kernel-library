@@ -13,6 +13,7 @@ from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from ops import ModelError
 from overrides import override
 
 from opensearch_single_kernel.common.constants import (
@@ -725,7 +726,7 @@ class TlsManager(BaseManager):
         )
 
         # See if the last check was made less than 6h ago, if yes - leave
-        if (datetime.now() - last_cert_check).seconds < 6 * 3600:
+        if (datetime.now() - last_cert_check).total_seconds() < 6 * 3600:
             return None
 
         certs = self.get_unit_certificates()
@@ -909,14 +910,20 @@ class TlsManager(BaseManager):
                 if not self.state.server.tls_configured:
                     status_list.append(TlsStatuses.TLS_NOT_FULLY_CONFIGURED.value)
 
-            if recompute and (certs := self.check_certs_expiration()):
-                missing = [cert.val for cert in certs.keys()]
-                status_list.append(
-                    format_status(
-                        TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
-                        {"certificates": ", ".join(missing)},
-                    )
-                )
+            if recompute:
+                try:
+                    certs = self.check_certs_expiration()
+                except ModelError as e:
+                    logger.error("Cannot read TLS secrets to check certificate expiry: %s", e)
+                else:
+                    if certs:
+                        missing = [cert.val for cert in certs.keys()]
+                        status_list.append(
+                            format_status(
+                                TlsStatuses.TLS_CERTS_EXPIRATION_ERROR.value,
+                                {"certificates": ", ".join(missing)},
+                            )
+                        )
 
         if scope == "app":
             if (

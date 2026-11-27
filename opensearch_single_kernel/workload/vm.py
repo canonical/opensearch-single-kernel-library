@@ -10,15 +10,15 @@ import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
-from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 
-from charmlibs import pathops
+from charmlibs import pathops, snap
 from charmlibs.pathops import LocalPath, PathProtocol
 from overrides import override
-from tenacity import Retrying, retry, stop_after_attempt, wait_exponential, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_exponential
 
+from opensearch_single_kernel.common.constants import OPENSEARCH_SNAP_NAME
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchCmdError,
     OpenSearchInstallError,
@@ -32,8 +32,6 @@ from opensearch_single_kernel.lib.charms.operator_libs_linux.v1.systemd import (
     service_restart,
     service_running,
 )
-from opensearch_single_kernel.lib.charms.operator_libs_linux.v2 import snap
-from opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap import SnapError
 from opensearch_single_kernel.utils.helpers import mask_sensitive_information, pinned_snap_revision
 from opensearch_single_kernel.workload.base import BaseWorkload, Paths
 
@@ -44,39 +42,38 @@ class VMWorkload(BaseWorkload):
     """OpenSearch Machine VM Workload."""
 
     SERVICE_NAME = "daemon"
+    SYSTEMD_UNIT = f"snap.{OPENSEARCH_SNAP_NAME}.{SERVICE_NAME}.service"
 
     def __init__(self, charm_root: Path):
         super().__init__()
         self.charm_root = charm_root
 
-    @cached_property
-    def opensearch_snap(self) -> snap.Snap:
-        """Return the opensearch snap."""
-        for attempt in Retrying(stop=stop_after_attempt(12), wait=wait_fixed(10), reraise=True):
-            with attempt:
-                opensearch_snap = snap.SnapCache()["opensearch"]
-        logger.debug(
-            f"Snap opensearch fetched after {attempt.retry_state.attempt_number - 1} attempts"
-        )
-        return opensearch_snap
-
     @property
     @override
     def workload_present(self) -> bool:
-        """Check if the snap is installed."""
+        """Check if the snap is installed.
+
+        Raises:
+            OpenSearchCmdError: if snapd could not be queried.
+        """
         try:
-            return self.opensearch_snap.present
-        except SnapError:
+            snap.list_one(OPENSEARCH_SNAP_NAME)
+        except snap.NotInstalledError:
             return False
+        except snap.Error as e:
+            logger.error("Failed to check if the snap is installed: %s", e)
+            raise OpenSearchCmdError(cmd=f"snap list {OPENSEARCH_SNAP_NAME}", err=str(e)) from e
+        return True
 
     @property
     @override
     def can_connect(self) -> bool:
         """Check if the snap is installed and we can connect to the snapd API."""
         try:
-            return bool(self.opensearch_snap.services[self.SERVICE_NAME])
-        except KeyError:
+            snap.list_one(OPENSEARCH_SNAP_NAME)
+        except snap.Error:
             return False
+        return True
 
     def _ensure_snap_reexec(self) -> None:
         """Append SNAP_REEXEC=force to /etc/environment and restart snapd if needed."""
@@ -106,16 +103,12 @@ class VMWorkload(BaseWorkload):
         """Install the workload."""
         try:
             self._ensure_snap_reexec()
-            cache = snap.SnapCache()
-            opensearch_snap = cache["opensearch"]
-            # Make sure that we have the exact revision
-            opensearch_snap.ensure(snap.SnapState.Latest, revision=pinned_snap_revision())
-            opensearch_snap.connect("process-control")
-            self.opensearch_snap = opensearch_snap
-            if not opensearch_snap.held:
-                # hold the snap in charm determined revision
-                self.opensearch_snap.hold()
-        except (snap.SnapError, SystemdError, OSError) as e:
+            snap.ensure_installed(OPENSEARCH_SNAP_NAME, revision=pinned_snap_revision())
+            if snap.list_one(OPENSEARCH_SNAP_NAME).hold is None:
+                # hold the snap in charm determined revision, keeping any existing hold
+                snap.hold(OPENSEARCH_SNAP_NAME)
+            snap.connect((OPENSEARCH_SNAP_NAME, "process-control"))
+        except (snap.Error, SystemdError, OSError) as e:
             logger.error("Failed to install/upgrade opensearch. \n%s", e)
             raise OpenSearchInstallError()
 
@@ -162,7 +155,7 @@ class VMWorkload(BaseWorkload):
     def run_script(
         self,
         script_name: str,
-        args: str = None,
+        args: str | None = None,
         stdin: str | None = None,
         *,
         timeout: int = 30,
@@ -201,15 +194,17 @@ class VMWorkload(BaseWorkload):
         return output.out.strip()
 
     @override
+    def get_http_publish_host(self, node_host: str, ingress_address: str) -> str:
+        """Use the public address, falling back to Juju's advertised ingress address."""
+        return self.get_host_public_ip() or ingress_address
+
+    @override
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.
 
         Set paused=True if the process was intentionally paused.
         """
-        if not self.opensearch_snap.present:
-            return False
-
-        if not service_running("snap.opensearch.daemon.service"):
+        if not service_running(self.SYSTEMD_UNIT):
             return False
 
         # Now, we must dig deeper into the actual status of systemd and the JVM process.
@@ -243,38 +238,22 @@ class VMWorkload(BaseWorkload):
         return stat[2] not in ["Z", "T", "X"]
 
     @override
-    def start_service_only(self):
-        """Start the actual service only (snap / pebble)."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
-        try:
-            self.opensearch_snap.start([self.SERVICE_NAME])
-        except snap.SnapError as e:
-            logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
-            raise OpenSearchStartError()
-
-    @override
     def is_failed(self) -> bool:
         """Check if snap service failed."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
-        return service_failed("snap.opensearch.daemon.service")
+        return service_failed(self.SYSTEMD_UNIT)
 
     @override
     def start_service(self):
         """Start the snap exposed "daemon" service."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
-        if self.opensearch_snap.services[self.SERVICE_NAME]["active"]:
-            logger.info("The opensearch.%s service is already started.", self.SERVICE_NAME)
-            return
-
         try:
-            self.opensearch_snap.start([self.SERVICE_NAME])
-        except snap.SnapError as e:
+            snap.start(OPENSEARCH_SNAP_NAME, [self.SERVICE_NAME])
+        except snap.NotInstalledError:
+            logger.error(
+                "Failed to start the opensearch.%s service. Snap is not installed.",
+                self.SERVICE_NAME,
+            )
+            raise OpenSearchMissingError()
+        except snap.Error as e:
             logger.error("Failed to start the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStartError()
 
@@ -393,12 +372,15 @@ class VMWorkload(BaseWorkload):
     @override
     def stop(self) -> None:
         """Stop the opensearch service."""
-        if not self.opensearch_snap.present:
-            raise OpenSearchMissingError()
-
         try:
-            self.opensearch_snap.stop([self.SERVICE_NAME])
-        except SnapError as e:
+            snap.stop(OPENSEARCH_SNAP_NAME, [self.SERVICE_NAME])
+        except snap.NotInstalledError:
+            logger.error(
+                "Failed to stop the opensearch.%s service. Snap is not installed.",
+                self.SERVICE_NAME,
+            )
+            raise OpenSearchMissingError()
+        except snap.Error as e:
             logger.error("Failed to stop the opensearch.%s service. \n%s", self.SERVICE_NAME, e)
             raise OpenSearchStopError()
 

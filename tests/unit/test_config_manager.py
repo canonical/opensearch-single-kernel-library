@@ -13,6 +13,7 @@ import pytest
 from charmlibs.pathops import LocalPath
 
 from opensearch_single_kernel.common.constants import DeploymentType, StartMode, State
+from opensearch_single_kernel.common.exceptions import OpenSearchFileOperationError
 from opensearch_single_kernel.core.models import (
     App,
     DeploymentDescription,
@@ -69,6 +70,82 @@ def tmp_config_path(tmp_path: Path) -> LocalPath:
         shutil.copyfile(source, target)
 
     return LocalPath(str(target_path))
+
+
+@pytest.mark.real_fs
+@pytest.mark.parametrize("existing_option", ["", "-Djdk.tls.client.protocols=TLSv1.2"])
+def test_append_keeps_following_jvm_option_separate(harness, tmp_config_path, existing_option):
+    setter = YamlConfigSetter(harness.charm.workload)
+    setter.base_path = tmp_config_path
+    path = tmp_config_path / jvm_options
+    prefix = "# Keep JVM options on separate lines\n-Xms1g\n"
+    path.write_text(prefix + existing_option)
+
+    setter.append(jvm_options, "-Djdk.tls.client.protocols=TLSv1.2")
+    first_write = path.read_text()
+    setter.append(jvm_options, "-Djdk.tls.client.protocols=TLSv1.2")
+    assert path.read_text() == first_write
+
+    path.write_text(path.read_text() + "-Duser.home=/home/opensearch\n")
+    assert path.read_text().startswith(prefix)
+    assert [line for line in path.read_text().splitlines() if line.startswith("-D")] == [
+        "-Djdk.tls.client.protocols=TLSv1.2",
+        "-Duser.home=/home/opensearch",
+    ]
+
+
+@pytest.mark.real_fs
+@pytest.mark.parametrize("leader", [False, True])
+def test_bootstrap_cleanup_removes_only_initial_managers(harness, mocker, tmp_config_path, leader):
+    with harness.hooks_disabled():
+        harness.set_leader(leader)
+        charm = harness.charm
+        charm.state.server.is_bootstrap_contributor = True
+    setter = YamlConfigSetter(charm.workload)
+    setter.base_path = tmp_config_path
+    mocker.patch.object(
+        type(charm.config_manager), "yaml_setter", new_callable=PropertyMock, return_value=setter
+    )
+    setter.put(opensearch_yml, "cluster.initial_cluster_manager_nodes", ["opensearch-0"])
+    original = setter.load(opensearch_yml)
+    seeds = (tmp_config_path / seed_unicast_hosts).read_text()
+    jvm = (tmp_config_path / jvm_options).read_text()
+
+    charm.opensearch_events.cleanup_start_state()
+
+    del original["cluster.initial_cluster_manager_nodes"]
+    assert setter.load(opensearch_yml) == original
+    assert (tmp_config_path / seed_unicast_hosts).read_text() == seeds
+    assert (tmp_config_path / jvm_options).read_text() == jvm
+    assert not charm.state.server.is_bootstrap_contributor
+    assert charm.state.application.bootstrapped == leader
+
+
+@pytest.mark.real_fs
+def test_bootstrap_cleanup_write_failure_can_retry(harness, mocker, tmp_config_path):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        charm = harness.charm
+        charm.state.server.is_bootstrap_contributor = True
+    setter = YamlConfigSetter(charm.workload)
+    setter.base_path = tmp_config_path
+    mocker.patch.object(
+        type(charm.config_manager), "yaml_setter", new_callable=PropertyMock, return_value=setter
+    )
+    setter.put(opensearch_yml, "cluster.initial_cluster_manager_nodes", ["opensearch-0"])
+    remove = mocker.patch.object(
+        setter, "delete", side_effect=OpenSearchFileOperationError("Write failed")
+    )
+
+    with pytest.raises(OpenSearchFileOperationError, match="Write failed"):
+        charm.opensearch_events.cleanup_start_state()
+
+    assert charm.state.server.is_bootstrap_contributor
+    assert not charm.state.application.bootstrapped
+    mocker.stop(remove)
+    charm.opensearch_events.cleanup_start_state()
+    assert not charm.state.server.is_bootstrap_contributor
+    assert "cluster.initial_cluster_manager_nodes" not in setter.load(opensearch_yml)
 
 
 @pytest.mark.real_fs
@@ -259,7 +336,10 @@ def test_security_config_not_updated_until_it_can_be_applied(
 
 
 @pytest.mark.real_fs
-def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_config_path):
+@pytest.mark.parametrize("public_ip", [None, "30.30.30.30"])
+def test_set_node_and_cleanup_if_bootstrapped(
+    harness, mocker, substrate, tmp_config_path, public_ip
+):
     """Test setting the core config of a node."""
     yaml_conf_setter = YamlConfigSetter(harness.charm.workload)
     yaml_conf_setter.base_path = tmp_config_path
@@ -321,6 +401,16 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
         return_value="20.20.20.20",
         new_callable=PropertyMock,
     )
+    mocker.patch(
+        "opensearch_single_kernel.core.state.ClusterState.network_ingress_address",
+        return_value="30.30.30.30",
+        new_callable=PropertyMock,
+    )
+    if substrate == "vm":
+        mocker.patch(
+            "opensearch_single_kernel.workload.vm.VMWorkload.get_host_public_ip",
+            return_value=public_ip,
+        )
 
     harness.charm.config_manager.update_opensearch_config(
         roles=["cluster_manager", "data"],
@@ -342,7 +432,10 @@ def test_set_node_and_cleanup_if_bootstrapped(harness, mocker, substrate, tmp_co
     expected_network_host = ["10.10.10.10"]
     assert opensearch_conf["network.host"] == expected_network_host
     assert opensearch_conf["network.publish_host"] == expected_publish_host
-    assert opensearch_conf["http.publish_host"] == [expected_publish_host]
+    expected_http_host = (
+        (public_ip or "30.30.30.30") if substrate == "vm" else expected_publish_host
+    )
+    assert opensearch_conf["http.publish_host"] == expected_http_host
     assert opensearch_conf["node.roles"] == ["cluster_manager", "data"]
     assert opensearch_conf["discovery.seed_providers"] == "file"
 

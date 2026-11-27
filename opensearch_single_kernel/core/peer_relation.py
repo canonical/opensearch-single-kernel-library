@@ -76,6 +76,18 @@ class OpenSearchServer(RelationState):
         self.relation_data.update({PERFORMANCE_PROFILE: profile_value.type.value})
 
     @property
+    def profile_apply_failure(self) -> PerformanceType | None:
+        """The type of the profile which failed to be applied on the unit, if any."""
+        if failure := self.relation_data.get("profile_apply_failure"):
+            return PerformanceType(failure)
+        return None
+
+    @profile_apply_failure.setter
+    def profile_apply_failure(self, profile_type: PerformanceType | None) -> None:
+        """Record, or clear with None, the type of the profile which failed to be applied."""
+        self.update({"profile_apply_failure": profile_type.value if profile_type else ""})
+
+    @property
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""
         return self.unit.is_leader()
@@ -113,6 +125,9 @@ class OpenSearchServer(RelationState):
     @property
     def started(self) -> str:
         """Get the value of 'started' key from unit data bag"""
+        # Statuses are still collected in peer relation-broken, after the relation is gone.
+        if not self.relation:
+            return ""
         return self.relation.data[self.unit].get("started", "")
 
     @started.setter
@@ -124,6 +139,26 @@ class OpenSearchServer(RelationState):
     def started(self) -> None:
         """Remove the value of 'started' key from unit data bag"""
         self.relation.data[self.unit].pop("started", None)
+
+    @property
+    def start_pending(self) -> bool:
+        """Whether a requested start still needs to finish."""
+        return self.relation_data.get("start_pending", "").lower() == "true"
+
+    @start_pending.setter
+    def start_pending(self, value: bool) -> None:
+        """Keep startup progress across deferred hooks and status recomputation."""
+        self.update({"start_pending": str(value)})
+
+    @property
+    def start_failed(self) -> bool:
+        """Whether startup failed and has not completed successfully since."""
+        return self.relation_data.get("start_failed", "").lower() == "true"
+
+    @start_failed.setter
+    def start_failed(self, value: bool) -> None:
+        """Keep the startup result across hooks and status recomputation."""
+        self.update({"start_failed": str(value)})
 
     @property
     def tls_ca_renewing(self) -> bool:
@@ -267,6 +302,21 @@ class OpenSearchServer(RelationState):
     def last_host_ip(self, value: str) -> None:
         """Set the value of last configured IP for the unit. Used for tracking the IP change."""
         self.update({"last_host_ip": value})
+
+    @property
+    def snapshots_info_handled(self) -> str:
+        """Get the hash of the object storage relation info handled by the unit."""
+        return self.relation_data.get("snapshots_info_handled", "")
+
+    @snapshots_info_handled.setter
+    def snapshots_info_handled(self, value: str) -> None:
+        """Set the hash of the object storage relation info handled by the unit."""
+        self.update({"snapshots_info_handled": value})
+
+    @snapshots_info_handled.deleter
+    def snapshots_info_handled(self) -> None:
+        """Remove the hash of the object storage relation info handled by the unit."""
+        self.relation.data[self.unit].pop("snapshots_info_handled", None)
 
     @property
     def plugin_config_info(self) -> dict[str, PluginConfigInfo]:

@@ -18,6 +18,8 @@ from opensearch_single_kernel.common.constants import (
     Scope,
 )
 from opensearch_single_kernel.core.models import (
+    DeploymentDescription,
+    Node,
     PeerClusterApp,
     PeerClusterRelData,
     PeerClusterRelErrorData,
@@ -115,6 +117,25 @@ class PeerCluster(RelationState):
     def error_data(self):
         """Delete the 'error_data' field to notify related clusters."""
         self.relation.data[self.app].pop("error_data", None)
+
+    @property
+    def deployment_desc(self) -> DeploymentDescription | None:
+        """Get the provider description without reading its credentials."""
+        content = json.loads(self.relation.data[self.app].get("data", "{}"))
+        description = content.get("deployment_desc")
+        return DeploymentDescription.from_dict(description) if description else None
+
+    @property
+    def cluster_name(self) -> str | None:
+        """Get the advertised cluster name without reading credentials."""
+        return json.loads(self.relation.data[self.app].get("data", "{}")).get("cluster_name")
+
+    @property
+    def cm_nodes(self) -> list[Node]:
+        """Get advertised cluster manager nodes without reading credentials."""
+        if not (content := self.relation.data[self.app].get("data")):
+            return []
+        return [Node.from_dict(node) for node in json.loads(content)["cm_nodes"]]
 
     def data(self, peek_secrets: bool = False) -> PeerClusterRelData | None:
         """Get the relation data as a PeerClusterRelData object."""

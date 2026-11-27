@@ -414,6 +414,9 @@ ROLESMAPPING_ENDPOINT = "/_plugins/_security/api/rolesmapping"
 # Root group id (gid 0). Used when we want root to have group-level access.
 ROOT_GID = 0
 
+# OpenSearch Snap name
+OPENSEARCH_SNAP_NAME = "opensearch"
+
 # Container name for K8s deployments
 CONTAINER_NAME = "opensearch"
 

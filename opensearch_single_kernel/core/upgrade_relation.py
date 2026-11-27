@@ -11,7 +11,12 @@ import time
 import poetry.core.constraints.version as poetry_version
 from ops.model import Relation, Unit
 
-from opensearch_single_kernel.core.models import UnitUpgradesState, UpgradeVersions
+from opensearch_single_kernel.common.constants import HealthColors
+from opensearch_single_kernel.core.models import (
+    UnitUpgradesState,
+    UpgradeResumeRequest,
+    UpgradeVersions,
+)
 from opensearch_single_kernel.core.relations import RelationState
 from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces import (
     Data,
@@ -20,6 +25,18 @@ from opensearch_single_kernel.lib.charms.data_platform_libs.v0.data_interfaces i
 
 class UpgradeAppState(RelationState):
     """State collection for the application side of upgrade relation."""
+
+    @property
+    def resume_request(self) -> UpgradeResumeRequest | None:
+        """Read the saved resume request, or None if there is no pending request."""
+        if raw := self.get_object("resume-request"):
+            return UpgradeResumeRequest.from_dict(raw)
+        return None
+
+    @resume_request.setter
+    def resume_request(self, value: UpgradeResumeRequest | None) -> None:
+        """Save a resume request in the application databag, or remove it with None."""
+        self.update({"resume-request": value.to_str() if value is not None else None})
 
     @property
     def versions(self) -> UpgradeVersions | None:
@@ -75,6 +92,17 @@ class UpgradeServerState(RelationState):
         self.unit = component
 
     @property
+    def post_upgrade_health(self) -> HealthColors | None:
+        """Read the saved upgrade health failure without relying on the status cache."""
+        value = self.relation.data[self.unit].get("post-upgrade-health")
+        return HealthColors(value) if value else None
+
+    @post_upgrade_health.setter
+    def post_upgrade_health(self, value: HealthColors | None) -> None:
+        """Save a failed check, or clear it after the upgrade health check succeeds."""
+        self.relation.data[self.unit]["post-upgrade-health"] = value.value if value else ""
+
+    @property
     def unit_state(self) -> UnitUpgradesState | None:
         """Get the unit upgrade state from relation bag."""
         return (
@@ -87,6 +115,16 @@ class UpgradeServerState(RelationState):
     def unit_state(self, value: UnitUpgradesState) -> None:
         """Set the unit upgrade state in relation bag."""
         self.relation.data[self.unit].update({"state": value.value})
+
+    @property
+    def unit_state_revision(self) -> str | None:
+        """Get the revision that last passed the unit's health checks."""
+        return self.relation.data[self.unit].get("state-revision")
+
+    @unit_state_revision.setter
+    def unit_state_revision(self, value: str) -> None:
+        """Record which revision passed the unit's health checks."""
+        self.relation.data[self.unit].update({"state-revision": value})
 
     @property
     def snap_revision(self) -> str | None:

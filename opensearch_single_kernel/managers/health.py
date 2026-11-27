@@ -18,6 +18,7 @@ from opensearch_single_kernel.common.constants import (
 from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
+    OpenSearchShardsCannotMoveError,
 )
 from opensearch_single_kernel.common.statuses import (
     GeneralStatuses,
@@ -118,17 +119,59 @@ class HealthManager(BaseManager):
             # is being relocated. Examples are: simple stop, unit removal, upgrade
             raise OpenSearchHAError("Shards haven't completed initializing or relocating.")
 
+    @retry(
+        retry=retry_if_exception_type(OpenSearchHAError),
+        stop=stop_after_delay(15 * 60),
+        wait=wait_fixed(10),
+        reraise=True,
+    )
+    def wait_for_only_copies_to_move(self) -> None:
+        """Wait until this node no longer holds any shard's only copy."""
+        name = self.state.unit_name
+        try:
+            shards = self.opensearch_client.get_shards(self.state.node_host, self.peer_hosts)
+            excluded = self.opensearch_client.fetch_allocation_exclusions(self.peer_hosts)
+            nodes = self._nodes(True, self.peer_hosts)
+        except OpenSearchHttpError as e:
+            if self.state.planned_units == 0:
+                return
+            raise OpenSearchHAError(f"Failed to read shards or nodes: {e}") from e
+
+        elsewhere = {
+            (shard["index"], shard["shard"])
+            for shard in shards
+            if shard["node"] != name
+            and shard["node"] not in excluded
+            and shard["state"] in ("STARTED", "RELOCATING")
+        }
+        here = {(shard["index"], shard["shard"]) for shard in shards if shard["node"] == name}
+        only_copies = here - elsewhere
+
+        can_move = any(
+            node.is_data() and node.name != name and node.name not in excluded for node in nodes
+        )
+        if only_copies and can_move:
+            logger.info(
+                "Waiting for %s shards to move before stopping OpenSearch.",
+                len(only_copies),
+            )
+            raise OpenSearchHAError("Shards haven't finished moving off this node.")
+        if only_copies and self.state.planned_units > 0:
+            raise OpenSearchShardsCannotMoveError(
+                "Node holds the only copy of some shards and no other node can take them."
+            )
+
     @override
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute health statuses. ``recompute=True`` may wait briefly for green."""
+        """Compute statuses from current health without waiting for it to become green."""
         status_list = running_statuses(self.state.statuses, scope, self.name)
 
         if not self.state.application.is_security_index_initialised:
             return status_list or [GeneralStatuses.ACTIVE_IDLE.value]
 
-        status = self.get(wait_for_green_first=recompute and scope == "app")
+        status = self.get()
 
         if scope == "app":
             match status:

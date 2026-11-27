@@ -5,6 +5,7 @@
 """Kubernetes Workload."""
 
 import logging
+import platform
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -322,8 +323,12 @@ class K8sWorkload(BaseWorkload):
     @property
     @override
     def keytool_cmd(self) -> str:
-        """Return keytool command path from the workload JDK."""
-        return (self.paths.jdk / "bin" / "keytool").as_posix()
+        """Return keytool from the workload JDK, including older image layouts."""
+        keytool = self.paths.jdk / "bin" / "keytool"
+        if not self.exists(keytool):
+            architecture = "arm64" if platform.machine() == "aarch64" else "amd64"
+            keytool = self.paths.root / f"usr/lib/jvm/java-21-openjdk-{architecture}/bin/keytool"
+        return keytool.as_posix()
 
     @override
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -351,24 +356,6 @@ class K8sWorkload(BaseWorkload):
         except (PebbleConnectionError, PebbleError, ModelError, TypeError) as e:
             logger.debug("Error checking service status: %s", e)
             return False
-
-    @override
-    def start_service_only(self):
-        """Start the actual pebble service.
-
-        Raises:
-            OpenSearchStartError: if container is not ready or service start fails.
-        """
-        try:
-            if not self.container.can_connect():
-                raise OpenSearchStartError("Container is not ready")
-
-            # ensure plan is present and readiness checks are enabled when starting intentionally.
-            self._configure_pebble_plan(enable_checks=True)
-            self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
-            raise OpenSearchStartError() from e
 
     @override
     def is_failed(self) -> bool:

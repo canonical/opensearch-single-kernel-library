@@ -174,6 +174,7 @@ async def test_invalid_conditions(ops_test: OpsTest) -> None:
         },
         units_statuses={
             MAIN_APP: [TlsStatuses.TLS_RELATION_MISSING.value],
+            FAILOVER_APP: [TLS_NOT_FULLY_CONFIGURED_IN_MAIN],
         },
         wait_for_exact_units={
             MAIN_APP: APP_UNITS[MAIN_APP],

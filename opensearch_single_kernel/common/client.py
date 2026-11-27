@@ -936,6 +936,8 @@ class OpenSearchClient:
 
     def remove_voting_exclusions(self, alt_hosts: list[str] | None = None) -> bool:
         """Remove voting exclusions from OpenSearch cluster."""
+        # "wait_for_removal" is VERY important, it removes all voting configs immediately
+        # and allows any node to return to the voting config in the future
         response = self.request(
             "DELETE",
             "/_cluster/voting_config_exclusions?wait_for_removal=false",
@@ -991,14 +993,13 @@ class OpenSearchClient:
 
     def add_allocation_exclusions(
         self,
-        node: Node,
-        allocations: set[str] | None = None,
+        allocations: set[str],
         override: bool = False,
         alt_hosts: list[str] | None = None,
     ) -> bool:
         """Register new allocation exclusions."""
         existing = set() if override else self.fetch_allocation_exclusions(alt_hosts=alt_hosts)
-        all_exclusions = existing.union(allocations if allocations is not None else {node.name})
+        all_exclusions = existing.union(allocations)
         response = self.request(
             "PUT",
             "/_cluster/settings",

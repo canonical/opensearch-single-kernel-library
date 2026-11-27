@@ -6,6 +6,7 @@
 import itertools
 import re
 import uuid
+from datetime import datetime, timedelta
 from unittest import mock
 from unittest.mock import MagicMock, PropertyMock, call
 
@@ -14,7 +15,9 @@ import responses
 from ops import MaintenanceStatus, ModelError
 
 from opensearch_single_kernel.common.constants import (
+    CERTS_EXPIRATION_DATE_FORMAT,
     CLIENT_RELATION,
+    STATUS_PEERS_RELATION,
     CertType,
     DeploymentType,
     Scope,
@@ -95,6 +98,79 @@ def assert_temp_file_used_dir(tempfile: MagicMock, expected_dir: str) -> None:
 def assert_tls_ca_rotation_status(harness) -> None:
     """Assert that TLS manager reports CA rotation in its computed statuses."""
     assert TlsStatuses.TLS_CA_ROTATION.value in harness.charm.tls_manager.get_statuses("unit")
+
+
+def test_certificate_status_recovers_after_secret_read_failure(
+    harness, mocker, patch_deployment_desc, caplog
+):
+    """A failed certificate secret read must not crash status recomputation."""
+    charm = harness.charm
+    manager = charm.tls_manager
+    mocker.stop(manager.check_certs_expiration)
+    mocker.patch.object(
+        type(charm.state), "implements_secrets", new_callable=PropertyMock, return_value=True
+    )
+    with harness.hooks_disabled():
+        harness.add_relation(STATUS_PEERS_RELATION, charm.app.name)
+        charm.state.server.tls_configured = True
+        charm.state.server.certs_exp_checked_at = (datetime.now() - timedelta(hours=7)).strftime(
+            CERTS_EXPIRATION_DATE_FORMAT
+        )
+    secrets = charm.state.secrets
+    secrets.put_object(Scope.UNIT, CertType.UNIT_TRANSPORT, {"cert": "transport certificate"})
+    secrets.cached_secrets.delete(Scope.UNIT, secrets.label(Scope.UNIT, CertType.UNIT_TRANSPORT))
+    failed_read = mocker.patch.object(
+        harness.model, "get_secret", side_effect=ModelError("Secret backend timed out")
+    )
+    charm.status_handler.components = (manager,)
+
+    charm.status_handler._on_update_status(mocker.Mock())
+
+    statuses = charm.state.statuses.get("unit", manager.name).root
+    assert len(statuses) == 1
+    assert statuses[0].status == "active"
+    assert "Cannot read TLS secrets to check certificate expiry" in caplog.text
+    failed_read.assert_called_once_with(label=f"{charm.app.name}:unit:0:unit-transport")
+
+    # Operational callers still receive the error instead of treating the secret as missing.
+    with pytest.raises(ModelError, match="Secret backend timed out"):
+        manager.get_unit_certificates()
+
+    mocker.stop(failed_read)
+    expiry = mocker.patch(
+        "opensearch_single_kernel.managers.tls.cert_expiration_remaining_hours", return_value=200
+    )
+    charm.status_handler._on_update_status(mocker.Mock())
+    assert all(s.status == "active" for s in charm.state.statuses.get("unit", manager.name).root)
+
+    expiry.return_value = 1
+    charm.status_handler._on_update_status(mocker.Mock())
+    statuses = charm.state.statuses.get("unit", manager.name).root
+    assert len(statuses) == 1
+    assert statuses[0].status == "blocked"
+    assert "unit-transport" in statuses[0].message
+
+
+@pytest.mark.parametrize("elapsed_hours", [5, 6, 25, 48])
+def test_certificate_expiry_check_includes_elapsed_days(harness, mocker, elapsed_hours):
+    manager = harness.charm.tls_manager
+    mocker.stop(manager.check_certs_expiration)
+    now = datetime(2026, 11, 12, 12)
+    clock = mocker.patch("opensearch_single_kernel.managers.tls.datetime", wraps=datetime)
+    clock.now.return_value = now
+    harness.charm.state.server.certs_exp_checked_at = (
+        now - timedelta(hours=elapsed_hours)
+    ).strftime(CERTS_EXPIRATION_DATE_FORMAT)
+    mocker.patch.object(
+        manager, "get_unit_certificates", return_value={CertType.UNIT_TRANSPORT: "certificate"}
+    )
+    mocker.patch(
+        "opensearch_single_kernel.managers.tls.cert_expiration_remaining_hours", return_value=1
+    )
+
+    result = manager.check_certs_expiration()
+
+    assert result == ({CertType.UNIT_TRANSPORT: "certificate"} if elapsed_hours >= 6 else None)
 
 
 def test_remove_ca_deletes_exact_alias(mocker):

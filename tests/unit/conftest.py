@@ -45,19 +45,13 @@ from tests.unit.constants import DEFAULT_AZURE_INFO, DEFAULT_GCS_INFO, DEFAULT_S
 @pytest.fixture
 def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness:
     if substrate == "vm":
-        mocker.patch("opensearch_single_kernel.lib.charms.operator_libs_linux.v2.snap.SnapCache")
         from tests.charms.opensearch_test_charm.src.charm import (
             OpenSearchVMCharm as TestCharm,
         )
 
         # unit tests should not depend on a running snapd daemon.
-        fake_snap = MagicMock()
-        fake_snap.present = True
-        fake_snap.held = True
-        mocker.patch(
-            "opensearch_single_kernel.workload.vm.snap.SnapCache",
-            return_value={"opensearch": fake_snap},
-        )
+        for func in ("list_one", "ensure_installed", "hold", "connect", "start", "stop"):
+            mocker.patch(f"opensearch_single_kernel.workload.vm.snap.{func}")
         # Unit tests should not run Juju CLI (such as unit-get public-address).
         # VM workload callers can fall back to state.host_ip populated by harness.add_network.
         mocker.patch(
@@ -96,6 +90,11 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
             side_effect=lambda: {"opensearch/0": "revision-0"},
         )
         mocker.patch(f"{k8s_client}.check_if_deployed_without_trust")
+        # Unit tests should not run sysctl in the workload container.
+        mocker.patch(
+            "opensearch_single_kernel.workload.k8s.K8sWorkload.check_missing_system_requirements",
+            return_value=[],
+        )
         mocker.patch(
             "opensearch_single_kernel.core.state.ClusterState.fqdn_resolvable",
             new_callable=PropertyMock,
@@ -117,6 +116,10 @@ def harness(substrate: Substrate, opensearch_base_path: Path, mocker) -> Harness
     harness.add_network("1.1.1.1")
     harness.add_network("1.1.1.1", endpoint=TLS_RELATION)
     harness.begin()
+    mocker.patch(
+        "opensearch_single_kernel.core.state.hookcmds.goal_state",
+        return_value=MagicMock(units={harness.charm.unit.name: MagicMock(status="active")}),
+    )
     # Most unit tests assume the workload container is connectable so charm logic can
     # proceed past "container not ready" gating (pebble/files/exec operations are mocked).
     if substrate != "vm":

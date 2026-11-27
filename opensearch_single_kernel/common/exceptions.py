@@ -89,6 +89,10 @@ class OpenSearchStopError(OpenSearchError):
     """Exception thrown when OpenSearch fails to stop."""
 
 
+class OpenSearchShardsCannotMoveError(OpenSearchError):
+    """Exception thrown when shards cannot be moved off a node."""
+
+
 class OpenSearchProvidedRolesException(OpenSearchError):
     """Exception class for events when the user provided node roles will violate quorum."""
 
@@ -173,7 +177,11 @@ class OpenSearchUpgradePrecheckError(OpenSearchError):
     """App is not ready to upgrade"""
 
 
-class OpenSearchK8sDeployedWithoutTrustError(OpenSearchError):
+class OpenSearchK8sError(OpenSearchError):
+    """A Kubernetes API operation failed."""
+
+
+class OpenSearchK8sDeployedWithoutTrustError(OpenSearchK8sError):
     """Exception thrown when the charm is deployed on k8s without the --trust flag."""
 
     def __init__(self, *, app_name: str):
