@@ -39,7 +39,7 @@ TIMEOUT = 2400
 IDLE_PERIOD = 30
 FAST_INTERVAL = "60s"
 
-VM_VERSION_N = "2.19.6"
+VM_VERSION_N = "2.19.7"
 VM_VERSION_N_MINUS_1 = "2.18.0"
 VM_VERSION_N_MINUS_2 = "2.17.0"
 
@@ -48,7 +48,7 @@ VM_VERSION_TO_REVISION = {
     VM_VERSION_N_MINUS_1: {"jammy": 209, "noble": 208},
 }
 
-K8S_VERSION_N = "2.19.6"
+K8S_VERSION_N = "2.19.7"
 K8S_VERSION_N_MINUS_1 = "2.19.5"
 K8S_VERSION_TO_REVISION = {K8S_VERSION_N_MINUS_1: {"jammy": 8, "noble": 7}}
 # Pin the image separately from the charm revision so the test starts on
