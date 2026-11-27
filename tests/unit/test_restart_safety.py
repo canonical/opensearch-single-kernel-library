@@ -31,6 +31,7 @@ def restart_node(harness, mocker, patch_deployment_desc):
         "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
     )
     mocker.patch.object(charm.health_manager, "wait_for_shards_relocation")
+    mocker.patch.object(charm.health_manager, "wait_for_only_copies_to_move")
     mocker.patch.object(charm.cluster_manager, "stop_workload")
     mocker.patch(
         "opensearch_single_kernel.common.client.OpenSearchClient.get_current_node",

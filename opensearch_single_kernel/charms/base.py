@@ -33,6 +33,7 @@ from opensearch_single_kernel.common.exceptions import (
     OpenSearchHAError,
     OpenSearchHttpError,
     OpenSearchK8sError,
+    OpenSearchShardsCannotMoveError,
     OpenSearchStopError,
 )
 from opensearch_single_kernel.common.pebble_observer import PebbleObserver
@@ -281,7 +282,7 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
                 component_name=self.cluster_manager.name,
             )
 
-            if self.cluster_manager.opensearch_client.is_node_up():
+            if node_up := self.cluster_manager.opensearch_client.is_node_up():
                 try:
                     nodes = self.cluster_manager.get_nodes(True)
                     if restart and not self.cluster_manager.can_restart_node(nodes):
@@ -319,8 +320,11 @@ class OpenSearchBaseCharm(ops.CharmBase, ABC):
 
             # Let ongoing shard initialization and relocation finish before stopping.
             try:
-                self.health_manager.wait_for_shards_relocation()
-            except OpenSearchHAError as e:
+                if restart:
+                    self.health_manager.wait_for_shards_relocation()
+                elif node_up:
+                    self.health_manager.wait_for_only_copies_to_move()
+            except (OpenSearchHAError, OpenSearchShardsCannotMoveError) as e:
                 raise OpenSearchStopError(str(e)) from e
 
             # Stop the workload

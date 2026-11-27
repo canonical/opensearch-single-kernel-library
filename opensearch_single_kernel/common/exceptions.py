@@ -89,6 +89,10 @@ class OpenSearchStopError(OpenSearchError):
     """Exception thrown when OpenSearch fails to stop."""
 
 
+class OpenSearchShardsCannotMoveError(OpenSearchError):
+    """Exception thrown when shards cannot be moved off a node."""
+
+
 class OpenSearchProvidedRolesException(OpenSearchError):
     """Exception class for events when the user provided node roles will violate quorum."""
 

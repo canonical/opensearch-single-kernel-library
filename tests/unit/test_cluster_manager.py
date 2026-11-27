@@ -294,6 +294,43 @@ def test_existing_cluster_setup_applies_new_roles(harness):
     assert deployment_desc.promotion_time == prev_deployment_desc.promotion_time
 
 
+def test_no_cluster_manager_left_ignores_current_unit(harness, mocker, patch_deployment_desc):
+    cluster_manager = harness.charm.cluster_manager
+    state = harness.charm.state
+    current = Node(
+        name=state.unit_name,
+        roles=["cluster_manager", "data"],
+        ip=state.node_host,
+        app=state.application.deployment_desc.app,
+        unit_number=0,
+    )
+    other_app = MagicMock()
+    other_app.app.id = "other-model/data"
+    mocker.patch.object(type(cluster_manager), "_nodes", return_value=[current])
+    mocker.patch.object(type(cluster_manager), "alt_hosts", new_callable=PropertyMock)
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=True
+    )
+    mocker.patch.object(
+        type(state.application),
+        "apps_in_fleet",
+        new_callable=PropertyMock,
+        return_value=[other_app],
+    )
+
+    assert cluster_manager.no_cluster_manager_left
+
+
+def test_bootstrap_contributors_use_node_host(harness, patch_deployment_desc):
+    cm_names, cm_ips = [], []
+
+    harness.charm.cluster_manager.configure_bootstrap_contributors(
+        ["cluster_manager"], cm_names, cm_ips
+    )
+
+    assert cm_ips == [harness.charm.state.node_host]
+
+
 @pytest.mark.parametrize("security_initialized", [False, True])
 @pytest.mark.parametrize("tls_configured", [False, True])
 @pytest.mark.parametrize("started", [False, True])

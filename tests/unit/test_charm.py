@@ -83,7 +83,7 @@ def test_storage_detaching_checks_health_when_exclusion_cleanup_fails(
         charm.opensearch_events._on_opensearch_data_storage_detaching(mocker.Mock())
 
     apply_health.assert_called_once_with(
-        wait_for_green_first=True, use_localhost=False, unit=False
+        wait_for_green_first=True, use_localhost=False, app=False, unit=False
     )
     release.assert_called_once_with()
 
@@ -204,6 +204,57 @@ def test_stop_wait_failure_leaves_workload_running(harness, mocker):
         harness.charm.stop_opensearch(restart=True)
 
     stop.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "restart, node_up, drains",
+    [(False, True, True), (True, True, False), (False, False, False)],
+    ids=["removal", "restart", "node-down"],
+)
+def test_drain_on_stop(harness, mocker, restart, node_up, drains):
+    mocker.patch(
+        "opensearch_single_kernel.core.state.OpenSearchApplication.deployment_desc",
+        new_callable=PropertyMock,
+        return_value=deployment_descriptions["ok"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.is_node_up", return_value=node_up
+    )
+    mocker.patch.object(harness.charm.cluster_manager, "get_nodes", return_value=[])
+    mocker.patch.object(harness.charm.cluster_manager, "can_restart_node", return_value=True)
+    wait = mocker.patch.object(harness.charm.health_manager, "wait_for_only_copies_to_move")
+    relocation = mocker.patch.object(harness.charm.health_manager, "wait_for_shards_relocation")
+    mocker.patch.object(harness.charm.cluster_manager, "stop_workload")
+
+    harness.charm.stop_opensearch(restart=restart)
+
+    assert wait.called == drains
+    assert relocation.called == restart
+
+
+@pytest.mark.parametrize("leader", [True, False], ids=["leader", "non-leader"])
+def test_storage_detaching_raises_when_cluster_is_red(
+    harness, mocker, patch_deployment_desc, leader
+):
+    with harness.hooks_disabled():
+        harness.set_leader(leader)
+    harness.set_planned_units(1)
+    mocker.patch.object(harness.charm.lock_manager, "acquire", return_value=True)
+    mocker.patch.object(harness.charm.lock_manager, "release")
+    mocker.patch.object(harness.charm, "stop_opensearch")
+    mocker.patch.object(harness.charm.exclusions_manager, "delete_current")
+    mocker.patch(
+        "opensearch_single_kernel.managers.base.BaseManager.alt_hosts",
+        new_callable=PropertyMock,
+        return_value=["10.0.0.2"],
+    )
+    mocker.patch(
+        "opensearch_single_kernel.common.client.OpenSearchClient.get_health",
+        return_value={"status": "red", "initializing_shards": 0, "relocating_shards": 0},
+    )
+
+    with pytest.raises(OpenSearchHAError, match="primary' shards are not assigned"):
+        harness.charm.opensearch_events._on_opensearch_data_storage_detaching(MagicMock())
 
 
 def test_on_install(harness, substrate):

@@ -599,7 +599,7 @@ class ClusterManager(BaseManager):
         contribute_to_bootstrap = False
         if "cluster_manager" in computed_roles:
             cm_names.append(self.state.unit_name)
-            cm_ips.append(self.state.host_ip)
+            cm_ips.append(self.state.node_host)
 
             if (
                 self.state.application.deployment_desc.typ == DeploymentType.MAIN_ORCHESTRATOR
@@ -826,7 +826,7 @@ class ClusterManager(BaseManager):
         nodes = self._nodes(True, self.alt_hosts)
         for node in nodes:
             # ignore current unit
-            if node.ip == self.state.host_ip:
+            if node.name == self.state.unit_name:
                 continue
             if node.is_cm_eligible() and self.opensearch_client.is_node_up(node.ip):
                 cm_nodes_left = True
