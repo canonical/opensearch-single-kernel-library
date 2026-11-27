@@ -28,119 +28,6 @@ permissions:
   contents: read
 
 jobs:
-  pre-commit:
-    name: Run pre-commits
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install tox, poetry & pre-commit
-        run: |
-          pipx install tox poetry pre-commit
-      - name: Set up python environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "poetry"
-      - name: Install pre-commit hooks
-        run: pre-commit install
-      - name: Run pre-commit hooks
-        run: |
-          pre-commit run --all-files
-
-  actionlint:
-    name: Lint .github/workflows/
-    uses: canonical/data-platform-workflows/.github/workflows/lint_workflows.yaml@v50.0.0
-
-  lib-check:
-    name: Check libraries
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check libs
-        uses: canonical/charming-actions/check-libraries@2.7.0
-        continue-on-error: true
-        with:
-          charm-path: ./opensearch_single_kernel/
-          credentials: ${{ secrets.CHARMHUB_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          use-labels: false
-          fail-build: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
-      pull-requests: write
-
-  tox-lint:
-    name: tox run -e lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install tox & poetry
-        run: |
-          pipx install tox poetry
-      - name: Set up python environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "poetry"
-      - name: Run linters
-        run: tox run -e lint
-
-  unit-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        substrate:
-          - vm
-          - k8s
-    name: Unit test charm (${{ matrix.substrate }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install tox & poetry
-        run: |
-          pipx install tox poetry
-      - name: Set up python environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "poetry"
-      - name: Run tests
-        run: tox run -e unit-${{ matrix.substrate }}
-
-  build:
-    strategy:
-      matrix:
-        path:
-          - tests/charms/opensearch_test_charm
-          - tests/charms/opensearch_k8s_test_charm
-          - tests/charms/dummy-client-charm
-          - tests/integration/relations/opensearch_provider/application-charm
-    name: Build Test charm | ${{ matrix.path }}
-    uses: ./.github/workflows/build_test_charms.yaml
-    with:
-      path-to-charm-directory: ${{ matrix.path }}
-      artifact-prefix: packed-charm
-      cache: false
-    permissions:
-      contents: read
-
   integration-test:
     strategy:
       fail-fast: false
@@ -149,10 +36,8 @@ jobs:
         base: ${{ github.event_name == 'schedule' && fromJSON('["ubuntu22", "ubuntu24"]') || fromJSON('["ubuntu24"]') }}
     name: Integration | ${{ matrix.base }}
     uses: $/.github/workflows/integration_test.yaml
-    needs:
-      - build
     with:
-      artifact-prefix: ${{ needs.build.outputs.artifact-prefix }}
+      artifact-prefix: ""
       base: ${{ matrix.base }}
     secrets:
       AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}

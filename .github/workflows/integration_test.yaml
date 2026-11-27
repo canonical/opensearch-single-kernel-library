@@ -1,5 +1,4 @@
 on:
-  workflow_dispatch:
   workflow_call:
     inputs:
       artifact-prefix:
@@ -49,8 +48,7 @@ jobs:
       - name: Set up python environment
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-          cache: "poetry"
+          python-version: "3.12"
       - name: Install deps
         run: |
           sudo apt update
@@ -104,7 +102,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as file:
               file.write(output)
       - name: Generate Allure default test results
-        if: ${{ github.event_name == 'schedule' && github.run_attempt == '1' }}
+        if: ${{ github.run_attempt == '1' }}
         run: tox run -e integration -- tests/integration --allure-default-dir=allure-default-results
       - name: Upload Allure default results
         # Default test results in case the integration tests time out or runner set up fails

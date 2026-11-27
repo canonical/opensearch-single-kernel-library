@@ -10,9 +10,10 @@ import typing
 import ops
 from data_platform_helpers.advanced_statuses.utils import as_status
 from data_platform_helpers.version_check import get_charm_revision
-from ops import Object, UpgradeCharmEvent
+from ops import Object, RelationCreatedEvent, RelationJoinedEvent, UpgradeCharmEvent
 
 from opensearch_single_kernel.common.constants import (
+    PEER_RELATION,
     UPGRADE_RELATION,
     HealthColors,
     Substrates,
@@ -84,6 +85,35 @@ class UpgradesEventsHandler(Object):
             self.charm.on.force_refresh_start_action,
             self._on_refresh_force_start_action,
         )
+        self.framework.observe(
+            self.charm.on[PEER_RELATION].relation_created,
+            self._on_peer_relation_created,
+        )
+        self.framework.observe(
+            self.charm.on[PEER_RELATION].relation_joined, self._on_peer_relation_joined
+        )
+
+    def _on_peer_relation_created(self, _: RelationCreatedEvent) -> None:
+        """Event received by the new node joining the cluster."""
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Adding units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
+
+    def _on_peer_relation_joined(self, _: RelationJoinedEvent) -> None:
+        """Event received by all units when a new node joins the cluster."""
+        try:
+            if self.charm.upgrades_manager.in_progress:
+                logger.warning(
+                    "Adding units during an upgrade is not supported."
+                    "The charm may be in a broken, unrecoverable state"
+                )
+        except OpenSearchK8sError as e:
+            logger.warning("Cannot check upgrade state: %s", e)
 
     def _on_upgrade_peer_relation_created(self, event: ops.RelationCreatedEvent) -> None:
         """Handle relation created events."""
