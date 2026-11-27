@@ -1619,10 +1619,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_leader(
     )
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
     mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored",
-        return_value=False,
-    )
-    mocker.patch(
         "opensearch_single_kernel.managers.exclusions.NodesExclusionsManager.delete_current"
     )
     mocker.patch(
@@ -1766,10 +1762,6 @@ def test_on_certificate_available_ca_rotation_second_stage_any_cluster_non_leade
     workload_class = _workload_class_name(substrate)
     mocker.patch(f"opensearch_single_kernel.workload.{substrate}.{workload_class}.run_cmd")
     mocker.patch("opensearch_single_kernel.managers.tls.TlsManager.read_stored_ca")
-    mocker.patch(
-        "opensearch_single_kernel.managers.tls.TlsManager.all_tls_resources_stored",
-        return_value=False,
-    )
     mocker.patch(
         "opensearch_single_kernel.managers.internal_users.InternalUsersManager.purge_initial_default_users"
     )
@@ -2371,75 +2363,6 @@ def test_all_tls_resources_stored_checks_cert_is_signed_by_stored_ca(
     mocker.patch.object(tls_manager, "get_cert_from_path", return_value=CHAIN_UNIT_CERT_PEM)
 
     assert tls_manager.all_tls_resources_stored() is expected
-
-
-@pytest.mark.parametrize("leader", [True, False])
-@pytest.mark.parametrize(
-    "unit_certs_renewed, admin_cert_renewed, reissue_pending, unfulfilled, "
-    "expect_unit_request, expect_admin_request",
-    [
-        (False, False, False, False, True, True),
-        (True, True, False, False, False, False),
-        (False, True, False, False, True, False),
-        (True, False, False, False, False, True),
-        (False, False, True, False, False, False),
-        (False, False, False, True, False, False),
-    ],
-    ids=[
-        "first-restart",
-        "all-renewed",
-        "only-admin-renewed",
-        "only-unit-renewed",
-        "revoked-not-re-requested",
-        "re-requested",
-    ],
-)
-def test_post_start_ca_rotation_requests_new_certs_once(
-    harness,
-    mocker,
-    leader,
-    unit_certs_renewed,
-    admin_cert_renewed,
-    reissue_pending,
-    unfulfilled,
-    expect_unit_request,
-    expect_admin_request,
-):
-    """A restart during CA rotation only requests certificates that are still needed."""
-    charm = harness.charm
-    with harness.hooks_disabled():
-        harness.set_leader(leader)
-        charm.state.server.tls_ca_renewing = True
-        charm.state.server.tls_ca_renewed = True
-        if reissue_pending:
-            charm.state.server.certs_reissue_pending = {
-                CertType.UNIT_HTTP.val,
-                CertType.UNIT_TRANSPORT.val,
-                CertType.APP_ADMIN.val,
-            }
-    mocker.patch.object(charm.state, "reset_ca_rotation_state")
-    mocker.patch.object(charm.tls_manager, "read_stored_ca", return_value=None)
-
-    def certs_renewed(cert_types=None, **_):
-        return admin_cert_renewed if cert_types == [CertType.APP_ADMIN] else unit_certs_renewed
-
-    mocker.patch.object(charm.tls_manager, "all_tls_resources_stored", side_effect=certs_renewed)
-    mocker.patch.object(
-        charm.tls_manager, "get_secrets_for_cert_type", return_value={"csr": "csr"}
-    )
-    mocker.patch.object(
-        charm.tls_events.certs,
-        "get_certificate_signing_requests",
-        return_value=[MagicMock(csr="csr")] if unfulfilled else [],
-    )
-    mocker.patch.object(charm.tls_manager, "store_admin_tls_secrets_if_applies")
-    request_unit = mocker.patch.object(charm.opensearch_events, "request_new_unit_certificates")
-    request_admin = mocker.patch.object(charm.opensearch_events, "request_new_admin_certificate")
-
-    charm.opensearch_events.post_start_ca_rotation()
-
-    assert request_unit.called is expect_unit_request
-    assert request_admin.called is (expect_admin_request and leader)
 
 
 @pytest.fixture

@@ -75,17 +75,18 @@ class TlsManager(BaseManager):
         super().__init__(state, workload, "tls_manager")
 
     def all_tls_resources_stored(  # noqa: C901
-        self, reconcile: bool = True, cert_types: list[CertType] | None = None
+        self, only_unit_resources: bool = False, reconcile: bool = True
     ) -> bool:  # noqa: C901
         """Check if all TLS resources are stored and ready to use.
 
         For K8s, we need first to save TLS resources from secrets.
 
         Args:
+            only_unit_resources (bool):
+                If True, only check for unit TLS resources (transport and HTTP certs).
+                If False, also check for app-level admin TLS resources.
             reconcile (bool):
                 If True, perform reconciliation of K8s runtime TLS resources before checking.
-            cert_types (list[CertType] | None):
-                The certificates to check. If None or empty, checks unit and admin certificates.
 
         Returns:
             bool: True if all required TLS resources are stored and valid, False otherwise.
@@ -99,8 +100,9 @@ class TlsManager(BaseManager):
                 # we assume they are not ready.
                 return False
 
-        if not cert_types:
-            cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP, CertType.APP_ADMIN]
+        cert_types = [CertType.UNIT_TRANSPORT, CertType.UNIT_HTTP]
+        if not only_unit_resources:
+            cert_types.append(CertType.APP_ADMIN)
 
         # check that each cert was signed by the stored CA
         # if they don't match, certs are not up-to-date and need to be renewed after CA rotation
