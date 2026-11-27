@@ -358,24 +358,6 @@ class K8sWorkload(BaseWorkload):
             return False
 
     @override
-    def start_service_only(self):
-        """Start the actual pebble service.
-
-        Raises:
-            OpenSearchStartError: if container is not ready or service start fails.
-        """
-        try:
-            if not self.container.can_connect():
-                raise OpenSearchStartError("Container is not ready")
-
-            # ensure plan is present and readiness checks are enabled when starting intentionally.
-            self._configure_pebble_plan(enable_checks=True)
-            self.container.start(OPENSEARCH_PEBBLE_SERVICE_NAME)
-        except (PebbleConnectionError, PebbleError, ModelError) as e:
-            logger.error("Failed to start the %s service: %s", OPENSEARCH_PEBBLE_SERVICE_NAME, e)
-            raise OpenSearchStartError() from e
-
-    @override
     def is_failed(self) -> bool:
         """Check if pebble service failed.
 

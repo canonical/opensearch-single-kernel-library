@@ -597,7 +597,7 @@ def test_start_retries_bootstrap_cleanup_without_blocking_host_recovery(
         "remove_bootstrap_config",
         side_effect=OpenSearchFileOperationError("Cannot write configuration"),
     )
-    start = mocker.patch.object(type(charm.workload), "start_service_only")
+    start = mocker.patch.object(type(charm.workload), "start_service")
     event = mocker.Mock()
 
     charm.opensearch_events._on_start(event)

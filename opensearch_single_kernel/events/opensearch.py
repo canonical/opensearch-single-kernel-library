@@ -623,7 +623,13 @@ class OpenSearchEventsHandler(Object):
             event.defer()
             return
 
-        if not self.charm.workload.workload_present:
+        try:
+            workload_present = self.charm.workload.workload_present
+        except OpenSearchCmdError as e:
+            logger.warning("Failed to check if the workload is present: %s", e)
+            workload_present = False
+
+        if not workload_present:
             logger.debug("Workload is not ready; deferring leader election.")
             event.defer()
             return
@@ -796,7 +802,7 @@ class OpenSearchEventsHandler(Object):
             # as "started" flag is still set to True.
             # We do not wait for the 200 return, as maybe more than one unit is coming back.
             try:
-                self.charm.workload.start_service_only()
+                self.charm.workload.start_service()
                 # Recover the service before attempting bootstrap file cleanup.
                 self.cleanup_start_state()
                 # We're done here, we can return
